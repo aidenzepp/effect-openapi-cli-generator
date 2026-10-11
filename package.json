@@ -6,6 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "test": "bun test",
     "format": "vp fmt --check",
     "lint": "vp lint --type-aware",
     "typecheck": "tsc --noEmit",
