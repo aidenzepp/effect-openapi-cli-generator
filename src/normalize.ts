@@ -104,6 +104,7 @@ const dereference = (
     const source = yield* object(value, location);
     if (!Object.hasOwn(source, "$ref")) return { value: source, location };
     yield* keys(source, ["$ref", "summary", "description"], location);
+    yield* docs(source, location);
     if (typeof source.$ref !== "string")
       return yield* fail(`${location}/$ref`, "Expected a reference string.");
     const target = yield* resolveReference(document, source.$ref, `${location}/$ref`, active);

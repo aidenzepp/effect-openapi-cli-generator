@@ -224,3 +224,39 @@ test("rejects empty selection and malformed root", () => {
   ])
     expect(fail(value)._tag).toBe("GenerationError");
 });
+
+test("reports malformed reference documentation at the local pointer", () => {
+  for (const field of ["summary", "description"]) {
+    const input = document(
+      { parameters: [{ $ref: "#/components/parameters/Q", [field]: 42 }] },
+      "/things",
+      { components: { parameters: { Q: parameter("q") } } },
+    );
+    expect(fail(input).location).toBe(`/paths/~1things/post/parameters/0/${field}`);
+  }
+});
+
+test("reference documentation overrides target documentation", () => {
+  const input = document(
+    {
+      parameters: [
+        {
+          $ref: "#/components/parameters/Q",
+          summary: "Local summary",
+          description: "Local description",
+        },
+      ],
+    },
+    "/things",
+    {
+      components: {
+        parameters: {
+          Q: { ...parameter("q"), summary: "Target summary", description: "Target description" },
+        },
+      },
+    },
+  );
+  expect(run(input).operations[0]!.parameters[0]!.docs.description).toBe(
+    "Local summary\nLocal description",
+  );
+});
