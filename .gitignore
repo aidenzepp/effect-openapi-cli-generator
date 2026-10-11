@@ -1,8 +1,8 @@
 node_modules/
 dist/
-.vivi/
 .env
 .env.*
 !.env.example
 *.tsbuildinfo
 .DS_Store
+.worktrees/
