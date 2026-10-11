@@ -1,0 +1,32 @@
+{
+  "name": "effect-openapi-cli-generator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generate Effect-native CLIs from OpenAPI specifications and Effect HttpApi definitions.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "format": "vp fmt --check",
+    "lint": "vp lint --type-aware",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run format && bun run lint && bun run typecheck",
+    "fix": "vp fmt && vp lint --fix",
+    "setup:vivi": "sh ./setup-vivi.sh"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.3",
+    "effect": "4.0.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.4",
+    "typescript": "7.0.2",
+    "ultracite": "7.12.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+    "vite-plus": "1.0.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0"
+  },
+  "packageManager": "bun@1.4.3"
+}
