@@ -1,6 +1,8 @@
 # effect-openapi-cli-generator
 
-Generate standalone, Effect-native command-line applications from Effect HttpApi definitions or OpenAPI 3.x specifications, following Forge/cf conventions and supporting optional overlays.
+Generate standalone, Effect-native command-line applications from Effect HttpApi definitions or OpenAPI 3.x specifications.
+
+Inspired by [Cloudflare’s Forge](https://github.com/cloudflare/forge) and its [cf CLI](https://github.com/cloudflare/cf): adapt their schema-driven generation, command conventions, and optional overlays to Effect’s libraries and runtime. This is an independent project, unaffiliated with Cloudflare or the Effect maintainers.
 
 **Status:** tooling and agent foundation only. No generator is implemented. Source layout and npm publishing are deferred until implementation and release work respectively.
 
@@ -26,13 +28,4 @@ Vite+ provides Oxlint and Oxfmt with Ultracite core/anti-slop presets. TypeScrip
 
 Starting references: [Forge](https://github.com/cloudflare/forge), [cf](https://github.com/cloudflare/cf), and [Effect openapi-generator](https://github.com/Effect-TS/effect/tree/main/packages/tools/openapi-generator).
 
-## Agent coordination
-
-Read [AGENTS.md](AGENTS.md). Install [Vivi](https://github.com/ianzepp/vivarium) and keep the Vivi and Tugboat skills in your personal skill collection; Tugboat is not vendored here. Setup is tested with Vivi 10.2.0.
-
-```sh
-bun run setup:vivi
-vivi boot --project .
-```
-
-The setup script initializes a local mailspace and registers Mind, Hand, and Auditor charters. It is safe to rerun. All `.vivi/` state stays local and ignored by Git; coordination uses the CLI only.
+Read [AGENTS.md](AGENTS.md) before contributing.
