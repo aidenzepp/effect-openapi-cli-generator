@@ -1,6 +1,6 @@
 # Agent instructions
 
-Read README.md first. This repository is a foundation for an Effect-native OpenAPI CLI generator. Keep work within the assigned scope; source layout is intentionally undecided. Do not add examples, benchmarks, infrastructure, or artificial package hierarchies without a request.
+Read README.md and docs/project.md first. This repository is a foundation for an Effect-native OpenAPI CLI generator. Keep work within the assigned scope; use src/core/ for the reusable generator and src/cli/ for its executable interface, with kebab-case filenames. Do not add examples, benchmarks, infrastructure, or artificial package hierarchies without a request.
 
 ## Engineering
 
