@@ -4,7 +4,9 @@ Generate standalone, Effect-native command-line applications from Effect HttpApi
 
 Inspired by [Cloudflare’s Forge](https://github.com/cloudflare/forge) and its [cf CLI](https://github.com/cloudflare/cf): adapt their schema-driven generation, command conventions, and optional overlays to Effect’s libraries and runtime. This is an independent project, unaffiliated with Cloudflare or the Effect maintainers.
 
-**Status:** tooling and agent foundation only. No generator is implemented. Source layout and npm publishing are deferred until implementation and release work respectively.
+**Status:** tooling and agent foundation only. No generator is implemented. The library will live in `src/core/` and the generator executable in `src/cli/`. npm publishing is deferred until release work.
+
+Read [the project direction](docs/project.md) for goals, Forge inspiration, code organization, and generated-code quality requirements.
 
 ## Development
 
