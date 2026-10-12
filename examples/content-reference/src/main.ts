@@ -77,24 +77,12 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
   );
 
 const userFlag = Flag.String("user").pipe(
-  Flag.withSchema(
-    Schema.NonEmptyString.check(
-      Schema.makeFilter((value) => value !== "." && value !== "..", {
-        message: "Use a nonempty identifier other than . or ..",
-      }),
-    ),
-  ),
+  Flag.withSchema(Schema.NonEmptyString.check(Schema.isPattern(/^(?!\.{1,2}$)/u))),
   Flag.withDescription("The owner of the posts."),
 );
 
 const postFlag = Flag.String("post").pipe(
-  Flag.withSchema(
-    Schema.NonEmptyString.check(
-      Schema.makeFilter((value) => value !== "." && value !== "..", {
-        message: "Use a nonempty identifier other than . or ..",
-      }),
-    ),
-  ),
+  Flag.withSchema(Schema.NonEmptyString.check(Schema.isPattern(/^(?!\.{1,2}$)/u))),
   Flag.withDescription("The post whose files should be listed."),
 );
 

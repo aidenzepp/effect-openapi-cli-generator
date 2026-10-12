@@ -172,6 +172,23 @@ test("real requests preserve paths, optional query values and JSON body values",
     await Effect.runPromise(
       Effect.forEach(
         [
+          ["list", "--user", "."],
+          ["list", "--user", ".."],
+          ["files", "list", "--user", "alice", "--post", "."],
+          ["files", "list", "--user", "alice", "--post", ".."],
+        ],
+        (args) =>
+          Effect.promise(async () => {
+            const result = await invoke([...args, "--base-url", `${origin}/api`]);
+            expect(result.code).toBe(1);
+            expect(result.err).toContain("Expected a string matching the RegExp ^(?!\\.{1,2}$)");
+          }),
+        { concurrency: 1, discard: true },
+      ),
+    );
+    await Effect.runPromise(
+      Effect.forEach(
+        [
           `${origin}/api?secret=private-token`,
           `${origin}/api#private-token`,
           `http://private-token@127.0.0.1:${port}/api`,

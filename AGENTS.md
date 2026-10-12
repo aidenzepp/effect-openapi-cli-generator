@@ -6,7 +6,7 @@ Read README.md and docs/project.md first. This repository is a foundation for an
 
 - Follow existing repository and supplied reference patterns. Explain necessary deviations before introducing a different convention.
 - Use verified, version-pinned GitHub source URLs for external dependency `@see` links; do not link installed `node_modules` paths.
-- In hand-written references and generated CLI output, define validation constraints inline in their owning flags; do not infer or extract shared schemas from structural similarity.
+- In hand-written references and generated CLI output, preserve schema reuse declared by explicit OpenAPI model references. Keep inline constraints in their owning flags; do not infer shared schemas from structural similarity.
 - Keep normal lint key ordering; do not add key-sort exceptions to preserve CLI flag order.
 - Use Effect APIs and typed errors at runtime. Preserve HTTP request semantics and wire schemas; command names do not imply HTTP verbs.
 - Prefer the smallest explicit implementation. Reject unsupported input with useful errors rather than silently guessing.
