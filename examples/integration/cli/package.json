@@ -1,0 +1,21 @@
+{
+  "name": "sample-api",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "sample-api": "./dist/main.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.3",
+    "effect": "4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "typescript": "7.0.2"
+  }
+}

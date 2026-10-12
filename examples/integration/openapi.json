@@ -1,0 +1,307 @@
+{
+  "info": {
+    "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+    "title": "Sample API",
+    "version": "not-semver"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/alias": {
+      "post": {
+        "operationId": "alias-get",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "x-forge-aliases": [
+          {
+            "x-fern-sdk-group-name": "alternate.deep",
+            "x-fern-sdk-method-name": "read"
+          }
+        ]
+      }
+    },
+    "/bulk/{parent}/{id}": {
+      "post": {
+        "operationId": "items-bulk-update",
+        "parameters": [
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "parent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "wire_name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "quote\" ` ${globalThis.injected = true} */\n@tag",
+        "x-fern-sdk-group-name": "account.deep.items",
+        "x-fern-sdk-method-name": "bulk-update"
+      }
+    },
+    "/empty": {
+      "get": {
+        "operationId": "empty-get",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "x-fern-sdk-group-name": "empty"
+      }
+    },
+    "/failure": {
+      "get": {
+        "operationId": "failure-get",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "x-fern-sdk-group-name": "failure"
+      }
+    },
+    "/list/{parent}/{id}": {
+      "get": {
+        "operationId": "items-list",
+        "parameters": [
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "parent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "wire_name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "quote\" ` ${globalThis.injected = true} */\n@tag",
+        "x-fern-sdk-group-name": "account.deep.items",
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/parents/{parent}/items/{id}": {
+      "post": {
+        "operationId": "items-get",
+        "parameters": [
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "parent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "wire_name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "quote\" ` ${globalThis.injected = true} */\n@tag",
+        "x-fern-sdk-group-name": "account.deep.items",
+        "x-fern-sdk-method-name": "get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "__proto__": {
+                    "type": "object"
+                  },
+                  "enabled": {
+                    "deprecated": true,
+                    "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+                    "externalDocs": {
+                      "url": "https://example.test"
+                    },
+                    "type": "boolean"
+                  },
+                  "quote\" ` ${globalThis.injected = true} */\n@tag": {
+                    "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+                    "enum": ["quote\" ` ${globalThis.injected = true} */\n@tag"],
+                    "type": "string"
+                  },
+                  "nested": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "nullable": {
+                    "enum": ["yes", null],
+                    "type": ["string", "null"]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/required": {
+      "post": {
+        "operationId": "required-send",
+        "parameters": [
+          {
+            "description": "quote\" ` ${globalThis.injected = true} */\n@tag",
+            "in": "query",
+            "name": "confirm",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "integer"
+                  }
+                },
+                "required": ["value"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "x-fern-sdk-group-name": "required"
+      }
+    }
+  }
+}

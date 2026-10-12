@@ -1,0 +1,112 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Local Demo",
+    "version": "1.0.0",
+    "description": "Users, posts and file metadata served on your machine."
+  },
+  "paths": {
+    "/users": {
+      "get": {
+        "operationId": "users-list",
+        "x-fern-sdk-group-name": "users",
+        "x-fern-sdk-method-name": "list",
+        "summary": "List demo users",
+        "responses": {
+          "200": {
+            "description": "Local JSON response"
+          }
+        },
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "operationId": "users-get",
+        "x-fern-sdk-group-name": "users",
+        "x-fern-sdk-method-name": "get",
+        "summary": "Get a demo user",
+        "responses": {
+          "200": {
+            "description": "Local JSON response"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/posts": {
+      "post": {
+        "operationId": "posts-create",
+        "x-fern-sdk-group-name": "posts",
+        "x-fern-sdk-method-name": "create",
+        "summary": "Echo a new post",
+        "responses": {
+          "200": {
+            "description": "Local JSON response"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "published": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["title", "published"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{id}": {
+      "get": {
+        "operationId": "files-get",
+        "x-fern-sdk-group-name": "files",
+        "x-fern-sdk-method-name": "get",
+        "summary": "Get file metadata (no upload)",
+        "responses": {
+          "200": {
+            "description": "Local JSON response"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
