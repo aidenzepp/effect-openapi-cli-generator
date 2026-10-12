@@ -52,4 +52,4 @@ The library accepts parsed JSON and performs no filesystem or network access. Fa
 - Supported request schemas include primitive types, scalar enums, arrays, objects, required properties, boolean additionalProperties and local references. Nullable behavior follows the OpenAPI version.
 - Unsupported request features fail with a location-bearing diagnostic: remote/cyclic references, schema compositions and unsupported validation keywords, security requirements, header/cookie parameters, complex parameter serialization, and non-JSON bodies. This is a deliberate subset, not full OpenAPI or Forge parity.
 
-See the [design contract](docs/superpowers/specs/2026-10-11-generator-design.md) and [implementation plan](docs/superpowers/plans/2026-10-11-generator.md) for the exact supported matrix. Read [AGENTS.md](AGENTS.md) before contributing.
+Read [the project direction](docs/project.md) for architecture and generated-code quality requirements, and [AGENTS.md](AGENTS.md) before contributing.
