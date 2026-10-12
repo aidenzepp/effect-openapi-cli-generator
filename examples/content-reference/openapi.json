@@ -1,0 +1,169 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Content Reference",
+    "version": "1.0.0",
+    "description": "Manage user posts and their attached files."
+  },
+  "tags": [
+    {
+      "name": "users",
+      "description": "Work with content owned by a user."
+    },
+    {
+      "name": "posts",
+      "description": "Browse and create user posts."
+    },
+    {
+      "name": "files",
+      "description": "Browse files attached to posts."
+    }
+  ],
+  "paths": {
+    "/users/{user}/posts": {
+      "get": {
+        "operationId": "listPosts",
+        "x-fern-sdk-group-name": ["users", "posts"],
+        "x-fern-sdk-method-name": "list",
+        "description": "List an owner's posts, optionally filtered by status and publication state.",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}$)"
+            },
+            "description": "The owner of the posts."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["draft", "published"]
+            },
+            "description": "Filter posts by editorial status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Return at most this many posts, from 1 through 100."
+          },
+          {
+            "name": "published",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter by publication state; omit to include both states."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The response from the content API."
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPost",
+        "x-fern-sdk-group-name": ["users", "posts"],
+        "x-fern-sdk-method-name": "create",
+        "description": "Create a post without supplying defaults for omitted fields.",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}$)"
+            },
+            "description": "The owner of the posts."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The created post."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "Create a post with a title and optional publication status and tags.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["title"],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "published": {
+                    "type": "boolean"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{user}/posts/{post}/files": {
+      "get": {
+        "operationId": "listPostFiles",
+        "x-fern-sdk-group-name": ["users", "posts", "files"],
+        "x-fern-sdk-method-name": "list",
+        "description": "List the files attached to a post.",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}$)"
+            },
+            "description": "The owner of the posts."
+          },
+          {
+            "name": "post",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}$)"
+            },
+            "description": "The post whose files should be listed."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The response from the content API."
+          }
+        }
+      }
+    }
+  }
+}
