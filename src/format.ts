@@ -9,7 +9,7 @@ export const formatApplication = (
   Effect.gen(function* formatApplicationEffect1() {
     const files = [];
     for (const file of application.files) {
-      if (!/\.(?:ts|json)$/.test(file.path)) {
+      if (!/\.(?:ts|json)$/u.test(file.path)) {
         files.push({ ...file, content: `${file.content.trimEnd()}\n` });
         continue;
       }

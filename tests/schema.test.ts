@@ -5,14 +5,16 @@ import { resolveReference } from "../src/references.js";
 
 const parse = (schema: Schema.Json, version: "3.0" | "3.1" = "3.1", document: Schema.Json = {}) =>
   Effect.runPromise(normalizeSchema(document, schema, "/schema", version));
-const failure = (schema: Schema.Json, location: string, version: "3.0" | "3.1" = "3.1") =>
-  Effect.runPromise(Effect.flip(normalizeSchema({}, schema, "/schema", version))).then((error) => {
-    expect(error._tag).toBe("GenerationError");
-    expect(error.location).toBe(location);
-  });
+const failure = async (schema: Schema.Json, location: string, version: "3.0" | "3.1" = "3.1") => {
+  const error = await Effect.runPromise(
+    Effect.flip(normalizeSchema({}, schema, "/schema", version)),
+  );
+  expect(error._tag).toBe("GenerationError");
+  expect(error.location).toBe(location);
+};
 
 test("retains nested wire keys, extras policy and documentation without applying defaults", async () => {
-  const input = JSON.parse(
+  const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
     '{"type":"object","description":"outer","additionalProperties":false,"required":["__proto__"],"properties":{"__proto__":{"type":"object","properties":{"a/b":{"type":"string","default":"x","deprecated":true,"externalDocs":{"url":"https://example.test","description":"docs"}}}}}}',
   );
   const original = JSON.stringify(input);
@@ -38,7 +40,7 @@ test("retains nested wire keys, extras policy and documentation without applying
 });
 
 test("resolves escaped and percent encoded own-property pointers without changing active refs", async () => {
-  const document = JSON.parse(
+  const document = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
     '{"defs":{"a/b~c":{"type":"string"},"__proto__":{"type":"boolean"}}}',
   );
   const active = new Set<string>();
@@ -48,7 +50,8 @@ test("resolves escaped and percent encoded own-property pointers without changin
   expect(resolved.value).toEqual({ type: "string" });
   expect(resolved.location).toBe("/defs/a~1b~0c");
   expect(active.size).toBe(0);
-  expect((await parse({ $ref: "#/defs/__proto__" }, "3.1", document)).kind).toBe("boolean");
+  const prototypeSchema = await parse({ $ref: "#/defs/__proto__" }, "3.1", document);
+  expect(prototypeSchema.kind).toBe("boolean");
 });
 
 test("shared references are not cycles but recursive references are", async () => {
@@ -122,7 +125,7 @@ test.each([
   [true, "/schema"],
   [{ description: "missing" }, "/schema/type"],
 ])("rejects unsupported or malformed schema at exact pointer %#", async (schema, location) => {
-  await failure(schema, location as string);
+  await failure(schema, location);
 });
 
 test("rejects validation siblings on refs while retaining descriptive siblings", async () => {

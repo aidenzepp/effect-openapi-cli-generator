@@ -1,14 +1,19 @@
 import { expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
+import type { Schema } from "effect";
 import { normalize } from "../src/normalize.js";
 
-const operation = (extra: Schema.JsonObject = {}) => ({
+const operation = (extra: Readonly<Record<string, Schema.Json>> = {}) => ({
   operationId: "things_get",
   responses: { "200": { description: "OK" } },
   "x-fern-sdk-group-name": "things",
   ...extra,
 });
-const document = (op: Schema.JsonObject = {}, path = "/things", extra: Schema.JsonObject = {}) => ({
+const document = (
+  op: Readonly<Record<string, Schema.Json>> = {},
+  path = "/things",
+  extra: Readonly<Record<string, Schema.Json>> = {},
+) => ({
   info: { title: "Things", version: "today" },
   openapi: "3.1.0",
   paths: { [path]: { post: operation(op) } },
@@ -46,7 +51,10 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
     "/parents/{parentId}/things/{itemId}",
   );
   const before = JSON.stringify(input);
-  const result = run(input).operations[0]!;
+  const [result] = run(input).operations;
+  if (result === undefined) {
+    throw new Error("Expected normalized operation");
+  }
   expect(result.method).toBe("POST");
   expect(result.commandPath).toEqual(["things", "get"]);
   expect(result.parameters.map((p) => [p.wireName, p.flagName, p.binding])).toEqual([
@@ -67,7 +75,7 @@ test("list and bulk actions keep all path parameters as flags", () => {
           { parameters: [parameter("id", "path")], "x-fern-sdk-method-name": action },
           "/things/{id}",
         ),
-      ).operations[0]!.parameters[0]!.binding,
+      ).operations[0]?.parameters[0]?.binding,
     ).toBe("flag");
   }
 });
@@ -83,7 +91,7 @@ test("operation parameters override path-item parameters", () => {
       },
     },
   });
-  expect(result.operations[0]!.parameters[0]!.schema.kind).toBe("integer");
+  expect(result.operations[0]?.parameters[0]?.schema.kind).toBe("integer");
 });
 
 test("checks only selected requests and permits operation security override", () => {
@@ -209,7 +217,7 @@ test("resolves reusable parameters and bodies and rejects ref siblings", () => {
       },
     },
   );
-  expect(run(input).operations[0]!.body!.required).toBe(true);
+  expect(run(input).operations[0]?.body?.required).toBe(true);
   expect(fail(document({ parameters: [{ $ref: "#/x", required: false }] })).code).toBe(
     "unsupported",
   );
@@ -258,7 +266,7 @@ test("reference documentation overrides target documentation", () => {
       },
     },
   );
-  expect(run(input).operations[0]!.parameters[0]!.docs.description).toBe(
+  expect(run(input).operations[0]?.parameters[0]?.docs.description).toBe(
     "Local summary\nLocal description",
   );
 });

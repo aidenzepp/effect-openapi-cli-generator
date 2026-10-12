@@ -25,7 +25,7 @@ export const writeApplication = (application: GeneratedApplication, output: stri
     }
     const io = (error: { readonly message: string }) =>
       new OutputError({ code: "io", message: error.message, path: target });
-    yield* Effect.acquireUseRelease(
+    return yield* Effect.acquireUseRelease(
       fs.makeDirectory(target).pipe(
         Effect.mapError(
           (error) =>

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
+import type { Schema } from "effect";
 import { mapCommands, resolveName } from "../src/commands.js";
 
 const groupKey = "x-fern-sdk-group-name";
@@ -13,10 +14,10 @@ const error = (operation: Schema.Json) =>
 describe("command metadata", () => {
   test("normalizes arbitrary depth and preserves input", () => {
     const operation = {
+      method: "POST",
       operationId: "reports_get",
       [groupKey]: " CloudAPI.user_accounts.deep.Reports ",
       [methodKey]: "getReport",
-      method: "POST",
     };
     const before = JSON.stringify(operation);
     expect(project(operation)).toEqual([
@@ -82,7 +83,9 @@ describe("command metadata", () => {
     }
   });
   test("only own metadata is considered", () => {
-    expect(project(Object.create({ operationId: "get", [groupKey]: "reports" }))).toEqual([]);
+    const operation = {};
+    Object.setPrototypeOf(operation, { operationId: "get", [groupKey]: "reports" });
+    expect(project(operation)).toEqual([]);
   });
 });
 
