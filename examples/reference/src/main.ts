@@ -3,7 +3,7 @@ import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node
 import { Console, Effect, Match, Option, Schema, SchemaIssue } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import type { HttpClientError } from "effect/http";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 const BaseUrl = Schema.URLFromString.check(
   Schema.makeFilter((url) => url.protocol === "http:" || url.protocol === "https:", {
@@ -54,29 +54,55 @@ const baseUrl = Flag.String("base-url").pipe(
   ),
 );
 
-const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string =>
-  Match.value(reason).pipe(
+// Problem Details members with invalid types are ignored independently.
+const ProblemDetails = Schema.Struct({
+  detail: Schema.optionalKey(Schema.Unknown),
+  title: Schema.optionalKey(Schema.Unknown),
+});
+
+const problemText = Schema.decodeUnknownOption(Schema.Trim.check(Schema.isNonEmpty()));
+
+const httpErrorMessage = Effect.fnUntraced(function* httpErrorMessage(
+  reason: HttpClientError.HttpClientErrorReason,
+  descriptions: Readonly<Record<number, string>>,
+) {
+  if (reason._tag === "StatusCodeError") {
+    const { response } = reason;
+    const fallback = descriptions[response.status] ?? "The request failed.";
+    const mediaType = response.headers["content-type"]?.split(";")[0]?.trim().toLowerCase();
+    if (mediaType !== "application/problem+json") {
+      return `HTTP ${response.status}: ${fallback}`;
+    }
+
+    const message = yield* HttpClientResponse.schemaBodyJson(ProblemDetails)(response).pipe(
+      Effect.map((problem) =>
+        problemText(problem.detail).pipe(
+          Option.orElse(() => problemText(problem.title)),
+          Option.getOrElse(() => fallback),
+        ),
+      ),
+      Effect.orElseSucceed(() => fallback),
+    );
+
+    return `HTTP ${response.status}: ${message}`;
+  }
+
+  return Match.value(reason).pipe(
     Match.tagsExhaustive({
-      DecodeError: () => "the response could not be read. Check the API server and connection.",
-      EmptyBodyError: () => "the response was empty. Check the API server and its response format.",
+      DecodeError: () => "The response could not be read. Check the API server and connection.",
+      EmptyBodyError: () => "The response was empty. Check the API server and its response format.",
       EncodeError: () =>
-        "the request could not be encoded. Check the command inputs and API documentation.",
-      InvalidUrlError: () => "the request URL is invalid. Check --base-url and its path prefix.",
-      StatusCodeError: ({ response }) => {
-        const message = `server returned HTTP ${response.status}.`;
-        if (response.status === 404) {
-          return `${message} Check --base-url and its path prefix.`;
-        }
-
-        if (response.status >= 500) {
-          return `${message} Check the API service status.`;
-        }
-
-        return `${message} Check the API documentation for this status and the supplied --base-url.`;
-      },
-      TransportError: () => "connection failed. Check --base-url and that the server is reachable.",
+        "The request could not be encoded. Check the command inputs and API documentation.",
+      InvalidUrlError: () => "The request URL is invalid. Check --base-url and its path prefix.",
+      TransportError: () => "Connection failed. Check --base-url and that the server is reachable.",
     }),
   );
+});
+
+const listUsersResponses = {
+  404: "The users collection is unavailable.",
+  503: "The service is temporarily unavailable.",
+};
 
 /**
  * Return users, optionally filtered by whether their accounts are active.
@@ -103,12 +129,12 @@ const listUsersCommand = Command.make(
       yield* Console.log(yield* response.text);
     }).pipe(
       Effect.withSpan("users.list"),
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: `Could not list users: ${httpErrorMessage(cause.reason)}`,
-          }),
+      Effect.catchTag("HttpClientError", (cause) =>
+        httpErrorMessage(cause.reason, listUsersResponses).pipe(
+          Effect.flatMap((userMessage) =>
+            Effect.fail(new CliError.UserError({ cause, userMessage })),
+          ),
+        ),
       ),
     ),
 ).pipe(

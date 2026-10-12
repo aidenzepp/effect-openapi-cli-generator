@@ -20,3 +20,5 @@ Inside this repository, the existing root dependencies also support building wit
 `--base-url` is required for requests and preserves a path prefix such as `/api`. `--active` accepts only explicit `true` or `false`; omitting it omits the query parameter. The command writes the response text to stdout and reports transport or non-success HTTP status failures through Effect CLI.
 
 Only the spec, package, and hand-written entry point live here. This reference does not change the generator or the existing generated demo.
+
+HTTP failures prefer the RFC 9457 `application/problem+json` response `detail`, then `title`, then the operation’s documented status description, and finally a shared generic message. Empty, malformed, or unreadable error bodies keep the actual HTTP status. Other body formats and Problem Details extension fields are not printed.
