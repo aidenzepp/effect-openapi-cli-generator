@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { normalizeSchema } from "../src/schema.js";
-import { resolveReference } from "../src/references.js";
+import { normalizeSchema } from "../src/core/schema.js";
+import { resolveReference } from "../src/core/references.js";
 
 const parse = (schema: Schema.Json, version: "3.0" | "3.1" = "3.1", document: Schema.Json = {}) =>
   Effect.runPromise(normalizeSchema(document, schema, "/schema", version));

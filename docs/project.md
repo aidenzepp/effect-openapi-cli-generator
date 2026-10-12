@@ -4,7 +4,7 @@
 
 Build `effect-openapi-cli-generator`: a reusable TypeScript package and generator CLI that produce standalone, maintainable Effect CLI source from OpenAPI specifications or Effect HttpApi definitions. Generated applications should feel like code an Effect developer would choose to maintain.
 
-The repository currently contains tooling only. This document describes the intended behavior, not existing functionality. npm publication is a future release decision.
+The repository implements the OpenAPI 3.0/3.1 JSON generation path, including a pure library, a Node CLI, standalone source output, and executable boundary tests. The Effect HttpApi adapter and npm publication remain deferred. README.md records the supported input subset and invocation contract.
 
 ## Cloudflare inspiration
 
@@ -26,7 +26,7 @@ flowchart LR
   C --> E[Emit Effect CLI source]
 ```
 
-Both input forms should feed a common generation pipeline. Determine what HttpApi metadata survives conversion and preserve any needed metadata explicitly.
+OpenAPI JSON currently feeds this pipeline. The deferred HttpApi adapter must preserve required metadata before joining the same normalization boundary.
 
 Operation metadata and overrides determine command names and grouping. Do not infer CRUD behavior from HTTP verbs or assume every operation is REST-shaped. Each generated handler must retain its operation's HTTP method, path, parameter locations, serialization, body encoding, and authentication requirements.
 
@@ -39,7 +39,14 @@ Map representable schema fields to typed CLI inputs. Provide documented JSON and
 - `tools/`: repository tooling such as custom lint rules.
 - `docs/`: project intent and documented contracts.
 
-Use kebab-case filenames. Keep modules focused and add them when real behavior needs them. The separation of library and executable concerns is inspired by Rust project organization; use ordinary TypeScript entry points and exports. Exact filenames, public API signatures, test placement, and service boundaries remain implementation decisions. Effect's own package layout is a reference, not our required layout.
+Use kebab-case filenames. Keep modules focused and add them when real behavior needs them. The separation of library and executable concerns is inspired by Rust project organization; use ordinary TypeScript entry points and exports. The stable entry points are `src/index.ts` (library) and `src/cli.ts` (executable). Effect's own package layout is a reference, not our required layout.
+
+### Source map
+
+- `src/core/generate.ts` validates the public JSON boundary; `normalize.ts`, `schema.ts`, `references.ts`, and `commands.ts` derive explicit wire and command contracts.
+- `src/core/emit.ts` assembles package files. `emit-command.ts` renders native commands and HTTP handlers; `emit-schema.ts` renders validators; `source-text.ts` owns literal and documentation safety.
+- `src/core/runtime-template.ts` is ordinary checked TypeScript shared by generated applications. `tools/embed-runtime.ts` embeds it into an ignored module before test, check, and build; installed library calls need no source checkout or runtime IO.
+- `src/cli/command.ts` reads input and calls the library, `write.ts` owns exclusive directory creation and rollback, and `main.ts` supplies Node services and diagnostics.
 
 ## Generated-code quality
 

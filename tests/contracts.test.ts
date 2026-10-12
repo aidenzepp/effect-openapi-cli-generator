@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { GenerationError } from "../src/errors.js";
+import { GenerationError } from "../src/core/errors.js";
 
 test.each(["invalid_input", "unsupported", "invalid_options", "format"] as const)(
   "preserves %s diagnostics through the Effect failure channel",

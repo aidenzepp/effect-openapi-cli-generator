@@ -13,8 +13,10 @@ bun install --frozen-lockfile
 bun run build
 node dist/cli.js --input ./openapi.json --output ./generated
 bun run check
-bun test
+bun run test
 ```
+
+`test`, `check`, and `build` embed the checked runtime template automatically. Before invoking `bun test` directly on a clean checkout, run `bun run prepare:runtime`.
 
 Both input and output are required. Output must be absent and its parent must exist. Existing files, directories, and symlinks are refused. Failed or interrupted writes clean up the directory claimed by this invocation.
 

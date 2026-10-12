@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import type { Schema } from "effect";
-import { mapCommands, resolveName } from "../src/commands.js";
+import { mapCommands, resolveName } from "../src/core/commands.js";
 
 const groupKey = "x-fern-sdk-group-name";
 const methodKey = "x-fern-sdk-method-name";

@@ -1,11 +1,26 @@
+/**
+ * The original supported HTTP verbs; command spelling never changes this value.
+ */
 export type HttpMethod = "GET" | "PUT" | "POST" | "DELETE" | "OPTIONS" | "HEAD" | "PATCH" | "TRACE";
+
+/**
+ * An uncoerced JSON primitive accepted by scalar enum constraints.
+ */
 export type JsonScalar = string | number | boolean | null;
+
+/**
+ * Source annotations retained for generated help, JSDoc, and deprecation metadata.
+ */
 export interface Documentation {
   readonly title?: string;
   readonly description?: string;
   readonly deprecated?: boolean;
   readonly externalDocs?: { readonly url: string; readonly description?: string };
 }
+
+/**
+ * The supported validation contract, retaining original property names and JSON domains.
+ */
 export type WireSchema = { readonly docs: Documentation } & (
   | {
       readonly kind: "string" | "boolean" | "integer" | "number" | "null";
@@ -24,6 +39,10 @@ export type WireSchema = { readonly docs: Documentation } & (
       readonly additionalProperties: boolean;
     }
 );
+
+/**
+ * A scalar request parameter whose wire identity remains separate from its CLI binding.
+ */
 export interface Parameter {
   readonly wireName: string;
   readonly flagName: string;
@@ -33,6 +52,10 @@ export interface Parameter {
   readonly docs: Documentation;
   readonly binding: "flag" | "argument";
 }
+
+/**
+ * A selected command projection with the original HTTP method, path, and request schema.
+ */
 export interface Operation {
   readonly commandPath: readonly string[];
   readonly operationId: string;
@@ -42,22 +65,41 @@ export interface Operation {
   readonly docs: Documentation;
   readonly body: { readonly required: boolean; readonly schema: WireSchema } | undefined;
 }
+
+/**
+ * The normalized API and deterministically ordered operations consumed by source emission.
+ */
 export interface ApiModel {
   readonly title: string;
   readonly description: string | undefined;
   readonly operations: readonly Operation[];
 }
+
+/**
+ * A metadata-derived command address independent of HTTP request semantics.
+ */
 export interface CommandProjection {
   readonly commandPath: readonly string[];
 }
 
+/**
+ * Optional naming choices for the standalone generated executable.
+ */
 export interface GenerateOptions {
   readonly name?: string;
 }
+
+/**
+ * A relative output path and its complete formatted file content.
+ */
 export interface GeneratedFile {
   readonly path: string;
   readonly content: string;
 }
+
+/**
+ * The standalone package files returned without performing filesystem operations.
+ */
 export interface GeneratedApplication {
   readonly files: readonly GeneratedFile[];
 }

@@ -18,14 +18,15 @@
     }
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun run prepare:runtime && bun test",
     "format": "vp fmt --check",
     "lint": "vp lint --type-aware",
     "typecheck": "tsc --noEmit",
-    "check": "bun run format && bun run lint && bun run typecheck",
+    "check": "bun run prepare:runtime && bun run format && bun run lint && bun run typecheck",
     "fix": "vp fmt && vp lint --fix",
-    "build": "tsc -p tsconfig.build.json",
-    "test:integration": "bun test tests/integration.test.ts tests/package.test.ts"
+    "build": "bun run prepare:runtime && tsc -p tsconfig.build.json",
+    "test:integration": "bun run prepare:runtime && bun test tests/integration.test.ts tests/package.test.ts",
+    "prepare:runtime": "bun tools/embed-runtime.ts"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.3",

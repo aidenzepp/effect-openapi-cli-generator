@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect, FileSystem, Fiber } from "effect";
 import { NodeServices } from "@effect/platform-node";
-import { writeApplication } from "../src/write.js";
+import { writeApplication } from "../src/cli/write.js";
 
 const app = { files: [{ content: "hello", path: "src/main.ts" }] };
 const run = (output: string, application = app) =>

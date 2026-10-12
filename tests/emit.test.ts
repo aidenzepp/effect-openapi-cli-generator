@@ -5,7 +5,7 @@ import path from "node:path";
 import { Effect, Schema } from "effect";
 import * as oxfmt from "oxfmt";
 import { generate } from "../src/index.js";
-import { formatApplication } from "../src/format.js";
+import { formatApplication } from "../src/core/format.js";
 
 const document = {
   info: { description: "Original help", title: "Sample API", version: "not-semver" },
@@ -40,6 +40,7 @@ const document = {
     },
   },
 };
+
 describe("standalone application generation", () => {
   test("returns five deterministic, independently formatted files without platform services", async () => {
     const output = await Effect.runPromise(generate(document));
@@ -52,6 +53,7 @@ describe("standalone application generation", () => {
     ]);
     expect(await Effect.runPromise(generate(document))).toEqual(output);
     expect(await Effect.runPromise(formatApplication(output))).toEqual(output);
+
     const pkg = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -77,7 +79,7 @@ describe("standalone application generation", () => {
     expect(main).toContain("@evil");
     expect(main).toContain("Prototype field");
     expect(main).toContain('["__proto__"]');
-    expect(main).toContain("Config.succeed");
+    expect(main).toContain("const { baseUrl } = yield* root;");
     expect(main).not.toContain("effect-openapi-cli-generator");
     expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(main)).not.toThrow();
   });
@@ -112,6 +114,7 @@ test("hostile wire strings remain literals and both generated modules parse", as
       prototype: { type: "string" },
     }),
   });
+
   const output = await Effect.runPromise(generate(fixture, { name: "safe-api" }));
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
   expect(main).toContain("Deprecated.");
@@ -155,9 +158,11 @@ for (const openapi of ["3.0.3", "3.1.0"]) {
           enum: values,
         },
       });
+
       const output = await Effect.runPromise(generate(fixture));
       const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
-      const expression = /const schema0 = (?<schema>[\s\S]*?);/u.exec(main)?.groups?.schema;
+      const expression = /const accountItemsGetBodySchema = (?<schema>[\s\S]*?);/u.exec(main)
+        ?.groups?.schema;
       expect(expression).toBeDefined();
       expect(expression).not.toMatch(/Schema\.Literals\([^)]*null/u);
       if (values.length === 1 && values.includes(null)) {
@@ -185,6 +190,7 @@ test("emitted runtime decodes JSON and preserves the validated original", async 
   expect(runtime).toContain("Schema.fromJsonString(Schema.Json)");
   expect(runtime).toContain("return Option.some(value)");
   expect(runtime).not.toContain("JSON.parse");
+
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
   expect(main).toContain("Schema.Record(Schema.String, Schema.Json)");
   expect(main).toContain('body: Flag.String("body")');
@@ -199,9 +205,10 @@ test("string query values stay direct and optional branches parse", async () => 
     required: false,
     schema: { type: "string" },
   });
+
   const output = await Effect.runPromise(generate(fixture));
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
-  expect(main).toContain('query.append("search", input.value1.value)');
+  expect(main).toContain('query.append("search", input.searchFlag.value)');
   expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(main)).not.toThrow();
 });
 
@@ -217,16 +224,20 @@ test("formatted enum literals preserve surrogate code units exactly", async () =
   Object.assign(fixture.paths["/items/{id}"].post.requestBody.content["application/json"], {
     schema: { enum: values, type: "string" },
   });
+
   const output = await Effect.runPromise(generate(fixture));
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
-  const expression = /const schema0 = Schema.Literals\((?<values>[\s\S]*?)\);/u.exec(main)?.groups
-    ?.values;
+  const expression =
+    /const accountItemsGetBodySchema = Schema.Literals\((?<values>[\s\S]*?)\);/u.exec(main)?.groups
+      ?.values;
   expect(expression).toBeDefined();
+
   const moduleUrl = `data:text/javascript,${encodeURIComponent(`export default ${expression};`)}`;
   const { default: emitted } = Schema.decodeUnknownSync(
     Schema.Struct({ default: Schema.Array(Schema.String) }),
   )(await import(moduleUrl));
   expect(emitted).toEqual(values);
+
   const accepts = Schema.is(Schema.Literals(emitted));
   for (const value of values) {
     expect(accepts(value)).toBe(true);
@@ -240,7 +251,7 @@ test("generated tagged errors retain typed constructors and yieldable failures",
   const runtime = output.files.find((file) => file.path === "src/runtime.ts")?.content ?? "";
   const declarations = runtime.slice(
     runtime.indexOf("\n\n") + 2,
-    runtime.indexOf("export const validateBaseUrl"),
+    runtime.lastIndexOf("/**", runtime.indexOf("export const validateBaseUrl")),
   );
   const directory = await mkdtemp(path.join(tmpdir(), "emitted-errors-"));
   try {
@@ -304,6 +315,7 @@ test.each(["query", "list", "get", "body"])(
         requestBody: { content: { "application/json": { schema: { type: "boolean" } } } },
       });
     }
+
     const output = await Effect.runPromise(generate(fixture));
     const directory = await mkdtemp(path.join(tmpdir(), "effect-imports-"));
     try {
@@ -355,10 +367,12 @@ test.each([false, true])(
         },
       },
     });
+
     const output = await Effect.runPromise(generate(fixture));
     const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
     expect(main.includes("@deprecated")).toBe(deprecated);
     expect(main.includes("oxlint-disable")).toBe(deprecated);
+
     const directory = await mkdtemp(path.join(process.cwd(), ".deprecated-proof-"));
     try {
       await Promise.all(
@@ -391,3 +405,63 @@ test.each([false, true])(
     }
   },
 );
+
+test("readable identifiers distinguish command paths and parameter bindings", async () => {
+  const operation = {
+    operationId: "items-get",
+    parameters: [
+      { in: "path", name: "body", required: true, schema: { type: "string" } },
+      { in: "query", name: "search", schema: { type: "string" } },
+    ],
+    requestBody: { content: { "application/json": { schema: { type: "string" } } } },
+    responses: { "200": { description: "OK" } },
+  };
+  const fixture = {
+    info: { title: "Identifiers", version: "1" },
+    openapi: "3.1.0",
+    paths: {
+      "/first/{body}": { post: { ...operation, "x-fern-sdk-group-name": "a-b.c" } },
+      "/second/{body}": { post: { ...operation, "x-fern-sdk-group-name": "a.b-c" } },
+    },
+  };
+  const output = await Effect.runPromise(generate(fixture));
+  expect(await Effect.runPromise(generate(fixture))).toEqual(output);
+
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+  expect(main).toContain("const aBCGetCommand =");
+  expect(main).toContain("const aBCGetCommand2 =");
+  expect(main).toContain("input.bodyArgument");
+  expect(main).toContain('body: Flag.String("body")');
+  expect(main).not.toMatch(/(?:operation|parameter|schema)\d/u);
+  expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(main)).not.toThrow();
+
+  const directory = await mkdtemp(path.join(tmpdir(), "identifier-proof-"));
+  try {
+    await symlink(path.resolve("node_modules"), path.join(directory, "node_modules"));
+    await Promise.all(
+      output.files
+        .filter((file) => file.path.endsWith(".ts"))
+        .map((file) => writeFile(path.join(directory, path.basename(file.path)), file.content)),
+    );
+    const result = Bun.spawnSync([
+      path.resolve("node_modules/.bin/tsc"),
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "--target",
+      "ES2022",
+      "--module",
+      "ESNext",
+      "--moduleResolution",
+      "Bundler",
+      path.join(directory, "main.ts"),
+    ]);
+    expect({ code: result.exitCode, errors: result.stdout.toString() }).toEqual({
+      code: 0,
+      errors: "",
+    });
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});

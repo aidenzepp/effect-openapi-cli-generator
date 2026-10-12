@@ -8,3 +8,5 @@ dist/
 .worktrees/
 
 .vivi/
+
+src/core/runtime-source.generated.ts

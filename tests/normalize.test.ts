@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import type { Schema } from "effect";
-import { normalize } from "../src/normalize.js";
+import { normalize } from "../src/core/normalize.js";
 
 const operation = (extra: Readonly<Record<string, Schema.Json>> = {}) => ({
   operationId: "things_get",
