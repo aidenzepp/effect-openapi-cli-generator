@@ -21,4 +21,4 @@ Inside this repository, the existing root dependencies also support building wit
 
 Only the spec, package, and hand-written entry point live here. This reference does not change the generator or the existing generated demo.
 
-HTTP failures prefer the RFC 9457 `application/problem+json` response `detail`, then `title`, then the operation’s documented status description, and finally a shared generic message. Empty, malformed, or unreadable error bodies keep the actual HTTP status. Other body formats and Problem Details extension fields are not printed.
+HTTP failures use shared generic descriptions and preserve the HTTP status. Error response bodies are not rendered.

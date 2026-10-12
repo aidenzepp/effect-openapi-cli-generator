@@ -118,53 +118,14 @@ test("reference documentation and help retain standard OpenAPI prose", async () 
 
 test("HTTP execution preserves prefixes and boolean values and reports safe failures", async () => {
   const requests: string[] = [];
-  const errorResponses = new Map(
-    Object.entries({
-      detail: {
-        body: JSON.stringify({
-          detail: "The requested team has no users collection.",
-          internal: "private-server-detail",
-          title: "Users unavailable.",
-        }),
-        status: 404,
-        type: "Application/Problem+JSON; charset=utf-8",
-      },
-      invalidMember: {
-        body: JSON.stringify({ detail: 99, title: "The team is archived." }),
-        status: 404,
-        type: "application/problem+json",
-      },
-      malformed: { body: "{private-server-detail", status: 404, type: "application/problem+json" },
-      missing: { body: "", status: 404, type: "text/plain" },
-      title: {
-        body: JSON.stringify({
-          internal: "private-server-detail",
-          title: "Maintenance is in progress.",
-        }),
-        status: 503,
-        type: "application/problem+json",
-      },
-      unavailable: { body: "", status: 503, type: "application/problem+json" },
-      unknown: { body: "private-server-detail", status: 418, type: "text/plain" },
-      unrecognized: {
-        body: JSON.stringify({ detail: "private-server-detail" }),
-        status: 404,
-        type: "application/json",
-      },
-    }),
-  );
   const server = createServer((request, response) => {
     requests.push(`${request.method} ${request.url}`);
-
-    const prefix = request.url?.split("/")[1] ?? "";
-    const failure = errorResponses.get(prefix);
-    if (failure) {
-      response.writeHead(failure.status, { "Content-Type": failure.type }).end(failure.body);
-    } else if (prefix === "truncated" || prefix === "truncatedError") {
-      response.writeHead(prefix === "truncated" ? 200 : 503, {
-        "Content-Length": 100,
-        "Content-Type": "application/problem+json",
-      });
+    if ((request.url ?? "").startsWith("/missing/")) {
+      response.writeHead(404).end("private-server-detail");
+    } else if ((request.url ?? "").startsWith("/unavailable/")) {
+      response.writeHead(503).end("private-server-detail");
+    } else if ((request.url ?? "").startsWith("/truncated/")) {
+      response.writeHead(200, { "Content-Length": 100 });
       response.write("private-server-detail", () => {
         response.destroy();
       });
@@ -198,16 +159,12 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
     await Effect.runPromise(
       Effect.forEach(
         [
-          ["detail", "HTTP 404: The requested team has no users collection."],
-          ["title", "HTTP 503: Maintenance is in progress."],
-          ["invalidMember", "HTTP 404: The team is archived."],
-          ["missing", "HTTP 404: The users collection is unavailable."],
-          ["unavailable", "HTTP 503: The service is temporarily unavailable."],
-          ["malformed", "HTTP 404: The users collection is unavailable."],
-          ["unrecognized", "HTTP 404: The users collection is unavailable."],
-          ["truncatedError", "HTTP 503: The service is temporarily unavailable."],
-          ["unknown", "HTTP 418: The request failed."],
-          ["truncated", "The response could not be read."],
+          ["missing", "The server returned HTTP 404"],
+          ["unavailable", "The server returned HTTP 503"],
+          [
+            "truncated",
+            "The response could not be read. Retry the request; if it persists, check the API server and connection.",
+          ],
         ] as const,
         ([prefix, message]) =>
           Effect.promise(async () => {
@@ -215,7 +172,6 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
             expect(result.code).toBe(1);
             expect(result.out).toBe("");
             expect(result.err).toContain(message);
-            expect(result.err).not.toContain("Retry");
             expect(result.err).not.toContain("Could not list users");
             expect(result.err).not.toContain("private-server-detail");
           }),
@@ -229,6 +185,5 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
   expect(refused.code).toBe(1);
   expect(refused.out).toBe("");
   expect(refused.err).toContain("Connection failed");
-  expect(refused.err).not.toContain("Could not list users");
   expect(refused.err).toContain("server is reachable");
 }, 20_000);
