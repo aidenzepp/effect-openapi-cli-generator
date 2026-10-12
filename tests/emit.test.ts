@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as oxfmt from "oxfmt";
 import { generate } from "../src/index.js";
 import { formatApplication } from "../src/format.js";
@@ -120,4 +120,42 @@ test("formatter rejections become typed generation failures", async () => {
   } finally {
     failure.mockRestore();
   }
+});
+
+// Regression contract: generated enum validators accept exactly the declared
+// scalar values, including null, under each supported OpenAPI version. Exercise
+// the emitted schema with real Effect; full program compilation belongs to U6.
+for (const openapi of ["3.0.3", "3.1.0"]) {
+  for (const values of [["yes", null], [null], ["yes"]]) {
+    test(`${openapi} emits an exact nullable enum ${JSON.stringify(values)}`, async () => {
+      const fixture = structuredClone(document);
+      fixture.openapi = openapi;
+      Object.assign(fixture.paths["/items/{id}"].post.requestBody.content["application/json"], {
+        schema: {
+          ...(openapi.startsWith("3.0")
+            ? { type: "string", nullable: true }
+            : { type: ["string", "null"] }),
+          enum: values,
+        },
+      });
+      const output = await Effect.runPromise(generate(fixture));
+      const expression = output.files[0]!.content.match(/const schema0 = ([\s\S]*?);/)?.[1];
+      expect(expression).toBeDefined();
+      // Null is its own Effect schema, never a supported Schema.Literals input.
+      expect(expression).not.toMatch(/Schema\.Literals\([^)]*null/);
+      const schema = new Function("Schema", `return ${expression}`)(Schema);
+      for (const value of ["yes", "no", null, false, 0]) {
+        expect(Schema.is(schema)(value)).toBe(values.some((expected) => expected === value));
+      }
+    });
+  }
+}
+
+test("base URL native flag adapts domain errors to InvalidValue", async () => {
+  const output = await Effect.runPromise(generate(document));
+  const main = output.files[0]!.content;
+  expect(main).toContain("new CliError.InvalidValue(");
+  expect(main).toContain('option: "base-url"');
+  expect(main).toContain('kind: "flag"');
+  expect(main).toContain("value: cause.value");
 });

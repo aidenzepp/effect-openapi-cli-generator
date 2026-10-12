@@ -44,9 +44,12 @@ const schemaSource = (schema: WireSchema): string => {
         number: "Finite",
         null: "Null",
       };
-      expression = schema.enum
-        ? `Schema.Literals(${literal(schema.enum)})`
-        : `Schema.${names[schema.kind]}`;
+      if (schema.enum) {
+        const values = schema.enum.filter((value) => value !== null);
+        expression = values.length === 0 ? "Schema.Null" : `Schema.Literals(${literal(values)})`;
+        if (values.length > 0 && schema.enum.includes(null))
+          expression = `Schema.NullOr(${expression})`;
+      } else expression = `Schema.${names[schema.kind]}`;
     }
   }
   return schema.nullable && !("enum" in schema && schema.enum)
@@ -79,7 +82,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
       'import { Argument, CliError, Command, Flag } from "effect/cli";',
       'import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";',
       'import { executeRequest, pathValue, readBody, validateBaseUrl } from "./runtime.js";',
-      `${comment({ title: model.title, ...(model.description ? { description: model.description } : {}) })}const root = Command.make(${literal(name)}).pipe(Command.withDescription(${literal([model.title, model.description].filter(Boolean).join("\n"))}), Command.withSharedFlags({baseUrl: Flag.String("base-url").pipe(Flag.mapEffect(validateBaseUrl))}));`,
+      `${comment({ title: model.title, ...(model.description ? { description: model.description } : {}) })}const root = Command.make(${literal(name)}).pipe(Command.withDescription(${literal([model.title, model.description].filter(Boolean).join("\n"))}), Command.withSharedFlags({baseUrl: Flag.String("base-url").pipe(Flag.mapEffect((value) => validateBaseUrl(value).pipe(Effect.mapError((cause) => new CliError.InvalidValue({option: "base-url", value: cause.value, expected: "HTTP(S) URL without credentials, query or fragment", kind: "flag"})))))}));`,
     ];
     let parameterIndex = 0;
     const leaves = new Map<string, string>();
