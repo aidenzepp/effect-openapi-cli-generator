@@ -1,6 +1,6 @@
 # Run the generated CLIs
 
-These are concrete generator inputs and outputs, committed for inspection. Generated source is in each `cli/src/` directory. Neither CLI needs this generator at runtime.
+The demo and integration examples contain concrete generator inputs and outputs, committed for inspection. Their generated source is in each `cli/src/` directory; neither CLI needs this generator at runtime. The Resend fixture linked below contains a specification slice only.
 
 Run the commands below from this repository root:
 
@@ -78,3 +78,7 @@ Output directories must not already exist. Inspect the new output before replaci
 ## Verification
 
 The regenerated sources pass repository formatting, type-aware lint, and TypeScript checks; both generated packages build. The full test suite also installs the packed generator outside this checkout and exercises generated HTTP requests, including false, zero, empty strings, own `__proto__` keys, encoded slashes, errors, and interruption. The friendly demo post schema allows only `title` and `published`; preservation of extra keys and zero belongs to the exact integration fixture.
+
+## Pinned Resend specification slice
+
+[Resend reference](resend-reference/README.md) preserves eight official API operations and their referenced models, with an immutable upstream snapshot and a separate CLI naming overlay. It is a specification fixture for the next output review, not a generated CLI.

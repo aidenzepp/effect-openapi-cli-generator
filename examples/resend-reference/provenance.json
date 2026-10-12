@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/resend/resend-openapi",
+  "revision": "8916b099d7f52b8552a2e1ef38a7f16fcd17864c",
+  "files": [
+    {
+      "path": "upstream/resend.json.snapshot",
+      "url": "https://raw.githubusercontent.com/resend/resend-openapi/8916b099d7f52b8552a2e1ef38a7f16fcd17864c/resend.json",
+      "sha256": "834cc0af1324a7a01e8cbe7d125297a249233ecb0fd344faf1024acff9139949"
+    },
+    {
+      "path": "upstream/LICENSE",
+      "url": "https://raw.githubusercontent.com/resend/resend-openapi/8916b099d7f52b8552a2e1ef38a7f16fcd17864c/LICENSE",
+      "sha256": "ae5e2657060393e9f3441bae84c5587c0e7848094fd1101bd72fbb307a058fe9"
+    }
+  ]
+}

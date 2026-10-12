@@ -1,0 +1,65 @@
+{
+  "overlay": "1.0.0",
+  "info": {
+    "title": "Resend reference CLI naming",
+    "version": "1.0.0"
+  },
+  "actions": [
+    {
+      "target": "$[\"paths\"][\"/domains\"][\"get\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/domains\"][\"post\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/domains/{domain_id}\"][\"patch\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/domains/{domain_id}\"][\"delete\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "delete"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/emails\"][\"post\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["emails"],
+        "x-fern-sdk-method-name": "send"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/emails/batch\"][\"post\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["emails", "batch"],
+        "x-fern-sdk-method-name": "send"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/emails/{email_id}/attachments\"][\"get\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["emails", "attachments"],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    {
+      "target": "$[\"paths\"][\"/emails/{email_id}/attachments/{attachment_id}\"][\"get\"]",
+      "update": {
+        "x-fern-sdk-group-name": ["emails", "attachments"],
+        "x-fern-sdk-method-name": "get"
+      }
+    }
+  ]
+}
