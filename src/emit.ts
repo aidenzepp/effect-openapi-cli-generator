@@ -1,38 +1,59 @@
-import { Effect } from "effect";
+import { Array, Effect, Order, Schema } from "effect";
 import { resolveName } from "./commands.js";
 import { formatApplication } from "./format.js";
 import type { ApiModel, Documentation, GenerateOptions, Parameter, WireSchema } from "./model.js";
 import { runtimeSource } from "./runtime-source.js";
 
-const literal = (value: unknown) => JSON.stringify(value);
+const literal = (value: Schema.Json): string => {
+  if (Schema.is(Schema.String)(value) && value.includes(`\${`)) {
+    return `\`${value.replaceAll("\\", "\\\\").replaceAll("`", "\\`").replaceAll("\r", "\\r").replaceAll(`\${`, `\\\${`)}\``;
+  }
+  if (Schema.is(Schema.Array(Schema.Json))(value)) {
+    return `[${value.map(literal).join(",")}]`;
+  }
+  return JSON.stringify(value);
+};
+const propertyKey = (name: string) =>
+  name === "__proto__" || name.includes(`\${`) ? `[${literal(name)}]` : JSON.stringify(name);
+const escapeComment = (text: string) => text.replaceAll("*/", "*\\/").replaceAll(/^\s*@/gmu, "\\@");
 const description = (docs: Documentation) =>
   [docs.title, docs.description].filter(Boolean).join("\n");
 const comment = (docs: Documentation): string => {
-  const escape = (text: string) => text.replaceAll("*/", "*\\/").replaceAll(/^\s*@/gm, "\\@");
-  const lines = description(docs).split("\n").filter(Boolean).map(escape);
-  if (docs.deprecated) {
+  const lines = description(docs).split("\n").filter(Boolean).map(escapeComment);
+  if (docs.deprecated === true) {
     lines.push("@deprecated");
   }
   if (docs.externalDocs) {
     lines.push(
-      `@see ${escape(docs.externalDocs.url)} ${escape(docs.externalDocs.description ?? "")}`,
+      `@see ${escapeComment(docs.externalDocs.url)} ${escapeComment(docs.externalDocs.description ?? "")}`,
     );
   }
-  return lines.length ? `/**\n${lines.map((line) => ` * ${line}`).join("\n")}\n */\n` : "";
+  return lines.length > 0 ? `/**\n${lines.map((line) => ` * ${line}`).join("\n")}\n */\n` : "";
 };
 const schemaSource = (schema: WireSchema): string => {
   let expression: string;
   switch (schema.kind) {
     case "object": {
-      const fields = schema.properties
+      const fields = Array.sort(
+        schema.properties,
+        (a: { readonly name: string }, b: { readonly name: string }) => {
+          if (a.name < b.name) {
+            return -1;
+          }
+          if (a.name > b.name) {
+            return 1;
+          }
+          return 0;
+        },
+      )
         .map(
           (property) =>
-            `${comment(property.schema.docs)}[${literal(property.name)}]: ${property.required ? schemaSource(property.schema) : `Schema.optionalKey(${schemaSource(property.schema)})`}`,
+            `${comment(property.schema.docs)}${propertyKey(property.name)}: ${property.required ? schemaSource(property.schema) : `Schema.optionalKey(${schemaSource(property.schema)})`}`,
         )
         .join(",\n");
       const struct = `Schema.Struct({${fields}})`;
       expression = schema.additionalProperties
-        ? `Schema.StructWithRest(${struct}, [Schema.Record(Schema.String, Schema.Unknown)])`
+        ? `Schema.StructWithRest(${struct}, [Schema.Record(Schema.String, Schema.Json)])`
         : struct;
       break;
     }
@@ -40,7 +61,11 @@ const schemaSource = (schema: WireSchema): string => {
       expression = `Schema.Array(${schemaSource(schema.items)})`;
       break;
     }
-    default: {
+    case "boolean":
+    case "integer":
+    case "null":
+    case "number":
+    case "string": {
       const names = {
         boolean: "Boolean",
         integer: "Int",
@@ -57,6 +82,10 @@ const schemaSource = (schema: WireSchema): string => {
       } else {
         expression = `Schema.${names[schema.kind]}`;
       }
+      break;
+    }
+    default: {
+      return schema;
     }
   }
   return schema.nullable && !("enum" in schema && schema.enum)
@@ -73,7 +102,14 @@ const parameterSource = (parameter: Parameter): string => {
   } else if (schema.kind === "string" && schema.enum) {
     expression = `${api}.Literals(${name}, ${literal(schema.enum)})`;
   } else {
-    expression = `${api}.${schema.kind === "integer" ? "Int" : schema.kind === "number" ? "Finite" : "String"}(${name})`;
+    let primitive = "String";
+    if (schema.kind === "integer") {
+      primitive = "Int";
+    }
+    if (schema.kind === "number") {
+      primitive = "Finite";
+    }
+    expression = `${api}.${primitive}(${name})`;
   }
   if (description(parameter.docs)) {
     expression += `.pipe(${api}.withDescription(${literal(description(parameter.docs))}))`;
@@ -87,20 +123,22 @@ const parameterSource = (parameter: Parameter): string => {
 export const emit = (model: ApiModel, options?: GenerateOptions) =>
   Effect.gen(function* emitEffect1() {
     const name = yield* resolveName(model.title, options);
+    const rootDocs =
+      model.description === undefined
+        ? { title: model.title }
+        : { description: model.description, title: model.title };
     const lines = [
       "#!/usr/bin/env node",
       'import { Config, Effect, Option, Schema } from "effect";',
       'import { Argument, CliError, Command, Flag } from "effect/cli";',
       'import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";',
       'import { executeRequest, pathValue, readBody, validateBaseUrl } from "./runtime.js";',
-      `${comment({ title: model.title, ...(model.description ? { description: model.description } : {}) })}const root = Command.make(${literal(name)}).pipe(Command.withDescription(${literal([model.title, model.description].filter(Boolean).join("\n"))}), Command.withSharedFlags({baseUrl: Flag.String("base-url").pipe(Flag.mapEffect((value) => validateBaseUrl(value).pipe(Effect.mapError((cause) => new CliError.InvalidValue({option: "base-url", value: cause.value, expected: "HTTP(S) URL without credentials, query or fragment", kind: "flag"})))))}));`,
+      `${comment(rootDocs)}const root = Command.make(${literal(name)}).pipe(Command.withDescription(${literal([model.title, model.description].filter(Boolean).join("\n"))}), Command.withSharedFlags({baseUrl: Flag.String("base-url").pipe(Flag.mapEffect((value) => validateBaseUrl(value).pipe(Effect.mapError((cause) => new CliError.InvalidValue({expected: "HTTP(S) URL without credentials, query or fragment", kind: "flag", option: "base-url", value: cause.value})))))}));`,
     ];
-    let parameterIndex = 0;
     const leaves = new Map<string, string>();
     for (const [index, operation] of model.operations.entries()) {
       const entries = operation.parameters.map((parameter, position) => {
-        const identifier = `parameter${parameterIndex}`;
-        parameterIndex += 1;
+        const identifier = `parameter${index}_${position}`;
         lines.push(
           `${comment(parameter.docs)}const ${identifier} = ${parameterSource(parameter)};`,
         );
@@ -110,7 +148,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
         lines.push(
           `${comment(operation.body.schema.docs)}const schema${index} = ${schemaSource(operation.body.schema)};`,
         );
-        entries.push(
+        entries.unshift(
           'body: Flag.String("body").pipe(Flag.optional)',
           'bodyFile: Flag.String("body-file").pipe(Flag.optional)',
         );
@@ -118,7 +156,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
       const statements = [
         "const { baseUrl } = yield* root;",
         "const base = yield* Config.succeed(baseUrl);",
-        `let path = ${literal(operation.path)};`,
+        `${operation.parameters.some((parameter) => parameter.location === "path") ? "let" : "const"} path = ${literal(operation.path)};`,
         "const query = new URLSearchParams();",
       ];
       for (const [position, parameter] of operation.parameters.entries()) {
@@ -128,42 +166,56 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
             `path = path.replace(${literal(`{${parameter.wireName}}`)}, yield* pathValue(${value}));`,
           );
         } else if (parameter.required) {
-          statements.push(`query.append(${literal(parameter.wireName)}, String(${value}));`);
+          statements.push(
+            `query.append(${literal(parameter.wireName)}, ${parameter.schema.kind === "string" ? value : `String(${value})`});`,
+          );
         } else {
           statements.push(
-            `if (Option.isSome(${value})) query.append(${literal(parameter.wireName)}, String(${value}.value));`,
+            `if (Option.isSome(${value})) { query.append(${literal(parameter.wireName)}, ${parameter.schema.kind === "string" ? `${value}.value` : `String(${value}.value)`}); }`,
           );
         }
       }
       statements.push(
         "const suffix = query.toString();",
-        'const url = base + path + (suffix ? "?" + suffix : "");',
+        `const url = \`\${base}\${path}\${suffix.length > 0 ? \`?\${suffix}\` : ""}\`;`,
         operation.body
           ? `const body = yield* readBody(input, ${operation.body.required}, schema${index});`
           : "const body = Option.none();",
         `yield* executeRequest(${literal(operation.method)}, url, body);`,
       );
       lines.push(
-        `${comment(operation.docs)}const operation${index} = Command.make(${literal(operation.commandPath.at(-1))}, {${entries.join(",")}}, (${entries.length ? "input" : ""}) => Effect.gen(function* () {${statements.join("\n")}}).pipe(Effect.mapError((cause) => new CliError.UserError({cause, userMessage: cause.message})))).pipe(Command.withDescription(${literal(description(operation.docs))}));`,
+        `${comment(operation.docs)}const operation${index} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${Array.sort(entries, Order.String).join(",")}}, (${entries.length > 0 ? "input" : ""}) => Effect.gen(function* runOperation${index}() {${statements.join("\n")}}).pipe(Effect.mapError((cause) => new CliError.UserError({cause, userMessage: cause.message})))).pipe(Command.withDescription(${literal(description(operation.docs))}));`,
       );
       leaves.set(operation.commandPath.join("/"), `operation${index}`);
     }
-    const groups = [
-      ...new Set(
-        model.operations.flatMap((operation) =>
-          operation.commandPath
-            .slice(0, -1)
-            .map((_, index) => operation.commandPath.slice(0, index + 1).join("/")),
+    const groups = Array.sort(
+      [
+        ...new Set(
+          model.operations.flatMap((operation) =>
+            operation.commandPath
+              .slice(0, -1)
+              .map((_, index) => operation.commandPath.slice(0, index + 1).join("/")),
+          ),
         ),
-      ),
-    ].sort((a, b) => b.split("/").length - a.split("/").length || a.localeCompare(b));
+      ],
+      (a: string, b: string) => {
+        const comparison = b.split("/").length - a.split("/").length || a.localeCompare(b);
+        if (comparison < 0) {
+          return -1;
+        }
+        if (comparison > 0) {
+          return 1;
+        }
+        return 0;
+      },
+    );
     const children = (parent: string) =>
       [...leaves]
         .filter(([path]) => path.split("/").slice(0, -1).join("/") === parent)
         .map(([, identifier]) => identifier);
     for (const [index, group] of groups.entries()) {
       lines.push(
-        `const group${index} = Command.make(${literal(group.split("/").at(-1))}).pipe(Command.withSubcommands([${children(group).join(",")}]));`,
+        `const group${index} = Command.make(${literal(group.split("/").at(-1) ?? "")}).pipe(Command.withSubcommands([${children(group).join(",")}]));`,
       );
       leaves.set(group, `group${index}`);
     }
@@ -176,7 +228,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
         { content: lines.join("\n\n"), path: "src/main.ts" },
         { content: runtimeSource, path: "src/runtime.ts" },
         {
-          content: literal({
+          content: JSON.stringify({
             bin: { [name]: "./dist/main.js" },
             dependencies: { "@effect/platform-node": "4.0.3", effect: "4.0.3" },
             devDependencies: { "@types/node": "26.6.4", typescript: "7.0.2" },
@@ -189,7 +241,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
           path: "package.json",
         },
         {
-          content: literal({
+          content: JSON.stringify({
             compilerOptions: {
               declaration: false,
               module: "NodeNext",

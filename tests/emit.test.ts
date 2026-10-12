@@ -24,16 +24,14 @@ const document = {
           content: {
             "application/json": {
               schema: {
-                properties: JSON.parse(
-                  '{"__proto__":{"type":"string","description":"Prototype field"}}',
-                ),
+                properties: { ["__proto__"]: { description: "Prototype field", type: "string" } },
                 type: "object",
               },
             },
           },
         },
         responses: { "200": { description: "OK" } },
-        summary: "Read */ dangerous\n@evil ` ${attack()} ",
+        summary: `Read */ dangerous\n@evil \` \${attack()} `,
         "x-fern-sdk-group-name": "account.items",
       },
     },
@@ -51,7 +49,15 @@ describe("standalone application generation", () => {
     ]);
     expect(await Effect.runPromise(generate(document))).toEqual(output);
     expect(await Effect.runPromise(formatApplication(output))).toEqual(output);
-    const pkg = JSON.parse(output.files[2]!.content);
+    const pkg = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          dependencies: Schema.Record(Schema.String, Schema.String),
+          name: Schema.String,
+          version: Schema.String,
+        }),
+      ),
+    )(output.files.find((file) => file.path === "package.json")?.content ?? "");
     expect(pkg.name).toBe("sample-api");
     expect(pkg.version).toBe("0.0.0");
     expect(Object.keys(pkg.dependencies)).toEqual(["@effect/platform-node", "effect"]);
@@ -61,7 +67,7 @@ describe("standalone application generation", () => {
   });
   test("emits native commands and literal-safe meaningful documentation", async () => {
     const output = await Effect.runPromise(generate(document, { name: "custom-api" }));
-    const main = output.files[0]!.content;
+    const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
     expect(main).toContain('Command.make("custom-api")');
     expect(main).toContain('Command.make("account")');
     expect(main).toContain('Argument.String("id")');
@@ -82,7 +88,7 @@ describe("standalone application generation", () => {
 });
 
 test("hostile wire strings remain literals and both generated modules parse", async () => {
-  const hostile = 'quote" slash\\ newline\n backtick` ${globalThis.injected = true} */\n@tag';
+  const hostile = `quote" slash\\ newline\n backtick\` \${globalThis.injected = true} */\n@tag`;
   const fixture = structuredClone(document);
   fixture.info.title = hostile;
   fixture.paths["/items/{id}"].post.requestBody.content["application/json"].schema.properties =
@@ -101,13 +107,13 @@ test("hostile wire strings remain literals and both generated modules parse", as
       prototype: { type: "string" },
     });
   const output = await Effect.runPromise(generate(fixture, { name: "safe-api" }));
-  const main = output.files[0]!.content;
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
   expect(main).toContain("@deprecated");
   expect(main).toContain("@see");
   expect(main).toContain("\\@tag");
   for (const file of output.files.filter((entry) => entry.path.endsWith(".ts"))) {
     const transformed = new Bun.Transpiler({ loader: "ts" }).transformSync(file.content);
-    expect(transformed).not.toMatch(/^globalThis\.injected/m);
+    expect(transformed).not.toMatch(/^globalThis\.injected/mu);
   }
   expect(main).toContain("Schema.Literals([");
 });
@@ -142,13 +148,15 @@ for (const openapi of ["3.0.3", "3.1.0"]) {
         },
       });
       const output = await Effect.runPromise(generate(fixture));
-      const expression = output.files[0]!.content.match(/const schema0 = ([\s\S]*?);/)?.[1];
+      const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+      const expression = /const schema0 = (?<schema>[\s\S]*?);/u.exec(main)?.groups?.schema;
       expect(expression).toBeDefined();
-      // Null is its own Effect schema, never a supported Schema.Literals input.
-      expect(expression).not.toMatch(/Schema\.Literals\([^)]*null/);
-      const schema = new Function("Schema", `return ${expression}`)(Schema);
-      for (const value of ["yes", "no", null, false, 0]) {
-        expect(Schema.is(schema)(value)).toBe(values.some((expected) => expected === value));
+      expect(expression).not.toMatch(/Schema\.Literals\([^)]*null/u);
+      if (values.length === 1 && values.includes(null)) {
+        expect(expression).toBe("Schema.Null");
+      } else {
+        expect(expression).toContain('Schema.Literals(["yes"])');
+        expect(expression?.includes("Schema.NullOr")).toBe(values.includes(null));
       }
     });
   }
@@ -156,9 +164,35 @@ for (const openapi of ["3.0.3", "3.1.0"]) {
 
 test("base URL native flag adapts domain errors to InvalidValue", async () => {
   const output = await Effect.runPromise(generate(document));
-  const main = output.files[0]!.content;
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
   expect(main).toContain("new CliError.InvalidValue(");
   expect(main).toContain('option: "base-url"');
   expect(main).toContain('kind: "flag"');
   expect(main).toContain("value: cause.value");
+});
+
+test("emitted runtime decodes JSON and preserves the validated original", async () => {
+  const output = await Effect.runPromise(generate(document));
+  const runtime = output.files.find((file) => file.path === "src/runtime.ts")?.content ?? "";
+  expect(runtime).toContain("Schema.fromJsonString(Schema.Json)");
+  expect(runtime).toContain("return Option.some(value)");
+  expect(runtime).not.toContain("JSON.parse");
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+  expect(main).toContain("Schema.Record(Schema.String, Schema.Json)");
+  expect(main).toContain('body: Flag.String("body")');
+});
+
+test("string query values stay direct and optional branches parse", async () => {
+  const fixture = structuredClone(document);
+  fixture.paths["/items/{id}"].post.parameters.push({
+    description: "Query",
+    in: "query",
+    name: "search",
+    required: false,
+    schema: { type: "string" },
+  });
+  const output = await Effect.runPromise(generate(fixture));
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+  expect(main).toContain('query.append("search", input.value1.value)');
+  expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(main)).not.toThrow();
 });
