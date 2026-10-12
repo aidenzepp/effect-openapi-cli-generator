@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const runNode = async (args: string[]) => {
   const child = Bun.spawn(["node", ...args], { stderr: "pipe", stdout: "pipe" });
+
   return {
     code: await child.exited,
     err: await new Response(child.stderr).text(),
@@ -19,18 +20,21 @@ const invoke = async (args: string[]) => {
     stderr: "pipe",
     stdout: "pipe",
   });
+
   return {
     code: await child.exited,
     err: await new Response(child.stderr).text(),
     out: await new Response(child.stdout).text(),
   };
 };
+
 test("native help and required flags", async () => {
   const help = await invoke(["--help"]);
   const missing = await invoke(["--input", "missing"]);
   expect(help.code).toBe(0);
   expect(missing.code).not.toBe(0);
 });
+
 test("malformed input yields one useful diagnostic and no output", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "generator-"));
   try {
@@ -57,6 +61,7 @@ test("malformed input yields one useful diagnostic and no output", async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
 test("optional name defaults from title", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "generator-"));
   try {
@@ -112,6 +117,7 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
     const help = await runNode([entry, "--help"]);
     expect(help.code).toBe(0);
     expect(help.out).toContain("--input");
+
     const input = path.join(root, "input.json");
     await writeFile(
       input,
@@ -138,6 +144,7 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
         await readFile(path.join(root, "out/package.json"), "utf-8"),
       ).name,
     ).toBe("symlink-api");
+
     const imported = await runNode([
       "--input-type=module",
       "-e",

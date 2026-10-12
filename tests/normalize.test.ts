@@ -9,6 +9,7 @@ const operation = (extra: Readonly<Record<string, Schema.Json>> = {}) => ({
   "x-fern-sdk-group-name": "things",
   ...extra,
 });
+
 const document = (
   op: Readonly<Record<string, Schema.Json>> = {},
   path = "/things",
@@ -19,8 +20,11 @@ const document = (
   paths: { [path]: { post: operation(op) } },
   ...extra,
 });
+
 const run = (value: Schema.Json) => Effect.runSync(normalize(value));
+
 const fail = (value: Schema.Json) => Effect.runSync(Effect.flip(normalize(value)));
+
 const parameter = (name: string, location = "query", type = "string") => ({
   in: location,
   name,
@@ -55,6 +59,7 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
   if (result === undefined) {
     throw new Error("Expected normalized operation");
   }
+
   expect(result.method).toBe("POST");
   expect(result.commandPath).toEqual(["things", "get"]);
   expect(result.parameters.map((p) => [p.wireName, p.flagName, p.binding])).toEqual([
@@ -180,6 +185,7 @@ test("rejects malformed paths, missing parameters, duplicate templates, and GET 
     expect(fail(document({}, path)).location).toContain("paths");
   }
   expect(fail(document({}, "/a/{id}")).message).toContain("parameter");
+
   const body = { content: { "application/json": { schema: { type: "string" } } } };
   expect(
     fail(document({}, "/a", { paths: { "/a": { get: operation({ requestBody: body }) } } })).code,

@@ -5,6 +5,7 @@ import { resolveReference } from "../src/core/references.js";
 
 const parse = (schema: Schema.Json, version: "3.0" | "3.1" = "3.1", document: Schema.Json = {}) =>
   Effect.runPromise(normalizeSchema(document, schema, "/schema", version));
+
 const failure = async (schema: Schema.Json, location: string, version: "3.0" | "3.1" = "3.1") => {
   const error = await Effect.runPromise(
     Effect.flip(normalizeSchema({}, schema, "/schema", version)),
@@ -23,14 +24,17 @@ test("retains nested wire keys, extras policy and documentation without applying
   if (result.kind !== "object") {
     return;
   }
+
   expect(result.additionalProperties).toBe(false);
   expect(result.docs.description).toBe("outer");
   expect(result.properties[0]?.name).toBe("__proto__");
   expect(result.properties[0]?.required).toBe(true);
+
   const nested = result.properties[0]?.schema;
   if (nested?.kind !== "object") {
     throw new Error("expected object");
   }
+
   expect(nested.additionalProperties).toBe(true);
   expect(nested.properties[0]?.schema.docs).toEqual({
     deprecated: true,
@@ -50,6 +54,7 @@ test("resolves escaped and percent encoded own-property pointers without changin
   expect(resolved.value).toEqual({ type: "string" });
   expect(resolved.location).toBe("/defs/a~1b~0c");
   expect(active.size).toBe(0);
+
   const prototypeSchema = await parse({ $ref: "#/defs/__proto__" }, "3.1", document);
   expect(prototypeSchema.kind).toBe("boolean");
 });
@@ -62,6 +67,7 @@ test("shared references are not cycles but recursive references are", async () =
     document,
   );
   expect(result.kind).toBe("object");
+
   const error = await Effect.runPromise(
     Effect.flip(normalizeSchema(document, { $ref: "#/defs/loop" }, "/schema", "3.1")),
   );
@@ -133,6 +139,7 @@ test("rejects validation siblings on refs while retaining descriptive siblings",
   expect(await parse({ $ref: "#/defs/text", description: "local" }, "3.1", document)).toMatchObject(
     { docs: { description: "local" } },
   );
+
   const error = await Effect.runPromise(
     Effect.flip(
       normalizeSchema(document, { $ref: "#/defs/text", type: "string" }, "/schema", "3.1"),

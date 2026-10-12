@@ -7,6 +7,7 @@ import { NodeServices } from "@effect/platform-node";
 import { writeApplication } from "../src/cli/write.js";
 
 const app = { files: [{ content: "hello", path: "src/main.ts" }] };
+
 const run = (output: string, application = app) =>
   Effect.runPromise(writeApplication(application, output).pipe(Effect.provide(NodeServices.layer)));
 
@@ -36,6 +37,7 @@ test("writes nested files and refuses existing targets including symlinks", asyn
         () => "rejected",
       ),
     ).toBe("rejected");
+
     const link = await lstat(path.join(root, "link"));
     expect(link.isSymbolicLink()).toBe(true);
     expect(await readFile(path.join(root, "file"), "utf-8")).toBe("keep");
@@ -43,6 +45,7 @@ test("writes nested files and refuses existing targets including symlinks", asyn
     await rm(root, { force: true, recursive: true });
   }
 });
+
 test("one concurrent claimant wins", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "writer-"));
   try {
@@ -55,6 +58,7 @@ test("one concurrent claimant wins", async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
 test("unsafe paths fail before claiming and write failures clean only owned output", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "writer-"));
   try {
@@ -96,6 +100,7 @@ test("unsafe paths fail before claiming and write failures clean only owned outp
     await rm(root, { force: true, recursive: true });
   }
 });
+
 test("interrupted writes remove the claimed directory", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "writer-"));
   try {

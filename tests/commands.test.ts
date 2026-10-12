@@ -4,10 +4,15 @@ import type { Schema } from "effect";
 import { mapCommands, resolveName } from "../src/core/commands.js";
 
 const groupKey = "x-fern-sdk-group-name";
+
 const methodKey = "x-fern-sdk-method-name";
+
 const aliasesKey = "x-forge-aliases";
+
 const location = "/paths/~1reports/post";
+
 const project = (operation: Schema.Json) => Effect.runSync(mapCommands(operation, location));
+
 const error = (operation: Schema.Json) =>
   Effect.runSync(Effect.flip(mapCommands(operation, location)));
 

@@ -65,7 +65,7 @@ Replace `CAPTURE_PORT` with a real capture server port; this is a template, not 
 
 ## Regenerate after generator changes
 
-These outputs were generated with the existing build before the readability refactor. To compare a fresh build without overwriting either checked-in output:
+These outputs were regenerated from the readable source refactor and verified with the current repository tools. To compare a fresh build without overwriting either checked-in output:
 
 ```sh
 bun run build
@@ -74,3 +74,7 @@ node dist/cli.js --input examples/demo/openapi.json --output examples/demo/cli-n
 ```
 
 Output directories must not already exist. Inspect the new output before replacing the reviewed `cli/` trees. Dependencies, build output, and example Bun lockfiles are ignored; source, package metadata, and TypeScript configs remain reviewable.
+
+## Verification
+
+The regenerated sources pass repository formatting, type-aware lint, and TypeScript checks; both generated packages build. The full test suite also installs the packed generator outside this checkout and exercises generated HTTP requests, including false, zero, empty strings, own `__proto__` keys, encoded slashes, errors, and interruption. The friendly demo post schema allows only `title` and `published`; preservation of extra keys and zero belongs to the exact integration fixture.

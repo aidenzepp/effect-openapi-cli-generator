@@ -4,16 +4,22 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const root = process.cwd();
+
 let temporary = "";
+
 let application = "";
+
 const requests: { method: string; url: string; body: string; contentType: string | null }[] = [];
+
 const lastRequest = () => {
   const request = requests.at(-1);
   if (request === undefined) {
     throw new Error("Expected a captured HTTP request");
   }
+
   return request;
 };
+
 const server = Bun.serve({
   async fetch(request) {
     requests.push({
@@ -25,15 +31,20 @@ const server = Bun.serve({
     if (request.url.includes("/empty")) {
       return new Response(null, { status: 204 });
     }
+
     if (request.url.includes("/failure")) {
       return new Response("denied", { status: 409 });
     }
+
     return new Response("exact response");
   },
   port: 0,
 });
+
 const interpolation = "globalThis.injected = true";
+
 const hostile = `quote" \` \${${interpolation}} */\n@tag`;
+
 const parameter = (name: string, location: string, type: string, required = false) => ({
   description: hostile,
   in: location,
@@ -41,6 +52,7 @@ const parameter = (name: string, location: string, type: string, required = fals
   required,
   schema: { type },
 });
+
 const operation = (action: string) => ({
   operationId: `items-${action}`,
   parameters: [
@@ -55,6 +67,7 @@ const operation = (action: string) => ({
   "x-fern-sdk-group-name": "account.deep.items",
   "x-fern-sdk-method-name": action,
 });
+
 const document = {
   info: { description: hostile, title: "Sample API", version: "not-semver" },
   openapi: "3.1.0",
@@ -137,6 +150,7 @@ const document = {
     },
   },
 };
+
 const run = async (command: string[], cwd = application) => {
   const child = Bun.spawn(command, { cwd, stderr: "pipe", stdout: "pipe" });
   const [stdout, stderr, code] = await Promise.all([
@@ -144,17 +158,24 @@ const run = async (command: string[], cwd = application) => {
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   return { code, stderr, stdout };
 };
+
 const success = async (command: string[], cwd = application) => {
   const result = await run(command, cwd);
   expect(result, command.join(" ")).toMatchObject({ code: 0 });
+
   return result;
 };
+
 const cli = (...args: string[]) => run(["node", "dist/main.js", ...args]);
+
 const base = () => `http://127.0.0.1:${server.port}/api`;
+
 const get = (...args: string[]) =>
   cli("account", "deep", "items", "get", "a/b雪", "--parent", "p/q", "--base-url", base(), ...args);
+
 beforeAll(async () => {
   temporary = await mkdtemp(path.join(tmpdir(), "effect-cli-integration-"));
   application = path.join(temporary, "application");
@@ -166,29 +187,35 @@ beforeAll(async () => {
   await success(["bun", "install"], application);
   await success(["bun", "run", "build"], application);
 }, 120_000);
+
 afterAll(async () => {
   await server.stop(true);
   if (temporary !== "") {
     await rm(temporary, { force: true, recursive: true });
   }
 });
+
 test("native help, title, version and completions need no base URL", async () => {
   const help = await cli("--help");
   expect(help.stdout).toContain("Sample API");
   expect(await cli("account", "deep", "items", "--help")).toMatchObject({ code: 0 });
+
   const version = await cli("--version");
   expect(version.stdout).toContain("0.0.0");
   expect(await cli("--completions", "bash")).toMatchObject({ code: 0 });
   expect(await readFile(path.join(application, "package.json"), "utf-8")).toContain('"sample-api"');
 });
+
 test("actual POST preserves base path, encoded values, optional false zero empty and original body", async () => {
   const body =
     '{"enabled":false,"unknown":0,"empty":"","nested":{"value":0},"__proto__":{"safe":true}}';
   expect(
     await get("--enabled", "false", "--count", "0", "--wire-name", "", "--body", body),
   ).toMatchObject({ code: 0, stdout: "exact response" });
+
   const request = lastRequest();
   expect(request.method).toBe("POST");
+
   const url = new URL(request.url);
   expect(url.pathname).toBe("/api/parents/p%2Fq/items/a%2Fb%E9%9B%AA");
   expect(url.searchParams.get("enabled")).toBe("false");
@@ -201,6 +228,7 @@ test("actual POST preserves base path, encoded values, optional false zero empty
   expect(new URL(lastRequest().url).search).toBe("");
   expect(lastRequest().contentType).toBeNull();
 });
+
 test.each(["list", "bulk-update"])("%s binds both path values as flags", async (action) => {
   expect(
     await cli(
@@ -217,10 +245,12 @@ test.each(["list", "bulk-update"])("%s binds both path values as flags", async (
     ),
   ).toMatchObject({ code: 0 });
 });
+
 test("aliases preserve HTTP method", async () => {
   expect(await cli("alternate", "deep", "read", "--base-url", base())).toMatchObject({ code: 0 });
   expect(lastRequest().method).toBe("POST");
 });
+
 test.each(
   [
     ["--body", "{"],
@@ -237,15 +267,19 @@ test.each(
   expect(result.code).not.toBe(0);
   expect(requests.length).toBe(count);
 });
+
 test("empty success, HTTP failure and refused connection are truthful", async () => {
   expect(await cli("empty", "get", "--base-url", base())).toMatchObject({ code: 0, stdout: "" });
+
   const failure = await cli("failure", "get", "--base-url", base());
   expect(failure.code).not.toBe(0);
   expect(failure.stderr).toContain("409");
   expect(failure.stderr).toContain("denied");
+
   const refused = await cli("empty", "get", "--base-url", "http://127.0.0.1:1");
   expect(refused.code).not.toBe(0);
 });
+
 test("generated source meets actual repository lint and formatter configuration", async () => {
   const verification = await mkdtemp(path.join(root, ".generated-proof-"));
   await cp(path.join(application, "src"), path.join(verification, "src"), { recursive: true });
@@ -292,6 +326,7 @@ test("required explicit false and body-file preserve values", async () => {
   expect(new URL(lastRequest().url).searchParams.get("confirm")).toBe("false");
   expect(lastRequest().body).toBe('{"value":0}');
 });
+
 test("malformed JSON file fails without a request", async () => {
   const file = path.join(temporary, "malformed.json");
   await writeFile(file, "{");
@@ -300,15 +335,18 @@ test("malformed JSON file fails without a request", async () => {
   expect(result.code).not.toBe(0);
   expect(requests.length).toBe(count);
 });
+
 test("nullable scalar enum accepts null and its declared string", async () => {
   expect(await get("--body", '{"nullable":null}')).toMatchObject({ code: 0 });
   expect(lastRequest().body).toBe('{"nullable":null}');
   expect(await get("--body", '{"nullable":"yes"}')).toMatchObject({ code: 0 });
+
   const count = requests.length;
   const invalid = await get("--body", '{"nullable":"no"}');
   expect(invalid.code).not.toBe(0);
   expect(requests.length).toBe(count);
 });
+
 test("invalid base URL and dot subject cannot send requests", async () => {
   const count = requests.length;
   const badBase = await cli("empty", "get", "--base-url", "file:///tmp");
@@ -327,6 +365,7 @@ test("invalid base URL and dot subject cannot send requests", async () => {
   expect(dot.code).not.toBe(0);
   expect(requests.length).toBe(count);
 });
+
 test("generator explicit name overrides title", async () => {
   const target = path.join(temporary, "renamed");
   await success(
@@ -344,6 +383,7 @@ test("generator explicit name overrides title", async () => {
   );
   expect(await readFile(path.join(target, "package.json"), "utf-8")).toContain('"explicit-api"');
 });
+
 test("SIGINT closes the in-flight HTTP request", async () => {
   const received = Promise.withResolvers<boolean>();
   const aborted = Promise.withResolvers<boolean>();
@@ -359,6 +399,7 @@ test("SIGINT closes the in-flight HTTP request", async () => {
         { once: true },
       );
       received.resolve(true);
+
       return response.promise;
     },
     port: 0,
@@ -372,6 +413,7 @@ test("SIGINT closes the in-flight HTTP request", async () => {
     Bun.sleep(4000).then(() => false),
   ]);
   child.kill("SIGINT");
+
   const closed = await Promise.race([
     aborted.promise.then(() => true),
     Bun.sleep(4000).then(() => false),
@@ -387,6 +429,7 @@ test("hostile declared property strings remain executable data", async () => {
   const body = JSON.stringify({ [hostile]: hostile });
   expect(await get("--body", body)).toMatchObject({ code: 0 });
   expect(lastRequest().body).toBe(body);
+
   const source = await readFile(path.join(application, "src/main.ts"), "utf-8");
   expect(source).toContain("@deprecated");
   expect(source).toContain("@see");
@@ -395,6 +438,7 @@ test("hostile declared property strings remain executable data", async () => {
 
 test("query values encode reserved characters and Unicode", async () => {
   expect(await get("--wire-name", "a /雪")).toMatchObject({ code: 0 });
+
   const url = new URL(lastRequest().url);
   expect(url.searchParams.get("wire_name")).toBe("a /雪");
   expect(url.search).toContain("%2F%E9%9B%AA");

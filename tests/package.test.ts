@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 let consumerDirectory = "";
+
 afterAll(async () => {
   if (consumerDirectory !== "") {
     await rm(consumerDirectory, { force: true, recursive: true });
   }
 });
+
 test("local tarball exposes typed library and executable with its formatter dependency", async () => {
   const root = process.cwd();
   const temporary = await mkdtemp(path.join(tmpdir(), "effect-cli-package-"));
@@ -21,6 +23,7 @@ test("local tarball exposes typed library and executable with its formatter depe
       child.exited,
     ]);
     expect({ code, stderr, stdout }, command.join(" ")).toMatchObject({ code: 0 });
+
     return stdout;
   };
   await run(["npm", "pack", "--pack-destination", temporary], root);
@@ -29,6 +32,7 @@ test("local tarball exposes typed library and executable with its formatter depe
   if (tarball === undefined) {
     throw new Error("npm pack produced no tarball");
   }
+
   await writeFile(
     path.join(temporary, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
@@ -42,6 +46,7 @@ test("local tarball exposes typed library and executable with its formatter depe
   expect(await readFile(path.join(packageRoot, "dist/cli.js"), "utf-8")).toStartWith(
     "#!/usr/bin/env node",
   );
+
   const entries = await readdir(packageRoot);
   expect(entries).not.toContain("tests");
   expect(entries).not.toContain(".vivi");
