@@ -196,3 +196,33 @@ test("string query values stay direct and optional branches parse", async () => 
   expect(main).toContain('query.append("search", input.value1.value)');
   expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(main)).not.toThrow();
 });
+
+// Load the emitted literals as a module to observe cooked values without eval.
+test("formatted enum literals preserve surrogate code units exactly", async () => {
+  const values = [
+    `\${\uD800`,
+    `\${\uDC00`,
+    `\${\uD83D\uDE00`,
+    `\${\uD800 backtick\` slash\\ CR\r LF\n low\uDC00 pair\uD83D\uDE00`,
+  ];
+  const fixture = structuredClone(document);
+  Object.assign(fixture.paths["/items/{id}"].post.requestBody.content["application/json"], {
+    schema: { enum: values, type: "string" },
+  });
+  const output = await Effect.runPromise(generate(fixture));
+  const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+  const expression = /const schema0 = Schema.Literals\((?<values>[\s\S]*?)\);/u.exec(main)?.groups
+    ?.values;
+  expect(expression).toBeDefined();
+  const moduleUrl = `data:text/javascript,${encodeURIComponent(`export default ${expression};`)}`;
+  const { default: emitted } = Schema.decodeUnknownSync(
+    Schema.Struct({ default: Schema.Array(Schema.String) }),
+  )(await import(moduleUrl));
+  expect(emitted).toEqual(values);
+  const accepts = Schema.is(Schema.Literals(emitted));
+  for (const value of values) {
+    expect(accepts(value)).toBe(true);
+  }
+  expect(accepts(`\${\uFFFD`)).toBe(false);
+  expect(main).toBe(Buffer.from(main, "utf-8").toString("utf-8"));
+});

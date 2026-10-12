@@ -6,7 +6,12 @@ import { runtimeSource } from "./runtime-source.js";
 
 const literal = (value: Schema.Json): string => {
   if (Schema.is(Schema.String)(value) && value.includes(`\${`)) {
-    return `\`${value.replaceAll("\\", "\\\\").replaceAll("`", "\\`").replaceAll("\r", "\\r").replaceAll(`\${`, `\\\${`)}\``;
+    return `\`${value
+      .replaceAll("\\", "\\\\")
+      .replaceAll("`", "\\`")
+      .replaceAll("\r", "\\r")
+      .replaceAll(`\${`, `\\\${`)
+      .replaceAll(/[\uD800-\uDFFF]/gu, (unit) => JSON.stringify(unit).slice(1, -1))}\``;
   }
   if (Schema.is(Schema.Array(Schema.Json))(value)) {
     return `[${value.map(literal).join(",")}]`;
