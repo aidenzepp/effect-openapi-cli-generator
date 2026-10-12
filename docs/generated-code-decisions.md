@@ -53,24 +53,29 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve `Models` and `Commands` where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve `Builtins`, `Models` and `Commands` where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
 
-## Separate models, commands and runtime assembly
+## Separate models, builtins, commands and runtime assembly
 
 The approved Resend layout supersedes the earlier single-file model preference:
 
 - `models.ts` owns the named schemas declared by explicit OpenAPI references.
-- `commands.ts` owns operation/group declarations and shared CLI configuration and execution helpers.
+- `builtins.ts` owns shared CLI configuration and execution helpers, with their authored JSDoc.
+- `commands.ts` contains only operation/group declarations after its imports.
 - `main.ts` owns `rootCommand` and runtime layer provision.
 
 Use namespace imports with quoted module specifiers, keeping imports contiguous:
 
 ```ts
 // commands.ts
+import * as Builtins from "./builtins.js";
 import * as Models from "./models.js";
 
 // A body schema reference inside its owning flag.
 Schema.fromJsonString(Models.SendEmailRequest);
+
+// Keep flag keys stable when referencing shared configuration.
+Command.make("list", { apiKey: Builtins.apiKey, baseUrl: Builtins.baseUrl });
 ```
 
 ```ts
@@ -83,7 +88,7 @@ const rootCommand = Command.make("resend-reference").pipe(
 );
 ```
 
-Export only top-level groups needed by the entrypoint and model schemas needed by the commands module. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
+Export only top-level groups needed by the entrypoint, model schemas needed by commands, and the four builtins consumed by commands: `apiKey`, `baseUrl`, `appendPathSegments` and `runRequest`. Builtin formatters and the segment encoder remain private. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
 
 ## Map declared constraints directly
 

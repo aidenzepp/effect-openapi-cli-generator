@@ -1,6 +1,6 @@
 # Resend CLI reference
 
-This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI split into `src/models.ts` for explicit request schemas, `src/commands.ts` for commands and shared execution helpers, and `src/main.ts` for the root and runtime layers. This is target output for review, not output emitted by the current generator.
+This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI split into `src/models.ts` for explicit request schemas, `src/builtins.ts` for shared CLI configuration and execution helpers, `src/commands.ts` for command declarations, and `src/main.ts` for the root and runtime layers. This is target output for review, not output emitted by the current generator.
 
 ## Provenance and rebuild
 
@@ -89,4 +89,4 @@ These choices exercise capabilities that the generator does not yet support; han
 
 ## Source layout
 
-`commands.ts` imports `* as Models` from `./models.js`; `main.ts` imports `* as Commands` from `./commands.js`. Only the three request schemas consumed by commands and the two top-level command groups are exported. Model dependencies remain local. Operation and group names end in `Command`, and nested groups retain their complete ordered path, such as `EmailsAttachmentsCommand`. `rootCommand` remains the entrypoint root. This supersedes the earlier single-file layout without changing wire behavior.
+`commands.ts` imports `* as Builtins` from `./builtins.js` and `* as Models` from `./models.js`; `main.ts` imports `* as Commands` from `./commands.js`. Export only the four builtins consumed by commands (`apiKey`, `baseUrl`, `appendPathSegments`, `runRequest`), the three request schemas and the two top-level command groups. Builtin formatter/encoder details and model dependencies remain local. Operation and group names end in `Command`, and nested groups retain their complete ordered path, such as `EmailsAttachmentsCommand`. `rootCommand` remains the entrypoint root. This four-file layout keeps shared infrastructure out of command declarations and supersedes the earlier single-file layout without changing wire behavior.
