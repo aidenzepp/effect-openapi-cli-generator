@@ -31,9 +31,14 @@ const Users = Command.make("users").pipe(
   Command.withDescription("Work with content owned by a user."),
   Command.withSubcommands([UsersPosts]),
 );
+
+const rootCommand = Command.make("content-reference").pipe(
+  Command.withDescription("Manage user posts and their attached files."),
+  Command.withSubcommands([Users]),
+);
 ```
 
-The root still references `Users`; the CLI remains `content-reference users posts files list`. A reversed branch, `posts users`, gets `PostsUsers`, distinct from `UsersPosts`. Do not sort path segments when naming a group.
+Run the root with `Command.run(rootCommand, { version: "0.0.0" })`. The root references `Users`; the CLI remains `content-reference users posts files list`. A reversed branch, `posts users`, gets `PostsUsers`, distinct from `UsersPosts`. Do not sort path segments when naming a group.
 
 **NEGATIVE — Name groups using only the leaf or obscure them in nested assembly.**
 
@@ -48,7 +53,7 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs a deterministic identifier allocator that sanitizes and checks the complete shared declaration scope. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. Existing operation identifiers and the root `command` name remain unchanged in this baseline.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. Existing operation identifiers remain unchanged in this baseline.
 
 ## Map declared constraints directly
 

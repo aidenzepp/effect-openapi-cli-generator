@@ -230,12 +230,12 @@ const Users = Command.make("users").pipe(
   Command.withSubcommands([UsersPosts]),
 );
 
-const command = Command.make("content-reference").pipe(
+const rootCommand = Command.make("content-reference").pipe(
   Command.withDescription("Manage user posts and their attached files."),
   Command.withSubcommands([Users]),
 );
 
-Command.run(command, { version: "0.0.0" }).pipe(
+Command.run(rootCommand, { version: "0.0.0" }).pipe(
   Effect.provide(NodeHttpClient.layerNodeHttp),
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain({ disableErrorReporting: true }),
