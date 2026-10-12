@@ -1,0 +1,33 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Users Reference",
+    "version": "1.0.0",
+    "description": "A small input for reviewing hand-written Effect CLI source."
+  },
+  "paths": {
+    "/users": {
+      "get": {
+        "operationId": "users-list",
+        "x-fern-sdk-group-name": "users",
+        "x-fern-sdk-method-name": "list",
+        "summary": "List demo users",
+        "responses": {
+          "200": {
+            "description": "Local JSON response"
+          }
+        },
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
