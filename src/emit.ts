@@ -124,6 +124,33 @@ const parameterSource = (parameter: Parameter): string => {
   return expression;
 };
 
+const importsFor = (model: ApiModel) => {
+  const parameters = model.operations.flatMap((operation) => operation.parameters);
+  const hasBody = model.operations.some((operation) => operation.body !== undefined);
+  const usesOption =
+    model.operations.some((operation) => operation.body === undefined) ||
+    parameters.some((parameter) => parameter.location === "query" && !parameter.required);
+  const effectImports = [
+    "Config",
+    "Effect",
+    ...(usesOption ? ["Option"] : []),
+    ...(hasBody ? ["Schema"] : []),
+  ];
+  const cliImports = [
+    ...(parameters.some((parameter) => parameter.binding === "argument") ? ["Argument"] : []),
+    "CliError",
+    "Command",
+    "Flag",
+  ];
+  const runtimeImports = [
+    "executeRequest",
+    ...(parameters.some((parameter) => parameter.location === "path") ? ["pathValue"] : []),
+    ...(hasBody ? ["readBody"] : []),
+    "validateBaseUrl",
+  ];
+  return { cliImports, effectImports, runtimeImports };
+};
+
 export const emit = (model: ApiModel, options?: GenerateOptions) =>
   Effect.gen(function* emitEffect1() {
     const name = yield* resolveName(model.title, options);
@@ -131,12 +158,13 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
       model.description === undefined
         ? { title: model.title }
         : { description: model.description, title: model.title };
+    const { effectImports, cliImports, runtimeImports } = importsFor(model);
     const lines = [
       "#!/usr/bin/env node",
-      'import { Config, Effect, Option, Schema } from "effect";',
-      'import { Argument, CliError, Command, Flag } from "effect/cli";',
+      `import { ${effectImports.join(", ")} } from "effect";`,
+      `import { ${cliImports.join(", ")} } from "effect/cli";`,
       'import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";',
-      'import { executeRequest, pathValue, readBody, validateBaseUrl } from "./runtime.js";',
+      `import { ${runtimeImports.join(", ")} } from "./runtime.js";`,
       `${comment(rootDocs)}const root = Command.make(${literal(name)}).pipe(Command.withDescription(${literal([model.title, model.description].filter(Boolean).join("\n"))}), Command.withSharedFlags({baseUrl: Flag.String("base-url").pipe(Flag.mapEffect((value) => validateBaseUrl(value).pipe(Effect.mapError((cause) => new CliError.InvalidValue({expected: "HTTP(S) URL without credentials, query or fragment", kind: "flag", option: "base-url", value: cause.value})))))}));`,
     ];
     const leaves = new Map<string, string>();

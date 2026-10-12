@@ -274,3 +274,66 @@ export const failures: Effect.Effect<never, RequestFailure>[] = errors.map((erro
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test.each(["query", "list", "get", "body"])(
+  "generated %s imports compile without unused declarations",
+  async (kind) => {
+    const hasPath = kind === "list" || kind === "get";
+    const fixture = {
+      info: { title: "Imports", version: "1" },
+      openapi: "3.1.0",
+      paths: {
+        [hasPath ? "/items/{id}" : "/items"]: {
+          post: {
+            operationId: `items-${kind}`,
+            parameters: [
+              hasPath
+                ? { in: "path", name: "id", required: true, schema: { type: "string" } }
+                : { in: "query", name: "enabled", schema: { type: "boolean" } },
+            ],
+            responses: { "200": { description: "OK" } },
+            "x-fern-sdk-group-name": "items",
+          },
+        },
+      },
+    };
+    if (kind === "body") {
+      Object.assign(fixture.paths["/items"]?.post ?? {}, {
+        parameters: [],
+        requestBody: { content: { "application/json": { schema: { type: "boolean" } } } },
+      });
+    }
+    const output = await Effect.runPromise(generate(fixture));
+    const directory = await mkdtemp(path.join(tmpdir(), "effect-imports-"));
+    try {
+      await symlink(path.resolve("node_modules"), path.join(directory, "node_modules"));
+      await Promise.all(
+        output.files
+          .filter((entry) => entry.path.endsWith(".ts"))
+          .map((file) => writeFile(path.join(directory, path.basename(file.path)), file.content)),
+      );
+
+      const result = Bun.spawnSync([
+        path.resolve("node_modules/.bin/tsc"),
+        "--ignoreConfig",
+        "--noEmit",
+        "--strict",
+        "--noUnusedLocals",
+        "--skipLibCheck",
+        "--target",
+        "ES2022",
+        "--module",
+        "ESNext",
+        "--moduleResolution",
+        "Bundler",
+        path.join(directory, "main.ts"),
+      ]);
+      expect({
+        code: result.exitCode,
+        output: result.stdout.toString() + result.stderr.toString(),
+      }).toEqual({ code: 0, output: "" });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  },
+);
