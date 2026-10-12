@@ -76,42 +76,6 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
     }),
   );
 
-const userFlag = Flag.String("user").pipe(
-  Flag.withSchema(Schema.NonEmptyString.check(Schema.isPattern(/^(?!\.{1,2}$)/u))),
-  Flag.withDescription("The owner of the posts."),
-);
-
-const postFlag = Flag.String("post").pipe(
-  Flag.withSchema(Schema.NonEmptyString.check(Schema.isPattern(/^(?!\.{1,2}$)/u))),
-  Flag.withDescription("The post whose files should be listed."),
-);
-
-const bodyFlag = Flag.String("body").pipe(
-  Flag.mapEffect((value) =>
-    Schema.decodeUnknownEffect(
-      Schema.fromJsonString(
-        Schema.Struct({
-          published: Schema.optionalKey(Schema.Boolean),
-          tags: Schema.optionalKey(Schema.Array(Schema.String)),
-          title: Schema.NonEmptyString,
-        }),
-      ),
-    )(value, {
-      onExcessProperty: "error",
-    }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage:
-              "Invalid --body. Provide a JSON object with a nonempty title, optional boolean published and optional string-array tags; no other fields are allowed.",
-          }),
-      ),
-    ),
-  ),
-  Flag.withDescription("Create a post with a title and optional publication status and tags."),
-);
-
 /**
  * List an owner's posts, optionally filtered by status and publication state.
  */
@@ -132,7 +96,12 @@ const listPosts = Command.make(
       Flag.withDescription("Filter posts by editorial status."),
       Flag.optional,
     ),
-    user: userFlag,
+    user: Flag.String("user").pipe(
+      Flag.withSchema(
+        Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u)),
+      ),
+      Flag.withDescription("The owner of the posts."),
+    ),
   },
   ({ baseUrl: apiUrl, limit, published, status, user }) =>
     Effect.gen(function* fetchPosts() {
@@ -164,7 +133,40 @@ const listPosts = Command.make(
  */
 const createPost = Command.make(
   "create",
-  { baseUrl, body: bodyFlag, user: userFlag },
+  {
+    baseUrl,
+    body: Flag.String("body").pipe(
+      Flag.mapEffect((value) =>
+        Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Struct({
+              published: Schema.optionalKey(Schema.Boolean),
+              tags: Schema.optionalKey(Schema.Array(Schema.String)),
+              title: Schema.String.check(Schema.isMinLength(1)),
+            }),
+          ),
+        )(value, {
+          onExcessProperty: "error",
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError.UserError({
+                cause,
+                userMessage:
+                  "Invalid --body. Provide a JSON object with a nonempty title, optional boolean published and optional string-array tags; no other fields are allowed.",
+              }),
+          ),
+        ),
+      ),
+      Flag.withDescription("Create a post with a title and optional publication status and tags."),
+    ),
+    user: Flag.String("user").pipe(
+      Flag.withSchema(
+        Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u)),
+      ),
+      Flag.withDescription("The owner of the posts."),
+    ),
+  },
   ({ baseUrl: apiUrl, body, user }) =>
     Effect.gen(function* submitPost() {
       const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
@@ -188,7 +190,21 @@ const createPost = Command.make(
  */
 const listFiles = Command.make(
   "list",
-  { baseUrl, post: postFlag, user: userFlag },
+  {
+    baseUrl,
+    post: Flag.String("post").pipe(
+      Flag.withSchema(
+        Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u)),
+      ),
+      Flag.withDescription("The post whose files should be listed."),
+    ),
+    user: Flag.String("user").pipe(
+      Flag.withSchema(
+        Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u)),
+      ),
+      Flag.withDescription("The owner of the posts."),
+    ),
+  },
   ({ baseUrl: apiUrl, post, user }) =>
     Effect.gen(function* fetchFiles() {
       const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);

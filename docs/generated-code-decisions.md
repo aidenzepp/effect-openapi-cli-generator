@@ -6,11 +6,11 @@ This is the canonical guide to the approved output style and its reasons. Read i
 
 [Users reference](../examples/reference/src/main.ts) and [content reference](../examples/content-reference/src/main.ts) are evolving hand-written targets. Their [specifications](../examples/reference/openapi.json) and [content specification](../examples/content-reference/openapi.json) demonstrate the intended relationship between input and output. They do not prove that the generator emits this style or supports all their keywords.
 
-[README](../README.md) owns current generator support. In particular, the current schema emitter does not implement the constraint mapping or named-model reuse illustrated below. The content reference uses native `Schema.isPattern`, but still uses `Schema.NonEmptyString`; the agreed explicit `Schema.isMinLength(1)` form below has not yet been applied there. Its hand-written body error also remains an example-specific message, not a general message-generation contract.
+[README](../README.md) owns current generator support. In particular, the current schema emitter does not implement the constraint mapping or named-model reuse illustrated below. The content reference now inlines API flag definitions in each command and maps the shown constraints with native `Schema.isMinLength(1)` and `Schema.isPattern`. Its hand-written body error also remains an example-specific message, not a general message-generation contract.
 
 ## Map declared constraints directly
 
-Keep inline constraints in the owning flag. Prefer native Schema checks that visibly correspond to the input keywords; do not interpret a regex into a domain predicate or invent its explanation.
+Define API flags directly in each owning `Command.make` configuration. Keep inline constraints in that flag definition. Prefer native Schema checks that visibly correspond to the input keywords; do not interpret a regex into a domain predicate or invent its explanation.
 
 For this schema:
 
@@ -21,10 +21,12 @@ For this schema:
 **POSITIVE — Preserve the declared checks and use native diagnostics.**
 
 ```ts
-const userFlag = Flag.String("user").pipe(
-  Flag.withSchema(Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u))),
-  Flag.withDescription("The owner of the posts."),
-);
+const listPosts = Command.make("list", {
+  user: Flag.String("user").pipe(
+    Flag.withSchema(Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u))),
+    Flag.withDescription("The owner of the posts."),
+  ),
+});
 ```
 
 **NEGATIVE — Replace the spec with interpreted semantics and authored copy.**
@@ -55,8 +57,10 @@ If two parameters reference `#/components/schemas/Identifier`, emit one correspo
 
 ```ts
 const Identifier = Schema.String.check(Schema.isMinLength(1));
-const userFlag = Flag.String("user").pipe(Flag.withSchema(Identifier));
-const postFlag = Flag.String("post").pipe(Flag.withSchema(Identifier));
+const listFiles = Command.make("list", {
+  post: Flag.String("post").pipe(Flag.withSchema(Identifier)),
+  user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
+});
 ```
 
 **NEGATIVE — Use that same extraction merely because two inline schemas look alike.**
@@ -64,11 +68,36 @@ const postFlag = Flag.String("post").pipe(Flag.withSchema(Identifier));
 ```ts
 // Neither parameter references a shared OpenAPI model.
 const PathId = Schema.String.check(Schema.isMinLength(1));
-const userFlag = Flag.String("user").pipe(Flag.withSchema(PathId));
-const postFlag = Flag.String("post").pipe(Flag.withSchema(PathId));
+const listFiles = Command.make("list", {
+  post: Flag.String("post").pipe(Flag.withSchema(PathId)),
+  user: Flag.String("user").pipe(Flag.withSchema(PathId)),
+});
 ```
 
 Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Model naming and module placement still need implementation decisions; these examples do not prescribe a new package hierarchy.
+
+A shared OpenAPI model shares the schema, not the flag definition. Repeat each API flag where its command declares it, including its name and help. The CLI-owned `baseUrl` flag may remain shared: it is executable configuration, not an API parameter model.
+
+**POSITIVE — Keep the parameter at its command boundary.**
+
+```ts
+const listPosts = Command.make("list", {
+  baseUrl,
+  user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
+});
+const createPost = Command.make("create", {
+  baseUrl,
+  user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
+});
+```
+
+**NEGATIVE — Hoist an API flag because commands happen to use it alike.**
+
+```ts
+const userFlag = Flag.String("user").pipe(Flag.withSchema(Identifier));
+const listPosts = Command.make("list", { baseUrl, user: userFlag });
+const createPost = Command.make("create", { baseUrl, user: userFlag });
+```
 
 ## Let native validation own arbitrary constraint messages
 
@@ -77,10 +106,12 @@ Use native Schema diagnostics for schema keywords. OpenAPI `description` supplie
 **POSITIVE — Keep help and validation separate.**
 
 ```ts
-Flag.String("user").pipe(
-  Flag.withSchema(Schema.String.check(Schema.isPattern(/^[a-z]+$/u))),
-  Flag.withDescription("The owner of the posts."),
-);
+const listPosts = Command.make("list", {
+  user: Flag.String("user").pipe(
+    Flag.withSchema(Schema.String.check(Schema.isPattern(/^[a-z]+$/u))),
+    Flag.withDescription("The owner of the posts."),
+  ),
+});
 ```
 
 **NEGATIVE — Treat ordinary description prose as a rejection message.**
