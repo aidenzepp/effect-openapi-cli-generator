@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { Effect, FileSystem, Option, Stdio, Stream } from "effect";
 import { Command, Flag } from "effect/cli";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
@@ -42,7 +42,21 @@ export const generatorCommand = Command.make(
     }),
 );
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const invokedPath = process.argv[1];
+const isEntryPoint = invokedPath
+  ? await Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const invoked = yield* fs.realPath(invokedPath);
+      const module = yield* fs.realPath(fileURLToPath(import.meta.url));
+      return invoked === module;
+    }).pipe(
+      Effect.orElseSucceed(() => false),
+      Effect.provide(NodeServices.layer),
+      Effect.runPromise,
+    )
+  : false;
+
+if (isEntryPoint) {
   Command.run(generatorCommand, { version: "0.0.0" }).pipe(
     Effect.tapError((error) =>
       Effect.gen(function* () {
