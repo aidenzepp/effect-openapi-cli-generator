@@ -40,7 +40,7 @@ export const executeRequest = (method: 'GET' | 'PUT' | 'POST' | 'DELETE' | 'OPTI
   const client = yield* HttpClient.HttpClient;
   const response = yield* client.execute(request).pipe(Effect.mapError((cause) => new RequestFailed({message: String(cause)})));
   const text = yield* response.text.pipe(Effect.mapError((cause) => new RequestFailed({message: String(cause)})));
-  if (response.status < 200 || response.status > 299) { return yield* new HttpStatusFailure({body: text, status: response.status}); }
+  if (response.status < 200 || response.status > 299) { yield* new HttpStatusFailure({body: text, status: response.status}); }
   if (text.length > 0) {
     const stdio = yield* Stdio.Stdio;
     yield* Stream.make(text).pipe(Stream.run(stdio.stdout({endOnDone: false})), Effect.mapError((cause) => new RequestFailed({message: String(cause)})));

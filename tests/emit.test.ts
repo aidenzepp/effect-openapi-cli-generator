@@ -94,6 +94,8 @@ test("hostile wire strings remain literals and both generated modules parse", as
   const hostile = `quote" slash\\ newline\n backtick\` \${globalThis.injected = true} */\n@tag`;
   const fixture = structuredClone(document);
   fixture.info.title = hostile;
+  Object.assign(fixture.paths["/items/{id}"].post, { deprecated: true });
+  Object.assign(fixture.paths["/items/{id}"].post.parameters[0], { deprecated: true });
   fixture.paths["/items/{id}"].post.requestBody.content["application/json"].schema.properties =
     structuredClone({
       [hostile]: {
@@ -111,7 +113,9 @@ test("hostile wire strings remain literals and both generated modules parse", as
     });
   const output = await Effect.runPromise(generate(fixture, { name: "safe-api" }));
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
-  expect(main).toContain("@deprecated");
+  expect(main).toContain("Deprecated.");
+  expect(main).not.toContain("@deprecated");
+  expect(main).toContain('withDescription("Identifier\\nDeprecated.")');
   expect(main).toContain("@see");
   expect(main).toContain("\\@tag");
   for (const file of output.files.filter((entry) => entry.path.endsWith(".ts"))) {

@@ -22,12 +22,11 @@ const propertyKey = (name: string) =>
   name === "__proto__" || name.includes(`\${`) ? `[${literal(name)}]` : JSON.stringify(name);
 const escapeComment = (text: string) => text.replaceAll("*/", "*\\/").replaceAll(/^\s*@/gmu, "\\@");
 const description = (docs: Documentation) =>
-  [docs.title, docs.description].filter(Boolean).join("\n");
+  [docs.title, docs.description, docs.deprecated === true ? "Deprecated." : undefined]
+    .filter(Boolean)
+    .join("\n");
 const comment = (docs: Documentation): string => {
   const lines = description(docs).split("\n").filter(Boolean).map(escapeComment);
-  if (docs.deprecated === true) {
-    lines.push("@deprecated");
-  }
   if (docs.externalDocs) {
     lines.push(
       `@see ${escapeComment(docs.externalDocs.url)} ${escapeComment(docs.externalDocs.description ?? "")}`,
