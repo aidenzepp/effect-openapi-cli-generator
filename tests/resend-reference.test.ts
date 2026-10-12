@@ -318,6 +318,61 @@ test("invalid body models fail before HTTP and do not reveal body contents", asy
   }
 }, 30_000);
 
+test("path segments preserve dotted filenames and isolate path failures from body errors", async () => {
+  const { origin, requests, server } = await fixture();
+  const base = ["--base-url", `${origin}/api/`, "--api-key", "local-test-token"];
+  try {
+    await each(["bar.json", "folder/report.json", "..."], async (id) => {
+      const result = await invoke([
+        "domains",
+        "update",
+        ...base,
+        "--domain-id",
+        id,
+        "--body",
+        '{"open_tracking":false}',
+      ]);
+      expect(result.code, result.err).toBe(0);
+    });
+    expect(requests.map(({ url }) => url)).toEqual([
+      "/api/domains/bar.json",
+      "/api/domains/folder%2Freport.json",
+      "/api/domains/...",
+    ]);
+    expect(requests.every(({ body }) => body === '{"open_tracking":false}')).toBe(true);
+    await each([".", ".."], async (id) => {
+      const result = await invoke([
+        "domains",
+        "update",
+        ...base,
+        "--domain-id",
+        id,
+        "--body",
+        '{"open_tracking":false}',
+      ]);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("literal URL segment");
+      expect(result.err).toContain("no request was sent");
+      expect(result.err).not.toContain("could not be encoded as JSON");
+    });
+    const attachment = await invoke([
+      "emails",
+      "attachments",
+      "get",
+      ...base,
+      "--email-id",
+      "email",
+      "--attachment-id",
+      "..",
+    ]);
+    expect(attachment.code).toBe(1);
+    expect(attachment.err).toContain("literal URL segment");
+    expect(requests).toHaveLength(3);
+  } finally {
+    await server[Symbol.asyncDispose]();
+  }
+});
+
 test("transport and authentication errors are safe and writes are never retried", async () => {
   const { origin, requests, server } = await fixture();
   try {

@@ -75,6 +75,39 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
     }),
   );
 
+/**
+ * URL parsing normalizes whole dot segments; reject them before encoding can
+ * silently redirect the request. Encoding failures stay in the CLI error channel.
+ */
+const encodePathSegment = (segment: string) => {
+  if (segment === "." || segment === "..") {
+    return Effect.fail(
+      new CliError.UserError({
+        cause: { _tag: "UnrepresentablePathSegment" },
+        userMessage:
+          "The path parameter cannot be sent as a literal URL segment. Use an identifier other than . or ..; no request was sent.",
+      }),
+    );
+  }
+
+  return Effect.try({
+    catch: (cause) =>
+      new CliError.UserError({
+        cause,
+        userMessage:
+          "The path parameter contains invalid Unicode. Use valid Unicode text; no request was sent.",
+      }),
+    try: () => encodeURIComponent(segment),
+  });
+};
+
+const appendPathSegments =
+  (...segments: readonly string[]) =>
+  (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.forEach(encodePathSegment)(segments).pipe(
+      Effect.map((encoded) => HttpClientRequest.appendUrl(request, encoded.join("/"))),
+    );
+
 const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
   HttpClient.execute(request).pipe(
     Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -114,14 +147,14 @@ const domainsListCommand = Command.make(
   },
   ({ after, apiKey: token, baseUrl: apiUrl, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/domains`),
       HttpClientRequest.bearerToken(token),
       HttpClientRequest.setUrlParams({
         after: Option.getOrUndefined(after),
         before: Option.getOrUndefined(before),
         limit: Option.getOrUndefined(limit),
       }),
-      runRequest,
+      appendPathSegments("domains"),
+      Effect.flatMap(runRequest),
       Effect.withSpan("domains.list"),
     ),
 ).pipe(Command.withDescription("Retrieve a list of domains"));
@@ -148,20 +181,23 @@ const domainsCreateCommand = Command.make(
   },
   ({ apiKey: token, baseUrl: apiUrl, body }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/domains`),
       HttpClientRequest.bearerToken(token),
-      (request) =>
+      appendPathSegments("domains"),
+      Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
             ? HttpClientRequest.bodyJson(request, body.value)
             : Effect.succeed(request),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError.UserError({
+                cause,
+                userMessage:
+                  "The request body could not be encoded as JSON. Check the body values.",
+              }),
+          ),
         ),
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: "The request body could not be encoded as JSON. Check the body values.",
-          }),
       ),
       Effect.flatMap(runRequest),
       Effect.withSpan("domains.create"),
@@ -189,38 +225,29 @@ const domainsUpdateCommand = Command.make(
     ),
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
-  ({ apiKey: token, baseUrl: apiUrl, body, domainId }) => {
-    // URL parsing normalizes dot segments; refuse a different request before execution.
-    if (domainId === "." || domainId === "..") {
-      return Effect.fail(
-        new CliError.UserError({
-          cause: { _tag: "UnrepresentablePathSegment" },
-          userMessage:
-            "The path parameter cannot be sent as a literal URL segment. Use an identifier other than . or ..; no request was sent.",
-        }),
-      );
-    }
-
-    return HttpClientRequest.patch(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/domains/${encodeURIComponent(domainId)}`),
+  ({ apiKey: token, baseUrl: apiUrl, body, domainId }) =>
+    HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(token),
-      (request) =>
+      appendPathSegments("domains", domainId),
+      Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
             ? HttpClientRequest.bodyJson(request, body.value)
             : Effect.succeed(request),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError.UserError({
+                cause,
+                userMessage:
+                  "The request body could not be encoded as JSON. Check the body values.",
+              }),
+          ),
         ),
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: "The request body could not be encoded as JSON. Check the body values.",
-          }),
       ),
       Effect.flatMap(runRequest),
       Effect.withSpan("domains.update"),
-    );
-  },
+    ),
 ).pipe(Command.withDescription("Update an existing domain"));
 
 /**
@@ -233,25 +260,13 @@ const domainsRemoveCommand = Command.make(
     baseUrl,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
-  ({ apiKey: token, baseUrl: apiUrl, domainId }) => {
-    // URL parsing normalizes dot segments; refuse a different request before execution.
-    if (domainId === "." || domainId === "..") {
-      return Effect.fail(
-        new CliError.UserError({
-          cause: { _tag: "UnrepresentablePathSegment" },
-          userMessage:
-            "The path parameter cannot be sent as a literal URL segment. Use an identifier other than . or ..; no request was sent.",
-        }),
-      );
-    }
-
-    return HttpClientRequest.delete(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/domains/${encodeURIComponent(domainId)}`),
+  ({ apiKey: token, baseUrl: apiUrl, domainId }) =>
+    HttpClientRequest.delete(apiUrl).pipe(
       HttpClientRequest.bearerToken(token),
-      runRequest,
+      appendPathSegments("domains", domainId),
+      Effect.flatMap(runRequest),
       Effect.withSpan("domains.remove"),
-    );
-  },
+    ),
 ).pipe(Command.withDescription("Remove an existing domain"));
 
 /**
@@ -283,21 +298,24 @@ const emailsSendCommand = Command.make(
   },
   ({ apiKey: token, baseUrl: apiUrl, body, idempotencyKey }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/emails`),
       HttpClientRequest.bearerToken(token),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
-      (request) =>
+      appendPathSegments("emails"),
+      Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
             ? HttpClientRequest.bodyJson(request, body.value)
             : Effect.succeed(request),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError.UserError({
+                cause,
+                userMessage:
+                  "The request body could not be encoded as JSON. Check the body values.",
+              }),
+          ),
         ),
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: "The request body could not be encoded as JSON. Check the body values.",
-          }),
       ),
       Effect.flatMap(runRequest),
       Effect.withSpan("emails.send"),
@@ -336,21 +354,24 @@ const emailsSendBatchCommand = Command.make(
   },
   ({ apiKey: token, baseUrl: apiUrl, body, idempotencyKey }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/emails/batch`),
       HttpClientRequest.bearerToken(token),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
-      (request) =>
+      appendPathSegments("emails", "batch"),
+      Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
             ? HttpClientRequest.bodyJson(request, body.value)
             : Effect.succeed(request),
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CliError.UserError({
+                cause,
+                userMessage:
+                  "The request body could not be encoded as JSON. Check the body values.",
+              }),
+          ),
         ),
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: "The request body could not be encoded as JSON. Check the body values.",
-          }),
       ),
       Effect.flatMap(runRequest),
       Effect.withSpan("emails.send-batch"),
@@ -383,30 +404,18 @@ const emailsListAttachmentsCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ after, apiKey: token, baseUrl: apiUrl, before, emailId, limit }) => {
-    // URL parsing normalizes dot segments; refuse a different request before execution.
-    if (emailId === "." || emailId === "..") {
-      return Effect.fail(
-        new CliError.UserError({
-          cause: { _tag: "UnrepresentablePathSegment" },
-          userMessage:
-            "The path parameter cannot be sent as a literal URL segment. Use an identifier other than . or ..; no request was sent.",
-        }),
-      );
-    }
-
-    return HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.appendUrl(`/emails/${encodeURIComponent(emailId)}/attachments`),
+  ({ after, apiKey: token, baseUrl: apiUrl, before, emailId, limit }) =>
+    HttpClientRequest.get(apiUrl).pipe(
       HttpClientRequest.bearerToken(token),
       HttpClientRequest.setUrlParams({
         after: Option.getOrUndefined(after),
         before: Option.getOrUndefined(before),
         limit: Option.getOrUndefined(limit),
       }),
-      runRequest,
+      appendPathSegments("emails", emailId, "attachments"),
+      Effect.flatMap(runRequest),
       Effect.withSpan("emails.list-attachments"),
-    );
-  },
+    ),
 ).pipe(Command.withDescription("Retrieve a list of attachments for a sent email"));
 
 /**
@@ -422,27 +431,13 @@ const emailsGetAttachmentCommand = Command.make(
     baseUrl,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
-  ({ apiKey: token, attachmentId, baseUrl: apiUrl, emailId }) => {
-    // URL parsing normalizes dot segments; refuse a different request before execution.
-    if (emailId === "." || emailId === ".." || attachmentId === "." || attachmentId === "..") {
-      return Effect.fail(
-        new CliError.UserError({
-          cause: { _tag: "UnrepresentablePathSegment" },
-          userMessage:
-            "The path parameter cannot be sent as a literal URL segment. Use an identifier other than . or ..; no request was sent.",
-        }),
-      );
-    }
-
-    return HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.appendUrl(
-        `/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`,
-      ),
+  ({ apiKey: token, attachmentId, baseUrl: apiUrl, emailId }) =>
+    HttpClientRequest.get(apiUrl).pipe(
       HttpClientRequest.bearerToken(token),
-      runRequest,
+      appendPathSegments("emails", emailId, "attachments", attachmentId),
+      Effect.flatMap(runRequest),
       Effect.withSpan("emails.get-attachment"),
-    );
-  },
+    ),
 ).pipe(Command.withDescription("Retrieve a single attachment for a sent email"));
 
 export const DomainsCommand = Command.make("domains").pipe(

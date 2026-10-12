@@ -280,10 +280,8 @@ A command handler remains a direct request pipeline:
 ```ts
 ({ baseUrl: apiUrl, post, user }) =>
   HttpClientRequest.get(apiUrl).pipe(
-    HttpClientRequest.appendUrl(
-      `/users/${encodeURIComponent(user)}/posts/${encodeURIComponent(post)}/files`,
-    ),
-    runRequest,
+    appendPathSegments("users", user, "posts", post, "files"),
+    Effect.flatMap(runRequest),
     Effect.withSpan("posts.files.list"),
   );
 ```
@@ -302,22 +300,36 @@ Effect.gen(function* fetchFiles() {
 );
 ```
 
-Keep URI encoding visible beside each parameter. The proposed `apiPath` abstraction was rejected; it hides simple path construction without a needed capability. The selected helper name is `runRequest`.
+Use the approved `encodePathSegment` and `appendPathSegments` transport helpers across operations. `encodePathSegment` rejects only whole `.` and `..` segments, then wraps `encodeURIComponent` in `Effect.try`; invalid Unicode becomes a safe `CliError.UserError` instead of an escaping exception. Keep these transport checks separate from unchanged API schemas. Do not introduce a custom error subclass, per-ID variables or `Effect.gen` handlers for this work.
 
-Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`, so map that failure before entering `runRequest`. Preserve its typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors.
+```ts
+const appendPathSegments =
+  (...segments: readonly string[]) =>
+  (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.forEach(encodePathSegment)(segments).pipe(
+      Effect.map((encoded) => HttpClientRequest.appendUrl(request, encoded.join("/"))),
+    );
+```
+
+Assemble complete segments before encoding. `appendPathSegments("files", "bar.json")` retains the dotted filename; ``appendPathSegments("files", `${name}.json`)`` encodes the completed mixed segment, including any slash within `name`, as one segment. Do not split a parameter on slash or encode a multi-segment path string as one value. The helper preserves the configured base URL prefix. `runRequest` still owns HTTP execution/output/errors.
+
+Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`, so map that failure before entering `runRequest`. Preserve its typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors. Map encoding errors inside the body operation, after `Effect.flatMap` enters that operation. A mapping around the whole pipeline would incorrectly replace path errors with a JSON encoding message.
 
 **POSITIVE — Keep encoding failure in the Effect error channel.**
 
 ```ts
 HttpClientRequest.post(apiUrl).pipe(
-  HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
-  HttpClientRequest.bodyJson(body),
-  Effect.mapError(
-    (cause) =>
-      new CliError.UserError({
-        cause,
-        userMessage: "The request body could not be encoded as JSON. Check the body values.",
-      }),
+  appendPathSegments("users", user, "posts"),
+  Effect.flatMap((request) =>
+    HttpClientRequest.bodyJson(request, body).pipe(
+      Effect.mapError(
+        (cause) =>
+          new CliError.UserError({
+            cause,
+            userMessage: "The request body could not be encoded as JSON. Check the body values.",
+          }),
+      ),
+    ),
   ),
   Effect.flatMap(runRequest),
   Effect.withSpan("posts.create"),
@@ -400,7 +412,7 @@ The [Resend reference](../examples/resend-reference/README.md) applies this styl
 - `Schema.Union([...], { mode: "oneOf" })` expresses exclusive alternatives natively. Resend's alternatives are disjoint strings/arrays or strings/numbers. A template `allOf` containing a model reference and description-only annotation adds no validation rule.
 - String `maxLength` uses `Schema.isMaxCodePoints`; UTF-16 `isMaxLength` is appropriate for array item counts, not general string code-point bounds. No handwritten counting adapter is needed.
 - Formats remain annotations for this OpenAPI 3.1 reference. UUID fields stay strings; JSON binary content is not treated as a file. Prose-only limits and cross-field rules stay prose, including tags, capabilities, pagination cursor exclusion and the batch-summary limit.
-- Path `.` and `..` are rejected before sending because the URL transport normalizes those segments. This is a typed request-boundary error, separate from the unconstrained OpenAPI string schema.
+- Path `.` and `..` are rejected by the shared encoder before sending because URL transport normalizes whole dot segments. Other segments use checked URI encoding; invalid Unicode also receives a safe typed error. These are request-boundary errors, separate from unconstrained OpenAPI string schemas.
 - Native body diagnostics disable input reporting and preserve their Schema cause. They do not reinterpret regexes or synthesize a schema-specific summary. Token and base URL failure paths retain their safe diagnostic boundaries.
 
 A representative optional body path keeps absence distinct from JSON data:
