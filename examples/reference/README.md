@@ -2,6 +2,8 @@
 
 This is a manually maintained design reference for the single `GET /users` operation in `openapi.json`. Edit `src/main.ts` directly. There is no regeneration or overwrite command: review and change this reference before teaching the generator to produce it.
 
+The root description comes from `info.description`, the users group from `tags[].description`, the command help from the operation summary and description, and the active flag help from its parameter description. The same prose supplies the reference JSDoc where useful. Implementation comments explain only non-obvious constraints such as keeping secrets out of validation errors. `--base-url` is runtime configuration, not an OpenAPI parameter.
+
 Imports have no blank lines between them, as requested. All other style and structure choices are proposals for review, not settled generator requirements.
 
 From this directory:

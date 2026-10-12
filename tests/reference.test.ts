@@ -37,20 +37,24 @@ test("base URL rejection never echoes credentials or query and fragment secrets"
   await Effect.runPromise(
     Effect.forEach(
       [
-        "https://dummy-user:dummy-secret@example.test/api",
-        "https://example.test/api?token=dummy-secret",
-        "https://example.test/api#dummy-secret",
-        "dummy-secret",
-        "file:///dummy-secret",
-      ],
-      (url) =>
+        ["https://dummy-user@example.test/api", "Remove the username"],
+        ["https://:dummy-secret@example.test/api", "Remove the password"],
+        ["https://dummy-user:dummy-secret@example.test/api", "Remove the username"],
+        ["https://example.test/api?token=dummy-secret", "Remove the query string"],
+        ["https://example.test/api#dummy-secret", "Remove the fragment"],
+        ["dummy-secret", "Enter an absolute URL"],
+        ["file:///dummy-secret", "Use HTTP or HTTPS"],
+      ] as const,
+      ([url, message]) =>
         Effect.promise(async () => {
           const result = await invoke(["--base-url", url]);
           expect(result.code).toBe(1);
           expect(result.out).not.toContain("dummy-secret");
           expect(result.out).not.toContain("dummy-user");
           expect(result.err).toContain("--base-url");
-          expect(result.err).toContain("HTTP(S)");
+          expect(result.err).toContain(message);
+          expect(result.err).not.toContain("(");
+          expect(result.err).not.toContain(")");
           expect(result.err).not.toContain("dummy-secret");
           expect(result.err).not.toContain("dummy-user");
         }),
@@ -68,6 +72,44 @@ test("help describes path prefixes and active requires explicit true or false", 
   expect(invalid.code).toBe(1);
   expect(invalid.err).toContain("true");
   expect(invalid.err).toContain("false");
+});
+
+test("reference documentation and help retain standard OpenAPI prose", async () => {
+  const spec = Schema.decodeUnknownSync(
+    Schema.fromJsonString(
+      Schema.Struct({
+        info: Schema.Struct({ description: Schema.String }),
+        paths: Schema.Struct({
+          "/users": Schema.Struct({
+            get: Schema.Struct({
+              description: Schema.String,
+              parameters: Schema.Array(
+                Schema.Struct({ description: Schema.String, name: Schema.String }),
+              ),
+              summary: Schema.String,
+            }),
+          }),
+        }),
+        tags: Schema.Array(Schema.Struct({ description: Schema.String, name: Schema.String })),
+      }),
+    ),
+  )(await Bun.file("examples/reference/openapi.json").text());
+  const source = await Bun.file("examples/reference/src/main.ts").text();
+  const operation = spec.paths["/users"].get;
+  const help = await invoke(["--help"]);
+  expect(help.code).toBe(0);
+  expect(help.out).toContain(operation.summary);
+  expect(help.out).toContain(operation.description);
+  expect(source).toContain(`* ${operation.description}`);
+  expect(source).toContain(`* ${spec.info.description}`);
+  expect(spec.tags).toHaveLength(1);
+  expect(spec.tags[0]?.name).toBe("users");
+  expect(source).toContain(`* ${spec.tags[0]?.description}`);
+  expect(operation.parameters).toHaveLength(1);
+  expect(operation.parameters[0]?.name).toBe("active");
+  expect(help.out.replaceAll(/\s+/gu, " ")).toContain(
+    operation.parameters[0]?.description ?? "missing active description",
+  );
 });
 
 test("HTTP execution preserves prefixes and boolean values and reports safe failures", async () => {

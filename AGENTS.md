@@ -21,6 +21,7 @@ Keep changes local for user review. Do not push, publish, or deploy without expl
 
 - Use `.agents/skills/conventional-commits/SKILL.md` when staging or committing.
 - Use `.agents/skills/document-code/SKILL.md` when writing or reviewing code; keep JSDoc multiline and imports contiguous.
+- For the hand-written reference and generated CLI output, prefer documentation from standard OpenAPI summaries and descriptions. This overrides blanket declaration coverage: add implementation comments only for meaningful non-obvious constraints, not redundant constant or group descriptions.
 - Use `.agents/skills/effect-design/SKILL.md` when writing or reviewing Effect code, schemas, or configuration composition. Read its labeled examples and inspect installed APIs before building custom equivalents. Name selected native capabilities and justify custom glue in the handoff.
 - Before writing Effect code, read `node_modules/effect/AGENTS.md` completely and follow relevant links; consult installed source for uncovered APIs and preserve pinned versions.
 - Use `.agents/skills/trace-effect/SKILL.md` when changing effectful operations or reviewing observability. Trace meaningful operations and external requests; review coverage without tests for every span or log.

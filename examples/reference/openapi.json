@@ -3,7 +3,7 @@
   "info": {
     "title": "Users Reference",
     "version": "1.0.0",
-    "description": "A small input for reviewing hand-written Effect CLI source."
+    "description": "Inspect user accounts through the Users API."
   },
   "paths": {
     "/users": {
@@ -11,7 +11,7 @@
         "operationId": "users-list",
         "x-fern-sdk-group-name": "users",
         "x-fern-sdk-method-name": "list",
-        "summary": "List demo users",
+        "summary": "List users",
         "responses": {
           "200": {
             "description": "Local JSON response"
@@ -24,10 +24,19 @@
             "required": false,
             "schema": {
               "type": "boolean"
-            }
+            },
+            "description": "Return only active users when true or inactive users when false. Omit to return all users."
           }
-        ]
+        ],
+        "description": "Return users, optionally filtered by whether their accounts are active.",
+        "tags": ["users"]
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "users",
+      "description": "Browse user accounts."
+    }
+  ]
 }

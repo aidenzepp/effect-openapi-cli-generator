@@ -1,31 +1,41 @@
 #!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Console, Effect, Match, Option, Schema } from "effect";
+import { Console, Effect, Match, Option, Schema, SchemaIssue } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import type { HttpClientError } from "effect/http";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-/**
- * Decodes an HTTP(S) API root without embedded credentials, query, or fragment.
- */
 const BaseUrl = Schema.URLFromString.check(
-  Schema.makeFilter(
-    (url) =>
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash,
-    { message: "Expected an HTTP(S) base URL without credentials, query, or fragment" },
-  ),
+  Schema.makeFilter((url) => url.protocol === "http:" || url.protocol === "https:", {
+    message: "Use HTTP or HTTPS for the API base URL.",
+  }),
+  Schema.makeFilter((url) => !url.username, {
+    message: "Remove the username from the API base URL.",
+  }),
+  Schema.makeFilter((url) => !url.password, {
+    message: "Remove the password from the API base URL.",
+  }),
+  Schema.makeFilter((url) => !url.search, {
+    message: "Remove the query string from the API base URL.",
+  }),
+  Schema.makeFilter((url) => !url.hash, { message: "Remove the fragment from the API base URL." }),
 );
 
 /**
- * Parses the API root without echoing rejected values that can contain secrets.
- * Param.withSchema includes the original input in InvalidValue; mapEffect lets
- * this boundary retain the Schema cause while presenting a safe message.
+ * Exposes only the static check messages above; malformed URL issues receive a
+ * safe fallback instead of the native formatter's potentially sensitive input.
  *
- * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/cli/Param.ts
+ * @see ../../../node_modules/effect/src/SchemaIssue.ts
+ */
+const formatBaseUrlIssue = SchemaIssue.makeFormatterStandardSchemaV1({
+  leafHook: () => "Enter an absolute URL; for example https://api.example.com.",
+});
+
+/**
+ * Param.withSchema echoes rejected values. This boundary retains the typed cause
+ * while rendering only the safe Schema issue message.
+ *
+ * @see ../../../node_modules/effect/src/cli/Param.ts
  */
 const baseUrl = Flag.String("base-url").pipe(
   Flag.mapEffect((value) =>
@@ -34,23 +44,16 @@ const baseUrl = Flag.String("base-url").pipe(
         (cause) =>
           new CliError.UserError({
             cause,
-            userMessage:
-              "Invalid --base-url. Use an absolute HTTP(S) URL without credentials, query, or fragment.",
+            userMessage: `Invalid --base-url. ${formatBaseUrlIssue(cause.issue).issues[0]?.message ?? "Enter an absolute URL."}`,
           }),
       ),
     ),
   ),
   Flag.withDescription(
-    "API base URL including any path prefix (for example http://localhost:43123/api)",
+    "API base URL including any path prefix; for example http://localhost:43123/api",
   ),
 );
 
-/**
- * Explains HTTP failures without exposing response bodies or nested diagnostics.
- *
- * @param reason - The typed HTTP failure retained as the CLI error cause.
- * @returns A bounded explanation and a relevant next step for this read request.
- */
 const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string =>
   Match.value(reason).pipe(
     Match.tagsExhaustive({
@@ -80,14 +83,19 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
   );
 
 /**
- * Lists users while preserving the distinction between omitted, true, and false filters.
+ * Return users, optionally filtered by whether their accounts are active.
  */
 const listUsersCommand = Command.make(
   "list",
   // oxlint-disable-next-line sort-keys -- Preserve the intended flag order in native help.
   {
     baseUrl,
-    active: Flag.Literals("active", ["true", "false"]).pipe(Flag.optional),
+    active: Flag.Literals("active", ["true", "false"]).pipe(
+      Flag.withDescription(
+        "Return only active users when true or inactive users when false. Omit to return all users.",
+      ),
+      Flag.optional,
+    ),
   },
   ({ baseUrl: apiUrl, active }) =>
     Effect.gen(function* listUsers() {
@@ -108,17 +116,27 @@ const listUsersCommand = Command.make(
           }),
       ),
     ),
-).pipe(Command.withDescription("List users, optionally filtered by active status"));
+).pipe(
+  Command.withDescription(
+    "List users. Return users, optionally filtered by whether their accounts are active.",
+  ),
+);
 
 /**
- * Groups operations on users beneath their command namespace.
+ * Browse user accounts.
  */
-const users = Command.make("users").pipe(Command.withSubcommands([listUsersCommand]));
+const users = Command.make("users").pipe(
+  Command.withDescription("Browse user accounts."),
+  Command.withSubcommands([listUsersCommand]),
+);
 
 /**
- * Defines the standalone reference CLI root and its native help.
+ * Inspect user accounts through the Users API.
  */
-const command = Command.make("users-reference").pipe(Command.withSubcommands([users]));
+const command = Command.make("users-reference").pipe(
+  Command.withDescription("Inspect user accounts through the Users API."),
+  Command.withSubcommands([users]),
+);
 
 Command.run(command, { version: "0.0.0" }).pipe(
   Effect.provide(NodeHttpClient.layerNodeHttp),
