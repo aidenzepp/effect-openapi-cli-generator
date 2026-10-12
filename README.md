@@ -1,31 +1,55 @@
 # effect-openapi-cli-generator
 
-Generate standalone, Effect-native command-line applications from Effect HttpApi definitions or OpenAPI 3.x specifications.
+Generate standalone, Effect-native TypeScript command-line applications from enriched OpenAPI 3.0/3.1 JSON. Inspired by [Cloudflare Forge](https://github.com/cloudflare/forge); independent of Cloudflare and Effect maintainers.
 
-Inspired by [Cloudflare’s Forge](https://github.com/cloudflare/forge) and its [cf CLI](https://github.com/cloudflare/cf): adapt their schema-driven generation, command conventions, and optional overlays to Effect’s libraries and runtime. This is an independent project, unaffiliated with Cloudflare or the Effect maintainers.
+This private package implements the OpenAPI generation path. An Effect HttpApi adapter is deferred. Publication is outside the current scope.
 
-**Status:** tooling and agent foundation only. No generator is implemented. Source layout and npm publishing are deferred until implementation and release work respectively.
+## Development and generation
 
-## Development
-
-Use Bun 1.4.3.
+Use Bun 1.4.3 and Node with ESM support.
 
 ```sh
 bun install --frozen-lockfile
+bun run build
+node dist/cli.js --input ./openapi.json --output ./generated
 bun run check
-bun run fix
+bun test
 ```
 
-Vite+ provides Oxlint and Oxfmt with Ultracite core/anti-slop presets. TypeScript is strict. Checks currently cover the root TypeScript configuration; add real implementation checks as code lands.
+Both input and output are required. Output must be absent and its parent must exist. Existing files, directories, and symlinks are refused. Failed or interrupted writes clean up the directory claimed by this invocation.
 
-## Implementation contract
+`--name my-api` overrides the executable/package name; otherwise it is derived from `info.title`. Generated package and CLI versions start at `0.0.0` independently of the API version.
 
-- Use Effect libraries for runtime configuration, schemas, HTTP, files, processes, resources, and CLI behavior.
-- Derive command names from operation metadata, independently of HTTP verbs.
-- Preserve wire schemas and parameter serialization when constructing requests.
-- Support JSON and file inputs; define conventions explicitly before generating them.
-- Report unsupported cases clearly. Full Forge parity and every OpenAPI feature are not promised.
+The output contains `src/main.ts`, `src/runtime.ts`, `package.json`, `tsconfig.json`, and `.gitignore`. Install dependencies and build inside that directory:
 
-Starting references: [Forge](https://github.com/cloudflare/forge), [cf](https://github.com/cloudflare/cf), and [Effect openapi-generator](https://github.com/Effect-TS/effect/tree/main/packages/tools/openapi-generator).
+```sh
+bun install
+bun run build
+node dist/main.js --help
+node dist/main.js account items get item-id --base-url https://api.example.com/api
+```
 
-Read [AGENTS.md](AGENTS.md) before contributing.
+Generated applications depend on Effect and its Node platform, not this generator.
+
+## Library
+
+```ts
+import { Effect } from "effect";
+import { generate } from "effect-openapi-cli-generator";
+
+const application = await Effect.runPromise(generate(document, { name: "my-api" }));
+// application.files contains relative paths and formatted source content.
+```
+
+The library accepts parsed JSON and performs no filesystem or network access. Failures are typed `GenerationError` values with code, location, message, and hint.
+
+## Conventions and supported scope
+
+- Select operations with a string `operationId` and `x-fern-sdk-group-name` (dotted string or string array). `x-fern-sdk-method-name` supplies the action; otherwise the final operation ID segment is used. `x-forge-aliases` replaces primary projections. Missing selection metadata skips operations; malformed supplied metadata fails.
+- Commands can nest arbitrarily. Command spelling never changes the HTTP method or wire names. Conflicting command addresses and flags fail generation.
+- Every request requires `--base-url`; help does not. Primitive path/query parameters use native flags or a subject argument according to the command conventions. Boolean values are explicit `true`/`false`.
+- JSON bodies use `--body` or `--body-file`. Original values, including false, zero, empty strings and unknown properties permitted by the schema, are preserved. No coercion, defaults, retries, or `@file` shorthand.
+- Supported request schemas include primitive types, scalar enums, arrays, objects, required properties, boolean additionalProperties and local references. Nullable behavior follows the OpenAPI version.
+- Unsupported request features fail with a location-bearing diagnostic: remote/cyclic references, schema compositions and unsupported validation keywords, security requirements, header/cookie parameters, complex parameter serialization, and non-JSON bodies. This is a deliberate subset, not full OpenAPI or Forge parity.
+
+See the [design contract](docs/superpowers/specs/2026-10-11-generator-design.md) and [implementation plan](docs/superpowers/plans/2026-10-11-generator.md) for the exact supported matrix. Read [AGENTS.md](AGENTS.md) before contributing.
