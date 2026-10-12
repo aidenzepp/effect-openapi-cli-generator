@@ -155,9 +155,9 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
     await Effect.runPromise(
       Effect.forEach(
         [
-          ["missing", "HTTP 404"],
-          ["unavailable", "HTTP 503"],
-          ["truncated", "response could not be read"],
+          ["missing", "Could not list users: server returned HTTP 404"],
+          ["unavailable", "Could not list users: server returned HTTP 503"],
+          ["truncated", "Could not list users: the response could not be read"],
         ] as const,
         ([prefix, message]) =>
           Effect.promise(async () => {
@@ -165,6 +165,7 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
             expect(result.code).toBe(1);
             expect(result.out).toBe("");
             expect(result.err).toContain(message);
+            expect(result.err).not.toContain("Retry");
             expect(result.err).not.toContain("private-server-detail");
           }),
         { concurrency: 1, discard: true },
@@ -176,6 +177,6 @@ test("HTTP execution preserves prefixes and boolean values and reports safe fail
   const refused = await invoke(["--base-url", origin]);
   expect(refused.code).toBe(1);
   expect(refused.out).toBe("");
-  expect(refused.err).toContain("connection failed");
+  expect(refused.err).toContain("Could not list users: connection failed");
   expect(refused.err).toContain("server is reachable");
 }, 20_000);

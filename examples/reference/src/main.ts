@@ -25,7 +25,7 @@ const BaseUrl = Schema.URLFromString.check(
  * Exposes only the static check messages above; malformed URL issues receive a
  * safe fallback instead of the native formatter's potentially sensitive input.
  *
- * @see ../../../node_modules/effect/src/SchemaIssue.ts
+ * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/SchemaIssue.ts
  */
 const formatBaseUrlIssue = SchemaIssue.makeFormatterStandardSchemaV1({
   leafHook: () => "Enter an absolute URL; for example https://api.example.com.",
@@ -35,7 +35,7 @@ const formatBaseUrlIssue = SchemaIssue.makeFormatterStandardSchemaV1({
  * Param.withSchema echoes rejected values. This boundary retains the typed cause
  * while rendering only the safe Schema issue message.
  *
- * @see ../../../node_modules/effect/src/cli/Param.ts
+ * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/cli/Param.ts
  */
 const baseUrl = Flag.String("base-url").pipe(
   Flag.mapEffect((value) =>
@@ -58,27 +58,24 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
   Match.value(reason).pipe(
     Match.tagsExhaustive({
       DecodeError: () =>
-        "Could not list users: the response could not be read. Retry the request; if it persists, check the API server.",
-      EmptyBodyError: () =>
-        "Could not list users: the response was empty. Check the API server and its response format.",
+        "the response could not be read. Check the API server and connection before deciding whether to retry.",
+      EmptyBodyError: () => "the response was empty. Check the API server and its response format.",
       EncodeError: () =>
-        "Could not list users: the request could not be encoded. Check the command inputs and API documentation.",
-      InvalidUrlError: () =>
-        "Could not list users: the request URL is invalid. Check --base-url and its path prefix.",
+        "the request could not be encoded. Check the command inputs and API documentation.",
+      InvalidUrlError: () => "the request URL is invalid. Check --base-url and its path prefix.",
       StatusCodeError: ({ response }) => {
-        const message = `Could not list users: server returned HTTP ${response.status}.`;
+        const message = `server returned HTTP ${response.status}.`;
         if (response.status === 404) {
           return `${message} Check --base-url and its path prefix.`;
         }
 
         if (response.status >= 500) {
-          return `${message} Retry later or check the API service status.`;
+          return `${message} Check the API service status before deciding whether to retry.`;
         }
 
         return `${message} Check the API documentation for this status and the supplied --base-url.`;
       },
-      TransportError: () =>
-        "Could not list users: connection failed. Check --base-url and that the server is reachable.",
+      TransportError: () => "connection failed. Check --base-url and that the server is reachable.",
     }),
   );
 
@@ -87,15 +84,14 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
  */
 const listUsersCommand = Command.make(
   "list",
-  // oxlint-disable-next-line sort-keys -- Preserve the intended flag order in native help.
   {
-    baseUrl,
     active: Flag.Literals("active", ["true", "false"]).pipe(
       Flag.withDescription(
         "Return only active users when true or inactive users when false. Omit to return all users.",
       ),
       Flag.optional,
     ),
+    baseUrl,
   },
   ({ baseUrl: apiUrl, active }) =>
     Effect.gen(function* listUsers() {
@@ -112,7 +108,7 @@ const listUsersCommand = Command.make(
         (cause) =>
           new CliError.UserError({
             cause,
-            userMessage: httpErrorMessage(cause.reason),
+            userMessage: `Could not list users: ${httpErrorMessage(cause.reason)}`,
           }),
       ),
     ),

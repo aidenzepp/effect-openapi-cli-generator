@@ -5,6 +5,8 @@ Read README.md and docs/project.md first. This repository is a foundation for an
 ## Engineering
 
 - Follow existing repository and supplied reference patterns. Explain necessary deviations before introducing a different convention.
+- Use verified, version-pinned GitHub source URLs for external dependency `@see` links; do not link installed `node_modules` paths.
+- Keep normal lint key ordering; do not add key-sort exceptions to preserve CLI flag order.
 - Use Effect APIs and typed errors at runtime. Preserve HTTP request semantics and wire schemas; command names do not imply HTTP verbs.
 - Prefer the smallest explicit implementation. Reject unsupported input with useful errors rather than silently guessing.
 - Select relevant personal skills by task: `api-boundary-design`, `designing-trustworthy-functions-and-data`, `small-software`, `software-taste`, `contract-tests`, and `correctness`. Avoid bulk copying skills into the repository.
