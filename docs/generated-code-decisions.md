@@ -4,7 +4,7 @@ This is the canonical guide to the approved output style and its reasons. Read i
 
 ## Target and implementation status
 
-The current content reference, including the group declarations below, is the approved baseline for generator implementation. Approval establishes the output style; it does not establish exhaustive correctness or generator parity, or authorize pushing, publishing or releasing.
+The content reference establishes the approved behavioral and formatting baseline. The Resend reference adds the approved modular layout below; the older content example remains in its existing file layout. Approval establishes the output style; it does not establish exhaustive correctness or generator parity, or authorize pushing, publishing or releasing.
 
 [Users reference](../examples/reference/src/main.ts) and [content reference](../examples/content-reference/src/main.ts) are evolving hand-written targets. Their [specifications](../examples/reference/openapi.json) and [content specification](../examples/content-reference/openapi.json) demonstrate the intended relationship between input and output. They do not prove that the generator emits this style or supports all their keywords.
 
@@ -12,33 +12,33 @@ The current content reference, including the group declarations below, is the ap
 
 ## Name groups by their full ordered command path
 
-Use individual PascalCase group constants built from the complete ordered group path. Emit children before parents so each declaration refers to an already defined command. Keep the visible command names unchanged.
+Use individual PascalCase group constants built from the complete ordered group path, with a `Command` suffix. Append `Command` to operation constants too. Emit children before parents so each declaration refers to an already defined command. Keep the visible command names unchanged.
 
 **POSITIVE — Make hierarchy and declaration order explicit.**
 
 ```ts
-const UsersPostsFiles = Command.make("files").pipe(
+const UsersPostsFilesCommand = Command.make("files").pipe(
   Command.withDescription("Browse files attached to posts."),
-  Command.withSubcommands([listFiles]),
+  Command.withSubcommands([listFilesCommand]),
 );
 
-const UsersPosts = Command.make("posts").pipe(
+const UsersPostsCommand = Command.make("posts").pipe(
   Command.withDescription("Browse and create user posts."),
-  Command.withSubcommands([listPosts, createPost, UsersPostsFiles]),
+  Command.withSubcommands([listPostsCommand, createPostCommand, UsersPostsFilesCommand]),
 );
 
-const Users = Command.make("users").pipe(
+const UsersCommand = Command.make("users").pipe(
   Command.withDescription("Work with content owned by a user."),
-  Command.withSubcommands([UsersPosts]),
+  Command.withSubcommands([UsersPostsCommand]),
 );
 
 const rootCommand = Command.make("content-reference").pipe(
   Command.withDescription("Manage user posts and their attached files."),
-  Command.withSubcommands([Users]),
+  Command.withSubcommands([UsersCommand]),
 );
 ```
 
-Run the root with `Command.run(rootCommand, { version: "0.0.0" })`. The root references `Users`; the CLI remains `content-reference users posts files list`. A reversed branch, `posts users`, gets `PostsUsers`, distinct from `UsersPosts`. Do not sort path segments when naming a group.
+Run the root with `Command.run(rootCommand, { version: "0.0.0" })`. The root references `UsersCommand`; the CLI remains `content-reference users posts files list`. A reversed branch, `posts users`, gets `PostsUsersCommand`, distinct from `UsersPostsCommand`. Do not sort path segments when naming a group.
 
 **NEGATIVE — Name groups using only the leaf or obscure them in nested assembly.**
 
@@ -53,7 +53,37 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. Existing operation identifiers remain unchanged in this baseline.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve `Models` and `Commands` where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
+
+## Separate models, commands and runtime assembly
+
+The approved Resend layout supersedes the earlier single-file model preference:
+
+- `models.ts` owns the named schemas declared by explicit OpenAPI references.
+- `commands.ts` owns operation/group declarations and shared CLI configuration and execution helpers.
+- `main.ts` owns `rootCommand` and runtime layer provision.
+
+Use namespace imports with quoted module specifiers, keeping imports contiguous:
+
+```ts
+// commands.ts
+import * as Models from "./models.js";
+
+// A body schema reference inside its owning flag.
+Schema.fromJsonString(Models.SendEmailRequest);
+```
+
+```ts
+// main.ts
+import * as Commands from "./commands.js";
+
+const rootCommand = Command.make("resend-reference").pipe(
+  Command.withDescription("Resend is the email platform for developers."),
+  Command.withSubcommands([Commands.DomainsCommand, Commands.EmailsCommand]),
+);
+```
+
+Export only top-level groups needed by the entrypoint and model schemas needed by the commands module. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
 
 ## Map declared constraints directly
 
@@ -68,7 +98,7 @@ For this schema:
 **POSITIVE — Preserve the declared checks and use native diagnostics.**
 
 ```ts
-const listPosts = Command.make("list", {
+const listPostsCommand = Command.make("list", {
   user: Flag.String("user").pipe(
     Flag.withSchema(Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/^(?!\.{1,2}$)/u))),
     Flag.withDescription("The owner of the posts."),
@@ -104,7 +134,7 @@ If two parameters reference `#/components/schemas/Identifier`, emit one correspo
 
 ```ts
 const Identifier = Schema.String.check(Schema.isMinLength(1));
-const listFiles = Command.make("list", {
+const listFilesCommand = Command.make("list", {
   post: Flag.String("post").pipe(Flag.withSchema(Identifier)),
   user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
 });
@@ -115,24 +145,24 @@ const listFiles = Command.make("list", {
 ```ts
 // Neither parameter references a shared OpenAPI model.
 const PathId = Schema.String.check(Schema.isMinLength(1));
-const listFiles = Command.make("list", {
+const listFilesCommand = Command.make("list", {
   post: Flag.String("post").pipe(Flag.withSchema(PathId)),
   user: Flag.String("user").pipe(Flag.withSchema(PathId)),
 });
 ```
 
-Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Keep named model schemas in the same CLI entry file, after contiguous imports and before their consumers, with dependencies declared first. Sharing a model does not require a separate module or exports. Model naming still requires the deterministic allocation described above; do not add a package hierarchy.
+Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Keep named model schemas in `models.ts`, with dependencies declared first. `commands.ts` imports them through the `Models` namespace. Export only schemas consumed across modules; dependencies used solely within `models.ts` stay local. Model naming still requires the deterministic allocation described above.
 
 A shared OpenAPI model shares the schema, not the flag definition. Repeat each API flag where its command declares it, including its name and help. The CLI-owned `baseUrl` flag may remain shared: it is executable configuration, not an API parameter model.
 
 **POSITIVE — Keep the parameter at its command boundary.**
 
 ```ts
-const listPosts = Command.make("list", {
+const listPostsCommand = Command.make("list", {
   baseUrl,
   user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
 });
-const createPost = Command.make("create", {
+const createPostCommand = Command.make("create", {
   baseUrl,
   user: Flag.String("user").pipe(Flag.withSchema(Identifier)),
 });
@@ -142,8 +172,8 @@ const createPost = Command.make("create", {
 
 ```ts
 const userFlag = Flag.String("user").pipe(Flag.withSchema(Identifier));
-const listPosts = Command.make("list", { baseUrl, user: userFlag });
-const createPost = Command.make("create", { baseUrl, user: userFlag });
+const listPostsCommand = Command.make("list", { baseUrl, user: userFlag });
+const createPostCommand = Command.make("create", { baseUrl, user: userFlag });
 ```
 
 ## Let native validation own arbitrary constraint messages
@@ -153,7 +183,7 @@ Use native Schema diagnostics for schema keywords. OpenAPI `description` supplie
 **POSITIVE — Keep help and validation separate.**
 
 ```ts
-const listPosts = Command.make("list", {
+const listPostsCommand = Command.make("list", {
   user: Flag.String("user").pipe(
     Flag.withSchema(Schema.String.check(Schema.isPattern(/^[a-z]+$/u))),
     Flag.withDescription("The owner of the posts."),
