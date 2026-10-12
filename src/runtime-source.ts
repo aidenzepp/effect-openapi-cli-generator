@@ -1,14 +1,11 @@
 export const runtimeSource = `import { Effect, FileSystem, Option, Schema, Stdio, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-const InvalidBaseUrlBase = Schema.TaggedError<InvalidBaseUrl>()("InvalidBaseUrl", { message: Schema.String, value: Schema.String });
-export class InvalidBaseUrl extends InvalidBaseUrlBase {}
-const InvalidBodyBase = Schema.TaggedError<InvalidBody>()("InvalidBody", { message: Schema.String, source: Schema.String });
-export class InvalidBody extends InvalidBodyBase {}
-const RequestFailedBase = Schema.TaggedError<RequestFailed>()("RequestFailed", { message: Schema.String });
-export class RequestFailed extends RequestFailedBase {}
-const HttpStatusFailureBase = Schema.TaggedError<HttpStatusFailure>()("HttpStatusFailure", { body: Schema.String, status: Schema.Number });
-export class HttpStatusFailure extends HttpStatusFailureBase { override get message() { return \`HTTP \${this.status}: \${this.body}\`; } }
+const tagged = Schema.TaggedError;
+export class InvalidBaseUrl extends tagged<InvalidBaseUrl>()("InvalidBaseUrl", { message: Schema.String, value: Schema.String }) {}
+export class InvalidBody extends tagged<InvalidBody>()("InvalidBody", { message: Schema.String, source: Schema.String }) {}
+export class RequestFailed extends tagged<RequestFailed>()("RequestFailed", { message: Schema.String }) {}
+export class HttpStatusFailure extends tagged<HttpStatusFailure>()("HttpStatusFailure", { body: Schema.String, status: Schema.Number }) { override get message() { return \`HTTP \${this.status}: \${this.body}\`; } }
 export type RequestFailure = InvalidBaseUrl | InvalidBody | RequestFailed | HttpStatusFailure;
 export const validateBaseUrl = (value: string) => Effect.try({ catch: (cause) => new InvalidBaseUrl({message: String(cause), value}), try: () => {
   const url = new URL(value);
@@ -48,6 +45,5 @@ export const executeRequest = (method: 'GET' | 'PUT' | 'POST' | 'DELETE' | 'OPTI
     const stdio = yield* Stdio.Stdio;
     yield* Stream.make(text).pipe(Stream.run(stdio.stdout({endOnDone: false})), Effect.mapError((cause) => new RequestFailed({message: String(cause)})));
   }
-  return undefined;
 }));
 `;

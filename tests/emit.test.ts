@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Effect, Schema } from "effect";
 import * as oxfmt from "oxfmt";
 import { generate } from "../src/index.js";
@@ -225,4 +228,45 @@ test("formatted enum literals preserve surrogate code units exactly", async () =
   }
   expect(accepts(`\${\uFFFD`)).toBe(false);
   expect(main).toBe(Buffer.from(main, "utf-8").toString("utf-8"));
+});
+
+test("generated tagged errors retain typed constructors and yieldable failures", async () => {
+  const output = await Effect.runPromise(generate(document));
+  const runtime = output.files.find((file) => file.path === "src/runtime.ts")?.content ?? "";
+  const declarations = runtime.slice(
+    runtime.indexOf("\n\n") + 2,
+    runtime.indexOf("export const validateBaseUrl"),
+  );
+  const directory = await mkdtemp(path.join(tmpdir(), "emitted-errors-"));
+  try {
+    await symlink(path.resolve("node_modules"), path.join(directory, "node_modules"));
+    await writeFile(
+      path.join(directory, "errors.ts"),
+      `import { Effect, Schema } from "effect";
+${declarations}
+const errors: RequestFailure[] = [new InvalidBaseUrl({ message: "bad", value: "url" }), new InvalidBody({ message: "bad", source: "input" }), new RequestFailed({ message: "bad" }), new HttpStatusFailure({ body: "bad", status: 400 })];
+export const failures: Effect.Effect<never, RequestFailure>[] = errors.map((error) => Effect.gen(function* fail() { return yield* error; }));
+`,
+    );
+    const result = Bun.spawnSync([
+      path.resolve("node_modules/.bin/tsc"),
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "--target",
+      "ES2022",
+      "--module",
+      "ESNext",
+      "--moduleResolution",
+      "Bundler",
+      path.join(directory, "errors.ts"),
+    ]);
+    expect({
+      code: result.exitCode,
+      output: result.stdout.toString() + result.stderr.toString(),
+    }).toEqual({ code: 0, output: "" });
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 });
