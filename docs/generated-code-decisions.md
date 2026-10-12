@@ -121,7 +121,7 @@ const listFiles = Command.make("list", {
 });
 ```
 
-Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Model naming and module placement still need implementation decisions; these examples do not prescribe a new package hierarchy.
+Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Keep named model schemas in the same CLI entry file, after contiguous imports and before their consumers, with dependencies declared first. Sharing a model does not require a separate module or exports. Model naming still requires the deterministic allocation described above; do not add a package hierarchy.
 
 A shared OpenAPI model shares the schema, not the flag definition. Repeat each API flag where its command declares it, including its name and help. The CLI-owned `baseUrl` flag may remain shared: it is executable configuration, not an API parameter model.
 

@@ -1,6 +1,6 @@
 # Resend CLI reference
 
-This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI in `src/main.ts` and explicit request models in `src/models.ts`. This is target output for review, not output emitted by the current generator.
+This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI and its explicit request models together in `src/main.ts`. This is target output for review, not output emitted by the current generator.
 
 ## Provenance and rebuild
 
