@@ -24,7 +24,8 @@
     "typecheck": "tsc --noEmit",
     "check": "bun run format && bun run lint && bun run typecheck",
     "fix": "vp fmt && vp lint --fix",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test:integration": "bun test tests/integration.test.ts tests/package.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.3",
