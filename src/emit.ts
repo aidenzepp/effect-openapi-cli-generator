@@ -27,6 +27,9 @@ const description = (docs: Documentation) =>
     .join("\n");
 const comment = (docs: Documentation): string => {
   const lines = description(docs).split("\n").filter(Boolean).map(escapeComment);
+  if (docs.deprecated === true) {
+    lines.push("@deprecated");
+  }
   if (docs.externalDocs) {
     lines.push(
       `@see ${escapeComment(docs.externalDocs.url)} ${escapeComment(docs.externalDocs.description ?? "")}`,
@@ -34,6 +37,14 @@ const comment = (docs: Documentation): string => {
   }
   return lines.length > 0 ? `/**\n${lines.map((line) => ` * ${line}`).join("\n")}\n */\n` : "";
 };
+// These uses implement upstream APIs that remain supported despite deprecation.
+const internalReference = (identifier: string, deprecated: boolean) =>
+  deprecated
+    ? `
+// oxlint-disable-next-line typescript/no-deprecated -- Required plumbing for a supported deprecated API element.
+${identifier}
+`
+    : identifier;
 const schemaSource = (schema: WireSchema): string => {
   let expression: string;
   switch (schema.kind) {
@@ -52,7 +63,7 @@ const schemaSource = (schema: WireSchema): string => {
       )
         .map(
           (property) =>
-            `${comment(property.schema.docs)}${propertyKey(property.name)}: ${property.required ? schemaSource(property.schema) : `Schema.optionalKey(${schemaSource(property.schema)})`}`,
+            `${comment(property.schema.docs)}${property.schema.docs.deprecated === true ? "// oxlint-disable-next-line typescript/no-deprecated -- Required schema registration for a supported deprecated API field.\n" : ""}${propertyKey(property.name)}: ${property.required ? schemaSource(property.schema) : `Schema.optionalKey(${schemaSource(property.schema)})`}`,
         )
         .join(",\n");
       const struct = `Schema.Struct({${fields}})`;
@@ -174,7 +185,7 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
         lines.push(
           `${comment(parameter.docs)}const ${identifier} = ${parameterSource(parameter)};`,
         );
-        return `value${position}: ${identifier}`;
+        return `value${position}: ${internalReference(identifier, parameter.docs.deprecated === true)}`;
       });
       if (operation.body) {
         lines.push(
@@ -211,14 +222,17 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
         "const suffix = query.toString();",
         `const url = \`\${base}\${path}\${suffix.length > 0 ? \`?\${suffix}\` : ""}\`;`,
         operation.body
-          ? `const body = yield* readBody(input, ${operation.body.required}, schema${index});`
+          ? `const body = yield* readBody(input, ${operation.body.required}, ${internalReference(`schema${index}`, operation.body.schema.docs.deprecated === true)});`
           : "const body = Option.none();",
         `yield* executeRequest(${literal(operation.method)}, url, body);`,
       );
       lines.push(
         `${comment(operation.docs)}const operation${index} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${Array.sort(entries, Order.String).join(",")}}, (${entries.length > 0 ? "input" : ""}) => Effect.gen(function* runOperation${index}() {${statements.join("\n")}}).pipe(Effect.mapError((cause) => new CliError.UserError({cause, userMessage: cause.message})))).pipe(Command.withDescription(${literal(description(operation.docs))}));`,
       );
-      leaves.set(operation.commandPath.join("/"), `operation${index}`);
+      leaves.set(
+        operation.commandPath.join("/"),
+        internalReference(`operation${index}`, operation.docs.deprecated === true),
+      );
     }
     const groups = Array.sort(
       [

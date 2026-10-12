@@ -95,9 +95,9 @@ test("hostile wire strings remain literals and both generated modules parse", as
   const fixture = structuredClone(document);
   fixture.info.title = hostile;
   Object.assign(fixture.paths["/items/{id}"].post, { deprecated: true });
-  Object.assign(fixture.paths["/items/{id}"].post.parameters[0], { deprecated: true });
-  fixture.paths["/items/{id}"].post.requestBody.content["application/json"].schema.properties =
-    structuredClone({
+  Object.assign(fixture.paths["/items/{id}"].post.parameters[0] ?? {}, { deprecated: true });
+  Object.assign(fixture.paths["/items/{id}"].post.requestBody.content["application/json"].schema, {
+    properties: structuredClone({
       [hostile]: {
         deprecated: true,
         description: hostile,
@@ -110,11 +110,12 @@ test("hostile wire strings remain literals and both generated modules parse", as
       },
       constructor: { type: "string" },
       prototype: { type: "string" },
-    });
+    }),
+  });
   const output = await Effect.runPromise(generate(fixture, { name: "safe-api" }));
   const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
   expect(main).toContain("Deprecated.");
-  expect(main).not.toContain("@deprecated");
+  expect(main).toContain("@deprecated");
   expect(main).toContain('withDescription("Identifier\\nDeprecated.")');
   expect(main).toContain("@see");
   expect(main).toContain("\\@tag");
@@ -332,6 +333,59 @@ test.each(["query", "list", "get", "body"])(
         code: result.exitCode,
         output: result.stdout.toString() + result.stderr.toString(),
       }).toEqual({ code: 0, output: "" });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  },
+);
+
+test.each([false, true])(
+  "deprecated metadata %s preserves strict generated lint",
+  async (deprecated) => {
+    const fixture = structuredClone(document);
+    const operation = fixture.paths["/items/{id}"].post;
+    Object.assign(operation, { deprecated });
+    Object.assign(operation.parameters[0] ?? {}, { deprecated });
+    Object.assign(operation.requestBody.content["application/json"].schema, {
+      deprecated,
+      properties: {
+        nested: {
+          items: { properties: { old: { deprecated, type: "string" } }, type: "object" },
+          type: "array",
+        },
+      },
+    });
+    const output = await Effect.runPromise(generate(fixture));
+    const main = output.files.find((file) => file.path === "src/main.ts")?.content ?? "";
+    expect(main.includes("@deprecated")).toBe(deprecated);
+    expect(main.includes("oxlint-disable")).toBe(deprecated);
+    const directory = await mkdtemp(path.join(process.cwd(), ".deprecated-proof-"));
+    try {
+      await Promise.all(
+        output.files
+          .filter((file) => file.path.endsWith(".ts"))
+          .map((file) => writeFile(path.join(directory, path.basename(file.path)), file.content)),
+      );
+      await writeFile(
+        path.join(directory, "tsconfig.json"),
+        JSON.stringify({ extends: "../tsconfig.json", include: ["*.ts"] }),
+      );
+      for (const command of [
+        ["bunx", "vp", "lint", "--type-aware", directory],
+        [
+          path.resolve("node_modules/.bin/tsc"),
+          "--noEmit",
+          "-p",
+          path.join(directory, "tsconfig.json"),
+        ],
+      ]) {
+        const result = Bun.spawnSync(command);
+        expect({
+          code: result.exitCode,
+          errors: result.stderr.toString(),
+          output: result.stdout.toString(),
+        }).toMatchObject({ code: 0, errors: "" });
+      }
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
