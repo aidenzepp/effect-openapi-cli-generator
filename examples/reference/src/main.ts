@@ -1,25 +1,22 @@
 #!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Console, Effect, Option } from "effect";
+import { Console, Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
-import { filter as filterFlag } from "effect/cli/Flag";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-const baseUrlFlag = Flag.String("base-url").pipe(
-  Flag.mapTryCatch(
-    (value) => new URL(value),
-    () => "Expected an absolute HTTP(S) base URL",
-  ),
-  filterFlag(
+const BaseUrl = Schema.URLFromString.check(
+  Schema.makeFilter(
     (url) =>
       (url.protocol === "http:" || url.protocol === "https:") &&
       !url.username &&
       !url.password &&
       !url.search &&
       !url.hash,
-    () => "Expected an HTTP(S) base URL without credentials, query, or fragment",
+    { message: "Expected an HTTP(S) base URL without credentials, query, or fragment" },
   ),
 );
+
+const baseUrlFlag = Flag.String("base-url").pipe(Flag.withSchema(BaseUrl));
 
 const listUsers = Command.make(
   "list",
