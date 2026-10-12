@@ -344,7 +344,11 @@ HttpClientRequest.post(apiUrl).pipe(HttpClientRequest.bodyJsonUnsafe(body), runR
 
 ## Documentation must have a source or a reason
 
-Use standard OpenAPI summaries, descriptions and applicable documentation metadata for command help and JSDoc. Add custom implementation comments only when they explain a meaningful constraint, such as why base URL error formatting must hide input. Do not invent comments merely to cover every declaration.
+Use standard OpenAPI summaries, descriptions and applicable documentation metadata for API command help and JSDoc. Do not invent API operation, schema or group descriptions.
+
+Document every emitted generator-owned builtin with concise authored JSDoc: helpers, CLI configuration flags and root command assembly have known contracts independent of API prose. State their purpose and relevant behavior, such as error safety, credential precedence or path encoding. This applies to conditionally emitted infrastructure too; it does not require every API to include bearer authentication or every helper. This replaces the earlier restriction that implementation comments require a nonobvious constraint.
+
+Keep JSDoc multiline. Omit boilerplate tags, redundant types and comments that merely restate syntax.
 
 **POSITIVE — Carry operation prose from the specification.**
 
@@ -352,6 +356,23 @@ Use standard OpenAPI summaries, descriptions and applicable documentation metada
 /**
  * List an owner's posts, optionally filtered by status and publication state.
  */
+```
+
+**POSITIVE — Document a builtin from its known contract.**
+
+```ts
+/**
+ * Append complete path segments while preserving the base URL path prefix.
+ * Encode each segment separately so embedded slashes remain parameter data.
+ */
+```
+
+**NEGATIVE — Leave a builtin undocumented because OpenAPI has no prose for it.**
+
+```ts
+const apiKey = Flag.Redacted("api-key").pipe(
+  Flag.withFallbackConfig(Config.Redacted("RESEND_API_KEY")),
+);
 ```
 
 **NEGATIVE — Narrate syntax without adding a contract.**

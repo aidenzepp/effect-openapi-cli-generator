@@ -4,6 +4,10 @@ import { Effect } from "effect";
 import { Command } from "effect/cli";
 import * as Commands from "./commands.js";
 
+/**
+ * Assemble the API command groups beneath the executable root, retaining the
+ * API description for top-level help.
+ */
 const rootCommand = Command.make("resend-reference").pipe(
   Command.withDescription("Resend is the email platform for developers."),
   Command.withSubcommands([Commands.DomainsCommand, Commands.EmailsCommand]),

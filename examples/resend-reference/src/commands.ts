@@ -5,8 +5,8 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as Models from "./models.js";
 
 /**
- * Exposes only the static flag check messages; malformed URL issues receive a
- * safe fallback instead of the native formatter's potentially sensitive input.
+ * Format base URL failures without exposing the rejected input. Preserve static
+ * schema check messages and use a safe fallback for malformed URLs.
  *
  * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/SchemaIssue.ts
  */
@@ -15,8 +15,9 @@ const formatBaseUrlIssue = SchemaIssue.makeFormatterStandardSchemaV1({
 });
 
 /**
- * Param.withSchema echoes rejected values. This boundary retains the typed cause
- * while rendering only the safe Schema issue message.
+ * Require an HTTP or HTTPS API base URL, preserving any path prefix. Reject
+ * credentials, queries and fragments without displaying their values;
+ * Param.withSchema would echo rejected input.
  *
  * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/cli/Param.ts
  */
@@ -55,6 +56,10 @@ const baseUrl = Flag.String("base-url").pipe(
   ),
 );
 
+/**
+ * Describe HTTP failures with neutral guidance, without exposing request details
+ * or response bodies. Status failures include the numeric HTTP status.
+ */
 const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string =>
   Match.value(reason).pipe(
     Match.tagsExhaustive({
@@ -76,8 +81,8 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
   );
 
 /**
- * URL parsing normalizes whole dot segments; reject them before encoding can
- * silently redirect the request. Encoding failures stay in the CLI error channel.
+ * Encode one complete URL path segment. Reject whole dot segments before URL
+ * parsing can redirect the request, and report invalid Unicode as a CLI error.
  */
 const encodePathSegment = (segment: string) => {
   if (segment === "." || segment === "..") {
@@ -101,6 +106,10 @@ const encodePathSegment = (segment: string) => {
   });
 };
 
+/**
+ * Append complete path segments while preserving the base URL path prefix.
+ * Encode each segment separately so embedded slashes remain parameter data.
+ */
 const appendPathSegments =
   (...segments: readonly string[]) =>
   (request: HttpClientRequest.HttpClientRequest) =>
@@ -108,6 +117,10 @@ const appendPathSegments =
       Effect.map((encoded) => HttpClientRequest.appendUrl(request, encoded.join("/"))),
     );
 
+/**
+ * Execute a request once and print successful response text. Reject non-2xx
+ * statuses and retain typed HTTP causes behind safe CLI messages.
+ */
 const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
   HttpClient.execute(request).pipe(
     Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -118,6 +131,10 @@ const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
     ),
   );
 
+/**
+ * Read the bearer credential as a redacted value. An explicit --api-key takes
+ * precedence over the RESEND_API_KEY environment fallback.
+ */
 const apiKey = Flag.Redacted("api-key").pipe(
   Flag.withFallbackConfig(Config.Redacted("RESEND_API_KEY")),
   Flag.withDescription("Resend bearer API key; defaults to RESEND_API_KEY."),
