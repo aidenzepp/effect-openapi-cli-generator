@@ -1,6 +1,6 @@
 # Run the generated CLIs
 
-The demo and integration examples contain concrete generator inputs and outputs, committed for inspection. Their generated source is in each `cli/src/` directory; neither CLI needs this generator at runtime. The Resend fixture linked below contains a specification slice only.
+The demo and integration examples contain concrete generator inputs and outputs, committed for inspection. Their generated source is in each `cli/src/` directory; neither CLI needs this generator at runtime. The Resend reference linked below pairs a pinned specification slice with a hand-written target CLI.
 
 Run the commands below from this repository root:
 
@@ -81,4 +81,4 @@ The regenerated sources pass repository formatting, type-aware lint, and TypeScr
 
 ## Pinned Resend specification slice
 
-[Resend reference](resend-reference/README.md) preserves eight official API operations and their referenced models, with an immutable upstream snapshot and a separate CLI naming overlay. It is a specification fixture for the next output review, not a generated CLI.
+[Resend reference](resend-reference/README.md) preserves eight official API operations and their referenced models, with an immutable upstream snapshot and a separate CLI naming overlay. Its hand-written Effect CLI is an output target for review; it is not emitted by the generator.

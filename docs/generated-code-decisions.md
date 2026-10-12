@@ -92,7 +92,7 @@ const userFlag = Flag.String("user").pipe(
 
 The semantic shortcut obscures the original keyword. The predicate and message require understanding an arbitrary regex, which the generator cannot reliably do. Effect's default pattern diagnostic describes the actual pattern. A schema without `pattern` gets no pattern check; a schema without a length constraint gets no invented nonempty requirement.
 
-Select native checks by semantics, not name alone. In the pinned Effect version, `isMinLength` counts UTF-16 code units; JSON Schema string lengths count Unicode code points. The illustrated bound of one is equivalent, but other bounds require a semantically faithful check and Unicode tests. Regex flags and escaping likewise need verification before generalizing this example.
+Select native checks by semantics, not name alone. In the pinned Effect version, `isMinLength` counts UTF-16 code units; JSON Schema string lengths count Unicode code points. The illustrated bound of one is equivalent. For general string bounds, the installed native `Schema.isMinCodePoints` and `Schema.isMaxCodePoints` preserve JSON Schema semantics; use Unicode tests to verify their application. Regex flags and escaping likewise need verification before generalizing this example.
 
 URL construction must preserve path segments independently of schema validation. A missing pattern does not authorize adding domain restrictions to the schema. Handling otherwise unrepresentable path values is a separate request-construction responsibility; this guide does not settle its future API.
 
@@ -359,3 +359,27 @@ Before accepting an output change:
 [Reference tests](../tests/reference.test.ts) cover the small target's help, documentation, safe URL diagnostics and requests. [Content reference tests](../tests/content-reference.test.ts) cover richer requests, native pattern failures and write-response failure behavior. [Integration tests](../tests/integration.test.ts) exercise actual generated packages, wire behavior and source hygiene; [package tests](../tests/package.test.ts) exercise the installed library and executable.
 
 Those suites prove their current fixtures, not all decisions in this guide. Add targeted executable cases when implementing missing mappings and explicit model reuse; do not claim reference tests prove generator parity.
+
+## Resend reference decisions
+
+The [Resend reference](../examples/resend-reference/README.md) applies this style to a pinned real-world slice. Its implementation decisions below are explicit reviewable choices; they do not expand current generator support or imply prior approval of every new boundary.
+
+- Authentication is shared CLI-owned configuration: native `Flag.Redacted("api-key")` with `Config.Redacted("RESEND_API_KEY")` fallback, passed to `HttpClientRequest.bearerToken`. Help does not require credentials, and execution still requires an explicit base URL.
+- Omitted `requestBody.required` means the body flag is optional. The request receives no body when omitted. Supplied bodies retain their model's required fields and use checked JSON encoding.
+- OpenAPI objects permit unspecified properties unless constrained. Native `Schema.StructWithRest` with `Schema.Record(Schema.String, Schema.Json)` preserves those values instead of stripping them. Only explicitly referenced request models get shared schema declarations; response text needs no unused response validators.
+- `Schema.Union([...], { mode: "oneOf" })` expresses exclusive alternatives natively. Resend's alternatives are disjoint strings/arrays or strings/numbers. A template `allOf` containing a model reference and description-only annotation adds no validation rule.
+- String `maxLength` uses `Schema.isMaxCodePoints`; UTF-16 `isMaxLength` is appropriate for array item counts, not general string code-point bounds. No handwritten counting adapter is needed.
+- Formats remain annotations for this OpenAPI 3.1 reference. UUID fields stay strings; JSON binary content is not treated as a file. Prose-only limits and cross-field rules stay prose, including tags, capabilities, pagination cursor exclusion and the batch-summary limit.
+- Path `.` and `..` are rejected before sending because the URL transport normalizes those segments. This is a typed request-boundary error, separate from the unconstrained OpenAPI string schema.
+- Native body diagnostics disable input reporting and preserve their Schema cause. They do not reinterpret regexes or synthesize a schema-specific summary. Token and base URL failure paths retain their safe diagnostic boundaries.
+
+A representative optional body path keeps absence distinct from JSON data:
+
+```ts
+(request) =>
+  Effect.suspend(() =>
+    Option.isSome(body) ? HttpClientRequest.bodyJson(request, body.value) : Effect.succeed(request),
+  );
+```
+
+The resulting encoding error is mapped to `CliError.UserError` before `Effect.flatMap(runRequest)`. Do not substitute a default object or array, or make the flag required because the endpoint usually expects a body.
