@@ -57,8 +57,7 @@ const baseUrl = Flag.String("base-url").pipe(
 const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string =>
   Match.value(reason).pipe(
     Match.tagsExhaustive({
-      DecodeError: () =>
-        "the response could not be read. Check the API server and connection before deciding whether to retry.",
+      DecodeError: () => "the response could not be read. Check the API server and connection.",
       EmptyBodyError: () => "the response was empty. Check the API server and its response format.",
       EncodeError: () =>
         "the request could not be encoded. Check the command inputs and API documentation.",
@@ -70,7 +69,7 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
         }
 
         if (response.status >= 500) {
-          return `${message} Check the API service status before deciding whether to retry.`;
+          return `${message} Check the API service status.`;
         }
 
         return `${message} Check the API documentation for this status and the supplied --base-url.`;
