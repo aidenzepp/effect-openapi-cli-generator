@@ -215,24 +215,24 @@ const listFiles = Command.make(
     ),
 ).pipe(Command.withDescription("List the files attached to a post."));
 
-const files = Command.make("files").pipe(
+const UsersPostsFiles = Command.make("files").pipe(
   Command.withDescription("Browse files attached to posts."),
   Command.withSubcommands([listFiles]),
 );
 
-const posts = Command.make("posts").pipe(
+const UsersPosts = Command.make("posts").pipe(
   Command.withDescription("Browse and create user posts."),
-  Command.withSubcommands([listPosts, createPost, files]),
+  Command.withSubcommands([listPosts, createPost, UsersPostsFiles]),
 );
 
-const users = Command.make("users").pipe(
+const Users = Command.make("users").pipe(
   Command.withDescription("Work with content owned by a user."),
-  Command.withSubcommands([posts]),
+  Command.withSubcommands([UsersPosts]),
 );
 
 const command = Command.make("content-reference").pipe(
   Command.withDescription("Manage user posts and their attached files."),
-  Command.withSubcommands([users]),
+  Command.withSubcommands([Users]),
 );
 
 Command.run(command, { version: "0.0.0" }).pipe(

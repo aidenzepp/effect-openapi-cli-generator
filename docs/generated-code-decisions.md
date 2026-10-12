@@ -4,9 +4,51 @@ This is the canonical guide to the approved output style and its reasons. Read i
 
 ## Target and implementation status
 
+The current content reference, including the group declarations below, is the approved baseline for generator implementation. Approval establishes the output style; it does not establish exhaustive correctness or generator parity, or authorize pushing, publishing or releasing.
+
 [Users reference](../examples/reference/src/main.ts) and [content reference](../examples/content-reference/src/main.ts) are evolving hand-written targets. Their [specifications](../examples/reference/openapi.json) and [content specification](../examples/content-reference/openapi.json) demonstrate the intended relationship between input and output. They do not prove that the generator emits this style or supports all their keywords.
 
 [README](../README.md) owns current generator support. In particular, the current schema emitter does not implement the constraint mapping or named-model reuse illustrated below. The content reference now inlines API flag definitions in each command and maps the shown constraints with native `Schema.isMinLength(1)` and `Schema.isPattern`. Its hand-written body error also remains an example-specific message, not a general message-generation contract.
+
+## Name groups by their full ordered command path
+
+Use individual PascalCase group constants built from the complete ordered group path. Emit children before parents so each declaration refers to an already defined command. Keep the visible command names unchanged.
+
+**POSITIVE — Make hierarchy and declaration order explicit.**
+
+```ts
+const UsersPostsFiles = Command.make("files").pipe(
+  Command.withDescription("Browse files attached to posts."),
+  Command.withSubcommands([listFiles]),
+);
+
+const UsersPosts = Command.make("posts").pipe(
+  Command.withDescription("Browse and create user posts."),
+  Command.withSubcommands([listPosts, createPost, UsersPostsFiles]),
+);
+
+const Users = Command.make("users").pipe(
+  Command.withDescription("Work with content owned by a user."),
+  Command.withSubcommands([UsersPosts]),
+);
+```
+
+The root still references `Users`; the CLI remains `content-reference users posts files list`. A reversed branch, `posts users`, gets `PostsUsers`, distinct from `UsersPosts`. Do not sort path segments when naming a group.
+
+**NEGATIVE — Name groups using only the leaf or obscure them in nested assembly.**
+
+```ts
+const posts = Command.make("posts"); // Which parent owns this group?
+const users = Command.make("users").pipe(
+  Command.withSubcommands([
+    Command.make("posts").pipe(Command.withSubcommands([Command.make("files")])),
+  ]),
+);
+```
+
+Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
+
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs a deterministic identifier allocator that sanitizes and checks the complete shared declaration scope. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. Existing operation identifiers and the root `command` name remain unchanged in this baseline.
 
 ## Map declared constraints directly
 
