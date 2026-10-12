@@ -50,6 +50,8 @@ Use kebab-case filenames. Keep modules focused and add them when real behavior n
 
 ## Generated-code quality
 
+[Generated code decisions](generated-code-decisions.md) records the approved output style, rationale, positive and negative examples, and differences between the hand-written targets and current generator support.
+
 - Use Effect's CLI, Schema, HTTP, Config, FileSystem, and runtime facilities where applicable. Use its process and resource facilities when a feature requires them.
 - Preserve schema constraints and wire representations through decoding and request construction. Report failures through typed errors with actionable context.
 - Keep failing external operations inside small Effect boundaries. Follow the repository's ban on native try/catch; avoid wrapping an entire workflow in Effect.tryPromise.
@@ -62,4 +64,4 @@ Use kebab-case filenames. Keep modules focused and add them when real behavior n
 
 Start with a small end-to-end slice: accept a supported specification, generate a real Effect command, compile it, and verify the resulting HTTP request. Expand supported inputs and overrides from tested contracts.
 
-This foundation does not include examples, benchmark suites, infrastructure, or Alchemy. Large public API specifications can later measure generation time, memory, output size, startup cost, and supported-operation coverage. Add those evaluation assets in a separate implementation task.
+The requested [users reference](../examples/reference/README.md) and [content reference](../examples/content-reference/README.md) are hand-written output targets. The [demo specification](../examples/demo/openapi.json) exercises the current generator. Benchmark suites and Alchemy infrastructure remain outside this work. Large public API specifications can later measure generation time, memory, output size, startup cost, and supported-operation coverage. Add those evaluation assets in a separate implementation task.
