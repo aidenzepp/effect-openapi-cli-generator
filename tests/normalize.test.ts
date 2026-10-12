@@ -1,25 +1,21 @@
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { normalize } from "../src/normalize.js";
 
-const operation = (extra: Record<string, unknown> = {}) => ({
+const operation = (extra: Schema.JsonObject = {}) => ({
   operationId: "things_get",
   responses: { "200": { description: "OK" } },
   "x-fern-sdk-group-name": "things",
   ...extra,
 });
-const document = (
-  op: Record<string, unknown> = {},
-  path = "/things",
-  extra: Record<string, unknown> = {},
-) => ({
+const document = (op: Schema.JsonObject = {}, path = "/things", extra: Schema.JsonObject = {}) => ({
   info: { title: "Things", version: "today" },
   openapi: "3.1.0",
   paths: { [path]: { post: operation(op) } },
   ...extra,
 });
-const run = (value: unknown) => Effect.runSync(normalize(value));
-const fail = (value: unknown) => Effect.runSync(Effect.flip(normalize(value)));
+const run = (value: Schema.Json) => Effect.runSync(normalize(value));
+const fail = (value: Schema.Json) => Effect.runSync(Effect.flip(normalize(value)));
 const parameter = (name: string, location = "query", type = "string") => ({
   in: location,
   name,
@@ -265,4 +261,11 @@ test("reference documentation overrides target documentation", () => {
   expect(run(input).operations[0]!.parameters[0]!.docs.description).toBe(
     "Local summary\nLocal description",
   );
+});
+
+test("unknown JSON annotations survive boundary decoding without changing selection", async () => {
+  const { generate } = await import("../src/index.js");
+  const input = document({}, "/things", { "x-private": { nested: [false, 0, null] } });
+  const result = await Effect.runPromise(generate(input));
+  expect(result.files.length).toBeGreaterThan(0);
 });

@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { normalizeSchema } from "../src/schema.js";
 import { resolveReference } from "../src/references.js";
 
-const parse = (schema: unknown, version: "3.0" | "3.1" = "3.1", document: unknown = {}) =>
+const parse = (schema: Schema.Json, version: "3.0" | "3.1" = "3.1", document: Schema.Json = {}) =>
   Effect.runPromise(normalizeSchema(document, schema, "/schema", version));
-const failure = (schema: unknown, location: string, version: "3.0" | "3.1" = "3.1") =>
+const failure = (schema: Schema.Json, location: string, version: "3.0" | "3.1" = "3.1") =>
   Effect.runPromise(Effect.flip(normalizeSchema({}, schema, "/schema", version))).then((error) => {
     expect(error._tag).toBe("GenerationError");
     expect(error.location).toBe(location);

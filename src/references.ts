@@ -1,30 +1,35 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { GenerationError } from "./errors.js";
 
 export const pointerSegment = (value: string): string =>
   value.replaceAll("~", "~0").replaceAll("/", "~1");
 
+const fail = (location: string, message: string) =>
+  Effect.fail(
+    new GenerationError({
+      code: "unsupported",
+      hint: "Use an acyclic local #/... JSON Pointer reference.",
+      location,
+      message,
+    }),
+  );
+
 export const resolveReference = (
-  document: unknown,
+  document: Schema.Json,
   ref: string,
   location: string,
   activeRefs: ReadonlySet<string>,
 ): Effect.Effect<
-  { readonly value: unknown; readonly location: string; readonly activeRefs: ReadonlySet<string> },
+  {
+    readonly value: Schema.Json;
+    readonly location: string;
+    readonly activeRefs: ReadonlySet<string>;
+  },
   GenerationError
 > =>
   Effect.gen(function* resolveReferenceEffect1() {
-    const fail = (message: string) =>
-      Effect.fail(
-        new GenerationError({
-          code: "unsupported",
-          hint: "Use an acyclic local #/... JSON Pointer reference.",
-          location,
-          message,
-        }),
-      );
     if (!ref.startsWith("#/")) {
-      return yield* fail("Only local JSON Pointer references are supported.");
+      return yield* fail(location, "Only local JSON Pointer references are supported.");
     }
     const decoded = yield* Effect.try({
       catch: () =>
@@ -38,24 +43,28 @@ export const resolveReference = (
     });
     const tokens = decoded.slice(1).split("/");
     if (tokens.some((token) => /~(?![01])/u.test(token))) {
-      return yield* fail("Invalid JSON Pointer escape.");
+      return yield* fail(location, "Invalid JSON Pointer escape.");
     }
     const keys = tokens.map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
     const target = `/${keys.map(pointerSegment).join("/")}`;
     if (activeRefs.has(target)) {
-      return yield* fail("Recursive references are unsupported.");
+      return yield* fail(location, "Recursive references are unsupported.");
     }
-    let value: unknown = document;
+    let value: Schema.Json = document;
     for (const key of keys) {
-      if (
-        typeof value !== "object" ||
-        value === null ||
-        !Object.hasOwn(value, key) ||
-        (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key))
-      ) {
-        return yield* fail("Reference does not resolve to an own JSON property.");
+      let next: Schema.Json | undefined;
+      if (Schema.is(Schema.Array(Schema.Json))(value)) {
+        if (!/^(?:0|[1-9][0-9]*)$/u.test(key) || !Object.hasOwn(value, key)) {
+          return yield* fail(location, "Reference does not resolve to an own JSON property.");
+        }
+        next = value[Number(key)];
+      } else if (Schema.is(Schema.JsonObject)(value) && Object.hasOwn(value, key)) {
+        next = value[key];
       }
-      value = (value as Record<string, unknown>)[key];
+      if (next === undefined) {
+        return yield* fail(location, "Reference does not resolve to an own JSON property.");
+      }
+      value = next;
     }
     return { activeRefs: new Set([...activeRefs, target]), location: target, value };
   });

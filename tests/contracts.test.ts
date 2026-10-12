@@ -34,3 +34,15 @@ test("retains an empty hint when no alternative exists", () => {
   expect(error.location).toBe("");
   expect(error.hint).toBe("");
 });
+
+test("public generator rejects non-JSON inputs through its typed failure channel", async () => {
+  const { generate } = await import("../src/index.js");
+  const failures = await Effect.runPromise(
+    Effect.all([Effect.flip(generate(undefined)), Effect.flip(generate(() => 1))]),
+  );
+  for (const error of failures) {
+    expect(error._tag).toBe("GenerationError");
+    expect(error.code).toBe("invalid_input");
+    expect(error.location).toBe("");
+  }
+});

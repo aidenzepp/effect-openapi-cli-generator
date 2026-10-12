@@ -1,21 +1,23 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { GenerationError } from "./errors.js";
 import type { CommandProjection, GenerateOptions } from "./model.js";
 
 const groupKey = "x-fern-sdk-group-name";
 const methodKey = "x-fern-sdk-method-name";
 const aliasesKey = "x-forge-aliases";
-const safeToken = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const safeToken = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const reservedNames = new Set(["help", "h", "version", "v", "wizard", "completions", "log-level"]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const isRecord = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  Schema.is(Schema.JsonObject)(value);
 
-const own = (record: Record<string, unknown>, key: string): unknown =>
+const own = (record: Schema.JsonObject, key: string): Schema.Json | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
 const separateWords = (value: string): string =>
-  value.replaceAll(/([A-Z]+)([A-Z][a-z])/g, "$1-$2").replaceAll(/([a-z0-9])([A-Z])/g, "$1-$2");
+  value
+    .replaceAll(/(?<first>[A-Z]+)(?<second>[A-Z][a-z])/gu, "$<first>-$<second>")
+    .replaceAll(/(?<first>[a-z0-9])(?<second>[A-Z])/gu, "$<first>-$<second>");
 
 const invalid = (location: string, message: string) =>
   Effect.fail(
@@ -27,8 +29,11 @@ const invalid = (location: string, message: string) =>
     }),
   );
 
-const token = (value: unknown, location: string): Effect.Effect<string, GenerationError> => {
-  if (typeof value !== "string") {
+const token = (
+  value: Schema.Json | undefined,
+  location: string,
+): Effect.Effect<string, GenerationError> => {
+  if (!Schema.is(Schema.String)(value)) {
     return invalid(location, "Command metadata must be a string.");
   }
   const normalized = separateWords(value.trim()).replaceAll("_", "-").toLowerCase();
@@ -38,19 +43,21 @@ const token = (value: unknown, location: string): Effect.Effect<string, Generati
 };
 
 const projection = (
-  source: Record<string, unknown>,
+  source: Schema.JsonObject,
   operationId: string,
   location: string,
 ): Effect.Effect<CommandProjection, GenerationError> =>
   Effect.gen(function* projectionEffect1() {
     const group = own(source, groupKey);
-    if (typeof group !== "string" && !Array.isArray(group)) {
+    if (!Schema.is(Schema.String)(group) && !Schema.is(Schema.Array(Schema.Json))(group)) {
       return yield* invalid(
         `${location}/${groupKey}`,
         "A group must be a dotted string or a nonempty string array.",
       );
     }
-    const segments: readonly unknown[] = typeof group === "string" ? group.split(".") : group;
+    const segments: readonly Schema.Json[] = Schema.is(Schema.String)(group)
+      ? group.split(".")
+      : group;
     if (segments.length === 0) {
       return yield* invalid(
         `${location}/${groupKey}`,
@@ -60,14 +67,18 @@ const projection = (
     const path: string[] = [];
     for (const [index, segment] of segments.entries()) {
       path.push(
-        yield* token(segment, `${location}/${groupKey}${Array.isArray(group) ? `/${index}` : ""}`),
+        yield* token(
+          segment,
+          `${location}/${groupKey}${Schema.is(Schema.Array(Schema.Json))(group) ? `/${index}` : ""}`,
+        ),
       );
     }
     const method = own(source, methodKey);
-    if (method !== undefined && typeof method !== "string") {
+    if (method !== undefined && !Schema.is(Schema.String)(method)) {
       return yield* invalid(`${location}/${methodKey}`, "Method metadata must be a string.");
     }
-    const fallback = operationId.split(/[-_]+/).at(-1) || "get";
+    const last = operationId.split(/[-_]+/u).at(-1);
+    const fallback = last === undefined || last === "" ? "get" : last;
     path.push(
       yield* token(
         method === undefined || method === "" ? fallback : method,
@@ -78,7 +89,7 @@ const projection = (
   });
 
 export const mapCommands = (
-  operation: unknown,
+  operation: Schema.Json,
   location: string,
 ): Effect.Effect<readonly CommandProjection[], GenerationError> =>
   Effect.gen(function* mapCommandsEffect2() {
@@ -86,12 +97,12 @@ export const mapCommands = (
       return yield* invalid(location, "An operation must be an object.");
     }
     const operationId = own(operation, "operationId");
-    if (typeof operationId !== "string") {
+    if (!Schema.is(Schema.String)(operationId)) {
       return [];
     }
     if (Object.hasOwn(operation, aliasesKey)) {
       const aliases = own(operation, aliasesKey);
-      if (!Array.isArray(aliases)) {
+      if (!Schema.is(Schema.Array(Schema.Json))(aliases)) {
         return yield* invalid(`${location}/${aliasesKey}`, "Aliases must be an array.");
       }
       const projections: CommandProjection[] = [];
@@ -118,10 +129,10 @@ export const resolveName = (
   const name = explicit
     ? options.name
     : separateWords(title)
-        .replaceAll(/[^A-Za-z0-9]+/g, "-")
-        .replaceAll(/^-+|-+$/g, "")
+        .replaceAll(/[^A-Za-z0-9]+/gu, "-")
+        .replaceAll(/^-+|-+$/gu, "")
         .toLowerCase();
-  if (typeof name === "string" && safeToken.test(name) && !reservedNames.has(name)) {
+  if (Schema.is(Schema.String)(name) && safeToken.test(name) && !reservedNames.has(name)) {
     return Effect.succeed(name);
   }
   return Effect.fail(

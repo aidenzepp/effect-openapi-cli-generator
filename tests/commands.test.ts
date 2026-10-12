@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { mapCommands, resolveName } from "../src/commands.js";
 
 const groupKey = "x-fern-sdk-group-name";
 const methodKey = "x-fern-sdk-method-name";
 const aliasesKey = "x-forge-aliases";
 const location = "/paths/~1reports/post";
-const project = (operation: unknown) => Effect.runSync(mapCommands(operation, location));
-const error = (operation: unknown) => Effect.runSync(Effect.flip(mapCommands(operation, location)));
+const project = (operation: Schema.Json) => Effect.runSync(mapCommands(operation, location));
+const error = (operation: Schema.Json) =>
+  Effect.runSync(Effect.flip(mapCommands(operation, location)));
 
 describe("command metadata", () => {
   test("normalizes arbitrary depth and preserves input", () => {
