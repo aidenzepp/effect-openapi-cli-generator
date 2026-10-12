@@ -140,7 +140,7 @@ This accepted URL adapter does not justify custom interpretation of arbitrary pa
 
 ## Keep one neutral HTTP error formatter
 
-Each standalone CLI uses one synchronous `httpErrorMessage(reason): string`. It classifies the typed HTTP failure without depending on resource names. Commands retain the original cause and pass the helper result directly to `CliError.UserError`.
+Each standalone CLI uses one synchronous `httpErrorMessage(reason): string`. It classifies the typed HTTP failure without depending on resource names. The shared `runRequest` execution helper retains the original cause and passes the formatter result directly to `CliError.UserError`.
 
 **POSITIVE — One complete message, one typed cause.**
 
@@ -177,6 +177,81 @@ The response could not be read. Retry the request.
 ```
 
 A server may have completed a POST before its response became unreadable. No automatic retries are added. The small GET-only reference has retry wording; do not copy that advice into a shared formatter that also handles writes.
+
+## Share CLI execution, keep request construction explicit
+
+`runRequest` owns execution, successful-status validation, text output and HTTP error conversion once per CLI. This is shared executable behavior, separate from OpenAPI-driven model reuse. Each command still declares its own method, path, parameters, body and tracing span.
+
+**POSITIVE — Compose the native client and response APIs at one boundary.**
+
+```ts
+const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
+  HttpClient.execute(request).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.text),
+    Effect.flatMap(Console.log),
+    Effect.mapError(
+      (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
+    ),
+  );
+```
+
+`HttpClient.execute` gets the client from the Effect environment. The existing `NodeHttpClient.layerNodeHttp` provider supplies it; no additional service or layer is needed. Filtering status before reading the body preserves the neutral status error and avoids displaying error response bodies.
+
+A command handler remains a direct request pipeline:
+
+```ts
+({ baseUrl: apiUrl, post, user }) =>
+  HttpClientRequest.get(apiUrl).pipe(
+    HttpClientRequest.appendUrl(
+      `/users/${encodeURIComponent(user)}/posts/${encodeURIComponent(post)}/files`,
+    ),
+    runRequest,
+    Effect.withSpan("posts.files.list"),
+  );
+```
+
+**NEGATIVE — Repeat client lookup, execution, output and error conversion in every handler.**
+
+```ts
+Effect.gen(function* fetchFiles() {
+  const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
+  const response = yield* client.execute(request);
+  yield* Console.log(yield* response.text);
+}).pipe(
+  Effect.mapError(
+    (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
+  ),
+);
+```
+
+Keep URI encoding visible beside each parameter. The proposed `apiPath` abstraction was rejected; it hides simple path construction without a needed capability. The selected helper name is `runRequest`.
+
+Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`, so map that failure before entering `runRequest`. Preserve its typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors.
+
+**POSITIVE — Keep encoding failure in the Effect error channel.**
+
+```ts
+HttpClientRequest.post(apiUrl).pipe(
+  HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
+  HttpClientRequest.bodyJson(body),
+  Effect.mapError(
+    (cause) =>
+      new CliError.UserError({
+        cause,
+        userMessage: "The request body could not be encoded as JSON. Check the body values.",
+      }),
+  ),
+  Effect.flatMap(runRequest),
+  Effect.withSpan("posts.create"),
+);
+```
+
+**NEGATIVE — Rely on an unsafe encoder despite an available checked API.**
+
+```ts
+HttpClientRequest.post(apiUrl).pipe(HttpClientRequest.bodyJsonUnsafe(body), runRequest);
+```
 
 ## Documentation must have a source or a reason
 

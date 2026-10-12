@@ -3,7 +3,7 @@ import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node
 import { Console, Effect, Match, Option, Schema, SchemaIssue } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import type { HttpClientError } from "effect/http";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 /**
  * Exposes only the static flag check messages; malformed URL issues receive a
@@ -76,6 +76,16 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
     }),
   );
 
+const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
+  HttpClient.execute(request).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.text),
+    Effect.flatMap(Console.log),
+    Effect.mapError(
+      (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
+    ),
+  );
+
 /**
  * List an owner's posts, optionally filtered by status and publication state.
  */
@@ -104,23 +114,15 @@ const listPosts = Command.make(
     ),
   },
   ({ baseUrl: apiUrl, limit, published, status, user }) =>
-    Effect.gen(function* fetchPosts() {
-      const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
-      const request = HttpClientRequest.get(apiUrl).pipe(
-        HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
-        HttpClientRequest.setUrlParams({
-          limit: Option.getOrUndefined(limit),
-          published: Option.getOrUndefined(published),
-          status: Option.getOrUndefined(status),
-        }),
-      );
-      const response = yield* client.execute(request);
-      yield* Console.log(yield* response.text);
-    }).pipe(
+    HttpClientRequest.get(apiUrl).pipe(
+      HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
+      HttpClientRequest.setUrlParams({
+        limit: Option.getOrUndefined(limit),
+        published: Option.getOrUndefined(published),
+        status: Option.getOrUndefined(status),
+      }),
+      runRequest,
       Effect.withSpan("posts.list"),
-      Effect.mapError(
-        (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
-      ),
     ),
 ).pipe(
   Command.withDescription(
@@ -168,20 +170,18 @@ const createPost = Command.make(
     ),
   },
   ({ baseUrl: apiUrl, body, user }) =>
-    Effect.gen(function* submitPost() {
-      const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
-      const request = HttpClientRequest.post(apiUrl).pipe(
-        HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
-        // Schema-decoded JSON strings, booleans and arrays remain JSON-serializable.
-        HttpClientRequest.bodyJsonUnsafe(body),
-      );
-      const response = yield* client.execute(request);
-      yield* Console.log(yield* response.text);
-    }).pipe(
-      Effect.withSpan("posts.create"),
+    HttpClientRequest.post(apiUrl).pipe(
+      HttpClientRequest.appendUrl(`/users/${encodeURIComponent(user)}/posts`),
+      HttpClientRequest.bodyJson(body),
       Effect.mapError(
-        (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
+        (cause) =>
+          new CliError.UserError({
+            cause,
+            userMessage: "The request body could not be encoded as JSON. Check the body values.",
+          }),
       ),
+      Effect.flatMap(runRequest),
+      Effect.withSpan("posts.create"),
     ),
 ).pipe(Command.withDescription("Create a post without supplying defaults for omitted fields."));
 
@@ -206,20 +206,12 @@ const listFiles = Command.make(
     ),
   },
   ({ baseUrl: apiUrl, post, user }) =>
-    Effect.gen(function* fetchFiles() {
-      const client = HttpClient.filterStatusOk(yield* HttpClient.HttpClient);
-      const request = HttpClientRequest.get(apiUrl).pipe(
-        HttpClientRequest.appendUrl(
-          `/users/${encodeURIComponent(user)}/posts/${encodeURIComponent(post)}/files`,
-        ),
-      );
-      const response = yield* client.execute(request);
-      yield* Console.log(yield* response.text);
-    }).pipe(
-      Effect.withSpan("posts.files.list"),
-      Effect.mapError(
-        (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
+    HttpClientRequest.get(apiUrl).pipe(
+      HttpClientRequest.appendUrl(
+        `/users/${encodeURIComponent(user)}/posts/${encodeURIComponent(post)}/files`,
       ),
+      runRequest,
+      Effect.withSpan("posts.files.list"),
     ),
 ).pipe(Command.withDescription("List the files attached to a post."));
 
