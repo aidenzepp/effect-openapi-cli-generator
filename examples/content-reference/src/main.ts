@@ -5,24 +5,8 @@ import { CliError, Command, Flag } from "effect/cli";
 import type { HttpClientError } from "effect/http";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-const BaseUrl = Schema.URLFromString.check(
-  Schema.makeFilter((url) => url.protocol === "http:" || url.protocol === "https:", {
-    message: "Use HTTP or HTTPS for the API base URL.",
-  }),
-  Schema.makeFilter((url) => !url.username, {
-    message: "Remove the username from the API base URL.",
-  }),
-  Schema.makeFilter((url) => !url.password, {
-    message: "Remove the password from the API base URL.",
-  }),
-  Schema.makeFilter((url) => !url.search, {
-    message: "Remove the query string from the API base URL.",
-  }),
-  Schema.makeFilter((url) => !url.hash, { message: "Remove the fragment from the API base URL." }),
-);
-
 /**
- * Exposes only the static check messages above; malformed URL issues receive a
+ * Exposes only the static flag check messages; malformed URL issues receive a
  * safe fallback instead of the native formatter's potentially sensitive input.
  *
  * @see https://github.com/Effect-TS/effect/blob/effect%404.0.3/packages/effect/src/SchemaIssue.ts
@@ -39,7 +23,25 @@ const formatBaseUrlIssue = SchemaIssue.makeFormatterStandardSchemaV1({
  */
 const baseUrl = Flag.String("base-url").pipe(
   Flag.mapEffect((value) =>
-    Schema.decodeUnknownEffect(BaseUrl)(value).pipe(
+    Schema.decodeUnknownEffect(
+      Schema.URLFromString.check(
+        Schema.makeFilter((url) => url.protocol === "http:" || url.protocol === "https:", {
+          message: "Use HTTP or HTTPS for the API base URL.",
+        }),
+        Schema.makeFilter((url) => !url.username, {
+          message: "Remove the username from the API base URL.",
+        }),
+        Schema.makeFilter((url) => !url.password, {
+          message: "Remove the password from the API base URL.",
+        }),
+        Schema.makeFilter((url) => !url.search, {
+          message: "Remove the query string from the API base URL.",
+        }),
+        Schema.makeFilter((url) => !url.hash, {
+          message: "Remove the fragment from the API base URL.",
+        }),
+      ),
+    )(value).pipe(
       Effect.mapError(
         (cause) =>
           new CliError.UserError({
@@ -74,31 +76,39 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
     }),
   );
 
-const PathId = Schema.NonEmptyString.check(
-  Schema.makeFilter((value) => value !== "." && value !== "..", {
-    message: "Use a nonempty identifier other than . or ..",
-  }),
-);
-
 const userFlag = Flag.String("user").pipe(
-  Flag.withSchema(PathId),
+  Flag.withSchema(
+    Schema.NonEmptyString.check(
+      Schema.makeFilter((value) => value !== "." && value !== "..", {
+        message: "Use a nonempty identifier other than . or ..",
+      }),
+    ),
+  ),
   Flag.withDescription("The owner of the posts."),
 );
 
 const postFlag = Flag.String("post").pipe(
-  Flag.withSchema(PathId),
+  Flag.withSchema(
+    Schema.NonEmptyString.check(
+      Schema.makeFilter((value) => value !== "." && value !== "..", {
+        message: "Use a nonempty identifier other than . or ..",
+      }),
+    ),
+  ),
   Flag.withDescription("The post whose files should be listed."),
 );
 
-const CreatePost = Schema.Struct({
-  published: Schema.optionalKey(Schema.Boolean),
-  tags: Schema.optionalKey(Schema.Array(Schema.String)),
-  title: Schema.NonEmptyString,
-});
-
 const bodyFlag = Flag.String("body").pipe(
   Flag.mapEffect((value) =>
-    Schema.decodeUnknownEffect(Schema.fromJsonString(CreatePost))(value, {
+    Schema.decodeUnknownEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          published: Schema.optionalKey(Schema.Boolean),
+          tags: Schema.optionalKey(Schema.Array(Schema.String)),
+          title: Schema.NonEmptyString,
+        }),
+      ),
+    )(value, {
       onExcessProperty: "error",
     }).pipe(
       Effect.mapError(
