@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trace Effect"
+  short_description: "Trace Effect operations and diagnose latency"
+  default_prompt: "Use $trace-effect to implement or review meaningful nested spans, structured logs, and preserved error causes in this Effect application."

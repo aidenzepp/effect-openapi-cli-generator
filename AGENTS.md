@@ -16,3 +16,12 @@ Read README.md and docs/project.md first. This repository is a foundation for an
 ## Review workflow
 
 Keep changes local for user review. Do not push, publish, or deploy without explicit approval for that action.
+
+## Repository skills
+
+- Use `.agents/skills/conventional-commits/SKILL.md` when staging or committing.
+- Use `.agents/skills/document-code/SKILL.md` when writing or reviewing code; keep JSDoc multiline and imports contiguous.
+- Use `.agents/skills/effect-design/SKILL.md` when writing or reviewing Effect code, schemas, or configuration composition. Read its labeled examples and inspect installed APIs before building custom equivalents. Name selected native capabilities and justify custom glue in the handoff.
+- Before writing Effect code, read `node_modules/effect/AGENTS.md` completely and follow relevant links; consult installed source for uncovered APIs and preserve pinned versions.
+- Use `.agents/skills/trace-effect/SKILL.md` when changing effectful operations or reviewing observability. Trace meaningful operations and external requests; review coverage without tests for every span or log.
+- Use `.agents/skills/error-messages/SKILL.md` when changing caller-facing errors. Preserve the existing typed library and CLI error contracts; generic payload examples do not require a separate envelope.

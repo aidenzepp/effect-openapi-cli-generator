@@ -20,12 +20,12 @@ const effectLogStatement = {
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: ["bun.lock", "src/core/runtime-source.generated.ts"],
+    ignorePatterns: [".agents/**", "bun.lock", "src/core/runtime-source.generated.ts"],
     jsdoc: { commentLineStrategy: "multiline", lineWrappingStyle: "balance" },
   },
   lint: {
     extends: [core, antiSlop],
-    ignorePatterns: ["dist/**", "src/core/runtime-source.generated.ts"],
+    ignorePatterns: ["dist/**", ".agents/**", "src/core/runtime-source.generated.ts"],
     jsPlugins: ["./tools/lint-plugin.mjs", "@stylistic/eslint-plugin"],
     rules: {
       "@stylistic/padding-line-between-statements": [

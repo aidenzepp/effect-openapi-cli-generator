@@ -1,0 +1,4 @@
+interface:
+  display_name: "Effect Design"
+  short_description: "Design readable Effect code with native capabilities"
+  default_prompt: "Use $effect-design to write or review Effect code with native Effect, CLI, and Node platform capabilities, schema-backed boundaries, typed failures, readable composition, and shared configuration derived from its owning source."
