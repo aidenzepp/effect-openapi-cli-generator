@@ -3,15 +3,16 @@ import { mkdtemp, writeFile, rm, lstat, readFile, symlink } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
 const invoke = async (args: string[]) => {
   const child = Bun.spawn([process.execPath, "src/cli.ts", ...args], {
-    stdout: "pipe",
     stderr: "pipe",
+    stdout: "pipe",
   });
   return {
     code: await child.exited,
-    out: await new Response(child.stdout).text(),
     err: await new Response(child.stderr).text(),
+    out: await new Response(child.stdout).text(),
   };
 };
 test("native help and required flags", async () => {
@@ -31,10 +32,10 @@ test("malformed input yields one useful diagnostic and no output", async () => {
       ]);
       expect(result.code).not.toBe(0);
       expect(result.err.trim().split("\n")).toHaveLength(1);
-      expect(await lstat(join(root, "out")).catch(() => undefined)).toBeUndefined();
+      expect(await lstat(join(root, "out")).catch(() => {})).toBeUndefined();
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { force: true, recursive: true });
   }
 });
 test("optional name defaults from title", async () => {
@@ -43,15 +44,15 @@ test("optional name defaults from title", async () => {
     await writeFile(
       join(root, "input.json"),
       JSON.stringify({
-        openapi: "3.1.0",
         info: { title: "Tiny API", version: "1" },
+        openapi: "3.1.0",
         paths: {
           "/pets": {
             get: {
               operationId: "listPets",
+              responses: { "200": { description: "OK" } },
               "x-fern-sdk-group-name": "pets",
               "x-fern-sdk-method-name": "list",
-              responses: { "200": { description: "OK" } },
             },
           },
         },
@@ -65,11 +66,11 @@ test("optional name defaults from title", async () => {
     ]);
     expect(result.err).toBe("");
     expect(result.code).toBe(0);
-    expect(JSON.parse(await readFile(join(root, "out/package.json"), "utf8")).name).toBe(
+    expect(JSON.parse(await readFile(join(root, "out/package.json"), "utf-8")).name).toBe(
       "tiny-api",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { force: true, recursive: true });
   }
 });
 
@@ -78,21 +79,21 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
   try {
     const build = await Bun.build({
       entrypoints: ["src/cli.ts"],
-      outdir: root,
       naming: "cli.mjs",
-      target: "node",
+      outdir: root,
       packages: "external",
+      target: "node",
     });
     expect(build.success).toBe(true);
     await symlink(resolve("node_modules"), join(root, "node_modules"), "dir");
     const entry = join(root, "generator");
     await symlink(join(root, "cli.mjs"), entry);
     const runNode = async (args: string[]) => {
-      const child = Bun.spawn(["node", ...args], { stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn(["node", ...args], { stderr: "pipe", stdout: "pipe" });
       return {
         code: await child.exited,
-        out: await new Response(child.stdout).text(),
         err: await new Response(child.stderr).text(),
+        out: await new Response(child.stdout).text(),
       };
     };
     const help = await runNode([entry, "--help"]);
@@ -102,15 +103,15 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
     await writeFile(
       input,
       JSON.stringify({
-        openapi: "3.1.0",
         info: { title: "Symlink API", version: "1" },
+        openapi: "3.1.0",
         paths: {
           "/pets": {
             get: {
               operationId: "listPets",
+              responses: { "200": { description: "OK" } },
               "x-fern-sdk-group-name": "pets",
               "x-fern-sdk-method-name": "list",
-              responses: { "200": { description: "OK" } },
             },
           },
         },
@@ -119,7 +120,7 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
     const generated = await runNode([entry, "--input", input, "--output", join(root, "out")]);
     expect(generated.err).toBe("");
     expect(generated.code).toBe(0);
-    expect(JSON.parse(await readFile(join(root, "out/package.json"), "utf8")).name).toBe(
+    expect(JSON.parse(await readFile(join(root, "out/package.json"), "utf-8")).name).toBe(
       "symlink-api",
     );
     const imported = await runNode([
@@ -131,6 +132,6 @@ test("Node symlink entry runs help and generation while imports stay inert", asy
     expect(imported.err).toBe("");
     expect(imported.out).toBe("imported\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { force: true, recursive: true });
   }
 });

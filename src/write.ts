@@ -3,7 +3,7 @@ import { OutputError } from "./errors.js";
 import type { GeneratedApplication } from "./model.js";
 
 export const writeApplication = (application: GeneratedApplication, output: string) =>
-  Effect.gen(function* () {
+  Effect.gen(function* writeApplicationEffect1() {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const target = path.resolve(output);
@@ -18,21 +18,21 @@ export const writeApplication = (application: GeneratedApplication, output: stri
       ) {
         return yield* new OutputError({
           code: "io",
-          path: file.path,
           message: "Generated file path must be a safe relative path",
+          path: file.path,
         });
       }
     }
     const io = (error: { readonly message: string }) =>
-      new OutputError({ code: "io", path: target, message: error.message });
+      new OutputError({ code: "io", message: error.message, path: target });
     yield* Effect.acquireUseRelease(
       fs.makeDirectory(target).pipe(
         Effect.mapError(
           (error) =>
             new OutputError({
               code: error.reason._tag === "AlreadyExists" ? "exists" : "io",
-              path: target,
               message: error.message,
+              path: target,
             }),
         ),
       ),
@@ -40,7 +40,7 @@ export const writeApplication = (application: GeneratedApplication, output: stri
         Effect.forEach(
           application.files,
           (file) =>
-            Effect.gen(function* () {
+            Effect.gen(function* writeApplicationEffect2() {
               const destination = path.join(target, file.path);
               yield* fs.makeDirectory(path.dirname(destination), { recursive: true });
               yield* fs.writeFileString(destination, file.content, { flag: "wx" });

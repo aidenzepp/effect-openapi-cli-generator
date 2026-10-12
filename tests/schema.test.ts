@@ -18,17 +18,21 @@ test("retains nested wire keys, extras policy and documentation without applying
   const original = JSON.stringify(input);
   const result = await parse(input);
   expect(result.kind).toBe("object");
-  if (result.kind !== "object") return;
+  if (result.kind !== "object") {
+    return;
+  }
   expect(result.additionalProperties).toBe(false);
   expect(result.docs.description).toBe("outer");
   expect(result.properties[0]?.name).toBe("__proto__");
   expect(result.properties[0]?.required).toBe(true);
   const nested = result.properties[0]?.schema;
-  if (nested?.kind !== "object") throw new Error("expected object");
+  if (nested?.kind !== "object") {
+    throw new Error("expected object");
+  }
   expect(nested.additionalProperties).toBe(true);
   expect(nested.properties[0]?.schema.docs).toEqual({
     deprecated: true,
-    externalDocs: { url: "https://example.test", description: "docs" },
+    externalDocs: { description: "docs", url: "https://example.test" },
   });
   expect(JSON.stringify(input)).toBe(original);
 });
@@ -48,9 +52,9 @@ test("resolves escaped and percent encoded own-property pointers without changin
 });
 
 test("shared references are not cycles but recursive references are", async () => {
-  const document = { defs: { text: { type: "string" }, loop: { $ref: "#/defs/loop" } } };
+  const document = { defs: { loop: { $ref: "#/defs/loop" }, text: { type: "string" } } };
   const result = await parse(
-    { type: "object", properties: { a: { $ref: "#/defs/text" }, b: { $ref: "#/defs/text" } } },
+    { properties: { a: { $ref: "#/defs/text" }, b: { $ref: "#/defs/text" } }, type: "object" },
     "3.1",
     document,
   );
@@ -76,43 +80,43 @@ test.each([
 });
 
 test("supports version-sensitive nullability and typed enums", async () => {
-  expect(await parse({ type: "string", nullable: true, enum: ["a", null] }, "3.0")).toMatchObject({
+  expect(await parse({ enum: ["a", null], nullable: true, type: "string" }, "3.0")).toMatchObject({
+    enum: ["a", null],
     kind: "string",
     nullable: true,
-    enum: ["a", null],
   });
-  expect(await parse({ type: ["null", "integer"], enum: [0, null] })).toMatchObject({
+  expect(await parse({ enum: [0, null], type: ["null", "integer"] })).toMatchObject({
+    enum: [0, null],
     kind: "integer",
     nullable: true,
-    enum: [0, null],
   });
   expect(await parse({ type: "null" })).toMatchObject({ kind: "null", nullable: true });
-  expect(await parse({ type: "array", items: { type: "boolean" } })).toMatchObject({
+  expect(await parse({ items: { type: "boolean" }, type: "array" })).toMatchObject({
+    items: { kind: "boolean" },
     kind: "array",
     nullable: false,
-    items: { kind: "boolean" },
   });
 });
 
 test.each([
-  [{ type: "string", minimum: 1 }, "/schema/minimum"],
-  [{ type: "string", format: "date" }, "/schema/format"],
-  [{ type: "object", additionalProperties: { type: "string" } }, "/schema/additionalProperties"],
-  [{ type: "object", required: ["missing"] }, "/schema/required/0"],
+  [{ minimum: 1, type: "string" }, "/schema/minimum"],
+  [{ format: "date", type: "string" }, "/schema/format"],
+  [{ additionalProperties: { type: "string" }, type: "object" }, "/schema/additionalProperties"],
+  [{ required: ["missing"], type: "object" }, "/schema/required/0"],
   [
-    { type: "object", required: ["a", "a"], properties: { a: { type: "string" } } },
+    { properties: { a: { type: "string" } }, required: ["a", "a"], type: "object" },
     "/schema/required/1",
   ],
-  [{ type: "string", nullable: true }, "/schema/nullable"],
+  [{ nullable: true, type: "string" }, "/schema/nullable"],
   [{ type: ["string", "number"] }, "/schema/type"],
-  [{ type: "integer", enum: [1.5] }, "/schema/enum/0"],
-  [{ type: "string", enum: [null] }, "/schema/enum/0"],
-  [{ type: "string", enum: ["a", "a"] }, "/schema/enum/1"],
-  [{ type: "object", enum: [{}] }, "/schema/enum"],
+  [{ enum: [1.5], type: "integer" }, "/schema/enum/0"],
+  [{ enum: [null], type: "string" }, "/schema/enum/0"],
+  [{ enum: ["a", "a"], type: "string" }, "/schema/enum/1"],
+  [{ enum: [{}], type: "object" }, "/schema/enum"],
   [{ type: "array" }, "/schema/items"],
-  [{ type: "string", properties: {} }, "/schema/properties"],
+  [{ properties: {}, type: "string" }, "/schema/properties"],
   [
-    { type: "object", properties: { "a/b": { type: "number", maximum: 2 } } },
+    { properties: { "a/b": { maximum: 2, type: "number" } }, type: "object" },
     "/schema/properties/a~1b/maximum",
   ],
   [true, "/schema"],
@@ -122,7 +126,7 @@ test.each([
 });
 
 test("rejects validation siblings on refs while retaining descriptive siblings", async () => {
-  const document = { defs: { text: { type: "string", description: "base" } } };
+  const document = { defs: { text: { description: "base", type: "string" } } };
   expect(await parse({ $ref: "#/defs/text", description: "local" }, "3.1", document)).toMatchObject(
     { docs: { description: "local" } },
   );

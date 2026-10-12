@@ -8,13 +8,16 @@ const literal = (value: unknown) => JSON.stringify(value);
 const description = (docs: Documentation) =>
   [docs.title, docs.description].filter(Boolean).join("\n");
 const comment = (docs: Documentation): string => {
-  const escape = (text: string) => text.replaceAll("*/", "*\\/").replace(/^\s*@/gm, "\\@");
+  const escape = (text: string) => text.replaceAll("*/", "*\\/").replaceAll(/^\s*@/gm, "\\@");
   const lines = description(docs).split("\n").filter(Boolean).map(escape);
-  if (docs.deprecated) lines.push("@deprecated");
-  if (docs.externalDocs)
+  if (docs.deprecated) {
+    lines.push("@deprecated");
+  }
+  if (docs.externalDocs) {
     lines.push(
       `@see ${escape(docs.externalDocs.url)} ${escape(docs.externalDocs.description ?? "")}`,
     );
+  }
   return lines.length ? `/**\n${lines.map((line) => ` * ${line}`).join("\n")}\n */\n` : "";
 };
 const schemaSource = (schema: WireSchema): string => {
@@ -33,23 +36,27 @@ const schemaSource = (schema: WireSchema): string => {
         : struct;
       break;
     }
-    case "array":
+    case "array": {
       expression = `Schema.Array(${schemaSource(schema.items)})`;
       break;
+    }
     default: {
       const names = {
-        string: "String",
         boolean: "Boolean",
         integer: "Int",
-        number: "Finite",
         null: "Null",
+        number: "Finite",
+        string: "String",
       };
       if (schema.enum) {
         const values = schema.enum.filter((value) => value !== null);
         expression = values.length === 0 ? "Schema.Null" : `Schema.Literals(${literal(values)})`;
-        if (values.length > 0 && schema.enum.includes(null))
+        if (values.length > 0 && schema.enum.includes(null)) {
           expression = `Schema.NullOr(${expression})`;
-      } else expression = `Schema.${names[schema.kind]}`;
+        }
+      } else {
+        expression = `Schema.${names[schema.kind]}`;
+      }
     }
   }
   return schema.nullable && !("enum" in schema && schema.enum)
@@ -59,22 +66,26 @@ const schemaSource = (schema: WireSchema): string => {
 const parameterSource = (parameter: Parameter): string => {
   const api = parameter.binding === "argument" ? "Argument" : "Flag";
   const name = literal(parameter.flagName);
-  const schema = parameter.schema;
+  const { schema } = parameter;
   let expression: string;
-  if (schema.kind === "boolean")
+  if (schema.kind === "boolean") {
     expression = `${api}.Literals(${name}, ["true", "false"]).pipe(${api}.map((value) => value === "true"))`;
-  else if (schema.kind === "string" && schema.enum)
+  } else if (schema.kind === "string" && schema.enum) {
     expression = `${api}.Literals(${name}, ${literal(schema.enum)})`;
-  else
+  } else {
     expression = `${api}.${schema.kind === "integer" ? "Int" : schema.kind === "number" ? "Finite" : "String"}(${name})`;
-  if (description(parameter.docs))
+  }
+  if (description(parameter.docs)) {
     expression += `.pipe(${api}.withDescription(${literal(description(parameter.docs))}))`;
-  if (!parameter.required) expression += ".pipe(Flag.optional)";
+  }
+  if (!parameter.required) {
+    expression += ".pipe(Flag.optional)";
+  }
   return expression;
 };
 
 export const emit = (model: ApiModel, options?: GenerateOptions) =>
-  Effect.gen(function* () {
+  Effect.gen(function* emitEffect1() {
     const name = yield* resolveName(model.title, options);
     const lines = [
       "#!/usr/bin/env node",
@@ -88,7 +99,8 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
     const leaves = new Map<string, string>();
     for (const [index, operation] of model.operations.entries()) {
       const entries = operation.parameters.map((parameter, position) => {
-        const identifier = `parameter${parameterIndex++}`;
+        const identifier = `parameter${parameterIndex}`;
+        parameterIndex += 1;
         lines.push(
           `${comment(parameter.docs)}const ${identifier} = ${parameterSource(parameter)};`,
         );
@@ -111,27 +123,26 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
       ];
       for (const [position, parameter] of operation.parameters.entries()) {
         const value = `input.value${position}`;
-        if (parameter.location === "path")
+        if (parameter.location === "path") {
           statements.push(
             `path = path.replace(${literal(`{${parameter.wireName}}`)}, yield* pathValue(${value}));`,
           );
-        else if (parameter.required)
+        } else if (parameter.required) {
           statements.push(`query.append(${literal(parameter.wireName)}, String(${value}));`);
-        else
+        } else {
           statements.push(
             `if (Option.isSome(${value})) query.append(${literal(parameter.wireName)}, String(${value}.value));`,
           );
+        }
       }
       statements.push(
         "const suffix = query.toString();",
         'const url = base + path + (suffix ? "?" + suffix : "");',
-      );
-      statements.push(
         operation.body
           ? `const body = yield* readBody(input, ${operation.body.required}, schema${index});`
           : "const body = Option.none();",
+        `yield* executeRequest(${literal(operation.method)}, url, body);`,
       );
-      statements.push(`yield* executeRequest(${literal(operation.method)}, url, body);`);
       lines.push(
         `${comment(operation.docs)}const operation${index} = Command.make(${literal(operation.commandPath.at(-1))}, {${entries.join(",")}}, (${entries.length ? "input" : ""}) => Effect.gen(function* () {${statements.join("\n")}}).pipe(Effect.mapError((cause) => new CliError.UserError({cause, userMessage: cause.message})))).pipe(Command.withDescription(${literal(description(operation.docs))}));`,
       );
@@ -162,38 +173,38 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
     );
     return yield* formatApplication({
       files: [
-        { path: "src/main.ts", content: lines.join("\n\n") },
-        { path: "src/runtime.ts", content: runtimeSource },
+        { content: lines.join("\n\n"), path: "src/main.ts" },
+        { content: runtimeSource, path: "src/runtime.ts" },
         {
-          path: "package.json",
           content: literal({
-            name,
-            version: "0.0.0",
-            private: true,
-            type: "module",
             bin: { [name]: "./dist/main.js" },
-            scripts: { build: "tsc -p tsconfig.json", start: "node dist/main.js" },
             dependencies: { "@effect/platform-node": "4.0.3", effect: "4.0.3" },
-            devDependencies: { typescript: "7.0.2", "@types/node": "26.6.4" },
+            devDependencies: { "@types/node": "26.6.4", typescript: "7.0.2" },
+            name,
+            private: true,
+            scripts: { build: "tsc -p tsconfig.json", start: "node dist/main.js" },
+            type: "module",
+            version: "0.0.0",
           }),
+          path: "package.json",
         },
         {
-          path: "tsconfig.json",
           content: literal({
             compilerOptions: {
-              strict: true,
-              target: "ES2022",
+              declaration: false,
               module: "NodeNext",
               moduleResolution: "NodeNext",
-              rootDir: "src",
               outDir: "dist",
-              declaration: false,
+              rootDir: "src",
+              strict: true,
+              target: "ES2022",
               types: ["node"],
             },
             include: ["src/**/*.ts"],
           }),
+          path: "tsconfig.json",
         },
-        { path: ".gitignore", content: "node_modules/\ndist/\n" },
+        { content: "node_modules/\ndist/\n", path: ".gitignore" },
       ],
     });
   });

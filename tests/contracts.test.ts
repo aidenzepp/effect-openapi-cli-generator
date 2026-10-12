@@ -8,9 +8,9 @@ test.each(["invalid_input", "unsupported", "invalid_options", "format"] as const
   async (code) => {
     const diagnostic = {
       code,
+      hint: "Use an explicit supported type",
       location: "/paths/~1reports/post/requestBody",
       message: "The request schema is not supported",
-      hint: "Use an explicit supported type",
     };
     const error = new GenerationError(diagnostic);
     const failure = await Effect.runPromise(Effect.flip(Effect.fail(error)));
@@ -26,9 +26,9 @@ test.each(["invalid_input", "unsupported", "invalid_options", "format"] as const
 test("retains an empty hint when no alternative exists", () => {
   const error = new GenerationError({
     code: "invalid_input",
+    hint: "",
     location: "",
     message: "Expected an OpenAPI object",
-    hint: "",
   });
 
   expect(error.location).toBe("");

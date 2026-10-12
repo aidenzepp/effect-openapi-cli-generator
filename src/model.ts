@@ -10,17 +10,17 @@ export type WireSchema = { readonly docs: Documentation } & (
   | {
       readonly kind: "string" | "boolean" | "integer" | "number" | "null";
       readonly nullable: boolean;
-      readonly enum: ReadonlyArray<JsonScalar> | undefined;
+      readonly enum: readonly JsonScalar[] | undefined;
     }
   | { readonly kind: "array"; readonly nullable: boolean; readonly items: WireSchema }
   | {
       readonly kind: "object";
       readonly nullable: boolean;
-      readonly properties: ReadonlyArray<{
+      readonly properties: readonly {
         readonly name: string;
         readonly required: boolean;
         readonly schema: WireSchema;
-      }>;
+      }[];
       readonly additionalProperties: boolean;
     }
 );
@@ -34,21 +34,21 @@ export interface Parameter {
   readonly binding: "flag" | "argument";
 }
 export interface Operation {
-  readonly commandPath: ReadonlyArray<string>;
+  readonly commandPath: readonly string[];
   readonly operationId: string;
   readonly method: HttpMethod;
   readonly path: string;
-  readonly parameters: ReadonlyArray<Parameter>;
+  readonly parameters: readonly Parameter[];
   readonly docs: Documentation;
   readonly body: { readonly required: boolean; readonly schema: WireSchema } | undefined;
 }
 export interface ApiModel {
   readonly title: string;
   readonly description: string | undefined;
-  readonly operations: ReadonlyArray<Operation>;
+  readonly operations: readonly Operation[];
 }
 export interface CommandProjection {
-  readonly commandPath: ReadonlyArray<string>;
+  readonly commandPath: readonly string[];
 }
 
 export interface GenerateOptions {
@@ -59,5 +59,5 @@ export interface GeneratedFile {
   readonly content: string;
 }
 export interface GeneratedApplication {
-  readonly files: ReadonlyArray<GeneratedFile>;
+  readonly files: readonly GeneratedFile[];
 }

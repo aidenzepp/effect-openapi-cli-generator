@@ -37,8 +37,9 @@ describe("command metadata", () => {
     expect(project({ operationId: "get", [groupKey]: "reports", [aliasesKey]: [] })).toEqual([]);
   });
   test("missing or nonstring operation IDs and missing groups skip", () => {
-    for (const operation of [{}, { operationId: 5, [groupKey]: null }, { operationId: "get" }])
+    for (const operation of [{}, { operationId: 5, [groupKey]: null }, { operationId: "get" }]) {
       expect(project(operation)).toEqual([]);
+    }
   });
   test("method fallback follows final hyphen or underscore segment", () => {
     for (const [id, action] of [
@@ -46,7 +47,7 @@ describe("command metadata", () => {
       ["reports-fetch", "fetch"],
       ["reports_", "get"],
       ["", "get"],
-    ]) {
+    ] as const) {
       expect(project({ operationId: id, [groupKey]: "reports", [methodKey]: "" })).toEqual([
         { commandPath: ["reports", action] },
       ]);

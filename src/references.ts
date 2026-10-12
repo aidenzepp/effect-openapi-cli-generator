@@ -13,34 +13,38 @@ export const resolveReference = (
   { readonly value: unknown; readonly location: string; readonly activeRefs: ReadonlySet<string> },
   GenerationError
 > =>
-  Effect.gen(function* () {
+  Effect.gen(function* resolveReferenceEffect1() {
     const fail = (message: string) =>
       Effect.fail(
         new GenerationError({
           code: "unsupported",
+          hint: "Use an acyclic local #/... JSON Pointer reference.",
           location,
           message,
-          hint: "Use an acyclic local #/... JSON Pointer reference.",
         }),
       );
-    if (!ref.startsWith("#/"))
+    if (!ref.startsWith("#/")) {
       return yield* fail("Only local JSON Pointer references are supported.");
+    }
     const decoded = yield* Effect.try({
-      try: () => decodeURIComponent(ref.slice(1)),
       catch: () =>
         new GenerationError({
           code: "invalid_input",
+          hint: "Use a valid URI fragment.",
           location,
           message: "Invalid percent escape in reference.",
-          hint: "Use a valid URI fragment.",
         }),
+      try: () => decodeURIComponent(ref.slice(1)),
     });
     const tokens = decoded.slice(1).split("/");
-    if (tokens.some((token) => /~(?![01])/u.test(token)))
+    if (tokens.some((token) => /~(?![01])/u.test(token))) {
       return yield* fail("Invalid JSON Pointer escape.");
+    }
     const keys = tokens.map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
     const target = `/${keys.map(pointerSegment).join("/")}`;
-    if (activeRefs.has(target)) return yield* fail("Recursive references are unsupported.");
+    if (activeRefs.has(target)) {
+      return yield* fail("Recursive references are unsupported.");
+    }
     let value: unknown = document;
     for (const key of keys) {
       if (
@@ -48,9 +52,10 @@ export const resolveReference = (
         value === null ||
         !Object.hasOwn(value, key) ||
         (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/u.test(key))
-      )
+      ) {
         return yield* fail("Reference does not resolve to an own JSON property.");
+      }
       value = (value as Record<string, unknown>)[key];
     }
-    return { value, location: target, activeRefs: new Set([...activeRefs, target]) };
+    return { activeRefs: new Set([...activeRefs, target]), location: target, value };
   });

@@ -6,7 +6,7 @@ import type { GeneratedApplication } from "./model.js";
 export const formatApplication = (
   application: GeneratedApplication,
 ): Effect.Effect<GeneratedApplication, GenerationError> =>
-  Effect.gen(function* () {
+  Effect.gen(function* formatApplicationEffect1() {
     const files = [];
     for (const file of application.files) {
       if (!/\.(?:ts|json)$/.test(file.path)) {
@@ -14,27 +14,28 @@ export const formatApplication = (
         continue;
       }
       const result = yield* Effect.tryPromise({
+        catch: (cause) =>
+          new GenerationError({
+            code: "format",
+            hint: "",
+            location: file.path,
+            message: String(cause),
+          }),
         try: () =>
           format(file.path, file.content, {
             endOfLine: "lf",
             jsdoc: { commentLineStrategy: "multiline", lineWrappingStyle: "balance" },
           }),
-        catch: (cause) =>
-          new GenerationError({
-            code: "format",
-            location: file.path,
-            message: String(cause),
-            hint: "",
-          }),
       });
-      if (result.errors.length > 0)
+      if (result.errors.length > 0) {
         return yield* new GenerationError({
           code: "format",
+          hint: "",
           location: file.path,
           message: JSON.stringify(result.errors),
-          hint: "",
         });
-      files.push({ path: file.path, content: `${result.code.trimEnd()}\n` });
+      }
+      files.push({ content: `${result.code.trimEnd()}\n`, path: file.path });
     }
     return { files };
   });

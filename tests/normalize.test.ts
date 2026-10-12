@@ -4,8 +4,8 @@ import { normalize } from "../src/normalize.js";
 
 const operation = (extra: Record<string, unknown> = {}) => ({
   operationId: "things_get",
-  "x-fern-sdk-group-name": "things",
   responses: { "200": { description: "OK" } },
+  "x-fern-sdk-group-name": "things",
   ...extra,
 });
 const document = (
@@ -13,16 +13,16 @@ const document = (
   path = "/things",
   extra: Record<string, unknown> = {},
 ) => ({
-  openapi: "3.1.0",
   info: { title: "Things", version: "today" },
+  openapi: "3.1.0",
   paths: { [path]: { post: operation(op) } },
   ...extra,
 });
 const run = (value: unknown) => Effect.runSync(normalize(value));
 const fail = (value: unknown) => Effect.runSync(Effect.flip(normalize(value)));
 const parameter = (name: string, location = "query", type = "string") => ({
-  name,
   in: location,
+  name,
   required: location === "path",
   schema: { type },
 });
@@ -30,9 +30,8 @@ const parameter = (name: string, location = "query", type = "string") => ({
 test("preserves HTTP method, docs, parameter order, values and input", () => {
   const input = document(
     {
-      summary: "Get things",
-      description: "Details",
       deprecated: true,
+      description: "Details",
       externalDocs: { url: "https://example.com" },
       parameters: [
         parameter("itemId", "path"),
@@ -42,10 +41,11 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
       requestBody: {
         content: {
           "application/json": {
-            schema: { type: "object", properties: { value: { type: "boolean", default: false } } },
+            schema: { properties: { value: { default: false, type: "boolean" } }, type: "object" },
           },
         },
       },
+      summary: "Get things",
     },
     "/parents/{parentId}/things/{itemId}",
   );
@@ -64,15 +64,16 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
 });
 
 test("list and bulk actions keep all path parameters as flags", () => {
-  for (const action of ["list", "bulk", "bulk-delete"])
+  for (const action of ["list", "bulk", "bulk-delete"]) {
     expect(
       run(
         document(
-          { "x-fern-sdk-method-name": action, parameters: [parameter("id", "path")] },
+          { parameters: [parameter("id", "path")], "x-fern-sdk-method-name": action },
           "/things/{id}",
         ),
       ).operations[0]!.parameters[0]!.binding,
     ).toBe("flag");
+  }
 });
 
 test("operation parameters override path-item parameters", () => {
@@ -98,7 +99,7 @@ test("checks only selected requests and permits operation security override", ()
       paths: {
         ...input.paths,
         "/unused": {
-          get: { operationId: "unused", parameters: [{ in: "header" }], callbacks: {} },
+          get: { callbacks: {}, operationId: "unused", parameters: [{ in: "header" }] },
         },
       },
     }).operations,
@@ -110,12 +111,13 @@ test("rejects command duplicates and prefix conflicts", () => {
   for (const other of [
     operation(),
     operation({ "x-fern-sdk-group-name": "things.get", "x-fern-sdk-method-name": "child" }),
-  ])
+  ]) {
     expect(
       fail(
         document({}, "/things", { paths: { "/a": { post: operation() }, "/b": { post: other } } }),
       ).message,
     ).toContain("command");
+  }
 });
 
 test("rejects effective flag collisions including native negations", () => {
@@ -133,8 +135,9 @@ test("rejects effective flag collisions including native negations", () => {
     "noHelp",
     "noVersion",
     "noWizard",
-  ])
+  ]) {
     expect(fail(document({ parameters: [parameter(name)] })).location).toContain("parameters");
+  }
   expect(
     fail(document({ parameters: [parameter("fooBar"), parameter("foo_bar")] })).message,
   ).toContain("flag");
@@ -154,8 +157,9 @@ test("rejects unsupported request boundaries", () => {
     { parameters: [{ ...parameter("q"), allowReserved: true }] },
     { requestBody: { content: { "text/plain": { schema: { type: "string" } } } } },
     { responses: { "200": { description: "ok", links: {} } } },
-  ])
+  ]) {
     expect(fail(document(op)).code).toBe("unsupported");
+  }
 });
 
 test("rejects malformed paths, missing parameters, duplicate templates, and GET bodies", () => {
@@ -168,8 +172,9 @@ test("rejects malformed paths, missing parameters, duplicate templates, and GET 
     "/a b",
     "/a/{bad",
     "//host/a",
-  ])
+  ]) {
     expect(fail(document({}, path)).location).toContain("paths");
+  }
   expect(fail(document({}, "/a/{id}")).message).toContain("parameter");
   const body = { content: { "application/json": { schema: { type: "string" } } } };
   expect(
@@ -203,7 +208,7 @@ test("resolves reusable parameters and bodies and rejects ref siblings", () => {
       components: {
         parameters: { Q: parameter("q") },
         requestBodies: {
-          B: { required: true, content: { "application/json": { schema: { type: "string" } } } },
+          B: { content: { "application/json": { schema: { type: "string" } } }, required: true },
         },
       },
     },
@@ -221,8 +226,9 @@ test("rejects empty selection and malformed root", () => {
     {},
     document({}, "/a", { openapi: "2.0" }),
     document({}, "/a", { info: { title: "x" } }),
-  ])
+  ]) {
     expect(fail(value)._tag).toBe("GenerationError");
+  }
 });
 
 test("reports malformed reference documentation at the local pointer", () => {
@@ -242,8 +248,8 @@ test("reference documentation overrides target documentation", () => {
       parameters: [
         {
           $ref: "#/components/parameters/Q",
-          summary: "Local summary",
           description: "Local description",
+          summary: "Local summary",
         },
       ],
     },
@@ -251,7 +257,7 @@ test("reference documentation overrides target documentation", () => {
     {
       components: {
         parameters: {
-          Q: { ...parameter("q"), summary: "Target summary", description: "Target description" },
+          Q: { ...parameter("q"), description: "Target description", summary: "Target summary" },
         },
       },
     },

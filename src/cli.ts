@@ -11,28 +11,28 @@ export const generatorCommand = Command.make(
   "effect-openapi-cli-generator",
   {
     input: Flag.String("input"),
-    output: Flag.String("output"),
     name: Flag.String("name").pipe(Flag.optional),
+    output: Flag.String("output"),
   },
   ({ input, output, name }) =>
-    Effect.gen(function* () {
+    Effect.gen(function* generatorCommandEffect1() {
       const fs = yield* FileSystem.FileSystem;
       const text = yield* fs
         .readFileString(input)
         .pipe(
           Effect.mapError(
-            (error) => new OutputError({ code: "io", path: input, message: error.message }),
+            (error) => new OutputError({ code: "io", message: error.message, path: input }),
           ),
         );
       const document: unknown = yield* Effect.try({
-        try: () => JSON.parse(text) as unknown,
         catch: () =>
           new GenerationError({
             code: "invalid_input",
+            hint: "",
             location: input,
             message: "Input must be valid JSON",
-            hint: "",
           }),
+        try: () => JSON.parse(text) as unknown,
       });
       const application = yield* generate(
         document,
@@ -44,7 +44,7 @@ export const generatorCommand = Command.make(
 
 const invokedPath = process.argv[1];
 const isEntryPoint = invokedPath
-  ? await Effect.gen(function* () {
+  ? await Effect.gen(function* isEntryPointEffect2() {
       const fs = yield* FileSystem.FileSystem;
       const invoked = yield* fs.realPath(invokedPath);
       const module = yield* fs.realPath(fileURLToPath(import.meta.url));
