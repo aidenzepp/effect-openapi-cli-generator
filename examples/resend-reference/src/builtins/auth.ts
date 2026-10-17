@@ -34,32 +34,66 @@ export const HttpScheme = Schema.Struct({
 export const SecurityScheme = Schema.Union([ApiKeyScheme, HttpScheme]);
 
 /**
- * Basic credentials are redacted and obey HTTP Basic transport syntax: no
- * control characters or username colon. Password colons remain valid.
+ * HTTP Basic usernames exclude colons and ASCII control characters.
+ */
+// oxlint-disable-next-line no-control-regex -- HTTP Basic forbids ASCII control characters.
+const BasicUsername = Schema.String.check(Schema.isPattern(/^[^\u0000-\u001F\u007F:]*$/u));
+
+/**
+ * HTTP Basic passwords exclude ASCII control characters; colons remain valid.
+ */
+// oxlint-disable-next-line no-control-regex -- HTTP Basic forbids ASCII control characters.
+const BasicPassword = Schema.String.check(Schema.isPattern(/^[^\u0000-\u001F\u007F]*$/u));
+
+/**
+ * Redacted Basic credentials follow HTTP transport syntax, not API-specific rules.
  *
  * @see https://www.rfc-editor.org/rfc/rfc7617#section-2
  */
 export const BasicCredentials = Schema.Struct({
-  // oxlint-disable-next-line no-control-regex -- HTTP Basic forbids ASCII control characters.
-  password: Schema.Redacted(Schema.String.check(Schema.isPattern(/^[^\u0000-\u001F\u007F]*$/u))),
-  // oxlint-disable-next-line no-control-regex -- HTTP Basic forbids ASCII control characters.
-  username: Schema.Redacted(Schema.String.check(Schema.isPattern(/^[^\u0000-\u001F\u007F:]*$/u))),
+  password: Schema.Redacted(BasicPassword),
+  username: Schema.Redacted(BasicUsername),
 });
 
 /**
- * Apply native Basic authentication inside a typed failure boundary. The native
- * encoder rejects unsupported Unicode; failed credentials are never retained.
+ * Validate each Basic field through its native schema before encoding the pair.
+ * Unavailable credentials, invalid fields and encoder failures stay distinct;
+ * no failure retains credential values or raw native causes.
  */
 export const basicAuth =
   (credentials: typeof BasicCredentials.Type) => (request: HttpClientRequest.HttpClientRequest) =>
-    Schema.decodeUnknownEffect(BasicCredentials)(credentials, { reportInput: false }).pipe(
+    Effect.all({
+      password: Effect.try({
+        catch: () => new Errors.BasicAuthenticationError({ reason: "PasswordUnavailable" }),
+        try: () => Redacted.value(credentials.password),
+      }).pipe(
+        Effect.flatMap((value) =>
+          Schema.decodeUnknownEffect(BasicPassword)(value, { reportInput: false }).pipe(
+            Effect.mapError(
+              () => new Errors.BasicAuthenticationError({ reason: "PasswordInvalid" }),
+            ),
+          ),
+        ),
+      ),
+      username: Effect.try({
+        catch: () => new Errors.BasicAuthenticationError({ reason: "UsernameUnavailable" }),
+        try: () => Redacted.value(credentials.username),
+      }).pipe(
+        Effect.flatMap((value) =>
+          Schema.decodeUnknownEffect(BasicUsername)(value, { reportInput: false }).pipe(
+            Effect.mapError(
+              () => new Errors.BasicAuthenticationError({ reason: "UsernameInvalid" }),
+            ),
+          ),
+        ),
+      ),
+    }).pipe(
       Effect.flatMap((decoded) =>
         Effect.try({
-          catch: () => new Errors.AuthenticationError({ reason: "BasicEncoding" }),
+          catch: () => new Errors.BasicAuthenticationError({ reason: "Encoding" }),
           try: () => HttpClientRequest.basicAuth(request, decoded.username, decoded.password),
         }),
       ),
-      Effect.mapError(() => new Errors.AuthenticationError({ reason: "BasicEncoding" })),
     );
 
 /**
@@ -70,41 +104,63 @@ export const basicAuth =
 export const apiKey =
   (scheme: typeof ApiKeyScheme.Type, credential: Redacted.Redacted) =>
   (request: HttpClientRequest.HttpClientRequest) =>
-    Match.value(scheme.in).pipe(
-      Match.when("header", () =>
-        Effect.try({
-          catch: () => new Errors.AuthenticationError({ reason: "ApiKeyEncoding" }),
-          try: () => HttpClientRequest.setHeader(request, scheme.name, Redacted.value(credential)),
+    Effect.try({
+      catch: () =>
+        new Errors.ApiKeyAuthenticationError({
+          location: scheme.in,
+          reason: "CredentialUnavailable",
         }),
-      ),
-      Match.when("query", () =>
-        Effect.try({
-          catch: () => new Errors.AuthenticationError({ reason: "ApiKeyEncoding" }),
-          try: () =>
-            HttpClientRequest.setUrlParam(request, scheme.name, Redacted.value(credential)),
-        }),
-      ),
-      Match.when("cookie", () =>
-        Effect.try({
-          catch: () => new Errors.AuthenticationError({ reason: "ApiKeyEncoding" }),
-          try: () =>
-            Result.all(
-              Object.entries({
-                ...Cookies.parseHeader(request.headers.cookie ?? ""),
-                [scheme.name]: Redacted.value(credential),
-              }).map(([name, value]) => Cookies.makeCookie(name, value)),
-            ),
-        }).pipe(
-          Effect.flatMap(Effect.fromResult),
-          Effect.map((cookies) =>
-            HttpClientRequest.setHeader(
-              request,
-              "cookie",
-              Cookies.toCookieHeader(Cookies.fromIterable(cookies)),
+      try: () => Redacted.value(credential),
+    }).pipe(
+      Effect.flatMap((value) =>
+        Match.value(scheme.in).pipe(
+          Match.when("header", () =>
+            Effect.try({
+              catch: () =>
+                new Errors.ApiKeyAuthenticationError({ location: "header", reason: "Preparation" }),
+              try: () => HttpClientRequest.setHeader(request, scheme.name, value),
+            }),
+          ),
+          Match.when("query", () =>
+            Effect.try({
+              catch: () =>
+                new Errors.ApiKeyAuthenticationError({ location: "query", reason: "Preparation" }),
+              try: () => HttpClientRequest.setUrlParam(request, scheme.name, value),
+            }),
+          ),
+          Match.when("cookie", () =>
+            Effect.try({
+              catch: () =>
+                new Errors.ApiKeyAuthenticationError({ location: "cookie", reason: "Encoding" }),
+              try: () =>
+                Result.all(
+                  Object.entries({
+                    ...Cookies.parseHeader(request.headers.cookie ?? ""),
+                    [scheme.name]: value,
+                  }).map(([name, entry]) => Cookies.makeCookie(name, entry)),
+                ),
+            }).pipe(
+              Effect.flatMap((result) =>
+                Effect.fromResult(result).pipe(
+                  Effect.mapError(
+                    () =>
+                      new Errors.ApiKeyAuthenticationError({
+                        location: "cookie",
+                        reason: "InvalidConfiguration",
+                      }),
+                  ),
+                ),
+              ),
+              Effect.map((cookies) =>
+                HttpClientRequest.setHeader(
+                  request,
+                  "cookie",
+                  Cookies.toCookieHeader(Cookies.fromIterable(cookies)),
+                ),
+              ),
             ),
           ),
-          Effect.mapError(() => new Errors.AuthenticationError({ reason: "ApiKeyEncoding" })),
+          Match.exhaustive,
         ),
       ),
-      Match.exhaustive,
     );

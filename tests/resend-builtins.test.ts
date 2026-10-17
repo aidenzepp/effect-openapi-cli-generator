@@ -66,8 +66,9 @@ test("native bearer and checked basic authentication retain wire behavior and re
       })(HttpClientRequest.get("https://example.test")),
     ),
   );
-  expect(error).toBeInstanceOf(Errors.AuthenticationError);
-  expect(error.reason).toBe("BasicEncoding");
+  expect(error).toBeInstanceOf(Errors.BasicAuthenticationError);
+  expect(error.reason).toBe("Encoding");
+  expect(Errors.toCliError(error).userMessage).toContain("Basic authentication encoding");
   expect(JSON.stringify(error)).not.toContain("private-secret");
   expect(Errors.toCliError(error).userMessage).not.toContain("private-secret");
 });
@@ -100,17 +101,24 @@ test("API keys honor explicit names and locations, including cookie preservation
   await Promise.all(
     (
       [
-        ["invalid;name", "private-secret"],
-        ["key", "\uD800"],
+        ["invalid;name", "private-secret", "InvalidConfiguration"],
+        ["key", "\uD800", "Encoding"],
       ] as const
-    ).map(async ([name, value]) => {
+    ).map(async ([name, value, reason]) => {
       const error = await Effect.runPromise(
         Effect.flip(
           Auth.apiKey({ in: "cookie", name, type: "apiKey" }, Redacted.make(value))(request),
         ),
       );
-      expect(error).toBeInstanceOf(Errors.AuthenticationError);
+      expect(error).toBeInstanceOf(Errors.ApiKeyAuthenticationError);
+      expect(error.location).toBe("cookie");
+      expect(error.reason).toBe(reason);
+      expect(Errors.toCliError(error).userMessage).toContain("cookie authentication");
+      expect(Errors.toCliError(error).userMessage).toContain(
+        reason === "Encoding" ? "valid Unicode" : "configured name",
+      );
       expect(JSON.stringify(error)).not.toContain("private-secret");
+      expect(JSON.stringify(error)).not.toContain("invalid;name");
     }),
   );
 });
@@ -142,11 +150,13 @@ test("literal path failures remain tagged until the CLI boundary", async () => {
 
 test("Basic rejects ambiguous or controlled credentials but permits password colons", async () => {
   await Promise.all(
-    [
-      { password: "secret", username: "alice:admin" },
-      { password: "secret\n", username: "alice" },
-      { password: "secret", username: "alice\u007F" },
-    ].map(async ({ password, username }) => {
+    (
+      [
+        { password: "secret", reason: "UsernameInvalid", username: "alice:admin" },
+        { password: "secret\n", reason: "PasswordInvalid", username: "alice" },
+        { password: "secret", reason: "UsernameInvalid", username: "alice\u007F" },
+      ] as const
+    ).map(async ({ password, reason, username }) => {
       const error = await Effect.runPromise(
         Effect.flip(
           Auth.basicAuth({
@@ -155,8 +165,13 @@ test("Basic rejects ambiguous or controlled credentials but permits password col
           })(HttpClientRequest.get("https://example.test")),
         ),
       );
-      expect(error).toBeInstanceOf(Errors.AuthenticationError);
+      expect(error).toBeInstanceOf(Errors.BasicAuthenticationError);
+      expect(error.reason).toBe(reason);
+      expect(Errors.toCliError(error).userMessage).toContain(
+        reason === "UsernameInvalid" ? "username is invalid" : "password is invalid",
+      );
       expect(JSON.stringify(error)).not.toContain("secret");
+      expect(Errors.toCliError(error).userMessage).not.toContain("secret");
     }),
   );
   const request = await Effect.runPromise(
@@ -166,4 +181,57 @@ test("Basic rejects ambiguous or controlled credentials but permits password col
     })(HttpClientRequest.get("https://example.test")),
   );
   expect(request.headers.authorization).toBe("Basic YWxpY2U6YTpi");
+});
+
+test("erased API keys preserve location and report credential access rather than encoding", async () => {
+  const messages = await Promise.all(
+    (["header", "query", "cookie"] as const).map(async (location) => {
+      const credential = Redacted.make("private-erased-key");
+      Redacted.wipeUnsafe(credential);
+
+      const error = await Effect.runPromise(
+        Effect.flip(
+          Auth.apiKey(
+            { in: location, name: "private-key-name", type: "apiKey" },
+            credential,
+          )(HttpClientRequest.get("https://example.test")),
+        ),
+      );
+      expect(error).toBeInstanceOf(Errors.ApiKeyAuthenticationError);
+      expect(error.location).toBe(location);
+      expect(error.reason).toBe("CredentialUnavailable");
+      expect(JSON.stringify(error)).not.toContain("private-erased-key");
+
+      const message = Errors.toCliError(error).userMessage;
+      expect(message).toContain(`${location} authentication`);
+      expect(message).toContain("Supply the credential again");
+      expect(message).not.toContain("private-key-name");
+      expect(message).not.toContain("private-erased-key");
+
+      return message;
+    }),
+  );
+  expect(new Set(messages).size).toBe(3);
+});
+
+test("erased Basic credentials identify the missing field without storing secrets", async () => {
+  await Promise.all(
+    (["username", "password"] as const).map(async (field) => {
+      const credentials = {
+        password: Redacted.make("private-password"),
+        username: Redacted.make("private-username"),
+      };
+      Redacted.wipeUnsafe(credentials[field]);
+
+      const error = await Effect.runPromise(
+        Effect.flip(Auth.basicAuth(credentials)(HttpClientRequest.get("https://example.test"))),
+      );
+      expect(error).toBeInstanceOf(Errors.BasicAuthenticationError);
+      expect(error.reason).toBe(
+        field === "username" ? "UsernameUnavailable" : "PasswordUnavailable",
+      );
+      expect(Errors.toCliError(error).userMessage).toContain(`${field} is unavailable`);
+      expect(JSON.stringify(error)).not.toContain("private-");
+    }),
+  );
 });
