@@ -120,15 +120,11 @@ const docs = (
         return yield* fail(`${location}/${key}`, "Expected a string.");
       }
     }
-    if (Schema.is(Schema.String)(value.title)) {
-      result.title = value.title;
-    }
-
-    const description = [value.summary, value.description]
-      .filter((text): text is string => Schema.is(Schema.String)(text))
-      .join("\n");
-    if (Object.hasOwn(value, "summary") || Object.hasOwn(value, "description")) {
-      result.description = description;
+    for (const key of ["title", "summary", "description"] as const) {
+      const text = value[key];
+      if (Schema.is(Schema.String)(text)) {
+        result[key] = text;
+      }
     }
 
     if (Object.hasOwn(value, "deprecated")) {

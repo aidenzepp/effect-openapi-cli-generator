@@ -37,7 +37,6 @@ test("retains nested wire keys, extras policy and documentation without applying
 
   expect(nested.additionalProperties).toBe(true);
   expect(nested.properties[0]?.schema.docs).toEqual({
-    default: "x",
     deprecated: true,
     externalDocs: { description: "docs", url: "https://example.test" },
   });
@@ -151,23 +150,14 @@ test("rejects validation siblings on refs while retaining descriptive siblings",
   await failure({ type: ["string", "null"] }, "/schema/type", "3.0");
 });
 
-test("default annotations retain false, zero, empty, null and structured values with reference semantics", async () => {
+test("default annotations do not become generated documentation or values", async () => {
   await Promise.all(
-    [false, 0, "", null, [], { ["__proto__"]: false, nested: [0, ""] }].map(async (value) => {
-      const result = await parse({ default: value });
-      expect(result.docs.default).toEqual(value);
+    [false, 0, "", null, [], { nested: [0, ""] }].map(async (value) => {
+      const result = await parse({
+        default: value,
+        description: "Defaults to the authored value.",
+      });
+      expect(result.docs).toEqual({ description: "Defaults to the authored value." });
     }),
   );
-  const document = {
-    defs: {
-      Alias: { $ref: "#/defs/Base", default: "alias" },
-      Base: { default: "base", type: "string" },
-    },
-  };
-  const modern = await parse({ $ref: "#/defs/Alias", default: "local" }, "3.1", document);
-  const legacy = await parse({ $ref: "#/defs/Alias", default: "local" }, "3.0", document);
-  const prose = await parse({ description: "Defaults to daily." });
-  expect(modern.docs.default).toBe("local");
-  expect(legacy.docs.default).toBe("base");
-  expect(prose.docs.default).toBeUndefined();
 });

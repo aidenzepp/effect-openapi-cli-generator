@@ -1,4 +1,3 @@
-import { defaultHelp } from "./emit-help.js";
 import type { MultipartField, Operation } from "./model.js";
 import { parameterSource } from "./emit-flag.js";
 import { schemaSource } from "./emit-schema.js";
@@ -20,19 +19,7 @@ export const multipartFlagSource = (
   reference: (pointer: string) => string,
 ): string => {
   const required = requiredBody && field.required;
-  const help = [
-    description(field.schema.docs),
-    defaultHelp(
-      field.schema,
-      field.required,
-      "this field is still required when its body is supplied",
-    ),
-    field.kind !== "text" && field.schema.docs.default !== undefined
-      ? "Default applies to uploaded content; supply a local file path explicitly."
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const help = description(field.schema.docs);
   if (field.kind === "text") {
     return parameterSource(
       {
@@ -45,7 +32,6 @@ export const multipartFlagSource = (
         wireName: field.name,
       },
       reference,
-      help,
     );
   }
 

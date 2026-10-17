@@ -100,18 +100,9 @@ const invalid = (
 const documentation = (
   input: Schema.JsonObject,
   location: string,
-  version: "3.0" | "3.1",
 ): Effect.Effect<Documentation, GenerationError> =>
   Effect.gen(function* decodeSchemaDocumentation() {
     const docs: MutableDocumentation = {};
-    if (
-      !(version === "3.0" && Object.hasOwn(input, "$ref")) &&
-      Object.hasOwn(input, "default") &&
-      Schema.is(Schema.Json)(input.default)
-    ) {
-      docs.default = input.default;
-    }
-
     for (const key of ["deprecated", "description", "externalDocs", "title"] as const) {
       if (!Object.hasOwn(input, key)) {
         continue;
@@ -525,7 +516,7 @@ const compositionSchema = (
         if (record(member)) {
           Object.assign(
             compositionDocs,
-            yield* documentation(member, `${location}/allOf/${index}`, version),
+            yield* documentation(member, `${location}/allOf/${index}`),
           );
         }
       }
@@ -649,7 +640,7 @@ export const normalizeSchema = (
         );
       }
     }
-    const docs = yield* documentation(schema, location, version);
+    const docs = yield* documentation(schema, location);
     if (hasRef) {
       if (!Schema.is(Schema.String)(schema.$ref)) {
         return yield* invalid(`${location}/$ref`, "Expected a reference string.");

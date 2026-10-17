@@ -1,18 +1,6 @@
-import { defaultHelp } from "./emit-help.js";
 import type { Parameter } from "./model.js";
 import { schemaSource } from "./emit-schema.js";
 import { description, literal } from "./source-text.js";
-
-/**
- * Describe the CLI representation before retaining the original parameter help.
- */
-export const parameterHelp = (parameter: Parameter): string =>
-  [
-    `${parameter.schema.kind === "array" ? "Pass a JSON array. " : ""}${description(parameter.docs)}`.trim(),
-    defaultHelp(parameter.schema, parameter.required),
-  ]
-    .filter(Boolean)
-    .join(" ");
 
 /**
  * Render one API flag with its schema and source-owned help at the command boundary.
@@ -20,7 +8,6 @@ export const parameterHelp = (parameter: Parameter): string =>
 export const parameterSource = (
   parameter: Parameter,
   reference: (pointer: string) => string,
-  help = parameterHelp(parameter),
 ): string => {
   const { schema } = parameter;
   let source = `Flag.String(${literal(parameter.flagName)})`;
@@ -45,6 +32,7 @@ export const parameterSource = (
     pipes.push(`Flag.withSchema(${schemaSource(schema, reference)})`);
   }
 
+  const help = description(parameter.docs);
   if (help) {
     pipes.push(`Flag.withDescription(${literal(help)})`);
   }

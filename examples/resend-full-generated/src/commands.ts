@@ -56,7 +56,7 @@ const apiKeysCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -113,7 +113,7 @@ const apiKeysUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -133,9 +133,7 @@ const apiKeysUpdateCommand = Command.make(
 ).pipe(Command.withDescription("Update an existing API key"));
 
 /**
- * Retrieve a list of audiences
  * Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.
- * Deprecated.
  *
  * @deprecated
  */
@@ -152,14 +150,12 @@ const audiencesListCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Retrieve a list of audiences\nDeprecated: Use Segments instead. These endpoints still work, but will be removed in the future.\nDeprecated.",
+    "Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.",
   ),
 );
 
 /**
- * Create a list of contacts
  * Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.
- * Deprecated.
  *
  * @deprecated
  */
@@ -179,7 +175,7 @@ const audiencesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -206,14 +202,12 @@ const audiencesCreateCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Create a list of contacts\nDeprecated: Use Segments instead. These endpoints still work, but will be removed in the future.\nDeprecated.",
+    "Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.",
   ),
 );
 
 /**
- * Retrieve a single audience
  * Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.
- * Deprecated.
  *
  * @deprecated
  */
@@ -234,14 +228,12 @@ const audiencesGetCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Retrieve a single audience\nDeprecated: Use Segments instead. These endpoints still work, but will be removed in the future.\nDeprecated.",
+    "Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.",
   ),
 );
 
 /**
- * Remove an existing audience
  * Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.
- * Deprecated.
  *
  * @deprecated
  */
@@ -262,7 +254,7 @@ const audiencesRemoveCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Remove an existing audience\nDeprecated: Use Segments instead. These endpoints still work, but will be removed in the future.\nDeprecated.",
+    "Deprecated: Use Segments instead. These endpoints still work, but will be removed in the future.",
   ),
 );
 
@@ -315,15 +307,11 @@ const automationsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -336,11 +324,7 @@ const automationsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/create"),
     ),
-).pipe(
-  Command.withDescription(
-    'Create an automation\n\nJSON body defaults for --body and --body-file:\nSchema path "/properties/connections/items/properties/type": "default".\nJSON Pointer "/status": "disabled".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Create an automation"));
 
 /**
  * Retrieve a single automation
@@ -406,15 +390,11 @@ const automationsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -427,11 +407,7 @@ const automationsUpdateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/update"),
     ),
-).pipe(
-  Command.withDescription(
-    'Update an automation\n\nJSON body defaults for --body and --body-file:\nSchema path "/properties/connections/items/properties/type": "default".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Update an automation"));
 
 /**
  * Duplicate an automation
@@ -581,7 +557,7 @@ const broadcastsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -657,7 +633,7 @@ const broadcastsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -678,8 +654,8 @@ const broadcastsUpdateCommand = Command.make(
 ).pipe(Command.withDescription("Update an existing broadcast"));
 
 /**
- * Cancel a broadcast Cancels a broadcast that is queued or scheduled. Canceling a queued broadcast
- * stops it mid-send; emails already sent are not affected, but no further emails will go out.
+ * Cancels a broadcast that is queued or scheduled. Canceling a queued broadcast stops it mid-send;
+ * emails already sent are not affected, but no further emails will go out.
  */
 const broadcastsCancelCommand = Command.make(
   "cancel",
@@ -698,7 +674,7 @@ const broadcastsCancelCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Cancel a broadcast\nCancels a broadcast that is queued or scheduled. Canceling a queued broadcast stops it mid-send; emails already sent are not affected, but no further emails will go out.",
+    "Cancels a broadcast that is queued or scheduled. Canceling a queued broadcast stops it mid-send; emails already sent are not affected, but no further emails will go out.",
   ),
 );
 
@@ -731,9 +707,9 @@ const broadcastsListClickedLinksCommand = Command.make(
 ).pipe(Command.withDescription("Retrieve a broadcast's clicked links"));
 
 /**
- * Duplicate a broadcast Creates a new draft broadcast with the same segment, topic, sender,
- * subject, reply-to, preview text, and content as the source. The copy is named after the source
- * with " (copy)" appended, truncated to 70 characters.
+ * Creates a new draft broadcast with the same segment, topic, sender, subject, reply-to, preview
+ * text, and content as the source. The copy is named after the source with " (copy)" appended,
+ * truncated to 70 characters.
  */
 const broadcastsDuplicateCommand = Command.make(
   "duplicate",
@@ -752,13 +728,13 @@ const broadcastsDuplicateCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    'Duplicate a broadcast\nCreates a new draft broadcast with the same segment, topic, sender, subject, reply-to, preview text, and content as the source. The copy is named after the source with " (copy)" appended, truncated to 70 characters.',
+    'Creates a new draft broadcast with the same segment, topic, sender, subject, reply-to, preview text, and content as the source. The copy is named after the source with " (copy)" appended, truncated to 70 characters.',
   ),
 );
 
 /**
- * Retrieve broadcast recipients Retrieve the recipients of a broadcast for a given event type, such
- * as who opened, clicked, or bounced.
+ * Retrieve the recipients of a broadcast for a given event type, such as who opened, clicked, or
+ * bounced.
  */
 const broadcastsRecipientsCommand = Command.make(
   "recipients",
@@ -808,7 +784,7 @@ const broadcastsRecipientsCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Retrieve broadcast recipients\nRetrieve the recipients of a broadcast for a given event type, such as who opened, clicked, or bounced.",
+    "Retrieve the recipients of a broadcast for a given event type, such as who opened, clicked, or bounced.",
   ),
 );
 
@@ -829,7 +805,7 @@ const broadcastsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -893,7 +869,7 @@ const contactPropertiesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -969,7 +945,7 @@ const contactPropertiesUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1033,7 +1009,7 @@ const contactsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1140,11 +1116,7 @@ const contactsCreateImportCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/create-import"),
     ),
-).pipe(
-  Command.withDescription(
-    "Create a contact import\n\nDefaults shown are declared by the API; this CLI does not insert them.",
-  ),
-);
+).pipe(Command.withDescription("Create a contact import"));
 
 /**
  * Retrieve a single contact import
@@ -1289,7 +1261,7 @@ const contactsUpdateTopicsCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1368,7 +1340,7 @@ const contactsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1432,15 +1404,11 @@ const domainsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -1453,17 +1421,13 @@ const domainsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create"),
     ),
-).pipe(
-  Command.withDescription(
-    'Create a new domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/region": "us-east-1".\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Create a new domain"));
 
 /**
- * Claim a domain Start a claim for a domain that another Resend account has already verified. The
- * domain is recreated under your account with fresh DKIM keys, so the previous account's DNS
- * records cannot be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the
- * same request body as creating a domain.
+ * Start a claim for a domain that another Resend account has already verified. The domain is
+ * recreated under your account with fresh DKIM keys, so the previous account's DNS records cannot
+ * be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the same request body
+ * as creating a domain.
  */
 const domainsCreateClaimCommand = Command.make(
   "create-claim",
@@ -1479,15 +1443,11 @@ const domainsCreateClaimCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -1502,7 +1462,7 @@ const domainsCreateClaimCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    'Claim a domain\nStart a claim for a domain that another Resend account has already verified. The domain is recreated under your account with fresh DKIM keys, so the previous account\'s DNS records cannot be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the same request body as creating a domain.\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/custom_return_path": "send".\nJSON Pointer "/region": "us-east-1".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+    "Start a claim for a domain that another Resend account has already verified. The domain is recreated under your account with fresh DKIM keys, so the previous account's DNS records cannot be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the same request body as creating a domain.",
   ),
 );
 
@@ -1563,15 +1523,11 @@ const domainsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
@@ -1585,14 +1541,9 @@ const domainsUpdateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/update"),
     ),
-).pipe(
-  Command.withDescription(
-    'Update an existing domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Update an existing domain"));
 
 /**
- * Retrieve a domain claim
  * Retrieve the latest claim for the placeholder domain created by the claim.
  */
 const domainsGetClaimCommand = Command.make(
@@ -1614,15 +1565,15 @@ const domainsGetClaimCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Retrieve a domain claim\nRetrieve the latest claim for the placeholder domain created by the claim.",
+    "Retrieve the latest claim for the placeholder domain created by the claim.",
   ),
 );
 
 /**
- * Verify a domain claim Trigger asynchronous DNS verification and ownership transfer for a domain
- * claim. The claim stays `pending` while verification runs; poll the retrieve endpoint for status.
- * Once `completed`, the transferred domain has new DKIM records that must be added to DNS and
- * verified via the standard domain verify endpoint.
+ * Trigger asynchronous DNS verification and ownership transfer for a domain claim. The claim stays
+ * `pending` while verification runs; poll the retrieve endpoint for status. Once `completed`, the
+ * transferred domain has new DKIM records that must be added to DNS and verified via the standard
+ * domain verify endpoint.
  */
 const domainsVerifyClaimCommand = Command.make(
   "verify-claim",
@@ -1643,13 +1594,13 @@ const domainsVerifyClaimCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Verify a domain claim\nTrigger asynchronous DNS verification and ownership transfer for a domain claim. The claim stays `pending` while verification runs; poll the retrieve endpoint for status. Once `completed`, the transferred domain has new DKIM records that must be added to DNS and verified via the standard domain verify endpoint.",
+    "Trigger asynchronous DNS verification and ownership transfer for a domain claim. The claim stays `pending` while verification runs; poll the retrieve endpoint for status. Once `completed`, the transferred domain has new DKIM records that must be added to DNS and verified via the standard domain verify endpoint.",
   ),
 );
 
 /**
- * Verify an existing domain Triggers verification of the domain's DNS records including DKIM, SPF,
- * and the tracking CNAME (if a tracking subdomain is configured).
+ * Triggers verification of the domain's DNS records including DKIM, SPF, and the tracking CNAME (if
+ * a tracking subdomain is configured).
  */
 const domainsVerifyCommand = Command.make(
   "verify",
@@ -1668,7 +1619,7 @@ const domainsVerifyCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Verify an existing domain\nTriggers verification of the domain's DNS records including DKIM, SPF, and the tracking CNAME (if a tracking subdomain is configured).",
+    "Triggers verification of the domain's DNS records including DKIM, SPF, and the tracking CNAME (if a tracking subdomain is configured).",
   ),
 );
 
@@ -1716,7 +1667,7 @@ const emailsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1760,7 +1711,7 @@ const emailsSendBatchCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1799,7 +1750,7 @@ const emailsMetricsCommand = Command.make(
       Flag.withSchema(Schema.fromJsonString(Schema.Array(Schema.String))),
       Flag.withMetavar("JSON_ARRAY"),
       Flag.withDescription(
-        "Pass a JSON array. List of broadcast IDs to restrict the response to, up to 100. Cannot be combined with the `email` dimension or `email_id`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
+        "List of broadcast IDs to restrict the response to, up to 100. Cannot be combined with the `email` dimension or `email_id`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
       ),
       Flag.optional,
     ),
@@ -1811,7 +1762,7 @@ const emailsMetricsCommand = Command.make(
       ),
       Flag.withMetavar("JSON_ARRAY"),
       Flag.withDescription(
-        "Pass a JSON array. List of dimensions to break the response down by. `email` cannot be combined with `broadcast`. Defaults to `[]`, returning a single `totals` row for the whole range, with no `data`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
+        "List of dimensions to break the response down by. `email` cannot be combined with `broadcast`. Defaults to `[]`, returning a single `totals` row for the whole range, with no `data`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
       ),
       Flag.optional,
     ),
@@ -1819,7 +1770,7 @@ const emailsMetricsCommand = Command.make(
       Flag.withSchema(Schema.fromJsonString(Schema.Array(Schema.String))),
       Flag.withMetavar("JSON_ARRAY"),
       Flag.withDescription(
-        "Pass a JSON array. List of sending domain IDs to restrict the response to, up to 100. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
+        "List of sending domain IDs to restrict the response to, up to 100. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
       ),
       Flag.optional,
     ),
@@ -1827,7 +1778,7 @@ const emailsMetricsCommand = Command.make(
       Flag.withSchema(Schema.fromJsonString(Schema.Array(Schema.String))),
       Flag.withMetavar("JSON_ARRAY"),
       Flag.withDescription(
-        "Pass a JSON array. List of email IDs to restrict the response to, up to 100. Cannot be combined with the `broadcast` dimension or `broadcast_id`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
+        "List of email IDs to restrict the response to, up to 100. Cannot be combined with the `broadcast` dimension or `broadcast_id`. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
       ),
       Flag.optional,
     ),
@@ -1839,7 +1790,7 @@ const emailsMetricsCommand = Command.make(
     ),
     granularity: Flag.Literals("granularity", ["hourly", "daily", "weekly", "monthly"]).pipe(
       Flag.withDescription(
-        'The bucket size used when `period` is in `dimensions`. The date range can\'t produce more than 10,000 periods at the chosen granularity. Server default when omitted: "daily".',
+        "The bucket size used when `period` is in `dimensions`. The date range can't produce more than 10,000 periods at the chosen granularity.",
       ),
       Flag.optional,
     ),
@@ -1876,7 +1827,7 @@ const emailsMetricsCommand = Command.make(
       ),
       Flag.withMetavar("JSON_ARRAY"),
       Flag.withDescription(
-        "Pass a JSON array. List of metrics to include in the response. Defaults to all metrics. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
+        "List of metrics to include in the response. Defaults to all metrics. Accepts a comma-separated value, the parameter repeated, or a mix of both.",
       ),
       Flag.optional,
     ),
@@ -1888,7 +1839,7 @@ const emailsMetricsCommand = Command.make(
     ),
     timezone: Flag.String("timezone").pipe(
       Flag.withDescription(
-        'The IANA timezone (e.g. `America/New_York`) used to bucket periods when `period` is in `dimensions`. Server default when omitted: "UTC".',
+        "The IANA timezone (e.g. `America/New_York`) used to bucket periods when `period` is in `dimensions`.",
       ),
       Flag.optional,
     ),
@@ -1924,11 +1875,7 @@ const emailsMetricsCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/metrics"),
     ),
-).pipe(
-  Command.withDescription(
-    "Retrieve account-level email metrics\n\nDefaults shown are declared by the API; this CLI does not insert them.",
-  ),
-);
+).pipe(Command.withDescription("Retrieve account-level email metrics"));
 
 /**
  * Retrieve a list of received emails
@@ -2195,7 +2142,7 @@ const emailsShareCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2259,7 +2206,7 @@ const eventsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2295,7 +2242,7 @@ const eventsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2375,7 +2322,7 @@ const eventsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2535,7 +2482,7 @@ const segmentsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2611,7 +2558,7 @@ const segmentsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2708,15 +2655,11 @@ const suppressionsAddCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -2748,15 +2691,11 @@ const suppressionsBatchAddCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -2788,15 +2727,11 @@ const suppressionsBatchRemoveCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -2899,7 +2834,7 @@ const templatesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2975,7 +2910,7 @@ const templatesUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3079,15 +3014,11 @@ const topicsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -3100,11 +3031,7 @@ const topicsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("topics/create"),
     ),
-).pipe(
-  Command.withDescription(
-    'Create a new topic\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/visibility": "private".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Create a new topic"));
 
 /**
  * Retrieve a single topic
@@ -3163,7 +3090,7 @@ const topicsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3184,7 +3111,6 @@ const topicsUpdateCommand = Command.make(
 ).pipe(Command.withDescription("Update an existing topic"));
 
 /**
- * Retrieve account usage
  * Retrieve your account's current usage and plan limits.
  */
 const usageGetCommand = Command.make(
@@ -3198,11 +3124,7 @@ const usageGetCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("usage/get"),
     ),
-).pipe(
-  Command.withDescription(
-    "Retrieve account usage\nRetrieve your account's current usage and plan limits.",
-  ),
-);
+).pipe(Command.withDescription("Retrieve your account's current usage and plan limits."));
 
 /**
  * Retrieve a list of webhooks
@@ -3261,7 +3183,7 @@ const webhooksCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3337,7 +3259,7 @@ const webhooksUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3432,9 +3354,9 @@ const webhooksListEventAttemptsCommand = Command.make(
 ).pipe(Command.withDescription("Retrieve a list of webhook event attempts"));
 
 /**
- * Replay a webhook event Queues one more delivery of the event to the webhook. The event must be
- * retrievable through the get event endpoint and the webhook must be enabled; a disabled webhook
- * returns a 422 validation_error. A manual replay does not schedule automatic retries.
+ * Queues one more delivery of the event to the webhook. The event must be retrievable through the
+ * get event endpoint and the webhook must be enabled; a disabled webhook returns a 422
+ * validation_error. A manual replay does not schedule automatic retries.
  */
 const webhooksReplayEventCommand = Command.make(
   "replay-event",
@@ -3454,15 +3376,15 @@ const webhooksReplayEventCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Replay a webhook event\nQueues one more delivery of the event to the webhook. The event must be retrievable through the get event endpoint and the webhook must be enabled; a disabled webhook returns a 422 validation_error. A manual replay does not schedule automatic retries.",
+    "Queues one more delivery of the event to the webhook. The event must be retrievable through the get event endpoint and the webhook must be enabled; a disabled webhook returns a 422 validation_error. A manual replay does not schedule automatic retries.",
   ),
 );
 
 /**
- * Rotate a webhook signing secret Generates a new signing secret for the webhook and returns it.
- * Payloads delivered after the rotation are signed with the new secret. The previous secret keeps
- * verifying payloads for 24 hours, so both secrets are accepted during that window. A webhook that
- * does not exist or was removed returns a 404 not_found.
+ * Generates a new signing secret for the webhook and returns it. Payloads delivered after the
+ * rotation are signed with the new secret. The previous secret keeps verifying payloads for 24
+ * hours, so both secrets are accepted during that window. A webhook that does not exist or was
+ * removed returns a 404 not_found.
  */
 const webhooksRotateSigningSecretCommand = Command.make(
   "rotate-signing-secret",
@@ -3481,7 +3403,7 @@ const webhooksRotateSigningSecretCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Rotate a webhook signing secret\nGenerates a new signing secret for the webhook and returns it. Payloads delivered after the rotation are signed with the new secret. The previous secret keeps verifying payloads for 24 hours, so both secrets are accepted during that window. A webhook that does not exist or was removed returns a 404 not_found.",
+    "Generates a new signing secret for the webhook and returns it. Payloads delivered after the rotation are signed with the new secret. The previous secret keeps verifying payloads for 24 hours, so both secrets are accepted during that window. A webhook that does not exist or was removed returns a 404 not_found.",
   ),
 );
 

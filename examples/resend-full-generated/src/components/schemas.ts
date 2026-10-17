@@ -32,8 +32,6 @@ export const UpdateApiKeyRequest = Schema.StructWithRest(
 );
 
 /**
- * Deprecated.
- *
  * @deprecated
  */
 export const CreateAudienceOptions = Schema.StructWithRest(
@@ -168,7 +166,6 @@ export const CreateBroadcastOptions = Schema.StructWithRest(
   Schema.Struct({
     /**
      * Use `segment_id` instead. Unique identifier of the segment this broadcast will be sent to.
-     * Deprecated.
      *
      * @deprecated
      */
@@ -226,7 +223,6 @@ export const UpdateBroadcastOptions = Schema.StructWithRest(
   Schema.Struct({
     /**
      * Use `segment_id` instead. Unique identifier of the audience this broadcast will be sent to.
-     * Deprecated.
      *
      * @deprecated
      */
@@ -321,7 +317,6 @@ export const CreateContactOptions = Schema.StructWithRest(
   Schema.Struct({
     /**
      * Unique identifier of the audience to which the contact belongs.
-     * Deprecated.
      *
      * @deprecated
      */
@@ -780,7 +775,6 @@ export const CreateSegmentOptions = Schema.StructWithRest(
   Schema.Struct({
     /**
      * The ID of the audience this segment belongs to.
-     * Deprecated.
      *
      * @deprecated
      */

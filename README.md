@@ -90,4 +90,4 @@ Referenced JSON request bodies reuse validators from `components/request-bodies.
 
 Multipart bundle identity prefers an explicit schema reference. When the media schema is inline inside a referenced request body, its request-body pointer supplies the bundle identity instead; request-body aliases reuse that bundle. Names are allocated across both pointer categories without collisions.
 
-Explicit schema defaults appear in CLI help without being inserted into requests. Parameter and multipart flags show their declared values; command help lists JSON body defaults for both `--body` and `--body-file`, using JSON Pointers or labeled array/branch schema paths. Required inputs remain required. Defaults mentioned only in prose are not interpreted.
+API-derived descriptions retain source text, including whitespace and explicit empty descriptions. Summary or title is a fallback only when description is absent. The generator adds no default summaries, requiredness prose or JSON-array instructions to these descriptions; source prose mentioning defaults remains unchanged. Native Effect usage and choices remain available, and generator-owned flags retain their own help.

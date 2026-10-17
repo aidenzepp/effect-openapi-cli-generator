@@ -44,15 +44,13 @@ export const escapeComment = (text: string) =>
   text.replaceAll("*/", "*\\/").replaceAll(/^\s*@/gmu, "\\@");
 
 /**
- * Combines API documentation for native command help.
+ * Selects source-owned help without combining or rewriting its text.
  *
  * @param docs The selected source annotations.
- * @returns Human-readable help including any deprecation notice.
+ * @returns The explicit description, or a summary/title fallback only when absent.
  */
 export const description = (docs: Documentation) =>
-  [docs.title, docs.description, docs.deprecated === true ? "Deprecated." : undefined]
-    .filter(Boolean)
-    .join("\n");
+  docs.description ?? docs.summary ?? docs.title ?? "";
 
 /**
  * Renders safe JSDoc while retaining supported deprecation and external references.

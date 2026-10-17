@@ -67,7 +67,8 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
     ["itemId", "item-id", "flag"],
     ["isReady", "is-ready", "flag"],
   ]);
-  expect(result.docs.description).toBe("Get things\nDetails");
+  expect(result.docs.description).toBe("Details");
+  expect(result.docs.summary).toBe("Get things");
   expect(result.docs.deprecated).toBe(true);
   expect(JSON.stringify(input)).toBe(before);
 });
@@ -280,9 +281,7 @@ test("reference documentation overrides target documentation", () => {
       },
     },
   );
-  expect(run(input).operations[0]?.parameters[0]?.docs.description).toBe(
-    "Local summary\nLocal description",
-  );
+  expect(run(input).operations[0]?.parameters[0]?.docs.description).toBe("Local description");
 });
 
 test("unknown JSON annotations survive boundary decoding without changing selection", async () => {

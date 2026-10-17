@@ -5,6 +5,7 @@ import { Array, Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/http";
 import * as oxfmt from "oxfmt";
 import { generate } from "../src/index.js";
+import { description } from "../src/core/source-text.js";
 import { formatApplication } from "../src/core/format.js";
 import type { GeneratedApplication } from "../src/core/model.js";
 
@@ -511,7 +512,7 @@ test("explicit component categories preserve identity, overrides and inline defi
   expect(commands).toContain('Flag.Int("inline")');
   expect(commands).toContain("RequestBodies.Shared");
   expect(commands).toContain("RequestBodies.Alias");
-  expect(commands).toContain("Local payload JSON request body; exclusive with --body-file.");
+  expect(commands).toContain('Flag.withDescription("Local payload")');
   expect(source(output, "components/request-bodies")).toContain("export const Alias = Shared");
   expect(source(output, "components/parameters")).toContain("export const Alias = Shared.pipe");
   expect(commands).toContain("SecuritySchemes.Shared");
@@ -702,7 +703,7 @@ test("multipart request-body aliases and JSON schema views retain explicit ident
   await checkPackage(output);
 });
 
-test("explicit defaults are discoverable in help and never inserted into requests", async () => {
+test("source descriptions remain unchanged and defaults never alter requests", async () => {
   const responses = { "200": { description: "OK" } };
   const input = {
     components: {
@@ -838,28 +839,21 @@ test("explicit defaults are discoverable in help and never inserted into request
     try {
       const help = await invoke(["--help"]);
       expect(help.code, help.err).toBe(0);
-      expect(help.out).toContain("Local flag description Server default when omitted: false.");
-      expect(help.out).toContain("Server default when omitted: 0.");
-      expect(help.out).toContain('Server default when omitted: "".');
-      expect(help.out).toContain('Declared default: "identifier"; this input is still required.');
-      expect(help.out).toContain('JSON Pointer "": {"a":false,"z":0}.');
-      expect(help.out).toContain('JSON Pointer "/blank": "".');
-      expect(help.out).toContain('JSON Pointer "/nothing": null.');
-      expect(help.out).toContain('JSON Pointer "/list": [].');
-      expect(help.out).toContain('Schema path "/properties/list/items": "item".');
-      expect(help.out).toContain(
-        'JSON Pointer "/nested/a~1b~0c": 0; required in its containing object.',
-      );
-      expect(help.out).not.toContain('JSON Pointer "/prose"');
-      expect(help.out).toContain("See body defaults above.");
-      expect(help.out).toContain('Schema path "/properties/choice/oneOf/0": "a".');
-      expect(help.out).toContain(
-        `JSON Pointer "/escaped": ${JSON.stringify(input.components.schemas.Payload.properties.escaped.default)}.`,
-      );
-      expect(help.out).toContain('Server default when omitted: "raw/slash".');
-
+      expect(help.out).toContain("Local flag description");
+      expect(help.out).toContain("Local body description");
+      for (const injected of [
+        "Server default when omitted",
+        "Declared default",
+        "JSON body defaults",
+        "See body defaults",
+        "Defaults shown",
+        "Pass a JSON array",
+        "Deprecated.",
+      ]) {
+        expect(help.out).not.toContain(injected);
+      }
       const requiredHelp = await invoke(["--help"], "required");
-      expect(requiredHelp.out).toContain('JSON Pointer "": {}; body is required.');
+      expect(requiredHelp.out).not.toContain("body is required");
 
       const base = ["--id", "abc", "--base-url", server.url.origin];
       const omitted = await invoke(base);
@@ -903,3 +897,65 @@ test("explicit defaults are discoverable in help and never inserted into request
     }
   });
 }, 30_000);
+
+test("authored descriptions remain exact while empty overrides and fallbacks stay distinct", async () => {
+  const authored = "  lower-case source\n\nDefaults to skip.  ";
+  expect(
+    description({ deprecated: true, description: authored, summary: "ignored", title: "ignored" }),
+  ).toBe(authored);
+  expect(description({ description: "", summary: "ignored", title: "ignored" })).toBe("");
+  expect(description({ summary: " summary ", title: "ignored" })).toBe(" summary ");
+  expect(description({ title: " title " })).toBe(" title ");
+
+  const responses = { "200": { description: "OK" } };
+  const output = await Effect.runPromise(
+    generate({
+      components: {
+        parameters: {
+          Q: {
+            description: authored,
+            in: "query",
+            name: "q",
+            schema: { default: [], items: { type: "string" }, type: "array" },
+          },
+        },
+      },
+      info: { title: "Source help", version: "1" },
+      openapi: "3.1.0",
+      paths: {
+        "/authored": {
+          get: {
+            deprecated: true,
+            description: authored,
+            parameters: [{ $ref: "#/components/parameters/Q" }],
+            responses,
+            summary: "IGNORE_OPERATION_SUMMARY",
+          },
+        },
+        "/empty": {
+          get: {
+            description: "",
+            parameters: [{ $ref: "#/components/parameters/Q", description: "" }],
+            responses,
+            summary: "IGNORE_EMPTY_SUMMARY",
+          },
+        },
+        "/summary": { get: { responses, summary: " Summary only " } },
+      },
+    }),
+  );
+  const commands = source(output, "commands");
+  expect(commands).toContain(`Command.withDescription(${JSON.stringify(authored)})`);
+  expect(commands).toContain('Parameters.Q.pipe(Flag.withDescription(""))');
+  expect(commands).toContain('Command.withDescription(" Summary only ")');
+  expect(commands).not.toContain("IGNORE_");
+  expect(commands).not.toContain("Deprecated.");
+  expect(commands).toContain("@deprecated");
+
+  const parameters = source(output, "components/parameters");
+  expect(parameters).toContain(`Flag.withDescription(${JSON.stringify(authored)})`);
+  expect(parameters).toContain('Flag.withMetavar("JSON_ARRAY")');
+  expect(parameters).not.toContain("Pass a JSON array");
+  expect(parameters).not.toContain("Server default");
+  await checkPackage(output);
+});

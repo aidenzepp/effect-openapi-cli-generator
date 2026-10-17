@@ -272,16 +272,12 @@ test("binary content constraints fail instead of checking local path spelling", 
 });
 
 test.each(["inline", "optional", "upload"])(
-  "%s multipart help distinguishes content defaults from required inputs",
+  "%s multipart help adds no default guidance",
   async (command) => {
     const help = await invoke([command, "post", "--help"]);
     expect(help.code, help.err).toBe(0);
-    expect(help.out).toContain(
-      'Declared default: "content"; this field is still required when its body is supplied.',
-    );
-    expect(help.out).toContain(
-      "Default applies to uploaded content; supply a local file path explicitly.",
-    );
-    expect(help.out).toContain('Server default when omitted: "caption".');
+    expect(help.out).not.toContain("Declared default");
+    expect(help.out).not.toContain("Server default");
+    expect(help.out).not.toContain("Default applies");
   },
 );

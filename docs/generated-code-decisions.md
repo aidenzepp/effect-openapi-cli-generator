@@ -549,21 +549,27 @@ Security Reference Object description overrides apply only in OpenAPI 3.1. OpenA
 
 Scalar request headers retain their raw values as an explicit interoperability convention; this is not full RFC 6570 header expansion. Resend’s [official idempotency example](https://resend.com/docs/dashboard/emails/idempotency-keys) uses `welcome-user/123456789` unchanged. Header serialization is unchanged by component extraction.
 
-## Explicit defaults in help
+## Source-owned descriptions
 
-Show only explicit schema `default` annotations. Optional parameter and multipart field help appends `Server default when omitted: "skip".` Required parameters say `Declared default: ...; this input is still required.` Multipart required fields remain required when their body is supplied; omitting an optional body is different from omitting a required field in a supplied body. File defaults describe uploaded content and never supply a local file path.
-
-Command help states once: `Defaults shown are declared by the API; this CLI does not insert them.` Native flag usage and enum choices remain available. JSON body defaults appear once in command help for both `--body` and `--body-file`; both input flags point to that section. Object properties use escaped JSON Pointers; array items and individual union branches use labeled schema paths. Nested defaults depend on the containing value, and branch defaults depend on the matching branch. Defaults do not synthesize parents, array elements, request bodies or required fields.
-
-Preserve false, zero, empty strings, null, arrays and objects as JSON values. Sort object keys only for deterministic presentation; do not change the request value. Retain defaults through explicit schema aliases and supported OpenAPI 3.1 reference annotation overrides. OpenAPI 3.0 reference siblings do not override defaults. Reference-site parameter/body descriptions must not erase schema default help.
+API-derived help uses the source `description` verbatim, including casing and whitespace. An explicitly empty description remains empty. Use `summary`, then `title`, only when description is absent; do not concatenate them. Reference-site overrides remain local and preserve shared component identity.
 
 ```ts
 Flag.Literals("on-conflict", ["upsert", "skip"]).pipe(
-  Flag.withDescription(
-    'Strategy to use when an imported contact already exists. Server default when omitted: "skip".',
-  ),
+  Flag.withDescription("Strategy to use when an imported contact already exists."),
   Flag.optional,
 );
 ```
 
-Do not infer defaults from prose such as “defaults to now,” add native flag/schema default combinators, fill missing JSON properties, or imply that a declared server default was verified against the live service. Omitted values remain omitted; explicit values remain unchanged.
+**Negative — adding a sentence absent from the source:**
+
+```ts
+Flag.withDescription(
+  'Strategy to use when an imported contact already exists. Server default when omitted: "skip".',
+);
+```
+
+Do not append default values, requiredness explanations, JSON-array instructions, body-default sections or a generated “Deprecated.” sentence to API descriptions. If the source itself says “defaults to skip,” keep that text unchanged; do not parse or remove it. Schema defaults never insert request values and do not create help text.
+
+Native Effect usage, enum choices and the `JSON_ARRAY` metavar remain native. Generator-owned flags such as `--body-file`, `--base-url` and `--additional-fields` retain concise descriptions of their own behavior. Authentication fallback help is used only when source documentation is absent. `--body` uses its request-body documentation without added prose.
+
+JSDoc retains safe escaping and structural `@deprecated` and `@see` annotations. Do not replace native help rendering or infer validation/error messages from documentation.

@@ -53,15 +53,11 @@ const domainsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
@@ -74,11 +70,7 @@ const domainsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create"),
     ),
-).pipe(
-  Command.withDescription(
-    'Create a new domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/region": "us-east-1".\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Create a new domain"));
 
 /**
  * Remove an existing domain
@@ -117,15 +109,11 @@ const domainsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. See body defaults above.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
@@ -139,11 +127,7 @@ const domainsUpdateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/update"),
     ),
-).pipe(
-  Command.withDescription(
-    'Update an existing domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
-  ),
-);
+).pipe(Command.withDescription("Update an existing domain"));
 
 /**
  * Send an email
@@ -162,7 +146,7 @@ const emailsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -206,7 +190,7 @@ const emailsSendBatchCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription("JSON request body; exclusive with --body-file."),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(

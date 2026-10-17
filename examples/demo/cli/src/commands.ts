@@ -36,15 +36,11 @@ const postsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
-      Flag.withDescription(
-        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription(""),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription(
-        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
-      ),
+      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
       Flag.optional,
     ),
   },
