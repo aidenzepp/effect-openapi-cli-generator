@@ -53,14 +53,18 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve `Builtins`, `Models` and `Commands` where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve owning-module namespaces (`Auth`, `Errors`, `Http`, `Url`, `Security`, `Models` and `Commands`) where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
 
 ## Separate models, builtins, commands and runtime assembly
 
 The approved Resend layout supersedes the earlier single-file model preference:
 
 - `models.ts` owns the named schemas declared by explicit OpenAPI references.
-- `builtins.ts` owns shared CLI configuration and execution helpers, with their authored JSDoc.
+- `builtins/errors.ts` owns schema-backed transport failures and safe CLI conversion.
+- `builtins/auth.ts` owns supported security-definition and credential schemas, checked Basic encoding and API key placement. Bearer requests use the native helper directly.
+- `builtins/url.ts` owns base URL validation and literal path-segment encoding.
+- `builtins/http.ts` owns one-shot HTTP execution and response output.
+- `security.ts` owns flags for this specification's active security requirements.
 - `commands.ts` contains only operation/group declarations after its imports.
 - `main.ts` owns `rootCommand` and runtime layer provision.
 
@@ -68,14 +72,17 @@ Use namespace imports with quoted module specifiers, keeping imports contiguous:
 
 ```ts
 // commands.ts
-import * as Builtins from "./builtins.js";
+import * as Errors from "./builtins/errors.js";
+import * as Http from "./builtins/http.js";
+import * as Url from "./builtins/url.js";
 import * as Models from "./models.js";
+import * as Security from "./security.js";
 
 // A body schema reference inside its owning flag.
 Schema.fromJsonString(Models.SendEmailRequest);
 
 // Keep flag keys stable when referencing shared configuration.
-Command.make("list", { baseUrl: Builtins.baseUrl, bearerAuth: Builtins.bearerAuth });
+Command.make("list", { baseUrl: Url.baseUrl, bearerAuth: Security.bearerAuth });
 ```
 
 ```ts
@@ -88,7 +95,11 @@ const rootCommand = Command.make("resend-reference").pipe(
 );
 ```
 
-Export only top-level groups needed by the entrypoint, model schemas needed by commands, and the four builtins consumed by commands: `bearerAuth`, `baseUrl`, `appendPathSegments` and `runRequest`. Builtin formatters and the segment encoder remain private. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
+Export only cross-module contracts and the explicitly showcased builtin capabilities. Keep operations, nested groups, model-only dependencies and error formatting details local. Use direct owning-module imports; there is no catch-all barrel. Keep API flags inline in their commands and preserve explicitly shared model identities across module boundaries.
+
+The showcase includes potential builtin capabilities beyond the active Resend bearer scheme. A future generator should emit only the required modules and declarations plus their transitive dependencies; selective emission is not implemented. The schema definitions describe supported configuration, not a runtime OpenAPI interpreter. Credentials are separate redacted values.
+
+Path failures use `Schema.TaggedError`; raw path and HTTP errors become safe `CliError.UserError` values once at the command boundary. Body validation/encoding and base URL flags retain their existing safe native CLI boundaries. No retries or credential logging are added.
 
 ## Derive authentication from effective security requirements
 
@@ -104,7 +115,7 @@ export const bearerAuth = Flag.Redacted("bearer-auth").pipe(
 
 Inside each command handler, pass the parsed `bearerAuth` value directly to `HttpClientRequest.bearerToken(bearerAuth)`.
 
-Environment bindings require explicit generator configuration. Do not infer vendor defaults from the API title, scheme key or description. The reference has no configured environment binding. Other authentication types, security alternatives and combinations, and general generator authentication support remain unimplemented; this reference establishes only the active HTTP bearer case.
+Environment bindings require explicit generator configuration. Do not infer vendor defaults from the API title, scheme key or description. The reference has no configured environment binding. The builtin showcase additionally exercises HTTP Basic and API keys in headers, queries and cookies. Only bearer authentication is exposed by the Resend commands. OAuth login/session flows, certificate management, security alternatives/combinations and general generator authentication support remain unimplemented. Basic credentials follow RFC 7617 transport restrictions; the native encoder's Unicode limitation is reported as a typed failure, without charset negotiation. Cookie placement preserves other parsed cookie values through native cookie serialization.
 
 ## Map declared constraints directly
 
@@ -238,7 +249,7 @@ This accepted URL adapter does not justify custom interpretation of arbitrary pa
 
 ## Keep one neutral HTTP error formatter
 
-Each standalone CLI uses one synchronous `httpErrorMessage(reason): string`. It classifies the typed HTTP failure without depending on resource names. The shared `runRequest` execution helper retains the original cause and passes the formatter result directly to `CliError.UserError`.
+Each standalone CLI uses one synchronous `httpErrorMessage(reason): string`. It classifies the typed HTTP failure without depending on resource names. The shared `Errors.toCliError` boundary retains the original HTTP cause and passes the formatter result directly to `CliError.UserError`.
 
 **POSITIVE — One complete message, one typed cause.**
 
@@ -278,7 +289,7 @@ A server may have completed a POST before its response became unreadable. No aut
 
 ## Share CLI execution, keep request construction explicit
 
-`runRequest` owns execution, successful-status validation, text output and HTTP error conversion once per CLI. This is shared executable behavior, separate from OpenAPI-driven model reuse. Each command still declares its own method, path, parameters, body and tracing span.
+`runRequest` owns execution, successful-status validation and text output. `Errors.toCliError` owns shared transport error conversion, applied once at each command boundary. This is shared executable behavior, separate from OpenAPI-driven model reuse. Each command still declares its own method, path, parameters, body and tracing span.
 
 **POSITIVE — Compose the native client and response APIs at one boundary.**
 
@@ -288,9 +299,6 @@ const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap((response) => response.text),
     Effect.flatMap(Console.log),
-    Effect.mapError(
-      (cause) => new CliError.UserError({ cause, userMessage: httpErrorMessage(cause.reason) }),
-    ),
   );
 ```
 
@@ -303,6 +311,7 @@ A command handler remains a direct request pipeline:
   HttpClientRequest.get(apiUrl).pipe(
     appendPathSegments("users", user, "posts", post, "files"),
     Effect.flatMap(runRequest),
+    Effect.mapError(Errors.toCliError),
     Effect.withSpan("posts.files.list"),
   );
 ```
@@ -321,7 +330,7 @@ Effect.gen(function* fetchFiles() {
 );
 ```
 
-Use the approved `encodePathSegment` and `appendPathSegments` transport helpers across operations. `encodePathSegment` rejects only whole `.` and `..` segments, then wraps `encodeURIComponent` in `Effect.try`; invalid Unicode becomes a safe `CliError.UserError` instead of an escaping exception. Keep these transport checks separate from unchanged API schemas. Do not introduce a custom error subclass, per-ID variables or `Effect.gen` handlers for this work.
+Use the approved `encodePathSegment` and `appendPathSegments` transport helpers across operations. `encodePathSegment` rejects only whole `.` and `..` segments, then wraps `encodeURIComponent` in `Effect.try`; invalid Unicode becomes a schema-backed `PathError` instead of an escaping exception. Commands convert it once through `Errors.toCliError`. Keep these transport checks separate from unchanged API schemas. Use native schema-backed tagged errors without subclassing `CliError`; do not introduce per-ID variables or `Effect.gen` handlers for this work.
 
 ```ts
 const appendPathSegments =
@@ -332,7 +341,7 @@ const appendPathSegments =
     );
 ```
 
-Assemble complete segments before encoding. `appendPathSegments("files", "bar.json")` retains the dotted filename; ``appendPathSegments("files", `${name}.json`)`` encodes the completed mixed segment, including any slash within `name`, as one segment. Do not split a parameter on slash or encode a multi-segment path string as one value. The helper preserves the configured base URL prefix. `runRequest` still owns HTTP execution/output/errors.
+Assemble complete segments before encoding. `appendPathSegments("files", "bar.json")` retains the dotted filename; ``appendPathSegments("files", `${name}.json`)`` encodes the completed mixed segment, including any slash within `name`, as one segment. Do not split a parameter on slash or encode a multi-segment path string as one value. The helper preserves the configured base URL prefix. `runRequest` still owns HTTP execution/output; `Errors.toCliError` owns CLI conversion.
 
 Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`, so map that failure before entering `runRequest`. Preserve its typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors. Map encoding errors inside the body operation, after `Effect.flatMap` enters that operation. A mapping around the whole pipeline would incorrectly replace path errors with a JSON encoding message.
 
@@ -353,6 +362,7 @@ HttpClientRequest.post(apiUrl).pipe(
     ),
   ),
   Effect.flatMap(runRequest),
+  Effect.mapError(Errors.toCliError),
   Effect.withSpan("posts.create"),
 );
 ```

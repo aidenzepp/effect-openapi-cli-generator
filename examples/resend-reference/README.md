@@ -1,6 +1,6 @@
 # Resend CLI reference
 
-This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI split into `src/models.ts` for explicit request schemas, `src/builtins.ts` for shared CLI configuration and execution helpers, `src/commands.ts` for command declarations, and `src/main.ts` for the root and runtime layers. This is target output for review, not output emitted by the current generator.
+This fixture contains eight operations from the official [Resend OpenAPI repository](https://github.com/resend/resend-openapi), pinned to [8916b099d7f52b8552a2e1ef38a7f16fcd17864c](https://github.com/resend/resend-openapi/tree/8916b099d7f52b8552a2e1ef38a7f16fcd17864c). The pinned specification slice is paired with a hand-written Effect CLI organized into API models, command declarations, spec-owned security flags, runtime assembly and cohesive builtin modules. This is target output for review, not output emitted by the current generator.
 
 ## Provenance and rebuild
 
@@ -89,4 +89,49 @@ These choices exercise capabilities that the generator does not yet support; han
 
 ## Source layout
 
-`commands.ts` imports `* as Builtins` from `./builtins.js` and `* as Models` from `./models.js`; `main.ts` imports `* as Commands` from `./commands.js`. Export only the four builtins consumed by commands (`bearerAuth`, `baseUrl`, `appendPathSegments`, `runRequest`), the three request schemas and the two top-level command groups. Builtin formatter/encoder details and model dependencies remain local. Operation and group names end in `Command`, and nested groups retain their complete ordered path, such as `EmailsAttachmentsCommand`. `rootCommand` remains the entrypoint root. This four-file layout keeps shared infrastructure out of command declarations and supersedes the earlier single-file layout without changing wire behavior.
+```text
+src/
+  builtins/
+    auth.ts       # Security schemas and checked Basic/API-key transport
+    errors.ts     # Tagged failures and safe CLI conversion
+    http.ts       # Execute once and print response text
+    url.ts        # Base URL validation and literal path segments
+  commands.ts     # Operation and group declarations
+  main.ts         # Root command and runtime layers
+  models.ts       # Explicitly referenced API request schemas
+  security.ts     # Active spec-owned bearer-auth flag
+```
+
+Commands import owning modules as `Errors`, `Http`, `Url`, `Models` and `Security`; the entrypoint imports `Commands`. API schemas are unchanged. Builtins have authored JSDoc, while API comments remain sourced from the specification. There is no catch-all builtin barrel.
+
+## Builtin showcase
+
+The extra Basic and API-key helpers are callable examples, not additional Resend CLI flags. Run their local contracts with `bun test tests/resend-builtins.test.ts`; run the unchanged eight-operation CLI contracts with `bun test tests/resend-reference.test.ts`.
+
+For example, from this directory, build then create a cookie-authenticated request without sending it:
+
+```sh
+bun run build
+node --input-type=module <<'JS'
+import { Effect, Redacted, Schema } from "effect";
+import { HttpClientRequest } from "effect/http";
+import * as Auth from "./dist/builtins/auth.js";
+
+const scheme = await Effect.runPromise(
+  Schema.decodeUnknownEffect(Auth.ApiKeyScheme)({ in: "cookie", name: "access", type: "apiKey" }),
+);
+const request = await Effect.runPromise(
+  HttpClientRequest.get("https://api.example.com").pipe(
+    HttpClientRequest.setHeader("cookie", "session=existing"),
+    Auth.apiKey(scheme, Redacted.make("example-value")),
+  ),
+);
+console.log(request.method);
+JS
+```
+
+Bearer transport uses `HttpClientRequest.bearerToken` directly. Basic uses `Auth.BasicCredentials` and `Auth.basicAuth` to reject username colons, ASCII control characters and native encoder failures without exposing credentials; password colons remain valid. API keys preserve the configured header/query/cookie name. Native cookie encoding retains other parsed cookies. Redaction protects credential objects, not the final wire request; do not log authenticated requests.
+
+`Errors.PathError` and `Errors.AuthenticationError` are schema-backed tagged failures. Command handlers convert transport errors through `Errors.toCliError`; HTTP execution never retries. Basic charset negotiation, OAuth login/session flows, certificate management and security alternatives/combinations are not implemented.
+
+The future generator should emit only the required capabilities and their transitive dependencies. That selective emission and generator support for these new builtin capabilities are not implemented by this showcase.

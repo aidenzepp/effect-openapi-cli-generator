@@ -1,8 +1,11 @@
 import { Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import { HttpClientRequest } from "effect/http";
-import * as Builtins from "./builtins.js";
+import * as Errors from "./builtins/errors.js";
+import * as Http from "./builtins/http.js";
+import * as Url from "./builtins/url.js";
 import * as Models from "./models.js";
+import * as Security from "./security.js";
 
 /**
  * Retrieve a list of domains
@@ -14,8 +17,8 @@ const domainsListCommand = Command.make(
       Flag.withDescription("Return items after this cursor."),
       Flag.optional,
     ),
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription("Return items before this cursor."),
       Flag.optional,
@@ -34,8 +37,9 @@ const domainsListCommand = Command.make(
         before: Option.getOrUndefined(before),
         limit: Option.getOrUndefined(limit),
       }),
-      Builtins.appendPathSegments("domains"),
-      Effect.flatMap(Builtins.runRequest),
+      Url.appendPathSegments("domains"),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains.list"),
     ),
 ).pipe(Command.withDescription("Retrieve a list of domains"));
@@ -46,8 +50,8 @@ const domainsListCommand = Command.make(
 const domainsCreateCommand = Command.make(
   "create",
   {
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateDomainRequest))(value, {
@@ -63,7 +67,7 @@ const domainsCreateCommand = Command.make(
   ({ baseUrl: apiUrl, bearerAuth, body }) =>
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
-      Builtins.appendPathSegments("domains"),
+      Url.appendPathSegments("domains"),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
@@ -80,7 +84,8 @@ const domainsCreateCommand = Command.make(
           ),
         ),
       ),
-      Effect.flatMap(Builtins.runRequest),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains.create"),
     ),
 ).pipe(Command.withDescription("Create a new domain"));
@@ -91,8 +96,8 @@ const domainsCreateCommand = Command.make(
 const domainsUpdateCommand = Command.make(
   "update",
   {
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateDomainOptions))(value, {
@@ -109,7 +114,7 @@ const domainsUpdateCommand = Command.make(
   ({ baseUrl: apiUrl, bearerAuth, body, domainId }) =>
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
-      Builtins.appendPathSegments("domains", domainId),
+      Url.appendPathSegments("domains", domainId),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
@@ -126,7 +131,8 @@ const domainsUpdateCommand = Command.make(
           ),
         ),
       ),
-      Effect.flatMap(Builtins.runRequest),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains.update"),
     ),
 ).pipe(Command.withDescription("Update an existing domain"));
@@ -137,15 +143,16 @@ const domainsUpdateCommand = Command.make(
 const domainsRemoveCommand = Command.make(
   "delete",
   {
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
     HttpClientRequest.delete(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
-      Builtins.appendPathSegments("domains", domainId),
-      Effect.flatMap(Builtins.runRequest),
+      Url.appendPathSegments("domains", domainId),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains.remove"),
     ),
 ).pipe(Command.withDescription("Remove an existing domain"));
@@ -156,8 +163,8 @@ const domainsRemoveCommand = Command.make(
 const emailsSendCommand = Command.make(
   "send",
   {
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendEmailRequest))(value, {
@@ -181,7 +188,7 @@ const emailsSendCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
-      Builtins.appendPathSegments("emails"),
+      Url.appendPathSegments("emails"),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
@@ -198,7 +205,8 @@ const emailsSendCommand = Command.make(
           ),
         ),
       ),
-      Effect.flatMap(Builtins.runRequest),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails.send"),
     ),
 ).pipe(Command.withDescription("Send an email"));
@@ -209,8 +217,8 @@ const emailsSendCommand = Command.make(
 const emailsSendBatchCommand = Command.make(
   "send",
   {
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Models.SendEmailRequest)))(
@@ -237,7 +245,7 @@ const emailsSendBatchCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
-      Builtins.appendPathSegments("emails", "batch"),
+      Url.appendPathSegments("emails", "batch"),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
           Option.isSome(body)
@@ -254,7 +262,8 @@ const emailsSendBatchCommand = Command.make(
           ),
         ),
       ),
-      Effect.flatMap(Builtins.runRequest),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails.send-batch"),
     ),
 ).pipe(Command.withDescription("Trigger up to 100 batch emails at once."));
@@ -271,8 +280,8 @@ const emailsListAttachmentsCommand = Command.make(
       ),
       Flag.optional,
     ),
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'.",
@@ -293,8 +302,9 @@ const emailsListAttachmentsCommand = Command.make(
         before: Option.getOrUndefined(before),
         limit: Option.getOrUndefined(limit),
       }),
-      Builtins.appendPathSegments("emails", emailId, "attachments"),
-      Effect.flatMap(Builtins.runRequest),
+      Url.appendPathSegments("emails", emailId, "attachments"),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails.list-attachments"),
     ),
 ).pipe(Command.withDescription("Retrieve a list of attachments for a sent email"));
@@ -308,15 +318,16 @@ const emailsGetAttachmentCommand = Command.make(
     attachmentId: Flag.String("attachment-id").pipe(
       Flag.withDescription("The ID of the attachment."),
     ),
-    baseUrl: Builtins.baseUrl,
-    bearerAuth: Builtins.bearerAuth,
+    baseUrl: Url.baseUrl,
+    bearerAuth: Security.bearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ attachmentId, baseUrl: apiUrl, bearerAuth, emailId }) =>
     HttpClientRequest.get(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
-      Builtins.appendPathSegments("emails", emailId, "attachments", attachmentId),
-      Effect.flatMap(Builtins.runRequest),
+      Url.appendPathSegments("emails", emailId, "attachments", attachmentId),
+      Effect.flatMap(Http.runRequest),
+      Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails.get-attachment"),
     ),
 ).pipe(Command.withDescription("Retrieve a single attachment for a sent email"));
