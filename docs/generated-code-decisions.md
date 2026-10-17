@@ -475,3 +475,7 @@ A representative optional body path keeps absence distinct from JSON data:
 ```
 
 The generator additionally retains mutually exclusive `--body-file` through a small native filesystem/body helper; the schema remains explicit at the command boundary. The resulting encoding error is mapped to `CliError.UserError` before `Effect.flatMap(runRequest)`. Do not substitute a default object or array, or make the flag required because the endpoint usually expects a body.
+
+## Generator utility choices
+
+Use native Effect string capitalization and projected string orders where their semantics match exactly. Source identifiers preserve acronym spelling after the first character; command-token validation and title sanitization remain distinct contracts. Local Set/Map allocation and explicit composite ordering stay plain when that makes ownership and tie-breaking clearer. These utility choices do not change emitted source.

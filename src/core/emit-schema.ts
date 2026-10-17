@@ -1,4 +1,4 @@
-import { Array, RegExp as EffectRegExp } from "effect";
+import { Array, Order, RegExp as EffectRegExp } from "effect";
 import type { WireSchema } from "./model.js";
 import { comment, internalReference, literal, propertyKey } from "./source-text.js";
 
@@ -51,17 +51,7 @@ export const schemaSource = (
     case "object": {
       const fields = Array.sort(
         schema.properties,
-        (a: { readonly name: string }, b: { readonly name: string }) => {
-          if (a.name < b.name) {
-            return -1;
-          }
-
-          if (a.name > b.name) {
-            return 1;
-          }
-
-          return 0;
-        },
+        Order.mapInput(Order.String, (property: { readonly name: string }) => property.name),
       )
         .map((property) => {
           const documentation = comment(property.schema.docs);

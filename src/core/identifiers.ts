@@ -1,3 +1,5 @@
+import { String } from "effect";
+
 /**
  * Allocate stable source names independently from command spelling and wire names.
  */
@@ -74,9 +76,7 @@ export const identifierAllocator = () => {
     const words = source.match(/[a-zA-Z0-9]+/gu) ?? ["api"];
     let name = words
       .map((word, index) =>
-        index === 0 && !pascal
-          ? `${word[0]?.toLowerCase()}${word.slice(1)}`
-          : `${word[0]?.toUpperCase()}${word.slice(1)}`,
+        index === 0 && !pascal ? String.uncapitalize(word) : String.capitalize(word),
       )
       .join("");
     if (/^[0-9]/u.test(name)) {

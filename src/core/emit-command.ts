@@ -125,8 +125,9 @@ const handlerSource = (
 ): string => {
   const pipes: string[] = [];
   for (const location of ["header", "query"] as const) {
-    const fields = Array.sort(operation.parameters, (a: Parameter, b: Parameter) =>
-      Order.String(a.wireName, b.wireName),
+    const fields = Array.sort(
+      operation.parameters,
+      Order.mapInput(Order.String, (parameter: Parameter) => parameter.wireName),
     )
       .filter((parameter) => parameter.location === location)
       .map((parameter) => {
