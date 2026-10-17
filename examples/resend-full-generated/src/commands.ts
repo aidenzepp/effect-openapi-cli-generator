@@ -56,6 +56,7 @@ const apiKeysCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -112,6 +113,7 @@ const apiKeysUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -177,6 +179,7 @@ const audiencesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -312,10 +315,15 @@ const automationsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
   },
@@ -328,7 +336,11 @@ const automationsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/create"),
     ),
-).pipe(Command.withDescription("Create an automation"));
+).pipe(
+  Command.withDescription(
+    'Create an automation\n\nJSON body defaults for --body and --body-file:\nSchema path "/properties/connections/items/properties/type": "default".\nJSON Pointer "/status": "disabled".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+  ),
+);
 
 /**
  * Retrieve a single automation
@@ -394,10 +406,15 @@ const automationsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
   },
@@ -410,7 +427,11 @@ const automationsUpdateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/update"),
     ),
-).pipe(Command.withDescription("Update an automation"));
+).pipe(
+  Command.withDescription(
+    'Update an automation\n\nJSON body defaults for --body and --body-file:\nSchema path "/properties/connections/items/properties/type": "default".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+  ),
+);
 
 /**
  * Duplicate an automation
@@ -560,6 +581,7 @@ const broadcastsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -635,6 +657,7 @@ const broadcastsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -806,6 +829,7 @@ const broadcastsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -869,6 +893,7 @@ const contactPropertiesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -944,6 +969,7 @@ const contactPropertiesUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1007,6 +1033,7 @@ const contactsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1113,7 +1140,11 @@ const contactsCreateImportCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/create-import"),
     ),
-).pipe(Command.withDescription("Create a contact import"));
+).pipe(
+  Command.withDescription(
+    "Create a contact import\n\nDefaults shown are declared by the API; this CLI does not insert them.",
+  ),
+);
 
 /**
  * Retrieve a single contact import
@@ -1258,6 +1289,7 @@ const contactsUpdateTopicsCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1336,6 +1368,7 @@ const contactsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1399,10 +1432,15 @@ const domainsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
   },
@@ -1415,7 +1453,11 @@ const domainsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create"),
     ),
-).pipe(Command.withDescription("Create a new domain"));
+).pipe(
+  Command.withDescription(
+    'Create a new domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/region": "us-east-1".\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+  ),
+);
 
 /**
  * Claim a domain Start a claim for a domain that another Resend account has already verified. The
@@ -1437,10 +1479,15 @@ const domainsCreateClaimCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
   },
@@ -1455,7 +1502,7 @@ const domainsCreateClaimCommand = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Claim a domain\nStart a claim for a domain that another Resend account has already verified. The domain is recreated under your account with fresh DKIM keys, so the previous account's DNS records cannot be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the same request body as creating a domain.",
+    'Claim a domain\nStart a claim for a domain that another Resend account has already verified. The domain is recreated under your account with fresh DKIM keys, so the previous account\'s DNS records cannot be reused. Returns a TXT record to add to your DNS to prove ownership. Uses the same request body as creating a domain.\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/custom_return_path": "send".\nJSON Pointer "/region": "us-east-1".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
   ),
 );
 
@@ -1516,10 +1563,15 @@ const domainsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
@@ -1533,7 +1585,11 @@ const domainsUpdateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/update"),
     ),
-).pipe(Command.withDescription("Update an existing domain"));
+).pipe(
+  Command.withDescription(
+    'Update an existing domain\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/tls": "opportunistic".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+  ),
+);
 
 /**
  * Retrieve a domain claim
@@ -1660,6 +1716,7 @@ const emailsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1703,6 +1760,7 @@ const emailsSendBatchCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -1781,7 +1839,7 @@ const emailsMetricsCommand = Command.make(
     ),
     granularity: Flag.Literals("granularity", ["hourly", "daily", "weekly", "monthly"]).pipe(
       Flag.withDescription(
-        "The bucket size used when `period` is in `dimensions`. The date range can't produce more than 10,000 periods at the chosen granularity.",
+        'The bucket size used when `period` is in `dimensions`. The date range can\'t produce more than 10,000 periods at the chosen granularity. Server default when omitted: "daily".',
       ),
       Flag.optional,
     ),
@@ -1830,7 +1888,7 @@ const emailsMetricsCommand = Command.make(
     ),
     timezone: Flag.String("timezone").pipe(
       Flag.withDescription(
-        "The IANA timezone (e.g. `America/New_York`) used to bucket periods when `period` is in `dimensions`.",
+        'The IANA timezone (e.g. `America/New_York`) used to bucket periods when `period` is in `dimensions`. Server default when omitted: "UTC".',
       ),
       Flag.optional,
     ),
@@ -1866,7 +1924,11 @@ const emailsMetricsCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/metrics"),
     ),
-).pipe(Command.withDescription("Retrieve account-level email metrics"));
+).pipe(
+  Command.withDescription(
+    "Retrieve account-level email metrics\n\nDefaults shown are declared by the API; this CLI does not insert them.",
+  ),
+);
 
 /**
  * Retrieve a list of received emails
@@ -2133,6 +2195,7 @@ const emailsShareCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2196,6 +2259,7 @@ const eventsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2231,6 +2295,7 @@ const eventsSendCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2310,6 +2375,7 @@ const eventsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2469,6 +2535,7 @@ const segmentsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2544,6 +2611,7 @@ const segmentsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2640,10 +2708,15 @@ const suppressionsAddCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
   },
@@ -2675,10 +2748,15 @@ const suppressionsBatchAddCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
   },
@@ -2710,10 +2788,15 @@ const suppressionsBatchRemoveCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. Supply either --body or --body-file.",
+      ),
       Flag.optional,
     ),
   },
@@ -2816,6 +2899,7 @@ const templatesCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2891,6 +2975,7 @@ const templatesUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -2994,10 +3079,15 @@ const topicsCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription(
+        "JSON request body; exclusive with --body-file. See body defaults above.",
+      ),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
-      Flag.withDescription("Read a JSON request body from a file; exclusive with --body."),
+      Flag.withDescription(
+        "Read a JSON request body from a file; exclusive with --body. See body defaults above.",
+      ),
       Flag.optional,
     ),
   },
@@ -3010,7 +3100,11 @@ const topicsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("topics/create"),
     ),
-).pipe(Command.withDescription("Create a new topic"));
+).pipe(
+  Command.withDescription(
+    'Create a new topic\n\nJSON body defaults for --body and --body-file:\nJSON Pointer "/visibility": "private".\nNested defaults depend on the containing value; schema paths describe array items or individual branches.\n\nDefaults shown are declared by the API; this CLI does not insert them.',
+  ),
+);
 
 /**
  * Retrieve a single topic
@@ -3069,6 +3163,7 @@ const topicsUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3166,6 +3261,7 @@ const webhooksCreateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(
@@ -3241,6 +3337,7 @@ const webhooksUpdateCommand = Command.make(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
         ),
       ),
+      Flag.withDescription("JSON request body; exclusive with --body-file."),
       Flag.optional,
     ),
     bodyFile: Flag.String("body-file").pipe(

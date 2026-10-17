@@ -1,3 +1,5 @@
+import type { Schema } from "effect";
+
 /**
  * The original supported HTTP verbs; command spelling never changes this value.
  */
@@ -12,6 +14,7 @@ export type JsonScalar = string | number | boolean | null;
  * Source annotations retained for generated help, JSDoc, and deprecation metadata.
  */
 export interface Documentation {
+  readonly default?: Schema.Json;
   readonly title?: string;
   readonly description?: string;
   readonly deprecated?: boolean;

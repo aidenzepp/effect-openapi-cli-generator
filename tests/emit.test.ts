@@ -511,7 +511,7 @@ test("explicit component categories preserve identity, overrides and inline defi
   expect(commands).toContain('Flag.Int("inline")');
   expect(commands).toContain("RequestBodies.Shared");
   expect(commands).toContain("RequestBodies.Alias");
-  expect(commands).toContain('Flag.withDescription("Local payload")');
+  expect(commands).toContain("Local payload JSON request body; exclusive with --body-file.");
   expect(source(output, "components/request-bodies")).toContain("export const Alias = Shared");
   expect(source(output, "components/parameters")).toContain("export const Alias = Shared.pipe");
   expect(commands).toContain("SecuritySchemes.Shared");
@@ -701,3 +701,205 @@ test("multipart request-body aliases and JSON schema views retain explicit ident
   expect(source(output, "commands")).toContain('Flag.String("title").pipe(');
   await checkPackage(output);
 });
+
+test("explicit defaults are discoverable in help and never inserted into requests", async () => {
+  const responses = { "200": { description: "OK" } };
+  const input = {
+    components: {
+      parameters: {
+        Enabled: {
+          description: "Shared flag",
+          in: "query",
+          name: "enabled",
+          schema: { $ref: "#/components/schemas/FlagAlias" },
+        },
+        EnabledAlias: { $ref: "#/components/parameters/Enabled" },
+      },
+      requestBodies: {
+        Body: {
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Payload" } } },
+        },
+        BodyAlias: { $ref: "#/components/requestBodies/Body" },
+      },
+      schemas: {
+        Flag: { default: true, type: "boolean" },
+        FlagAlias: { $ref: "#/components/schemas/Flag", default: false },
+        Payload: {
+          default: { a: false, z: 0 },
+          properties: {
+            blank: { default: "", type: "string" },
+            choice: {
+              oneOf: [
+                { default: "a", enum: ["a"], type: "string" },
+                { default: "b", enum: ["b"], type: "string" },
+              ],
+            },
+            escaped: { default: `line\n\u0001\${literal}*/`, type: "string" },
+            list: { default: [], items: { default: "item", type: "string" }, type: "array" },
+            nested: {
+              properties: { "a/b~c": { default: 0, type: "integer" } },
+              required: ["a/b~c"],
+              type: "object",
+            },
+            nothing: { default: null, type: "null" },
+            prose: { description: "Defaults to inferred.", type: "string" },
+          },
+          type: "object",
+        },
+      },
+    },
+    info: { title: "Defaults", version: "1" },
+    openapi: "3.1.0",
+    paths: {
+      "/required": {
+        post: {
+          operationId: "required",
+          requestBody: {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Payload", default: {} } },
+            },
+            required: true,
+          },
+          responses,
+        },
+      },
+      "/send/{id}": {
+        post: {
+          operationId: "send",
+          parameters: [
+            { $ref: "#/components/parameters/EnabledAlias", description: "Local flag description" },
+            { in: "header", name: "X-Mode", schema: { default: "raw/slash", type: "string" } },
+            { in: "query", name: "count", schema: { default: 0, type: "integer" } },
+            { in: "query", name: "text", schema: { default: "", type: "string" } },
+            {
+              in: "path",
+              name: "id",
+              required: true,
+              schema: { default: "identifier", type: "string" },
+            },
+          ],
+          requestBody: {
+            $ref: "#/components/requestBodies/BodyAlias",
+            description: "Local body description",
+          },
+          responses,
+        },
+      },
+    },
+  };
+  const output = await Effect.runPromise(generate(input));
+  const reordered = {
+    ...input,
+    components: {
+      ...input.components,
+      schemas: {
+        ...input.components.schemas,
+        Payload: {
+          ...input.components.schemas.Payload,
+          default: Object.fromEntries(
+            Array.reverse(Object.entries(input.components.schemas.Payload.default)),
+          ),
+        },
+      },
+    },
+  };
+  expect(await Effect.runPromise(generate(reordered))).toEqual(output);
+  await checkPackage(output, async (directory) => {
+    const build = Bun.spawnSync([path.resolve("node_modules/.bin/tsc"), "-p", directory]);
+    expect(build.exitCode, build.stderr.toString()).toBe(0);
+
+    const requests: { body: string; header: string | null; url: string }[] = [];
+    const server = Bun.serve({
+      async fetch(request) {
+        requests.push({
+          body: await request.text(),
+          header: request.headers.get("x-mode"),
+          url: request.url,
+        });
+
+        return new Response("accepted");
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+    const invoke = async (args: readonly string[], command = "send") => {
+      const process = Bun.spawn(["node", path.join(directory, "dist/main.js"), command, ...args], {
+        stderr: "pipe",
+        stdout: "pipe",
+      });
+      const [code, out, err] = await Promise.all([
+        process.exited,
+        new Response(process.stdout).text(),
+        new Response(process.stderr).text(),
+      ]);
+
+      return { code, err, out };
+    };
+    try {
+      const help = await invoke(["--help"]);
+      expect(help.code, help.err).toBe(0);
+      expect(help.out).toContain("Local flag description Server default when omitted: false.");
+      expect(help.out).toContain("Server default when omitted: 0.");
+      expect(help.out).toContain('Server default when omitted: "".');
+      expect(help.out).toContain('Declared default: "identifier"; this input is still required.');
+      expect(help.out).toContain('JSON Pointer "": {"a":false,"z":0}.');
+      expect(help.out).toContain('JSON Pointer "/blank": "".');
+      expect(help.out).toContain('JSON Pointer "/nothing": null.');
+      expect(help.out).toContain('JSON Pointer "/list": [].');
+      expect(help.out).toContain('Schema path "/properties/list/items": "item".');
+      expect(help.out).toContain(
+        'JSON Pointer "/nested/a~1b~0c": 0; required in its containing object.',
+      );
+      expect(help.out).not.toContain('JSON Pointer "/prose"');
+      expect(help.out).toContain("See body defaults above.");
+      expect(help.out).toContain('Schema path "/properties/choice/oneOf/0": "a".');
+      expect(help.out).toContain(
+        `JSON Pointer "/escaped": ${JSON.stringify(input.components.schemas.Payload.properties.escaped.default)}.`,
+      );
+      expect(help.out).toContain('Server default when omitted: "raw/slash".');
+
+      const requiredHelp = await invoke(["--help"], "required");
+      expect(requiredHelp.out).toContain('JSON Pointer "": {}; body is required.');
+
+      const base = ["--id", "abc", "--base-url", server.url.origin];
+      const omitted = await invoke(base);
+      expect(omitted.code).toBe(0);
+
+      const body = '{"blank":"","list":[],"nested":{"a/b~c":0},"nothing":null}';
+      const explicit = await invoke([
+        ...base,
+        "--x-mode",
+        "custom/slash",
+        "--enabled",
+        "false",
+        "--count",
+        "0",
+        "--text",
+        "",
+        "--body",
+        body,
+      ]);
+      expect(explicit.code).toBe(0);
+
+      const filename = path.join(directory, "body.json");
+      await writeFile(filename, body);
+      const fromFile = await invoke([...base, "--body-file", filename]);
+      expect(fromFile.code).toBe(0);
+      expect(requests.map((request) => request.body)).toEqual(["", body, body]);
+      expect(requests.map((request) => request.header)).toEqual([null, "custom/slash", null]);
+      expect(new URL(requests[0]?.url ?? "").search).toBe("");
+      expect(new URL(requests[1]?.url ?? "").searchParams.get("enabled")).toBe("false");
+      expect(new URL(requests[1]?.url ?? "").searchParams.get("count")).toBe("0");
+      expect(new URL(requests[1]?.url ?? "").searchParams.get("text")).toBe("");
+
+      const missing = await invoke([...base, "--body", '{"nested":{}}']);
+      expect(missing.code).toBe(1);
+
+      const missingBody = await invoke(["--base-url", server.url.origin], "required");
+      expect(missingBody.code).toBe(1);
+      expect(requests).toHaveLength(3);
+    } finally {
+      await server.stop(true);
+    }
+  });
+}, 30_000);

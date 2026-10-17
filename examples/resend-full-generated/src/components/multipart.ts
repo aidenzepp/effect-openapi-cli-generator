@@ -11,7 +11,9 @@ export const CreateContactImportOptions = {
     Flag.withDescription("CSV file to import. Maximum size is 50MB."),
   ),
   on_conflict: Flag.Literals("on-conflict", ["upsert", "skip"]).pipe(
-    Flag.withDescription("Strategy to use when an imported contact already exists."),
+    Flag.withDescription(
+      'Strategy to use when an imported contact already exists. Server default when omitted: "skip".',
+    ),
     Flag.optional,
   ),
   segments: Flag.String("segments").pipe(

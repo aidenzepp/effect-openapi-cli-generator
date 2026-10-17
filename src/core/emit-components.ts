@@ -3,7 +3,7 @@ import { identifierAllocator } from "./identifiers.js";
 import { parameterHelp, parameterSource } from "./emit-flag.js";
 import { hasSchemaReference, schemaSource } from "./emit-schema.js";
 import type { ApiModel, Parameter, RequestBody } from "./model.js";
-import { comment, description, internalReference, literal } from "./source-text.js";
+import { comment, internalReference, literal } from "./source-text.js";
 
 /**
  * Allocate category-local names from explicit pointers, never structural equality.
@@ -30,7 +30,7 @@ const parameterUse = (parameter: Parameter, name: string): string => {
   const target = parameter.reference?.parameter;
   const value = internalReference(name, target?.docs.deprecated === true);
 
-  return target && description(parameter.docs) !== description(target.docs)
+  return target && parameterHelp(parameter) !== parameterHelp(target)
     ? `${value}.pipe(Flag.withDescription(${literal(parameterHelp(parameter))}))`
     : value;
 };

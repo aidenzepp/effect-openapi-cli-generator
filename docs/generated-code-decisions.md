@@ -548,3 +548,22 @@ Multipart bundle identity prefers the schema reference. A referenced request bod
 Security Reference Object description overrides apply only in OpenAPI 3.1. OpenAPI 3.0 ignores reference siblings. An explicit empty 3.1 description clears inherited CLI help.
 
 Scalar request headers retain their raw values as an explicit interoperability convention; this is not full RFC 6570 header expansion. Resend’s [official idempotency example](https://resend.com/docs/dashboard/emails/idempotency-keys) uses `welcome-user/123456789` unchanged. Header serialization is unchanged by component extraction.
+
+## Explicit defaults in help
+
+Show only explicit schema `default` annotations. Optional parameter and multipart field help appends `Server default when omitted: "skip".` Required parameters say `Declared default: ...; this input is still required.` Multipart required fields remain required when their body is supplied; omitting an optional body is different from omitting a required field in a supplied body. File defaults describe uploaded content and never supply a local file path.
+
+Command help states once: `Defaults shown are declared by the API; this CLI does not insert them.` Native flag usage and enum choices remain available. JSON body defaults appear once in command help for both `--body` and `--body-file`; both input flags point to that section. Object properties use escaped JSON Pointers; array items and individual union branches use labeled schema paths. Nested defaults depend on the containing value, and branch defaults depend on the matching branch. Defaults do not synthesize parents, array elements, request bodies or required fields.
+
+Preserve false, zero, empty strings, null, arrays and objects as JSON values. Sort object keys only for deterministic presentation; do not change the request value. Retain defaults through explicit schema aliases and supported OpenAPI 3.1 reference annotation overrides. OpenAPI 3.0 reference siblings do not override defaults. Reference-site parameter/body descriptions must not erase schema default help.
+
+```ts
+Flag.Literals("on-conflict", ["upsert", "skip"]).pipe(
+  Flag.withDescription(
+    'Strategy to use when an imported contact already exists. Server default when omitted: "skip".',
+  ),
+  Flag.optional,
+);
+```
+
+Do not infer defaults from prose such as “defaults to now,” add native flag/schema default combinators, fill missing JSON properties, or imply that a declared server default was verified against the live service. Omitted values remain omitted; explicit values remain unchanged.

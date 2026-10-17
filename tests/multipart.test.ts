@@ -18,9 +18,9 @@ const upload = {
       minItems: 1,
       type: "array",
     },
-    document: { format: "binary", type: "string" },
+    document: { default: "content", format: "binary", type: "string" },
     signature: { format: "binary", type: "string" },
-    title: { minLength: 2, type: "string" },
+    title: { default: "caption", minLength: 2, type: "string" },
   },
   required: ["document"],
   type: "object",
@@ -39,6 +39,7 @@ const input = {
     "/empty": {
       post: operation({ additionalProperties: false, properties: {}, type: "object" }, true),
     },
+    "/inline": { post: operation(upload, false) },
     "/optional": { post: operation({ $ref: "#/components/schemas/UploadAlias" }, false) },
     "/upload": { post: operation({ $ref: "#/components/schemas/Upload" }, true) },
   },
@@ -269,3 +270,18 @@ test("binary content constraints fail instead of checking local path spelling", 
   expect(commands).toContain("document: MultipartComponents.Upload.document");
   expect(source).toContain("Schema.isMaxLength(2)");
 });
+
+test.each(["inline", "optional", "upload"])(
+  "%s multipart help distinguishes content defaults from required inputs",
+  async (command) => {
+    const help = await invoke([command, "post", "--help"]);
+    expect(help.code, help.err).toBe(0);
+    expect(help.out).toContain(
+      'Declared default: "content"; this field is still required when its body is supplied.',
+    );
+    expect(help.out).toContain(
+      "Default applies to uploaded content; supply a local file path explicitly.",
+    );
+    expect(help.out).toContain('Server default when omitted: "caption".');
+  },
+);

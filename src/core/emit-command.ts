@@ -1,3 +1,4 @@
+import { bodyInputHelp, commandHelp } from "./emit-help.js";
 import { parameterSource } from "./emit-flag.js";
 import { multipartFlagSource, multipartBodySource, multipartUsesSchema } from "./emit-multipart.js";
 import { Array, Order } from "effect";
@@ -234,13 +235,14 @@ const operationSource = (
       );
     }
   } else if (operation.body) {
+    const help = bodyInputHelp(operation.body);
     flags.set(
       "body",
-      `Flag.String("body").pipe(Flag.mapEffect((value) => Schema.decodeUnknownEffect(Schema.fromJsonString(${bodies.reference(operation.body)}))(value, { onExcessProperty: "error", reportInput: false }).pipe(Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })))), ${description(operation.body.docs) ? `Flag.withDescription(${literal(description(operation.body.docs))}), ` : ""}Flag.optional)`,
+      `Flag.String("body").pipe(Flag.mapEffect((value) => Schema.decodeUnknownEffect(Schema.fromJsonString(${bodies.reference(operation.body)}))(value, { onExcessProperty: "error", reportInput: false }).pipe(Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })))), Flag.withDescription(${literal(help.body)}), Flag.optional)`,
     );
     flags.set(
       "bodyFile",
-      'Flag.String("body-file").pipe(Flag.withDescription("Read a JSON request body from a file; exclusive with --body."), Flag.optional)',
+      `Flag.String("body-file").pipe(Flag.withDescription(${literal(help.bodyFile)}), Flag.optional)`,
     );
   }
 
@@ -249,7 +251,7 @@ const operationSource = (
     Array.sort([...flags.keys()], Order.String)
       .map((key) => `${key}: ${flags.get(key)}`)
       .join(",\n");
-  const help = description(operation.docs);
+  const help = commandHelp(operation);
 
   return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference, bodies)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
 };
