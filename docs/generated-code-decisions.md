@@ -53,36 +53,38 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve owning-module namespaces (`Auth`, `Errors`, `Http`, `Url`, `Models` and `Commands`) where imported. The root name alone does not prevent collisions. The generator allocates these identifiers deterministically; dedicated emitted-package checks exercise normalized-name collisions. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve owning-module namespaces (`SecuritySchemes`, `Parameters`, `RequestBodies`, `Schemas`, `Errors`, `Http`, `Url` and `Commands`) where imported. The root name alone does not prevent collisions. The generator allocates these identifiers deterministically; dedicated emitted-package checks exercise normalized-name collisions. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
 
-## Separate models, builtins, commands and runtime assembly
+## Separate OpenAPI components, builtins, commands and runtime assembly
 
-The approved Resend layout supersedes the earlier single-file model preference:
+The generated layout groups source-owned declarations by OpenAPI component category. Handwritten references retain their historical layout:
 
-- `models.ts` owns the named schemas declared by explicit OpenAPI references.
+- `components/schemas.ts` owns named schemas declared by explicit OpenAPI references.
+- `components/parameters.ts` owns explicitly referenced parameter flags.
+- `components/request-bodies.ts` owns validators for explicitly referenced JSON request bodies; handlers retain requiredness and transport.
 - `builtins/errors.ts` owns schema-backed transport failures and safe CLI conversion.
 - `builtins/auth.ts` owns supported security-definition and credential schemas, checked Basic encoding and API key placement. Bearer requests use the native helper directly.
 - `builtins/url.ts` owns base URL validation and literal path-segment encoding.
 - `builtins/http.ts` owns one-shot HTTP execution and response output.
-- `auth.ts` owns flags for this specification's active security requirements.
+- `components/security-schemes.ts` owns flags for this specification's active security requirements.
 - `commands.ts` contains only operation/group declarations after its imports.
 - `main.ts` owns `rootCommand` and runtime layer provision.
 
-Use namespace imports with quoted module specifiers, keeping imports contiguous. If a module imports both spec-owned `auth.ts` and `builtins/auth.ts`, name the builtin namespace `BuiltinAuth` to keep ownership distinct:
+Use namespace imports with quoted module specifiers, keeping imports contiguous. If a module imports both spec-owned `components/security-schemes.ts` and `builtins/auth.ts`, name the builtin namespace `BuiltinAuth` to keep ownership distinct:
 
 ```ts
 // commands.ts
-import * as Auth from "./auth.js";
+import * as SecuritySchemes from "./components/security-schemes.js";
 import * as Errors from "./builtins/errors.js";
 import * as Http from "./builtins/http.js";
 import * as Url from "./builtins/url.js";
-import * as Models from "./models.js";
+import * as Schemas from "./components/schemas.js";
 
 // A body schema reference inside its owning flag.
-Schema.fromJsonString(Models.SendEmailRequest);
+Schema.fromJsonString(Schemas.SendEmailRequest);
 
 // Keep flag keys stable when referencing shared configuration.
-Command.make("list", { baseUrl: Url.baseUrl, bearerAuth: Auth.bearerAuth });
+Command.make("list", { baseUrl: Url.baseUrl, bearerAuth: SecuritySchemes.BearerAuth });
 ```
 
 ```ts
@@ -95,7 +97,7 @@ const rootCommand = Command.make("resend-reference").pipe(
 );
 ```
 
-Export only cross-module contracts and the explicitly showcased builtin capabilities. Keep operations, nested groups, model-only dependencies and error formatting details local. Use direct owning-module imports; there is no catch-all barrel. Keep API flags inline in their commands and preserve explicitly shared model identities across module boundaries.
+Export only cross-module contracts and the explicitly showcased builtin capabilities. Keep operations, nested groups, model-only dependencies and error formatting details local. Use direct owning-module imports; there is no catch-all barrel. Keep inline API definitions in their commands; preserve explicit parameter and schema references across component modules.
 
 The showcase includes potential builtin capabilities beyond the active Resend bearer scheme. The generator emits only required modules and declarations plus their transitive dependencies; API-key adapters are selected by active wire location. The schema definitions describe supported configuration, not a runtime OpenAPI interpreter. Credentials are separate redacted values.
 
@@ -119,7 +121,7 @@ Environment bindings require explicit generator configuration. Do not infer vend
 
 ## Map declared constraints directly
 
-Define API flags directly in each owning `Command.make` configuration. Keep inline constraints in that flag definition. Prefer native Schema checks that visibly correspond to the input keywords; do not interpret a regex into a domain predicate or invent its explanation.
+Define inline API parameters directly in each owning `Command.make` configuration; use `Parameters.Name` for explicit parameter component references. Keep inline constraints in that flag definition. Prefer native Schema checks that visibly correspond to the input keywords; do not interpret a regex into a domain predicate or invent its explanation.
 
 For this schema:
 
@@ -183,9 +185,9 @@ const listFilesCommand = Command.make("list", {
 });
 ```
 
-Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Keep named model schemas in `models.ts`, with dependencies declared first. `commands.ts` imports them through the `Models` namespace. Export only schemas consumed across modules; dependencies used solely within `models.ts` stay local. Model naming still requires the deterministic allocation described above.
+Independent inline schemas remain inline, even when identical. Structural similarity does not establish shared meaning or ownership. Explicit references establish that relationship. Keep named model schemas in `components/schemas.ts`, with dependencies declared first. Consumers import them through the `Schemas` namespace. Export only schemas consumed across modules; dependencies used solely within that module stay local. Model naming still requires the deterministic allocation described above.
 
-A shared OpenAPI model shares the schema, not the flag definition. Repeat each API flag where its command declares it, including its name and help. The CLI-owned `baseUrl` flag may remain shared: it is executable configuration, not an API parameter model.
+A shared schema component shares the validator, not the flag. An explicitly referenced parameter component shares its native flag, including requiredness and source-owned help. Reference-site descriptions are applied locally, and operation-level overrides replace path-level parameters before component collection. The CLI-owned `baseUrl` flag may remain shared: it is executable configuration, not an API parameter model.
 
 **POSITIVE — Keep the parameter at its command boundary.**
 
@@ -495,3 +497,28 @@ Naming extensions are optional. Slash-separated operation IDs define nesting; ot
 For multipart only, `string` plus `format: binary` selects native `Flag.File`; arrays of binary strings use repeated file flags. This is an explicit generator convention for legacy binary schemas in OpenAPI 3.1, not a standard-imposed interpretation of format. JSON binary formats remain annotations. Native FormData owns boundaries. Files are buffered in memory. Content constraints on binary strings are unsupported; do not apply them to filesystem paths. Array bounds apply to the list of supplied paths.
 
 Unknown multipart fields use an explicit text-valued JSON object flag when allowed by the schema. Reject declared-name collisions. Do not infer binary parts, JSON structures, defaults or constraints from descriptions. Optional omission sends no body; required empty objects still send multipart. Structured multipart fields, typed rest fields and custom encoding remain unsupported. Emit only the file helpers actually used by that CLI.
+
+## Preserve explicit component categories and aliases
+
+Standard category names are fixed; names within each category come from the specification. Allocate safe identifiers deterministically within each category. Two categories may both export `Shared` without collision. Emit only used declarations and dependencies; do not generate unused responses or runtime implementations merely because a component exists.
+
+**POSITIVE — A referenced parameter owns a reusable native flag.**
+
+```ts
+// components/parameters.ts
+export const PaginationLimit = Flag.Int("limit").pipe(
+  Flag.withSchema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  Flag.optional,
+);
+// commands.ts
+Command.make("list", { baseUrl: Url.baseUrl, limit: Parameters.PaginationLimit });
+```
+
+**NEGATIVE — Extract equal inline parameters into a shared component without a source reference.**
+
+```ts
+// No parameter component exists in the input; this invents one.
+export const SharedLimit = Flag.Int("limit");
+```
+
+Aliases retain explicit target reuse, such as `export const Alias = Base`; local descriptions can wrap a referenced flag with `Flag.withDescription`. A JSON request-body component exports its validator, including schema aliases through native destructuring when appropriate. Its handler still owns body requiredness and encoding; do not present this validator as the entire OpenAPI Request Body Object. Reference-site body descriptions remain on the local body flag. Multipart references remain normalized identities without an unused whole-body validator.

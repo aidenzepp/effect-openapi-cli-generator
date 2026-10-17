@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Effect, Schema } from "effect";
+import { Array, Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/http";
 import * as oxfmt from "oxfmt";
 import { generate } from "../src/index.js";
@@ -50,7 +50,10 @@ const document = {
 const source = (output: GeneratedApplication, name: string) =>
   output.files.find((file) => file.path === `src/${name}.ts`)?.content ?? "";
 
-const checkPackage = async (output: GeneratedApplication) => {
+const checkPackage = async (
+  output: GeneratedApplication,
+  inspect?: (directory: string) => Promise<void>,
+) => {
   const directory = await mkdtemp(path.join(process.cwd(), ".emission-proof-"));
   try {
     await symlink(path.resolve("node_modules"), path.join(directory, "node_modules"));
@@ -71,6 +74,9 @@ const checkPackage = async (output: GeneratedApplication) => {
         { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString() },
         command.join(" "),
       ).toMatchObject({ code: 0 });
+    }
+    if (inspect) {
+      await inspect(directory);
     }
   } finally {
     await rm(directory, { force: true, recursive: true });
@@ -201,7 +207,7 @@ test("explicit reference aliases share identity; inline lookalikes remain inline
   });
 
   const output = await Effect.runPromise(generate(input));
-  const models = source(output, "models");
+  const models = source(output, "components/schemas");
   expect(models).toContain("const Auth2 =");
   expect(models).toContain("const Alias = Auth2");
   expect(models).toContain("export const Models2");
@@ -239,7 +245,7 @@ test("model constraints preserve code points, exact oneOf, extras and null enum 
   const output = await Effect.runPromise(generate(input));
   const directory = await mkdtemp(path.join(process.cwd(), ".schema-proof-"));
   try {
-    await writeFile(path.join(directory, "models.ts"), source(output, "models"));
+    await writeFile(path.join(directory, "models.ts"), source(output, "components/schemas"));
     const models = Schema.decodeUnknownSync(
       Schema.Struct({
         Case0: JsonValidator,
@@ -349,7 +355,7 @@ test("formatted enum literals roundtrip lone surrogates, interpolation and line 
   const output = await Effect.runPromise(generate(input));
   const directory = await mkdtemp(path.join(process.cwd(), ".literal-proof-"));
   try {
-    const models = source(output, "models");
+    const models = source(output, "components/schemas");
     await writeFile(path.join(directory, "models.ts"), models);
     const { Text } = Schema.decodeUnknownSync(Schema.Struct({ Text: JsonValidator }))(
       await import(path.join(directory, "models.ts")),
@@ -415,7 +421,7 @@ test("multipart capability subsets compile without unused models or imports", as
               },
             }),
           );
-          expect(source(output, "models")).toBe("");
+          expect(source(output, "components/schemas")).toBe("");
 
           const multipart = source(output, "builtins/multipart");
           expect(multipart).not.toContain("export const files");
@@ -431,4 +437,160 @@ test("multipart capability subsets compile without unused models or imports", as
       { concurrency: 1 },
     ),
   );
+}, 30_000);
+
+test("explicit component categories preserve identity, overrides and inline definitions", async () => {
+  const responses = { "200": { description: "OK" } };
+  const schema = { minimum: 0, type: "integer" };
+  const sharedParameter = {
+    in: "query",
+    name: "limit",
+    schema: { $ref: "#/components/schemas/Shared" },
+  };
+  const body = {
+    content: { "application/json": { schema: { $ref: "#/components/schemas/Shared" } } },
+    required: true,
+  };
+  const input = {
+    components: {
+      parameters: {
+        Alias: { $ref: "#/components/parameters/Shared", description: "Alias parameter" },
+        Shared: sharedParameter,
+        Twin: sharedParameter,
+      },
+      requestBodies: {
+        Alias: { $ref: "#/components/requestBodies/Shared", description: "Alias payload" },
+        Shared: { ...body, description: "Canonical payload" },
+      },
+      schemas: { Shared: schema, Twin: schema },
+      securitySchemes: { Shared: { scheme: "bearer", type: "http" } },
+    },
+    info: { title: "Components", version: "1" },
+    openapi: "3.1.0",
+    paths: {
+      "/first": {
+        post: {
+          parameters: [
+            { $ref: "#/components/parameters/Alias" },
+            { in: "header", name: "inline", schema },
+          ],
+          requestBody: { $ref: "#/components/requestBodies/Alias", description: "Local payload" },
+          responses,
+        },
+      },
+      "/second": {
+        parameters: [{ $ref: "#/components/parameters/Twin" }],
+        post: {
+          parameters: [{ $ref: "#/components/parameters/Shared", description: "Local help" }],
+          requestBody: { $ref: "#/components/requestBodies/Shared" },
+          responses,
+        },
+      },
+      "/third": {
+        get: {
+          parameters: [
+            { $ref: "#/components/parameters/Twin" },
+            { in: "header", name: "twin", schema: { $ref: "#/components/schemas/Twin" } },
+          ],
+          responses,
+        },
+      },
+    },
+    security: [{ Shared: [] }],
+  };
+  const output = await Effect.runPromise(generate(input));
+  const commands = source(output, "commands");
+  expect(commands.match(/Parameters.Shared/gu)).toHaveLength(1);
+  expect(commands).toContain('Flag.withDescription("Local help")');
+  expect(commands).toContain('Flag.Int("inline")');
+  expect(commands).toContain("RequestBodies.Shared");
+  expect(commands).toContain("RequestBodies.Alias");
+  expect(commands).toContain('Flag.withDescription("Local payload")');
+  expect(source(output, "components/request-bodies")).toContain("export const Alias = Shared");
+  expect(source(output, "components/parameters")).toContain("export const Alias = Shared.pipe");
+  expect(commands).toContain("SecuritySchemes.Shared");
+  expect(source(output, "components/parameters")).toContain("export const Shared = Flag.Int");
+  expect(source(output, "components/parameters")).toContain("export const Twin = Flag.Int");
+  expect(source(output, "components/parameters")).toContain("Schemas.Shared");
+  expect(source(output, "components/request-bodies")).toContain(
+    "export const { Shared } = Schemas",
+  );
+  expect(source(output, "components/schemas")).toContain("export const Shared =");
+  expect(source(output, "components/schemas")).toContain("export const Twin =");
+  expect(
+    output.files.some((file) => file.path === "src/models.ts" || file.path === "src/auth.ts"),
+  ).toBe(false);
+  expect(
+    await Effect.runPromise(
+      generate({ ...input, paths: Object.fromEntries(Array.reverse(Object.entries(input.paths))) }),
+    ),
+  ).toEqual(output);
+  await checkPackage(output, async (directory) => {
+    expect(Bun.spawnSync([path.resolve("node_modules/.bin/tsc"), "-p", directory]).exitCode).toBe(
+      0,
+    );
+
+    const requests: { body: string; url: string; authorization: string | null }[] = [];
+    const server = Bun.serve({
+      fetch: async (request) => {
+        requests.push({
+          authorization: request.headers.get("authorization"),
+          body: await request.text(),
+          url: request.url,
+        });
+
+        return new Response("accepted");
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+    const invoke = async (command: string, args: readonly string[]) => {
+      const child = Bun.spawn(
+        [
+          "node",
+          path.join(directory, "dist/main.js"),
+          command,
+          "post",
+          "--base-url",
+          server.url.origin,
+          "--shared",
+          "local-token",
+          ...args,
+        ],
+        { stderr: "pipe", stdout: "pipe" },
+      );
+      const [code, out, err] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+
+      return { code, err, out };
+    };
+    try {
+      const first = await invoke("first", ["--limit", "4", "--inline", "5", "--body", "12"]);
+      expect(first.code, first.err).toBe(0);
+
+      const second = await invoke("second", ["--limit", "0", "--body", "7"]);
+      expect(second.code, second.err).toBe(0);
+      expect(requests.map((request) => request.body)).toEqual(["12", "7"]);
+      expect(requests.map((request) => new URL(request.url).searchParams.get("limit"))).toEqual([
+        "4",
+        "0",
+      ]);
+      expect(requests.map((request) => request.authorization)).toEqual([
+        "Bearer local-token",
+        "Bearer local-token",
+      ]);
+
+      const missing = await invoke("first", []);
+      expect(missing.code).toBe(1);
+
+      const invalid = await invoke("first", ["--limit", "-1", "--body", "12"]);
+      expect(invalid.code).toBe(1);
+      expect(requests).toHaveLength(2);
+    } finally {
+      await server.stop(true);
+    }
+  });
 }, 30_000);

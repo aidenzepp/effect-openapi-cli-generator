@@ -47,7 +47,7 @@ const input = {
 beforeAll(async () => {
   directory = await mkdtemp(path.join(process.cwd(), ".emission-proof-multipart-"));
   const output = await Effect.runPromise(generate(input));
-  expect(output.files.some((entry) => entry.path === "src/models.ts")).toBe(false);
+  expect(output.files.some((entry) => entry.path === "src/components/schemas.ts")).toBe(false);
   await symlink(path.resolve("node_modules"), path.join(directory, "node_modules"));
   await Promise.all(
     output.files.map(async (entry) => {

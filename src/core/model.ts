@@ -54,6 +54,7 @@ export type WireSchema = {
  * A scalar request parameter whose wire identity remains separate from its CLI binding.
  */
 export interface Parameter {
+  readonly reference?: { readonly pointer: string; readonly parameter: Parameter };
   readonly wireName: string;
   readonly flagName: string;
   readonly location: "path" | "query" | "header";
@@ -86,16 +87,21 @@ export interface Operation {
   readonly parameters: readonly Parameter[];
   readonly docs: Documentation;
   readonly security: SecurityRequirement | undefined;
-  readonly body:
-    | {
-        readonly required: boolean;
-        readonly schema: WireSchema;
-        readonly multipart?: {
-          readonly fields: readonly MultipartField[];
-          readonly additionalFields: boolean;
-        };
-      }
-    | undefined;
+  readonly body: RequestBody | undefined;
+}
+
+/**
+ * A request-body contract with its explicit component identity and use-site documentation.
+ */
+export interface RequestBody {
+  readonly required: boolean;
+  readonly schema: WireSchema;
+  readonly docs: Documentation;
+  readonly reference?: { readonly pointer: string; readonly body: RequestBody };
+  readonly multipart?: {
+    readonly fields: readonly MultipartField[];
+    readonly additionalFields: boolean;
+  };
 }
 
 /**

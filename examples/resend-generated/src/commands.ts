@@ -1,12 +1,13 @@
 import { Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import { HttpClientRequest } from "effect/http";
-import * as Auth from "./auth.js";
 import * as Body from "./builtins/body.js";
 import * as Errors from "./builtins/errors.js";
 import * as Http from "./builtins/http.js";
 import * as Url from "./builtins/url.js";
-import * as Models from "./models.js";
+import * as Parameters from "./components/parameters.js";
+import * as Schemas from "./components/schemas.js";
+import * as SecuritySchemes from "./components/security-schemes.js";
 
 /**
  * Retrieve a list of domains
@@ -14,23 +15,11 @@ import * as Models from "./models.js";
 const domainsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -54,10 +43,10 @@ const domainsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateDomainRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateDomainRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -75,7 +64,7 @@ const domainsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("domains"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateDomainRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateDomainRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create"),
@@ -89,7 +78,7 @@ const domainsRemoveCommand = Command.make(
   "delete",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
@@ -109,10 +98,10 @@ const domainsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateDomainOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateDomainOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -131,7 +120,7 @@ const domainsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("domains", domainId),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateDomainOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateDomainOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/update"),
@@ -145,10 +134,10 @@ const emailsSendCommand = Command.make(
   "send",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendEmailRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.SendEmailRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -174,7 +163,7 @@ const emailsSendCommand = Command.make(
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("emails"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.SendEmailRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.SendEmailRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/send"),
@@ -188,10 +177,10 @@ const emailsSendBatchCommand = Command.make(
   "send",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Models.SendEmailRequest)))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schemas.SendEmailRequest)))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -217,7 +206,7 @@ const emailsSendBatchCommand = Command.make(
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("emails", "batch"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Schema.Array(Models.SendEmailRequest))),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schema.Array(Schemas.SendEmailRequest))),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/send-batch"),
@@ -237,7 +226,7 @@ const emailsListAttachmentsCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'.",
@@ -275,7 +264,7 @@ const emailsGetAttachmentCommand = Command.make(
       Flag.withDescription("The ID of the attachment."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ attachmentId, baseUrl: apiUrl, bearerAuth, emailId }) =>

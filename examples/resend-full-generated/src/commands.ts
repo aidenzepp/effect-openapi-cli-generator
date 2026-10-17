@@ -1,14 +1,15 @@
 import { Effect, Option, Schema } from "effect";
 import { CliError, Command, Flag } from "effect/cli";
 import { HttpClientRequest } from "effect/http";
-import * as Auth from "./auth.js";
 import * as Body from "./builtins/body.js";
 import * as Errors from "./builtins/errors.js";
 import * as Http from "./builtins/http.js";
 import * as Multipart from "./builtins/multipart.js";
 import * as Query from "./builtins/query.js";
 import * as Url from "./builtins/url.js";
-import * as Models from "./models.js";
+import * as Parameters from "./components/parameters.js";
+import * as Schemas from "./components/schemas.js";
+import * as SecuritySchemes from "./components/security-schemes.js";
 
 /**
  * Retrieve a list of API keys
@@ -16,23 +17,11 @@ import * as Models from "./models.js";
 const apiKeysListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -56,10 +45,10 @@ const apiKeysCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateApiKeyRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateApiKeyRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -77,7 +66,7 @@ const apiKeysCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("api-keys"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateApiKeyRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateApiKeyRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("api-keys/create"),
@@ -92,7 +81,7 @@ const apiKeysRemoveCommand = Command.make(
   {
     apiKeyId: Flag.String("api-key-id").pipe(Flag.withDescription("The API key ID.")),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
   },
   ({ apiKeyId, baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.delete(apiUrl).pipe(
@@ -112,10 +101,10 @@ const apiKeysUpdateCommand = Command.make(
   {
     apiKeyId: Flag.String("api-key-id").pipe(Flag.withDescription("The API key ID.")),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateApiKeyRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateApiKeyRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -133,7 +122,7 @@ const apiKeysUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("api-keys", apiKeyId),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateApiKeyRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateApiKeyRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("api-keys/update"),
@@ -149,7 +138,7 @@ const apiKeysUpdateCommand = Command.make(
  */
 const audiencesListCommand = Command.make(
   "list",
-  { baseUrl: Url.baseUrl, bearerAuth: Auth.bearerAuth },
+  { baseUrl: Url.baseUrl, bearerAuth: SecuritySchemes.BearerAuth },
   ({ baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.get(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
@@ -175,13 +164,13 @@ const audiencesCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(
           Schema.fromJsonString(
             // oxlint-disable-next-line typescript/no-deprecated -- Required plumbing for a supported deprecated API element.
-            Models.CreateAudienceOptions,
+            Schemas.CreateAudienceOptions,
           ),
         )(value, { onExcessProperty: "error", reportInput: false }).pipe(
           Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })),
@@ -204,7 +193,7 @@ const audiencesCreateCommand = Command.make(
           bodyFile,
           false,
           // oxlint-disable-next-line typescript/no-deprecated -- Required plumbing for a supported deprecated API element.
-          Models.CreateAudienceOptions,
+          Schemas.CreateAudienceOptions,
         ),
       ),
       Effect.flatMap(Http.runRequest),
@@ -228,7 +217,7 @@ const audiencesGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Audience ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -256,7 +245,7 @@ const audiencesRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Audience ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -279,23 +268,11 @@ const audiencesRemoveCommand = Command.make(
 const automationsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
     status: Flag.Literals("status", ["enabled", "disabled"]).pipe(
       Flag.withDescription("Filter automations by status."),
       Flag.optional,
@@ -324,10 +301,10 @@ const automationsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateAutomationRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateAutomationRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -345,7 +322,7 @@ const automationsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("automations"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateAutomationRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateAutomationRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/create"),
@@ -362,7 +339,7 @@ const automationsGetCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
   },
   ({ automationId, baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -384,7 +361,7 @@ const automationsRemoveCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
   },
   ({ automationId, baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.delete(apiUrl).pipe(
@@ -406,10 +383,10 @@ const automationsUpdateCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.PatchAutomationRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.PatchAutomationRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -427,7 +404,7 @@ const automationsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("automations", automationId),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.PatchAutomationRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.PatchAutomationRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("automations/update"),
@@ -444,7 +421,7 @@ const automationsDuplicateCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
   },
   ({ automationId, baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.post(apiUrl).pipe(
@@ -462,26 +439,14 @@ const automationsDuplicateCommand = Command.make(
 const automationsListRunsCommand = Command.make(
   "list-runs",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     automationId: Flag.String("automation-id").pipe(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
     status: Flag.String("status").pipe(
       Flag.withDescription(
         "Filter runs by status. Comma-separated list of: running, completed, failed, cancelled.",
@@ -515,7 +480,7 @@ const automationsGetRunCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     runId: Flag.String("run-id").pipe(Flag.withDescription("The ID of the automation run.")),
   },
   ({ automationId, baseUrl: apiUrl, bearerAuth, runId }) =>
@@ -538,7 +503,7 @@ const automationsStopCommand = Command.make(
       Flag.withDescription("The ID of the automation."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
   },
   ({ automationId, baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.post(apiUrl).pipe(
@@ -556,23 +521,11 @@ const automationsStopCommand = Command.make(
 const broadcastsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -596,10 +549,10 @@ const broadcastsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateBroadcastOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateBroadcastOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -617,7 +570,7 @@ const broadcastsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("broadcasts"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateBroadcastOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateBroadcastOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("broadcasts/create"),
@@ -631,7 +584,7 @@ const broadcastsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -651,7 +604,7 @@ const broadcastsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -671,10 +624,10 @@ const broadcastsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateBroadcastOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateBroadcastOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -693,7 +646,7 @@ const broadcastsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("broadcasts", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateBroadcastOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateBroadcastOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("broadcasts/update"),
@@ -708,7 +661,7 @@ const broadcastsCancelCommand = Command.make(
   "cancel",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -731,24 +684,12 @@ const broadcastsCancelCommand = Command.make(
 const broadcastsListClickedLinksCommand = Command.make(
   "list-clicked-links",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, id, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -774,7 +715,7 @@ const broadcastsDuplicateCommand = Command.make(
   "duplicate",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -798,16 +739,10 @@ const broadcastsDuplicateCommand = Command.make(
 const broadcastsRecipientsCommand = Command.make(
   "recipients",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
     bounceType: Flag.Literals("bounce-type", ["permanent", "transient", "undetermined"]).pipe(
       Flag.withDescription(
         "Filter bounced recipients by bounce type. Only valid when `type` is `bounced`.",
@@ -819,13 +754,7 @@ const broadcastsRecipientsCommand = Command.make(
       Flag.optional,
     ),
     id: Flag.String("id").pipe(Flag.withDescription("The Broadcast ID.")),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
     type: Flag.Literals("type", [
       "sent",
       "delivered",
@@ -866,10 +795,10 @@ const broadcastsSendCommand = Command.make(
   "send",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendBroadcastOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.SendBroadcastOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -888,7 +817,7 @@ const broadcastsSendCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("broadcasts", id, "send"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.SendBroadcastOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.SendBroadcastOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("broadcasts/send"),
@@ -901,23 +830,11 @@ const broadcastsSendCommand = Command.make(
 const contactPropertiesListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -941,10 +858,10 @@ const contactPropertiesCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateContactPropertyOptions))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateContactPropertyOptions))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -962,7 +879,7 @@ const contactPropertiesCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("contact-properties"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateContactPropertyOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateContactPropertyOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contact-properties/create"),
@@ -976,7 +893,7 @@ const contactPropertiesGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Contact Property ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -996,7 +913,7 @@ const contactPropertiesRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Contact Property ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -1016,10 +933,10 @@ const contactPropertiesUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateContactPropertyOptions))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateContactPropertyOptions))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -1038,7 +955,7 @@ const contactPropertiesUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("contact-properties", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateContactPropertyOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateContactPropertyOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contact-properties/update"),
@@ -1051,23 +968,11 @@ const contactPropertiesUpdateCommand = Command.make(
 const contactsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -1091,10 +996,10 @@ const contactsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateContactOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateContactOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1112,7 +1017,7 @@ const contactsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("contacts"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateContactOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateContactOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/create"),
@@ -1125,23 +1030,11 @@ const contactsCreateCommand = Command.make(
 const contactsListImportsCommand = Command.make(
   "list-imports",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
     status: Flag.Literals("status", ["queued", "in_progress", "completed", "failed"]).pipe(
       Flag.withDescription("Filter contact imports by status."),
       Flag.optional,
@@ -1177,7 +1070,7 @@ const contactsCreateImportCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     columnMap: Flag.String("column-map").pipe(
       Flag.withDescription(
         "JSON-encoded object mapping contact fields and custom property keys to CSV column names. Supports `email`, `first_name`, `last_name`, `unsubscribed`, and `properties`. Custom property mappings can include `type` as `string`, `number`, or `boolean`; defaults to `string`.",
@@ -1246,7 +1139,7 @@ const contactsGetImportCommand = Command.make(
   "get-import",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Contact Import ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -1265,26 +1158,14 @@ const contactsGetImportCommand = Command.make(
 const contactsListSegmentsCommand = Command.make(
   "list-segments",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
     contactId: Flag.String("contact-id").pipe(
       Flag.withDescription("The Contact ID or email address."),
     ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, contactId, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -1308,7 +1189,7 @@ const contactsAddSegmentCommand = Command.make(
   "add-segment",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     contactId: Flag.String("contact-id").pipe(
       Flag.withDescription("The Contact ID or email address."),
     ),
@@ -1331,7 +1212,7 @@ const contactsRemoveSegmentCommand = Command.make(
   "remove-segment",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     contactId: Flag.String("contact-id").pipe(
       Flag.withDescription("The Contact ID or email address."),
     ),
@@ -1353,26 +1234,14 @@ const contactsRemoveSegmentCommand = Command.make(
 const contactsListTopicsCommand = Command.make(
   "list-topics",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
     contactId: Flag.String("contact-id").pipe(
       Flag.withDescription("The Contact ID or email address."),
     ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, contactId, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -1396,10 +1265,10 @@ const contactsUpdateTopicsCommand = Command.make(
   "update-topics",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateContactTopicsOptions))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateContactTopicsOptions))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -1420,7 +1289,7 @@ const contactsUpdateTopicsCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("contacts", contactId, "topics"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateContactTopicsOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateContactTopicsOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/update-topics"),
@@ -1434,7 +1303,7 @@ const contactsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Contact ID or email address.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -1454,7 +1323,7 @@ const contactsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Contact ID or email address.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -1474,10 +1343,10 @@ const contactsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateContactOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateContactOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1496,7 +1365,7 @@ const contactsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("contacts", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateContactOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateContactOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/update"),
@@ -1509,23 +1378,11 @@ const contactsUpdateCommand = Command.make(
 const domainsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -1549,10 +1406,10 @@ const domainsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateDomainRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateDomainRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1570,7 +1427,7 @@ const domainsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("domains"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateDomainRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateDomainRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create"),
@@ -1587,10 +1444,10 @@ const domainsCreateClaimCommand = Command.make(
   "create-claim",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateDomainClaimRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateDomainClaimRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1608,7 +1465,7 @@ const domainsCreateClaimCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("domains", "claim"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateDomainClaimRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateDomainClaimRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/create-claim"),
@@ -1626,7 +1483,7 @@ const domainsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
@@ -1646,7 +1503,7 @@ const domainsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
@@ -1666,10 +1523,10 @@ const domainsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateDomainOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateDomainOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1688,7 +1545,7 @@ const domainsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("domains", domainId),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateDomainOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateDomainOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("domains/update"),
@@ -1703,7 +1560,7 @@ const domainsGetClaimCommand = Command.make(
   "get-claim",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(
       Flag.withDescription("The ID of the placeholder domain created by the claim."),
     ),
@@ -1732,7 +1589,7 @@ const domainsVerifyClaimCommand = Command.make(
   "verify-claim",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(
       Flag.withDescription("The ID of the placeholder domain created by the claim."),
     ),
@@ -1759,7 +1616,7 @@ const domainsVerifyCommand = Command.make(
   "verify",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
@@ -1782,23 +1639,11 @@ const domainsVerifyCommand = Command.make(
 const emailsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -1822,10 +1667,10 @@ const emailsSendCommand = Command.make(
   "send",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendEmailRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.SendEmailRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -1851,7 +1696,7 @@ const emailsSendCommand = Command.make(
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("emails"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.SendEmailRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.SendEmailRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/send"),
@@ -1865,10 +1710,10 @@ const emailsSendBatchCommand = Command.make(
   "send-batch",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Models.SendEmailRequest)))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schemas.SendEmailRequest)))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -1894,7 +1739,7 @@ const emailsSendBatchCommand = Command.make(
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("emails", "batch"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Schema.Array(Models.SendEmailRequest))),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schema.Array(Schemas.SendEmailRequest))),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/send-batch"),
@@ -1908,7 +1753,7 @@ const emailsMetricsCommand = Command.make(
   "metrics",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     broadcastId: Flag.String("broadcast-id").pipe(
       Flag.withSchema(Schema.fromJsonString(Schema.Array(Schema.String))),
       Flag.withMetavar("JSON_ARRAY"),
@@ -2053,7 +1898,7 @@ const emailsListReceivingCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this email ID. Cannot be used with 'after'.",
@@ -2087,7 +1932,7 @@ const emailsGetReceivingCommand = Command.make(
   "get-receiving",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the received email.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2113,7 +1958,7 @@ const emailsListReceivingAttachmentsCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'.",
@@ -2151,7 +1996,7 @@ const emailsGetReceivingAttachmentCommand = Command.make(
       Flag.withDescription("The ID of the attachment."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the received email.")),
   },
   ({ attachmentId, baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2171,7 +2016,7 @@ const emailsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2191,7 +2036,7 @@ const emailsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2217,7 +2062,7 @@ const emailsListAttachmentsCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'.",
@@ -2255,7 +2100,7 @@ const emailsGetAttachmentCommand = Command.make(
       Flag.withDescription("The ID of the attachment."),
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ attachmentId, baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2275,7 +2120,7 @@ const emailsCancelCommand = Command.make(
   "cancel",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, emailId }) =>
@@ -2295,10 +2140,10 @@ const emailsShareCommand = Command.make(
   "share",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.ShareEmailOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.ShareEmailOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2317,7 +2162,7 @@ const emailsShareCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("emails", emailId, "share"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.ShareEmailOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.ShareEmailOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("emails/share"),
@@ -2330,23 +2175,11 @@ const emailsShareCommand = Command.make(
 const eventsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -2370,10 +2203,10 @@ const eventsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateEventRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateEventRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2391,7 +2224,7 @@ const eventsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("events"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateEventRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateEventRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("events/create"),
@@ -2405,10 +2238,10 @@ const eventsSendCommand = Command.make(
   "send",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendEventRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.SendEventRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2426,7 +2259,7 @@ const eventsSendCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("events", "send"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.SendEventRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.SendEventRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("events/send"),
@@ -2440,7 +2273,7 @@ const eventsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     identifier: Flag.String("identifier").pipe(
       Flag.withDescription("The event ID (UUID) or event name."),
     ),
@@ -2462,7 +2295,7 @@ const eventsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     identifier: Flag.String("identifier").pipe(
       Flag.withDescription("The event ID (UUID) or event name."),
     ),
@@ -2484,10 +2317,10 @@ const eventsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateEventRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateEventRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2508,7 +2341,7 @@ const eventsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("events", identifier),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateEventRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateEventRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("events/update"),
@@ -2521,23 +2354,11 @@ const eventsUpdateCommand = Command.make(
 const logsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -2561,7 +2382,7 @@ const logsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     logId: Flag.String("log-id").pipe(Flag.withDescription("The ID of the log.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, logId }) =>
@@ -2580,23 +2401,11 @@ const logsGetCommand = Command.make(
 const oauthListGrantsCommand = Command.make(
   "list-grants",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -2620,7 +2429,7 @@ const oauthRevokeGrantCommand = Command.make(
   "revoke-grant",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     oauthGrantId: Flag.String("oauth-grant-id").pipe(Flag.withDescription("The OAuth grant ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, oauthGrantId }) =>
@@ -2639,23 +2448,11 @@ const oauthRevokeGrantCommand = Command.make(
 const segmentsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -2679,10 +2476,10 @@ const segmentsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateSegmentOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateSegmentOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2700,7 +2497,7 @@ const segmentsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("segments"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateSegmentOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateSegmentOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("segments/create"),
@@ -2714,7 +2511,7 @@ const segmentsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Segment ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -2734,7 +2531,7 @@ const segmentsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Segment ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -2754,10 +2551,10 @@ const segmentsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateSegmentOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateSegmentOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2776,7 +2573,7 @@ const segmentsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("segments", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateSegmentOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateSegmentOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("segments/update"),
@@ -2789,24 +2586,12 @@ const segmentsUpdateCommand = Command.make(
 const segmentsListContactsCommand = Command.make(
   "list-contacts",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
     id: Flag.String("id").pipe(Flag.withDescription("The Segment ID.")),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, id, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -2829,23 +2614,11 @@ const segmentsListContactsCommand = Command.make(
 const suppressionsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
     origin: Flag.Literals("origin", ["bounce", "complaint", "manual"]).pipe(
       Flag.withDescription("Filter suppressions by origin."),
       Flag.optional,
@@ -2874,10 +2647,10 @@ const suppressionsAddCommand = Command.make(
   "add",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateSuppressionOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateSuppressionOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -2895,7 +2668,7 @@ const suppressionsAddCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("suppressions"),
-      Effect.flatMap(Body.withBody(body, bodyFile, true, Models.CreateSuppressionOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, true, Schemas.CreateSuppressionOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/add"),
@@ -2909,10 +2682,10 @@ const suppressionsBatchAddCommand = Command.make(
   "batch-add",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.BatchAddSuppressionsOptions))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.BatchAddSuppressionsOptions))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -2930,7 +2703,7 @@ const suppressionsBatchAddCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("suppressions", "batch", "add"),
-      Effect.flatMap(Body.withBody(body, bodyFile, true, Models.BatchAddSuppressionsOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, true, Schemas.BatchAddSuppressionsOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/batch-add"),
@@ -2944,10 +2717,10 @@ const suppressionsBatchRemoveCommand = Command.make(
   "batch-remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.BatchRemoveSuppressionsOptions))(
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.BatchRemoveSuppressionsOptions))(
           value,
           { onExcessProperty: "error", reportInput: false },
         ).pipe(
@@ -2965,7 +2738,7 @@ const suppressionsBatchRemoveCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("suppressions", "batch", "remove"),
-      Effect.flatMap(Body.withBody(body, bodyFile, true, Models.BatchRemoveSuppressionsOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, true, Schemas.BatchRemoveSuppressionsOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/batch-remove"),
@@ -2979,7 +2752,7 @@ const suppressionsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     suppression: Flag.String("suppression").pipe(
       Flag.withDescription("The Suppression ID or email address."),
     ),
@@ -3001,7 +2774,7 @@ const suppressionsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     suppression: Flag.String("suppression").pipe(
       Flag.withDescription("The Suppression ID or email address."),
     ),
@@ -3022,23 +2795,11 @@ const suppressionsRemoveCommand = Command.make(
 const templatesListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -3062,10 +2823,10 @@ const templatesCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateTemplateRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateTemplateRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3083,7 +2844,7 @@ const templatesCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("templates"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateTemplateRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateTemplateRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("templates/create"),
@@ -3097,7 +2858,7 @@ const templatesGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Template ID or alias.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3117,7 +2878,7 @@ const templatesRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Template ID or alias.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3137,10 +2898,10 @@ const templatesUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateTemplateOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateTemplateOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3159,7 +2920,7 @@ const templatesUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("templates", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateTemplateOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateTemplateOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("templates/update"),
@@ -3173,7 +2934,7 @@ const templatesDuplicateCommand = Command.make(
   "duplicate",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Template ID or alias.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3193,7 +2954,7 @@ const templatesPublishCommand = Command.make(
   "publish",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Template ID or alias.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3212,23 +2973,11 @@ const templatesPublishCommand = Command.make(
 const topicsListCommand = Command.make(
   "list",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    before: Flag.String("before").pipe(
-      Flag.withDescription("Return items before this cursor."),
-      Flag.optional,
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    before: Parameters.PaginationBefore,
+    limit: Parameters.PaginationLimit,
   },
   ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
@@ -3252,10 +3001,10 @@ const topicsCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateTopicOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateTopicOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3273,7 +3022,7 @@ const topicsCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("topics"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateTopicOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateTopicOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("topics/create"),
@@ -3287,7 +3036,7 @@ const topicsGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Topic ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3307,7 +3056,7 @@ const topicsRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     id: Flag.String("id").pipe(Flag.withDescription("The Topic ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, id }) =>
@@ -3327,10 +3076,10 @@ const topicsUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateTopicOptions))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateTopicOptions))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3349,7 +3098,7 @@ const topicsUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("topics", id),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateTopicOptions)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateTopicOptions)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("topics/update"),
@@ -3362,7 +3111,7 @@ const topicsUpdateCommand = Command.make(
  */
 const usageGetCommand = Command.make(
   "get",
-  { baseUrl: Url.baseUrl, bearerAuth: Auth.bearerAuth },
+  { baseUrl: Url.baseUrl, bearerAuth: SecuritySchemes.BearerAuth },
   ({ baseUrl: apiUrl, bearerAuth }) =>
     HttpClientRequest.get(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
@@ -3390,7 +3139,7 @@ const webhooksListCommand = Command.make(
       Flag.optional,
     ),
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this webhook ID. Cannot be used with 'after'.",
@@ -3424,10 +3173,10 @@ const webhooksCreateCommand = Command.make(
   "create",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateWebhookRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.CreateWebhookRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3445,7 +3194,7 @@ const webhooksCreateCommand = Command.make(
     HttpClientRequest.post(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("webhooks"),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.CreateWebhookRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.CreateWebhookRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("webhooks/create"),
@@ -3459,7 +3208,7 @@ const webhooksGetCommand = Command.make(
   "get",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, webhookId }) =>
@@ -3479,7 +3228,7 @@ const webhooksRemoveCommand = Command.make(
   "remove",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, webhookId }) =>
@@ -3499,10 +3248,10 @@ const webhooksUpdateCommand = Command.make(
   "update",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateWebhookRequest))(value, {
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schemas.UpdateWebhookRequest))(value, {
           onExcessProperty: "error",
           reportInput: false,
         }).pipe(
@@ -3521,7 +3270,7 @@ const webhooksUpdateCommand = Command.make(
     HttpClientRequest.patch(apiUrl).pipe(
       HttpClientRequest.bearerToken(bearerAuth),
       Url.appendPathSegments("webhooks", webhookId),
-      Effect.flatMap(Body.withBody(body, bodyFile, false, Models.UpdateWebhookRequest)),
+      Effect.flatMap(Body.withBody(body, bodyFile, false, Schemas.UpdateWebhookRequest)),
       Effect.flatMap(Http.runRequest),
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("webhooks/update"),
@@ -3534,19 +3283,10 @@ const webhooksUpdateCommand = Command.make(
 const webhooksListEventsCommand = Command.make(
   "list-events",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    bearerAuth: SecuritySchemes.BearerAuth,
+    limit: Parameters.PaginationLimit,
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
   ({ after, baseUrl: apiUrl, bearerAuth, limit, webhookId }) =>
@@ -3570,7 +3310,7 @@ const webhooksGetEventCommand = Command.make(
   "get-event",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     eventId: Flag.String("event-id").pipe(Flag.withDescription("The Webhook Event ID.")),
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
@@ -3590,20 +3330,11 @@ const webhooksGetEventCommand = Command.make(
 const webhooksListEventAttemptsCommand = Command.make(
   "list-event-attempts",
   {
-    after: Flag.String("after").pipe(
-      Flag.withDescription("Return items after this cursor."),
-      Flag.optional,
-    ),
+    after: Parameters.PaginationAfter,
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     eventId: Flag.String("event-id").pipe(Flag.withDescription("The Webhook Event ID.")),
-    limit: Flag.Int("limit").pipe(
-      Flag.withSchema(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100)),
-      ),
-      Flag.withDescription("Number of items to return."),
-      Flag.optional,
-    ),
+    limit: Parameters.PaginationLimit,
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
   ({ after, baseUrl: apiUrl, bearerAuth, eventId, limit, webhookId }) =>
@@ -3629,7 +3360,7 @@ const webhooksReplayEventCommand = Command.make(
   "replay-event",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     eventId: Flag.String("event-id").pipe(Flag.withDescription("The Webhook Event ID.")),
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
@@ -3657,7 +3388,7 @@ const webhooksRotateSigningSecretCommand = Command.make(
   "rotate-signing-secret",
   {
     baseUrl: Url.baseUrl,
-    bearerAuth: Auth.bearerAuth,
+    bearerAuth: SecuritySchemes.BearerAuth,
     webhookId: Flag.String("webhook-id").pipe(Flag.withDescription("The Webhook ID.")),
   },
   ({ baseUrl: apiUrl, bearerAuth, webhookId }) =>

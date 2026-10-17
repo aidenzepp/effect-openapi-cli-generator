@@ -72,7 +72,8 @@ export const modelSource = (model: ApiModel) => {
   );
 
   return {
-    reference: (pointer: string) => `Models.${reference(pointer)}`,
+    name: reference,
+    reference: (pointer: string) => `Schemas.${reference(pointer)}`,
     source:
       declarations.length > 0
         ? `import { Schema } from "effect";\n\n${declarations.join("\n\n")}\n`

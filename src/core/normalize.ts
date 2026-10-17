@@ -3,6 +3,7 @@ import { Array as EffectArray, Effect, Order, Schema } from "effect";
 import { mapCommands } from "./commands.js";
 import { GenerationError } from "./errors.js";
 import type {
+  RequestBody,
   MultipartField,
   WireSchema,
   ApiModel,
@@ -171,12 +172,25 @@ const docs = (
  * @param active Canonical references already on this recursion path.
  * @returns The resolved object and its canonical source pointer.
  */
+interface ObjectReference {
+  readonly pointer: string;
+  readonly value: Schema.JsonObject;
+  readonly target?: ObjectReference;
+}
+
 const dereference = (
   document: Schema.Json,
   value: Schema.Json | undefined,
   location: string,
   active: ReadonlySet<string> = new Set(),
-): Effect.Effect<{ value: Schema.JsonObject; location: string }, GenerationError> =>
+): Effect.Effect<
+  {
+    value: Schema.JsonObject;
+    location: string;
+    reference?: ObjectReference;
+  },
+  GenerationError
+> =>
   Effect.gen(function* dereferenceObject() {
     const source = yield* object(value, location);
     if (!Object.hasOwn(source, "$ref")) {
@@ -198,7 +212,49 @@ const dereference = (
       }
     }
 
-    return { location: resolved.location, value: merged };
+    return {
+      location: resolved.location,
+      reference: resolved.reference
+        ? { pointer: target.location, target: resolved.reference, value: resolved.value }
+        : { pointer: target.location, value: resolved.value },
+      value: merged,
+    };
+  });
+
+/**
+ * Retain a parameter alias chain without copying a reference-site description into its target.
+ */
+const parameterReference = (
+  parameter: Parameter,
+  reference: ObjectReference | undefined,
+): Effect.Effect<Parameter, GenerationError> =>
+  Effect.gen(function* retainParameterReference() {
+    if (!reference) {
+      return parameter;
+    }
+
+    const canonical = { ...parameter, docs: yield* docs(reference.value, reference.pointer) };
+    const target = yield* parameterReference(canonical, reference.target);
+
+    return { ...parameter, reference: { parameter: target, pointer: reference.pointer } };
+  });
+
+/**
+ * Retain request-body aliases independently of their use-site annotations.
+ */
+const bodyReference = (
+  body: RequestBody,
+  reference: ObjectReference | undefined,
+): Effect.Effect<RequestBody, GenerationError> =>
+  Effect.gen(function* retainBodyReference() {
+    if (!reference) {
+      return body;
+    }
+
+    const canonical = { ...body, docs: yield* docs(reference.value, reference.pointer) };
+    const target = yield* bodyReference(canonical, reference.target);
+
+    return { ...body, reference: { body: target, pointer: reference.pointer } };
   });
 
 /**
@@ -375,7 +431,15 @@ const parameterList = (
         continue;
       }
 
-      result.push(yield* normalizeParameter(document, source, at, version, source.name, source.in));
+      const parameter = yield* normalizeParameter(
+        document,
+        source,
+        at,
+        version,
+        source.name,
+        source.in,
+      );
+      result.push(yield* parameterReference(parameter, resolved.reference));
     }
 
     return result;
@@ -660,15 +724,18 @@ const requestBody = (
     yield* keys(media, ["schema", "example", "examples"], mediaAt);
 
     const schema = yield* normalizeSchema(document, media.schema, `${mediaAt}/schema`, version);
-    const body = { required: source.required === true, schema };
+    const body = { docs: yield* docs(source, at), required: source.required === true, schema };
     if (mediaType === "multipart/form-data") {
-      return {
-        ...body,
-        multipart: yield* multipartFields(document, media.schema, schema, `${mediaAt}/schema`),
-      };
+      return yield* bodyReference(
+        {
+          ...body,
+          multipart: yield* multipartFields(document, media.schema, schema, `${mediaAt}/schema`),
+        },
+        resolved.reference,
+      );
     }
 
-    return body;
+    return yield* bodyReference(body, resolved.reference);
   });
 
 /**

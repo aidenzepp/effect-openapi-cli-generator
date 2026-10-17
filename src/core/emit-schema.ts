@@ -131,3 +131,29 @@ export const schemaSource = (
 
   return allowsNull ? `Schema.NullOr(${expression})` : expression;
 };
+
+/**
+ * Whether rendering this schema consumes an explicit shared schema declaration.
+ */
+export const hasSchemaReference = (schema: WireSchema): boolean => {
+  if (schema.reference) {
+    return true;
+  }
+
+  if (schema.kind === "array") {
+    return hasSchemaReference(schema.items);
+  }
+
+  if (schema.kind === "object") {
+    return (
+      schema.properties.some((field) => hasSchemaReference(field.schema)) ||
+      (schema.additionalProperties !== true &&
+        schema.additionalProperties !== false &&
+        hasSchemaReference(schema.additionalProperties))
+    );
+  }
+
+  return (
+    (schema.kind === "oneOf" || schema.kind === "union") && schema.members.some(hasSchemaReference)
+  );
+};

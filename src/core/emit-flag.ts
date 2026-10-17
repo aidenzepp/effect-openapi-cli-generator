@@ -3,6 +3,12 @@ import { schemaSource } from "./emit-schema.js";
 import { description, literal } from "./source-text.js";
 
 /**
+ * Describe the CLI representation before retaining the original parameter help.
+ */
+export const parameterHelp = (parameter: Parameter): string =>
+  `${parameter.schema.kind === "array" ? "Pass a JSON array. " : ""}${description(parameter.docs)}`.trim();
+
+/**
  * Render one API flag with its schema and source-owned help at the command boundary.
  */
 export const parameterSource = (
@@ -32,8 +38,7 @@ export const parameterSource = (
     pipes.push(`Flag.withSchema(${schemaSource(schema, reference)})`);
   }
 
-  const help =
-    `${schema.kind === "array" ? "Pass a JSON array. " : ""}${description(parameter.docs)}`.trim();
+  const help = parameterHelp(parameter);
   if (help) {
     pipes.push(`Flag.withDescription(${literal(help)})`);
   }

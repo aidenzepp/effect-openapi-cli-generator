@@ -2,7 +2,8 @@ import { parameterSource } from "./emit-flag.js";
 import { multipartFlagSource, multipartBodySource } from "./emit-multipart.js";
 import { Array, Order } from "effect";
 import { identifierAllocator } from "./identifiers.js";
-import { schemaSource } from "./emit-schema.js";
+import type { parameterComponents, requestBodyComponents } from "./emit-components.js";
+import { hasSchemaReference } from "./emit-schema.js";
 import type { ApiModel, MultipartField, Operation, Parameter } from "./model.js";
 import { comment, description, internalReference, literal, propertyKey } from "./source-text.js";
 
@@ -27,7 +28,7 @@ const authenticationSource = (model: ApiModel) => {
     const fields = security.kind === "basic" ? ["username", "password"] : [""];
     const identifiers: string[] = [];
     for (const field of fields) {
-      const name = allocate(`${key} ${field}`);
+      const name = allocate(`${key} ${field}`, "", true);
       identifiers.push(name);
 
       const flag = `${security.flagName}${field ? `-${field}` : ""}`;
@@ -102,7 +103,7 @@ const parameterPipes = (operation: Operation, inputs: ReadonlyMap<Parameter, str
         if (location === "header" && parameter.schema.kind !== "string") {
           value = parameter.required
             ? `String(${name})`
-            : `Option.getOrUndefined(Option.map(${name}, String))`;
+            : `Option.getOrUndefined(Option.map(String)(${name}))`;
         }
 
         return parameter.wireName === value
@@ -128,6 +129,7 @@ const handlerSource = (
   multipartInputs: ReadonlyMap<MultipartField, string>,
   securityNames: readonly string[],
   reference: (pointer: string) => string,
+  bodies: ReturnType<typeof requestBodyComponents>,
 ): string => {
   const pipes: string[] = [];
   pipes.push(...parameterPipes(operation, inputs));
@@ -161,7 +163,7 @@ const handlerSource = (
     pipes.push(multipartBodySource(operation.body, multipartInputs));
   } else if (operation.body) {
     pipes.push(
-      `Effect.flatMap(Body.withBody(body, bodyFile, ${operation.body.required}, ${schemaSource(operation.body.schema, reference)}))`,
+      `Effect.flatMap(Body.withBody(body, bodyFile, ${operation.body.required}, ${bodies.reference(operation.body)}))`,
     );
   }
 
@@ -193,6 +195,8 @@ const operationSource = (
   identifier: string,
   auth: ReturnType<typeof authenticationSource>,
   reference: (pointer: string) => string,
+  parameters: ReturnType<typeof parameterComponents>,
+  bodies: ReturnType<typeof requestBodyComponents>,
 ) => {
   const inputs = new Map<Parameter, string>();
   const multipartInputs = new Map<MultipartField, string>();
@@ -205,12 +209,12 @@ const operationSource = (
   const securityInputs = securityNames.map((entry) => local(entry));
   const flags = new Map([["baseUrl", "Url.baseUrl"]]);
   for (const [index, source] of securityNames.entries()) {
-    flags.set(securityInputs[index] ?? source, `Auth.${source}`);
+    flags.set(securityInputs[index] ?? source, `SecuritySchemes.${source}`);
   }
   for (const parameter of operation.parameters) {
     const input = local(parameter.flagName);
     inputs.set(parameter, input);
-    flags.set(input, parameterSource(parameter, reference));
+    flags.set(input, parameters.reference(parameter));
   }
   if (operation.body?.multipart) {
     for (const field of operation.body.multipart.fields) {
@@ -227,7 +231,7 @@ const operationSource = (
   } else if (operation.body) {
     flags.set(
       "body",
-      `Flag.String("body").pipe(Flag.mapEffect((value) => Schema.decodeUnknownEffect(Schema.fromJsonString(${schemaSource(operation.body.schema, reference)}))(value, { onExcessProperty: "error", reportInput: false }).pipe(Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })))), Flag.optional)`,
+      `Flag.String("body").pipe(Flag.mapEffect((value) => Schema.decodeUnknownEffect(Schema.fromJsonString(${bodies.reference(operation.body)}))(value, { onExcessProperty: "error", reportInput: false }).pipe(Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })))), ${description(operation.body.docs) ? `Flag.withDescription(${literal(description(operation.body.docs))}), ` : ""}Flag.optional)`,
     );
     flags.set(
       "bodyFile",
@@ -240,7 +244,7 @@ const operationSource = (
     .join(",\n");
   const help = description(operation.docs);
 
-  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
+  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference, bodies)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
 };
 
 /**
@@ -250,7 +254,8 @@ const commandImports = (
   model: ApiModel,
   reference: (pointer: string) => string,
   hasAuth: boolean,
-  hasModels: boolean,
+  parameters: ReturnType<typeof parameterComponents>,
+  bodies: ReturnType<typeof requestBodyComponents>,
 ): readonly string[] => {
   const needsBody = model.operations.some(
     (operation) => operation.body !== undefined && operation.body.multipart === undefined,
@@ -276,8 +281,9 @@ const commandImports = (
             "Schema.",
           ),
         ) === true ||
-        operation.parameters.some((parameter) =>
-          parameterSource(parameter, reference).includes("Schema."),
+        operation.parameters.some(
+          (parameter) =>
+            !parameter.reference && parameterSource(parameter, reference).includes("Schema."),
         ),
     )
       ? ["Schema"]
@@ -288,7 +294,11 @@ const commandImports = (
     "Command",
     ...(model.operations.some(
       (operation) =>
-        operation.parameters.length > 0 ||
+        operation.parameters.some(
+          (parameter) =>
+            !parameter.reference ||
+            description(parameter.docs) !== description(parameter.reference.parameter.docs),
+        ) ||
         (operation.body !== undefined &&
           (operation.body.multipart === undefined ||
             operation.body.multipart.fields.length > 0 ||
@@ -301,7 +311,7 @@ const commandImports = (
     `import { ${effectImports.join(", ")} } from "effect";`,
     `import { ${cliImports.join(", ")} } from "effect/cli";`,
     'import { HttpClientRequest } from "effect/http";',
-    ...(hasAuth ? ['import * as Auth from "./auth.js";'] : []),
+    ...(hasAuth ? ['import * as SecuritySchemes from "./components/security-schemes.js";'] : []),
     ...(needsAuthBuiltin ? ['import * as BuiltinAuth from "./builtins/auth.js";'] : []),
     ...(needsBody ? ['import * as Body from "./builtins/body.js";'] : []),
     ...(needsMultipart ? ['import * as Multipart from "./builtins/multipart.js";'] : []),
@@ -313,7 +323,27 @@ const commandImports = (
     )
       ? ['import * as Query from "./builtins/query.js";']
       : []),
-    ...(hasModels ? ['import * as Models from "./models.js";'] : []),
+    ...(model.operations.some(
+      (operation) =>
+        operation.parameters.some(
+          (parameter) => !parameter.reference && hasSchemaReference(parameter.schema),
+        ) ||
+        (operation.body?.multipart
+          ? operation.body.multipart.fields.some(
+              (field) => field.kind !== "file" && hasSchemaReference(field.schema),
+            )
+          : operation.body !== undefined &&
+            !operation.body.reference &&
+            hasSchemaReference(operation.body.schema)),
+    )
+      ? ['import * as Schemas from "./components/schemas.js";']
+      : []),
+    ...(parameters.source === undefined
+      ? []
+      : ['import * as Parameters from "./components/parameters.js";']),
+    ...(bodies.source === undefined
+      ? []
+      : ['import * as RequestBodies from "./components/request-bodies.js";']),
   ];
 
   return imports;
@@ -326,7 +356,8 @@ export const commandSource = (
   model: ApiModel,
   name: string,
   reference: (pointer: string) => string,
-  hasModels: boolean,
+  parameters: ReturnType<typeof parameterComponents>,
+  bodies: ReturnType<typeof requestBodyComponents>,
 ) => {
   const auth = authenticationSource(model);
   const allocate = identifierAllocator();
@@ -334,7 +365,7 @@ export const commandSource = (
   const entries: { path: readonly string[]; name: string; deprecated: boolean }[] = [];
   for (const operation of model.operations) {
     const identifier = allocate(operation.operationId, "Command");
-    declarations.push(operationSource(operation, identifier, auth, reference));
+    declarations.push(operationSource(operation, identifier, auth, reference, parameters, bodies));
     entries.push({
       deprecated: operation.docs.deprecated === true,
       name: identifier,
@@ -377,7 +408,7 @@ export const commandSource = (
       );
     }
   }
-  const imports = commandImports(model, reference, auth.source !== undefined, hasModels);
+  const imports = commandImports(model, reference, auth.source !== undefined, parameters, bodies);
   const main = `#!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect } from "effect";

@@ -22,7 +22,7 @@ Both input and output are required. Output must be absent and its parent must ex
 
 `--name my-api` overrides the executable/package name; otherwise it is derived from `info.title`. Generated package and CLI versions start at `0.0.0` independently of the API version.
 
-The output contains `src/main.ts`, `src/commands.ts`, required `src/builtins/` modules, optional `src/models.ts` and `src/auth.ts`, plus `package.json`, `tsconfig.json`, and `.gitignore`. Install dependencies and build inside that directory:
+The output contains `src/main.ts`, `src/commands.ts`, required `src/builtins/` modules, used OpenAPI declarations under `src/components/`, plus `package.json`, `tsconfig.json`, and `.gitignore`. Install dependencies and build inside that directory:
 
 ```sh
 bun install
@@ -58,7 +58,7 @@ Read [the project direction](docs/project.md) for architecture and generated-cod
 
 ## Modular output and expanded request support
 
-Generated code now follows [the approved output decisions](docs/generated-code-decisions.md): `main.ts` assembles the runtime, `commands.ts` declares native request pipelines, `models.ts` preserves explicit reference identity, and `auth.ts` exposes only effective security flags. Required shared runtime capabilities live under `builtins/`. Every API parameter, including the final path parameter, is an explicit flag; the old inferred positional-subject convention is retired.
+Generated code now follows [the approved output decisions](docs/generated-code-decisions.md): `main.ts` assembles the runtime, `commands.ts` declares native request pipelines, `components/schemas.ts` preserves explicit schema identity, `components/parameters.ts` preserves referenced parameter flags, and `components/security-schemes.ts` exposes only effective security flags. Required shared runtime capabilities live under `builtins/`. Every API parameter, including the final path parameter, is an explicit flag; the old inferred positional-subject convention is retired.
 
 Supported request schemas include scalar enums and nullability, objects with boolean or schema-valued additional properties, arrays, acyclic local references, exclusive `oneOf`, and `allOf` restricted to one reference plus annotations. Native checks implement string patterns and Unicode code-point lengths, numeric bounds and positive multiples, and array item-count bounds. Inline schemas remain inline; only explicit references create shared models. Formats are annotations in JSON bodies and ordinary parameters, including UUID and binary. Within multipart bodies only, this generator recognizes `string` with `format: binary` as a file input convention, including OpenAPI 3.1; this is not mandated by the 3.1 format keyword. Descriptions and defaults do not create validation or values. Schema-valued rest validation excludes declared object keys.
 
@@ -83,3 +83,7 @@ Annotation-only schemas use native `Schema.Json`. Unconstrained multi-type schem
 Multipart bodies expose declared primitive text fields and binary file fields as named flags. Repeat an array-of-files flag for each file; item-count checks apply to the supplied list. An empty file list is not representable. Binary content constraints are rejected rather than applied to local path names. Optional body omission and schema-required fields are preserved. Files are read into memory; uploads are not streamed. Native FormData supplies boundaries and filenames.
 
 When the schema permits unknown multipart fields, `--additional-fields` accepts a JSON object of text values. Declared field names cannot be overridden. Unknown binary parts, structured multipart fields, typed additional properties and custom encoding objects remain unsupported. These are explicit CLI transport limits, not changes to the input model. No prose constraints or defaults are inferred.
+
+Explicit component references retain their category and author-defined identity. A schema reference shares its validator; a parameter reference shares its native flag. Identical inline definitions remain inline, and different named components remain distinct even when their shapes match. Component aliases refer to their targets rather than copying their definitions. Reference-site descriptions remain local; operation parameter overrides are resolved before selecting shared components.
+
+Referenced JSON request bodies reuse validators from `components/request-bodies.ts`. This module represents their validation contract, not a whole HTTP request definition: requiredness, mutual exclusion, serialization and transport stay in the handler. Multipart body references remain in the normalized contract, but do not create an unused whole-body validator for separate file/text inputs. Only used component categories are emitted; responses and unrelated components do not acquire invented runtime behavior. Handwritten reference examples retain their historical layout.

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { resolveName } from "./commands.js";
 import { formatApplication } from "./format.js";
 import type { ApiModel, GenerateOptions } from "./model.js";
+import { parameterComponents, requestBodyComponents } from "./emit-components.js";
 import { modelSource } from "./emit-models.js";
 import { builtinSources } from "./emit-builtins.js";
 import { commandSource } from "./emit-command.js";
@@ -17,14 +18,26 @@ export const emit = (model: ApiModel, options?: GenerateOptions) =>
   Effect.gen(function* assembleApplication() {
     const name = yield* resolveName(model.title, options);
     const models = modelSource(model);
-    const source = commandSource(model, name, models.reference, models.source !== undefined);
+    const parameters = parameterComponents(model, models.reference);
+    const bodies = requestBodyComponents(model, models.reference, models.name);
+    const source = commandSource(model, name, models.reference, parameters, bodies);
 
     return yield* formatApplication({
       files: [
         { content: source.main, path: "src/main.ts" },
         { content: source.commands, path: "src/commands.ts" },
-        ...(source.auth === undefined ? [] : [{ content: source.auth, path: "src/auth.ts" }]),
-        ...(models.source === undefined ? [] : [{ content: models.source, path: "src/models.ts" }]),
+        ...(source.auth === undefined
+          ? []
+          : [{ content: source.auth, path: "src/components/security-schemes.ts" }]),
+        ...(models.source === undefined
+          ? []
+          : [{ content: models.source, path: "src/components/schemas.ts" }]),
+        ...(parameters.source === undefined
+          ? []
+          : [{ content: parameters.source, path: "src/components/parameters.ts" }]),
+        ...(bodies.source === undefined
+          ? []
+          : [{ content: bodies.source, path: "src/components/request-bodies.ts" }]),
         ...builtinSources(model),
         {
           content: JSON.stringify({
