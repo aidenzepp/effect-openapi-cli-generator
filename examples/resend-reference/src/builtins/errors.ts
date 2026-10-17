@@ -3,15 +3,11 @@ import { CliError } from "effect/cli";
 import type { HttpClientError } from "effect/http";
 
 /**
- * Preserve native schema-backed error constructor inference.
- */
-const tagged = Schema.TaggedError;
-
-/**
  * A path value that cannot be transported literally without changing its meaning.
  * The rejected value is never stored in the error.
  */
-export class PathError extends tagged<PathError>()("PathError", {
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class PathError extends Schema.TaggedError<PathError>()("PathError", {
   cause: Schema.optionalKey(Schema.Defect()),
   reason: Schema.Literals(["DotSegment", "InvalidUnicode"]),
 }) {}
@@ -20,9 +16,13 @@ export class PathError extends tagged<PathError>()("PathError", {
  * Authentication could not be encoded for transport. Credentials are excluded
  * from the error so diagnostics can be inspected without exposing secrets.
  */
-export class AuthenticationError extends tagged<AuthenticationError>()("AuthenticationError", {
-  reason: Schema.Literals(["BasicEncoding", "ApiKeyEncoding"]),
-}) {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
+  "AuthenticationError",
+  {
+    reason: Schema.Literals(["BasicEncoding", "ApiKeyEncoding"]),
+  },
+) {}
 
 /**
  * Describe HTTP failures with neutral guidance, without exposing request details

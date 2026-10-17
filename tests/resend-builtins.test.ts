@@ -20,10 +20,22 @@ test("security definitions reject unsupported mechanisms and invalid configurati
     }),
   );
 
-  const scheme = await Effect.runPromise(
-    Schema.decodeUnknownEffect(Auth.SecurityScheme)({ scheme: "bearer", type: "http" }),
+  await Promise.all(
+    (
+      [
+        ["bearer", "bearer"],
+        ["Bearer", "bearer"],
+        ["bEaReR", "bearer"],
+        ["Basic", "basic"],
+        ["BASIC", "basic"],
+      ] as const
+    ).map(async ([input, canonical]) => {
+      const scheme = await Effect.runPromise(
+        Schema.decodeUnknownEffect(Auth.SecurityScheme)({ scheme: input, type: "http" }),
+      );
+      expect(scheme).toEqual({ scheme: canonical, type: "http" });
+    }),
   );
-  expect(scheme).toEqual({ scheme: "bearer", type: "http" });
 });
 
 test("native bearer and checked basic authentication retain wire behavior and redaction", async () => {

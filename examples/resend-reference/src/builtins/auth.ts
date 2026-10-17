@@ -1,4 +1,4 @@
-import { Effect, Match, Redacted, Result, Schema } from "effect";
+import { Effect, Match, Redacted, Result, Schema, SchemaGetter } from "effect";
 import { Cookies, HttpClientRequest } from "effect/http";
 import * as Errors from "./errors.js";
 
@@ -13,11 +13,17 @@ export const ApiKeyScheme = Schema.Struct({
 });
 
 /**
- * The HTTP authentication definitions supported by this showcase.
- * Scheme identifiers and descriptions do not determine the mechanism.
+ * The supported HTTP authentication subset, decoded case-insensitively into
+ * canonical lowercase scheme names. This does not resolve security requirements.
  */
 export const HttpScheme = Schema.Struct({
-  scheme: Schema.Literals(["bearer", "basic"]),
+  scheme: Schema.String.pipe(
+    Schema.decodeTo(Schema.String, {
+      decode: SchemaGetter.toLowerCase(),
+      encode: SchemaGetter.passthrough(),
+    }),
+    Schema.decodeTo(Schema.Literals(["bearer", "basic"])),
+  ),
   type: Schema.Literal("http"),
 });
 
