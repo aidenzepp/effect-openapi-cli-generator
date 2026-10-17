@@ -53,7 +53,7 @@ const users = Command.make("users").pipe(
 
 Prefer simple individual declarations over nested inline command trees or object namespaces. Use OpenAPI `operationId` as the naming source for operation declarations, with valid-identifier sanitization. Keep group identifiers separate from visible CLI spelling and HTTP method selection.
 
-Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve owning-module namespaces (`Auth`, `Errors`, `Http`, `Url`, `Security`, `Models` and `Commands`) where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
+Full paths reduce ambiguity but do not guarantee unique TypeScript names: normalization can collapse different inputs, and a group name can collide with a model, helper or operation. The generator needs one deterministic identifier allocator that sanitizes and checks the complete shared declaration scope: imports, helpers, models, groups and operations. Reserve `rootCommand` for the root alongside imported and helper names; assign generated conflicts deterministic alternative names. Namespace imports separate module access but do not eliminate collisions within a module; the `Command` suffix can also collide with normalized input. Reserve owning-module namespaces (`Auth`, `Errors`, `Http`, `Url`, `Models` and `Commands`) where imported. The root name alone does not prevent collisions. Allocation details remain to be implemented; the hand-written constants above do not prove collision handling exists. The suffix affects source identifiers only; operation IDs in the OpenAPI document and visible CLI names stay unchanged.
 
 ## Separate models, builtins, commands and runtime assembly
 
@@ -64,25 +64,25 @@ The approved Resend layout supersedes the earlier single-file model preference:
 - `builtins/auth.ts` owns supported security-definition and credential schemas, checked Basic encoding and API key placement. Bearer requests use the native helper directly.
 - `builtins/url.ts` owns base URL validation and literal path-segment encoding.
 - `builtins/http.ts` owns one-shot HTTP execution and response output.
-- `security.ts` owns flags for this specification's active security requirements.
+- `auth.ts` owns flags for this specification's active security requirements.
 - `commands.ts` contains only operation/group declarations after its imports.
 - `main.ts` owns `rootCommand` and runtime layer provision.
 
-Use namespace imports with quoted module specifiers, keeping imports contiguous:
+Use namespace imports with quoted module specifiers, keeping imports contiguous. If a module imports both spec-owned `auth.ts` and `builtins/auth.ts`, name the builtin namespace `BuiltinAuth` to keep ownership distinct:
 
 ```ts
 // commands.ts
+import * as Auth from "./auth.js";
 import * as Errors from "./builtins/errors.js";
 import * as Http from "./builtins/http.js";
 import * as Url from "./builtins/url.js";
 import * as Models from "./models.js";
-import * as Security from "./security.js";
 
 // A body schema reference inside its owning flag.
 Schema.fromJsonString(Models.SendEmailRequest);
 
 // Keep flag keys stable when referencing shared configuration.
-Command.make("list", { baseUrl: Url.baseUrl, bearerAuth: Security.bearerAuth });
+Command.make("list", { baseUrl: Url.baseUrl, bearerAuth: Auth.bearerAuth });
 ```
 
 ```ts

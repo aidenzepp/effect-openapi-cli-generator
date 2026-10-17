@@ -99,10 +99,10 @@ src/
   commands.ts     # Operation and group declarations
   main.ts         # Root command and runtime layers
   models.ts       # Explicitly referenced API request schemas
-  security.ts     # Active spec-owned bearer-auth flag
+  auth.ts         # Active spec-owned bearer-auth flag
 ```
 
-Commands import owning modules as `Errors`, `Http`, `Url`, `Models` and `Security`; the entrypoint imports `Commands`. API schemas are unchanged. Builtins have authored JSDoc, while API comments remain sourced from the specification. There is no catch-all builtin barrel.
+Commands import owning modules as `Errors`, `Http`, `Url`, `Models` and `Auth`; the entrypoint imports `Commands`. API schemas are unchanged. Builtins have authored JSDoc, while API comments remain sourced from the specification. There is no catch-all builtin barrel.
 
 ## Builtin showcase
 
