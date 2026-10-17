@@ -54,7 +54,10 @@ const objectSource = (
       return `${documentation}${registrationNotice}${propertyKey(property.name)}: ${validator}`;
     })
     .join(",\n");
-  const struct = `Schema.Struct({${fields}})`;
+  const struct =
+    schema.properties.length === 0 && schema.additionalProperties === false
+      ? "Schema.Record(Schema.String, Schema.Never)"
+      : `Schema.Struct({${fields}})`;
 
   return schema.additionalProperties === false
     ? struct

@@ -1,3 +1,4 @@
+import { commandExamples } from "./examples.js";
 import { parameterSource } from "./emit-flag.js";
 import { multipartFlagSource, multipartBodySource, multipartUsesSchema } from "./emit-multipart.js";
 import { Array, Order } from "effect";
@@ -197,6 +198,7 @@ const handlerSource = (
 const operationSource = (
   operation: Operation,
   identifier: string,
+  executable: string,
   auth: ReturnType<typeof authenticationSource>,
   reference: (pointer: string) => string,
   parameters: ReturnType<typeof parameterComponents>,
@@ -251,8 +253,17 @@ const operationSource = (
       .map((key) => `${key}: ${flags.get(key)}`)
       .join(",\n");
   const help = description(operation.docs);
+  const examples = commandExamples(operation, executable);
+  const metadata = [
+    ...(help ? [`Command.withDescription(${literal(help)})`] : []),
+    ...(examples.length
+      ? [
+          `Command.withExamples([${examples.map((example) => `{command: ${literal(example.command)}${example.description === undefined ? "" : `, description: ${literal(example.description)}`}}`).join(",")}])`,
+        ]
+      : []),
+  ];
 
-  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference, bodies)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
+  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference, bodies)})${metadata.length ? `.pipe(${metadata.join(", ")})` : ""};`;
 };
 
 /**
@@ -385,7 +396,7 @@ export const commandSource = (
   for (const operation of model.operations) {
     const identifier = allocate(operation.operationId, "Command");
     declarations.push(
-      operationSource(operation, identifier, auth, reference, parameters, bodies, multipart),
+      operationSource(operation, identifier, name, auth, reference, parameters, bodies, multipart),
     );
     entries.push({
       deprecated: operation.docs.deprecated === true,
