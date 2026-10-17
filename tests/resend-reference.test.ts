@@ -3,9 +3,9 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { Effect, Schema } from "effect";
 
-const invoke = async (args: string[], apiKey = "") => {
+const invoke = async (args: string[], env: Record<string, string> = {}) => {
   const child = Bun.spawn(["node", "examples/resend-reference/dist/main.js", ...args], {
-    env: { ...process.env, RESEND_API_KEY: apiKey },
+    env: { ...process.env, ...env },
     stderr: "pipe",
     stdout: "pipe",
   });
@@ -103,13 +103,17 @@ test("Resend help requires neither credentials nor an API URL", async () => {
       const result = await invoke([...command, "--help"]);
       expect(result.code, result.err).toBe(0);
       expect(result.out).not.toBe("");
+      if (command.length > 0) {
+        expect(result.out).toContain("--bearer-auth");
+        expect(result.out).not.toContain("--api-key");
+      }
     },
   );
 });
 
 test("eight Resend operations preserve methods, path segments, headers and omitted bodies", async () => {
   const { origin, requests, server } = await fixture();
-  const base = ["--base-url", `${origin}/api/`, "--api-key", "local-test-token"];
+  const base = ["--base-url", `${origin}/api/`, "--bearer-auth", "local-test-token"];
   try {
     await each(
       [
@@ -146,17 +150,6 @@ test("eight Resend operations preserve methods, path segments, headers and omitt
     expect(requests.every(({ body }) => body === "")).toBe(true);
     expect(requests[4]?.idempotency).toBe("send-once");
     expect(requests[5]?.idempotency).toBeUndefined();
-
-    const fallback = await invoke(
-      ["domains", "list", "--base-url", `${origin}/api`],
-      "environment-test-token",
-    );
-    expect(fallback.code, fallback.err).toBe(0);
-    expect(requests.at(-1)?.authorization).toBe("Bearer environment-test-token");
-
-    const explicit = await invoke(["domains", "list", ...base], "environment-test-token");
-    expect(explicit.code, explicit.err).toBe(0);
-    expect(requests.at(-1)?.authorization).toBe("Bearer local-test-token");
   } finally {
     await server[Symbol.asyncDispose]();
   }
@@ -164,7 +157,7 @@ test("eight Resend operations preserve methods, path segments, headers and omitt
 
 test("request models preserve original JSON, unknown fields and omitted defaults", async () => {
   const { origin, requests, server } = await fixture();
-  const base = ["--base-url", `${origin}/api`, "--api-key", "local-test-token"];
+  const base = ["--base-url", `${origin}/api`, "--bearer-auth", "local-test-token"];
   const email = {
     attachments: [{ content: "@/not-a-real-file", extra: { keep: false }, filename: "" }],
     from: "",
@@ -217,7 +210,7 @@ test("request models preserve original JSON, unknown fields and omitted defaults
 
 test("pagination follows declared numeric bounds without inventing cursor exclusivity", async () => {
   const { origin, requests, server } = await fixture();
-  const base = ["--base-url", `${origin}/api`, "--api-key", "local-test-token"];
+  const base = ["--base-url", `${origin}/api`, "--bearer-auth", "local-test-token"];
   try {
     await each(
       [
@@ -271,7 +264,7 @@ test("pagination follows declared numeric bounds without inventing cursor exclus
 
 test("invalid body models fail before HTTP and do not reveal body contents", async () => {
   const { origin, requests, server } = await fixture();
-  const base = ["--base-url", `${origin}/api`, "--api-key", "local-test-token"];
+  const base = ["--base-url", `${origin}/api`, "--bearer-auth", "local-test-token"];
   const email = { from: "private-sender", subject: "private-subject", to: "a" };
   try {
     const cases = [
@@ -320,7 +313,7 @@ test("invalid body models fail before HTTP and do not reveal body contents", asy
 
 test("path segments preserve dotted filenames and isolate path failures from body errors", async () => {
   const { origin, requests, server } = await fixture();
-  const base = ["--base-url", `${origin}/api/`, "--api-key", "local-test-token"];
+  const base = ["--base-url", `${origin}/api/`, "--bearer-auth", "local-test-token"];
   try {
     await each(["bar.json", "folder/report.json", "..."], async (id) => {
       const result = await invoke([
@@ -379,6 +372,15 @@ test("transport and authentication errors are safe and writes are never retried"
     const noAuth = await invoke(["domains", "list", "--base-url", `${origin}/api`]);
     expect(noAuth.code).toBe(1);
     expect(requests).toHaveLength(0);
+
+    // The removed vendor fallback must never supply authentication implicitly.
+    const legacyEnvironment = await invoke(["domains", "list", "--base-url", `${origin}/api`], {
+      RESEND_API_KEY: "legacy-private-credential",
+    });
+    expect(legacyEnvironment.code).toBe(1);
+    expect(legacyEnvironment.err).toContain("--bearer-auth");
+    expect(legacyEnvironment.err).not.toContain("legacy-private-credential");
+    expect(requests).toHaveLength(0);
     await each(
       [["unauthorized", "401"] as const, ["unavailable", "503"] as const],
       async ([prefix, status]) => {
@@ -387,7 +389,7 @@ test("transport and authentication errors are safe and writes are never retried"
           "send",
           "--base-url",
           `${origin}/${prefix}`,
-          "--api-key",
+          "--bearer-auth",
           "private-test-credential",
         ]);
         expect(result.code).toBe(1);
@@ -402,7 +404,7 @@ test("transport and authentication errors are safe and writes are never retried"
       "send",
       "--base-url",
       `${origin}/truncated`,
-      "--api-key",
+      "--bearer-auth",
       "private-test-credential",
     ]);
     expect(truncated.code).toBe(1);

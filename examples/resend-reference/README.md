@@ -61,15 +61,15 @@ node examples/resend-reference/dist/main.js emails attachments get --help
 
 Dependencies use the repository's pinned Effect 4.0.3 packages. A standalone copy can run `bun install` inside this directory before building. No API call occurs during build or help.
 
-Every execution requires an explicit `--base-url` and a bearer token, supplied through `--api-key` or `RESEND_API_KEY`. The explicit flag takes precedence. The token uses native Redacted values and is passed directly to the native bearer-token request helper. No production base URL or credential is supplied automatically.
+Every execution requires an explicit `--base-url` and a bearer token, supplied through `--bearer-auth`. This flag represents the active `bearerAuth` HTTP bearer security scheme in the specification; no environment fallback is configured. The token uses native Redacted values and is passed directly to the native bearer-token request helper. No production base URL or credential is supplied automatically.
 
 Against a local HTTP fixture implementing these routes:
 
 ```sh
-RESEND_API_KEY=fixture-token node examples/resend-reference/dist/main.js domains list --base-url http://127.0.0.1:43124/api --limit 10
-RESEND_API_KEY=fixture-token node examples/resend-reference/dist/main.js domains update --base-url http://127.0.0.1:43124/api --domain-id domain-1 --body '{"open_tracking":false}'
-RESEND_API_KEY=fixture-token node examples/resend-reference/dist/main.js emails send --base-url http://127.0.0.1:43124/api --idempotency-key local-example --body '{"from":"sender@example.com","to":["recipient@example.com"],"subject":"Example"}'
-RESEND_API_KEY=fixture-token node examples/resend-reference/dist/main.js emails batch send --base-url http://127.0.0.1:43124/api --body '[{"from":"sender@example.com","to":"recipient@example.com","subject":"Example"}]'
+node examples/resend-reference/dist/main.js domains list --base-url http://127.0.0.1:43124/api --bearer-auth fixture-token --limit 10
+node examples/resend-reference/dist/main.js domains update --base-url http://127.0.0.1:43124/api --bearer-auth fixture-token --domain-id domain-1 --body '{"open_tracking":false}'
+node examples/resend-reference/dist/main.js emails send --base-url http://127.0.0.1:43124/api --bearer-auth fixture-token --idempotency-key local-example --body '{"from":"sender@example.com","to":["recipient@example.com"],"subject":"Example"}'
+node examples/resend-reference/dist/main.js emails batch send --base-url http://127.0.0.1:43124/api --bearer-auth fixture-token --body '[{"from":"sender@example.com","to":"recipient@example.com","subject":"Example"}]'
 ```
 
 These commands need a running fixture; this directory does not start a server. The default users demo server does not implement these routes. No live Resend requests were used to develop this reference. Choosing Resend's real server and credentials can create/delete domains or send email.
@@ -89,4 +89,4 @@ These choices exercise capabilities that the generator does not yet support; han
 
 ## Source layout
 
-`commands.ts` imports `* as Builtins` from `./builtins.js` and `* as Models` from `./models.js`; `main.ts` imports `* as Commands` from `./commands.js`. Export only the four builtins consumed by commands (`apiKey`, `baseUrl`, `appendPathSegments`, `runRequest`), the three request schemas and the two top-level command groups. Builtin formatter/encoder details and model dependencies remain local. Operation and group names end in `Command`, and nested groups retain their complete ordered path, such as `EmailsAttachmentsCommand`. `rootCommand` remains the entrypoint root. This four-file layout keeps shared infrastructure out of command declarations and supersedes the earlier single-file layout without changing wire behavior.
+`commands.ts` imports `* as Builtins` from `./builtins.js` and `* as Models` from `./models.js`; `main.ts` imports `* as Commands` from `./commands.js`. Export only the four builtins consumed by commands (`bearerAuth`, `baseUrl`, `appendPathSegments`, `runRequest`), the three request schemas and the two top-level command groups. Builtin formatter/encoder details and model dependencies remain local. Operation and group names end in `Command`, and nested groups retain their complete ordered path, such as `EmailsAttachmentsCommand`. `rootCommand` remains the entrypoint root. This four-file layout keeps shared infrastructure out of command declarations and supersedes the earlier single-file layout without changing wire behavior.

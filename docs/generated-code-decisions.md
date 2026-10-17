@@ -75,7 +75,7 @@ import * as Models from "./models.js";
 Schema.fromJsonString(Models.SendEmailRequest);
 
 // Keep flag keys stable when referencing shared configuration.
-Command.make("list", { apiKey: Builtins.apiKey, baseUrl: Builtins.baseUrl });
+Command.make("list", { baseUrl: Builtins.baseUrl, bearerAuth: Builtins.bearerAuth });
 ```
 
 ```ts
@@ -88,7 +88,23 @@ const rootCommand = Command.make("resend-reference").pipe(
 );
 ```
 
-Export only top-level groups needed by the entrypoint, model schemas needed by commands, and the four builtins consumed by commands: `apiKey`, `baseUrl`, `appendPathSegments` and `runRequest`. Builtin formatters and the segment encoder remain private. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
+Export only top-level groups needed by the entrypoint, model schemas needed by commands, and the four builtins consumed by commands: `bearerAuth`, `baseUrl`, `appendPathSegments` and `runRequest`. Builtin formatters and the segment encoder remain private. Operations, nested groups and model-only dependencies remain local. Namespace imports make the owning module visible; they do not replace deterministic identifier allocation. Keep API flags inline in their commands and preserve explicitly shared model identities across this file boundary. These are modules, not nested command object namespaces or a new package hierarchy.
+
+## Derive authentication from effective security requirements
+
+Emit authentication only for an operation's effective OpenAPI security requirements: use operation-level `security` when present, otherwise root `security`. A declared but unused scheme does not require a flag; an empty operation-level security array disables inherited authentication.
+
+The Resend reference activates `bearerAuth` at the root, whose definition is `type: "http"` and `scheme: "bearer"`. That definition selects native bearer authentication; the scheme key alone does not identify the authentication mechanism. Normalizing `bearerAuth` to the CLI flag `--bearer-auth` is our naming convention, not an OpenAPI requirement.
+
+```ts
+export const bearerAuth = Flag.Redacted("bearer-auth").pipe(
+  Flag.withDescription("Bearer token for authentication."),
+);
+```
+
+Inside each command handler, pass the parsed `bearerAuth` value directly to `HttpClientRequest.bearerToken(bearerAuth)`.
+
+Environment bindings require explicit generator configuration. Do not infer vendor defaults from the API title, scheme key or description. The reference has no configured environment binding. Other authentication types, security alternatives and combinations, and general generator authentication support remain unimplemented; this reference establishes only the active HTTP bearer case.
 
 ## Map declared constraints directly
 
@@ -375,9 +391,7 @@ Keep JSDoc multiline. Omit boilerplate tags, redundant types and comments that m
 **NEGATIVE — Leave a builtin undocumented because OpenAPI has no prose for it.**
 
 ```ts
-const apiKey = Flag.Redacted("api-key").pipe(
-  Flag.withFallbackConfig(Config.Redacted("RESEND_API_KEY")),
-);
+const bearerAuth = Flag.Redacted("bearer-auth");
 ```
 
 **NEGATIVE — Narrate syntax without adding a contract.**
@@ -432,7 +446,7 @@ Those suites prove their current fixtures, not all decisions in this guide. Add 
 
 The [Resend reference](../examples/resend-reference/README.md) applies this style to a pinned real-world slice. Its implementation decisions below are explicit reviewable choices; they do not expand current generator support or imply prior approval of every new boundary.
 
-- Authentication is shared CLI-owned configuration: native `Flag.Redacted("api-key")` with `Config.Redacted("RESEND_API_KEY")` fallback, passed to `HttpClientRequest.bearerToken`. Help does not require credentials, and execution still requires an explicit base URL.
+- Authentication follows the active `bearerAuth` security requirement: native `Flag.Redacted("bearer-auth")` passes directly to `HttpClientRequest.bearerToken`. Help does not require credentials, and execution requires an explicit token and base URL; no environment binding is configured.
 - Omitted `requestBody.required` means the body flag is optional. The request receives no body when omitted. Supplied bodies retain their model's required fields and use checked JSON encoding.
 - OpenAPI objects permit unspecified properties unless constrained. Native `Schema.StructWithRest` with `Schema.Record(Schema.String, Schema.Json)` preserves those values instead of stripping them. Only explicitly referenced request models get shared schema declarations; response text needs no unused response validators.
 - `Schema.Union([...], { mode: "oneOf" })` expresses exclusive alternatives natively. Resend's alternatives are disjoint strings/arrays or strings/numbers. A template `allOf` containing a model reference and description-only annotation adds no validation rule.

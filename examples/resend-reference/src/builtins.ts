@@ -1,4 +1,4 @@
-import { Config, Console, Effect, Match, Schema, SchemaIssue } from "effect";
+import { Console, Effect, Match, Schema, SchemaIssue } from "effect";
 import { CliError, Flag } from "effect/cli";
 import type { HttpClientError } from "effect/http";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -131,10 +131,9 @@ export const runRequest = (request: HttpClientRequest.HttpClientRequest) =>
   );
 
 /**
- * Read the bearer credential as a redacted value. An explicit --api-key takes
- * precedence over the RESEND_API_KEY environment fallback.
+ * Read the token for the specification's bearerAuth HTTP bearer security scheme
+ * as a redacted value. Authentication requires an explicit --bearer-auth flag.
  */
-export const apiKey = Flag.Redacted("api-key").pipe(
-  Flag.withFallbackConfig(Config.Redacted("RESEND_API_KEY")),
-  Flag.withDescription("Resend bearer API key; defaults to RESEND_API_KEY."),
+export const bearerAuth = Flag.Redacted("bearer-auth").pipe(
+  Flag.withDescription("Bearer token for authentication."),
 );

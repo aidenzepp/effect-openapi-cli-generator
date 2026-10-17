@@ -14,8 +14,8 @@ const domainsListCommand = Command.make(
       Flag.withDescription("Return items after this cursor."),
       Flag.optional,
     ),
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription("Return items before this cursor."),
       Flag.optional,
@@ -26,9 +26,9 @@ const domainsListCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ after, apiKey: token, baseUrl: apiUrl, before, limit }) =>
+  ({ after, baseUrl: apiUrl, bearerAuth, before, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setUrlParams({
         after: Option.getOrUndefined(after),
         before: Option.getOrUndefined(before),
@@ -46,8 +46,8 @@ const domainsListCommand = Command.make(
 const domainsCreateCommand = Command.make(
   "create",
   {
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.CreateDomainRequest))(value, {
@@ -60,9 +60,9 @@ const domainsCreateCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ apiKey: token, baseUrl: apiUrl, body }) =>
+  ({ baseUrl: apiUrl, bearerAuth, body }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       Builtins.appendPathSegments("domains"),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
@@ -91,8 +91,8 @@ const domainsCreateCommand = Command.make(
 const domainsUpdateCommand = Command.make(
   "update",
   {
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.UpdateDomainOptions))(value, {
@@ -106,9 +106,9 @@ const domainsUpdateCommand = Command.make(
     ),
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
-  ({ apiKey: token, baseUrl: apiUrl, body, domainId }) =>
+  ({ baseUrl: apiUrl, bearerAuth, body, domainId }) =>
     HttpClientRequest.patch(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       Builtins.appendPathSegments("domains", domainId),
       Effect.flatMap((request) =>
         Effect.suspend(() =>
@@ -137,13 +137,13 @@ const domainsUpdateCommand = Command.make(
 const domainsRemoveCommand = Command.make(
   "delete",
   {
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     domainId: Flag.String("domain-id").pipe(Flag.withDescription("The ID of the domain.")),
   },
-  ({ apiKey: token, baseUrl: apiUrl, domainId }) =>
+  ({ baseUrl: apiUrl, bearerAuth, domainId }) =>
     HttpClientRequest.delete(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       Builtins.appendPathSegments("domains", domainId),
       Effect.flatMap(Builtins.runRequest),
       Effect.withSpan("domains.remove"),
@@ -156,8 +156,8 @@ const domainsRemoveCommand = Command.make(
 const emailsSendCommand = Command.make(
   "send",
   {
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Models.SendEmailRequest))(value, {
@@ -177,9 +177,9 @@ const emailsSendCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ apiKey: token, baseUrl: apiUrl, body, idempotencyKey }) =>
+  ({ baseUrl: apiUrl, bearerAuth, body, idempotencyKey }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       Builtins.appendPathSegments("emails"),
       Effect.flatMap((request) =>
@@ -209,8 +209,8 @@ const emailsSendCommand = Command.make(
 const emailsSendBatchCommand = Command.make(
   "send",
   {
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     body: Flag.String("body").pipe(
       Flag.mapEffect((value) =>
         Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Models.SendEmailRequest)))(
@@ -233,9 +233,9 @@ const emailsSendBatchCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ apiKey: token, baseUrl: apiUrl, body, idempotencyKey }) =>
+  ({ baseUrl: apiUrl, bearerAuth, body, idempotencyKey }) =>
     HttpClientRequest.post(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setHeaders({ "Idempotency-Key": Option.getOrUndefined(idempotencyKey) }),
       Builtins.appendPathSegments("emails", "batch"),
       Effect.flatMap((request) =>
@@ -271,8 +271,8 @@ const emailsListAttachmentsCommand = Command.make(
       ),
       Flag.optional,
     ),
-    apiKey: Builtins.apiKey,
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     before: Flag.String("before").pipe(
       Flag.withDescription(
         "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'.",
@@ -285,9 +285,9 @@ const emailsListAttachmentsCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ after, apiKey: token, baseUrl: apiUrl, before, emailId, limit }) =>
+  ({ after, baseUrl: apiUrl, bearerAuth, before, emailId, limit }) =>
     HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       HttpClientRequest.setUrlParams({
         after: Option.getOrUndefined(after),
         before: Option.getOrUndefined(before),
@@ -305,16 +305,16 @@ const emailsListAttachmentsCommand = Command.make(
 const emailsGetAttachmentCommand = Command.make(
   "get",
   {
-    apiKey: Builtins.apiKey,
     attachmentId: Flag.String("attachment-id").pipe(
       Flag.withDescription("The ID of the attachment."),
     ),
     baseUrl: Builtins.baseUrl,
+    bearerAuth: Builtins.bearerAuth,
     emailId: Flag.String("email-id").pipe(Flag.withDescription("The ID of the email.")),
   },
-  ({ apiKey: token, attachmentId, baseUrl: apiUrl, emailId }) =>
+  ({ attachmentId, baseUrl: apiUrl, bearerAuth, emailId }) =>
     HttpClientRequest.get(apiUrl).pipe(
-      HttpClientRequest.bearerToken(token),
+      HttpClientRequest.bearerToken(bearerAuth),
       Builtins.appendPathSegments("emails", emailId, "attachments", attachmentId),
       Effect.flatMap(Builtins.runRequest),
       Effect.withSpan("emails.get-attachment"),
