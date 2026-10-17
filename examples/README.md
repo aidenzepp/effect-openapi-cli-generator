@@ -29,21 +29,21 @@ It binds only `127.0.0.1:43123`, logs each request, and prints its PID. Stop wit
 ```sh
 node examples/demo/cli/dist/main.js --help
 node examples/demo/cli/dist/main.js users list --active false --base-url http://127.0.0.1:43123/api
-node examples/demo/cli/dist/main.js users get ada --base-url http://127.0.0.1:43123/api
+node examples/demo/cli/dist/main.js users get --id ada --base-url http://127.0.0.1:43123/api
 node examples/demo/cli/dist/main.js posts create --body '{"title":"Hello","published":false}' --base-url http://127.0.0.1:43123/api
 node examples/demo/cli/dist/main.js posts create --body-file examples/demo/post.json --base-url http://127.0.0.1:43123/api
-node examples/demo/cli/dist/main.js files get 'folder/hello' --base-url http://127.0.0.1:43123/api
+node examples/demo/cli/dist/main.js files get --id 'folder/hello' --base-url http://127.0.0.1:43123/api
 ```
 
-| Command                        | HTTP endpoint                   | Expected JSON                                                      |
-| ------------------------------ | ------------------------------- | ------------------------------------------------------------------ |
-| `users list --active false`    | `GET /api/users?active=false`   | `[{"id":"grace","name":"Grace","active":false}]`                   |
-| `users get ada`                | `GET /api/users/ada`            | `{"id":"ada","name":"Ada","active":true}`                          |
-| `posts create --body ...`      | `POST /api/posts`               | `{"id":"post-demo","title":"Hello","published":false}`             |
-| `posts create --body-file ...` | `POST /api/posts`               | `{"id":"post-demo","title":"Hello from a file","published":false}` |
-| `files get 'folder/hello'`     | `GET /api/files/folder%2Fhello` | `{"id":"folder/hello","name":"hello.txt","bytes":12}`              |
+| Command                         | HTTP endpoint                   | Expected JSON                                                      |
+| ------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
+| `users list --active false`     | `GET /api/users?active=false`   | `[{"id":"grace","name":"Grace","active":false}]`                   |
+| `users get --id ada`            | `GET /api/users/ada`            | `{"id":"ada","name":"Ada","active":true}`                          |
+| `posts create --body ...`       | `POST /api/posts`               | `{"id":"post-demo","title":"Hello","published":false}`             |
+| `posts create --body-file ...`  | `POST /api/posts`               | `{"id":"post-demo","title":"Hello from a file","published":false}` |
+| `files get --id 'folder/hello'` | `GET /api/files/folder%2Fhello` | `{"id":"folder/hello","name":"hello.txt","bytes":12}`              |
 
-The CLI prints the response without adding a newline. Unknown users return HTTP 404 and a nonzero CLI exit.
+The CLI prints the response. Unknown users return HTTP 404 and a nonzero CLI exit.
 
 ## Exact integration fixture
 
@@ -58,14 +58,22 @@ node examples/integration/cli/dist/main.js account deep items get --help
 The test suite supplies its own temporary capture server and proves HTTP semantics. The friendly server does not implement those fixture endpoints. A corresponding command against a capture server would be:
 
 ```sh
-node examples/integration/cli/dist/main.js account deep items get 'a/b雪' --parent 'p/q' --enabled false --count 0 --wire-name '' --body '{"enabled":false,"__proto__":{"safe":true}}' --base-url http://127.0.0.1:CAPTURE_PORT/api
+node examples/integration/cli/dist/main.js account deep items get --id 'a/b雪' --parent 'p/q' --enabled false --count 0 --wire-name '' --body '{"enabled":false,"__proto__":{"safe":true}}' --base-url http://127.0.0.1:CAPTURE_PORT/api
 ```
 
 Replace `CAPTURE_PORT` with a real capture server port; this is a template, not a command for the friendly server. Despite its command name `get`, this operation sends **POST**.
 
 ## Regenerate after generator changes
 
-These outputs were regenerated from the readable source refactor and verified with the current repository tools. To compare a fresh build without overwriting either checked-in output:
+Regenerate the committed demo and integration outputs directly from their specifications:
+
+```sh
+bun tools/generate-local-examples.ts
+```
+
+The tool rejects unexpected source files so obsolete modules cannot silently remain. Inspect and remove obsolete generated source when the output layout changes. Tests compare every emitted file and the source inventory against fresh generation, then build and run help for both packages.
+
+To inspect a fresh build in separate directories:
 
 ```sh
 bun run build
