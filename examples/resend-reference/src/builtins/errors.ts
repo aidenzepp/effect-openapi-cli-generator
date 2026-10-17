@@ -1,3 +1,4 @@
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError is a schema class factory. */
 import { Match, Schema } from "effect";
 import { CliError } from "effect/cli";
 import type { HttpClientError } from "effect/http";
@@ -6,7 +7,6 @@ import type { HttpClientError } from "effect/http";
  * A path value that cannot be transported literally without changing its meaning.
  * The rejected value is never stored in the error.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class PathError extends Schema.TaggedError<PathError>()("PathError", {
   cause: Schema.optionalKey(Schema.Defect()),
   reason: Schema.Literals(["DotSegment", "InvalidUnicode"]),
@@ -16,7 +16,6 @@ export class PathError extends Schema.TaggedError<PathError>()("PathError", {
  * A redacted credential was erased or is otherwise unavailable. Basic fields
  * and API-key locations are represented separately without retaining secrets.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class CredentialUnavailable extends Schema.TaggedError<CredentialUnavailable>()(
   "CredentialUnavailable",
   {
@@ -47,7 +46,6 @@ export class CredentialUnavailable extends Schema.TaggedError<CredentialUnavaila
 /**
  * A Basic field failed its native transport schema, without retaining the input.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class InvalidBasicCredential extends Schema.TaggedError<InvalidBasicCredential>()(
   "InvalidBasicCredential",
   {
@@ -67,7 +65,6 @@ export class InvalidBasicCredential extends Schema.TaggedError<InvalidBasicCrede
 /**
  * Validated Basic fields could not be represented by the native encoder.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class BasicEncodingError extends Schema.TaggedError<BasicEncodingError>()(
   "BasicEncodingError",
   {},
@@ -84,7 +81,6 @@ export class BasicEncodingError extends Schema.TaggedError<BasicEncodingError>()
 /**
  * Native cookie validation rejected API-key preparation or an existing cookie.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class CookieConfigurationError extends Schema.TaggedError<CookieConfigurationError>()(
   "CookieConfigurationError",
   {},
@@ -101,7 +97,6 @@ export class CookieConfigurationError extends Schema.TaggedError<CookieConfigura
 /**
  * A cookie value could not be URI-encoded during API-key preparation.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class CookieEncodingError extends Schema.TaggedError<CookieEncodingError>()(
   "CookieEncodingError",
   {},
@@ -119,7 +114,6 @@ export class CookieEncodingError extends Schema.TaggedError<CookieEncodingError>
  * Local header or query API-key construction failed before execution. Wire
  * validation may still be deferred until execution when preparation succeeds.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class ApiKeyPreparationError extends Schema.TaggedError<ApiKeyPreparationError>()(
   "ApiKeyPreparationError",
   {
@@ -149,7 +143,6 @@ export const AuthenticationErrorReason = Schema.Union([
 /**
  * Authentication preparation failed for a structured, secret-free reason.
  */
-// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
 export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
   "AuthenticationError",
   {
