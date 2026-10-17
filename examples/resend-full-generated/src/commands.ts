@@ -7,6 +7,7 @@ import * as Http from "./builtins/http.js";
 import * as Multipart from "./builtins/multipart.js";
 import * as Query from "./builtins/query.js";
 import * as Url from "./builtins/url.js";
+import * as MultipartComponents from "./components/multipart.js";
 import * as Parameters from "./components/parameters.js";
 import * as Schemas from "./components/schemas.js";
 import * as SecuritySchemes from "./components/security-schemes.js";
@@ -1071,29 +1072,11 @@ const contactsCreateImportCommand = Command.make(
     ),
     baseUrl: Url.baseUrl,
     bearerAuth: SecuritySchemes.BearerAuth,
-    columnMap: Flag.String("column-map").pipe(
-      Flag.withDescription(
-        "JSON-encoded object mapping contact fields and custom property keys to CSV column names. Supports `email`, `first_name`, `last_name`, `unsubscribed`, and `properties`. Custom property mappings can include `type` as `string`, `number`, or `boolean`; defaults to `string`.",
-      ),
-      Flag.optional,
-    ),
-    file: Flag.File("file", { mustExist: true }).pipe(
-      Flag.withDescription("CSV file to import. Maximum size is 50MB."),
-    ),
-    onConflict: Flag.Literals("on-conflict", ["upsert", "skip"]).pipe(
-      Flag.withDescription("Strategy to use when an imported contact already exists."),
-      Flag.optional,
-    ),
-    segments: Flag.String("segments").pipe(
-      Flag.withDescription("JSON-encoded array of segments to add imported contacts to."),
-      Flag.optional,
-    ),
-    topics: Flag.String("topics").pipe(
-      Flag.withDescription(
-        "JSON-encoded array of topic subscriptions to apply to imported contacts. Each `subscription` must be `opt_in` or `opt_out`.",
-      ),
-      Flag.optional,
-    ),
+    columnMap: MultipartComponents.CreateContactImportOptions.column_map,
+    file: MultipartComponents.CreateContactImportOptions.file,
+    onConflict: MultipartComponents.CreateContactImportOptions.on_conflict,
+    segments: MultipartComponents.CreateContactImportOptions.segments,
+    topics: MultipartComponents.CreateContactImportOptions.topics,
   },
   ({
     additionalFields,

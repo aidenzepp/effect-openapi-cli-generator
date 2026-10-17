@@ -337,3 +337,40 @@ test("mixed naming overrides and plain operations are stable under path reorderi
     fail({ ...input, paths: { ...paths, "/duplicate": { get: collision } } }).message,
   ).toContain("Duplicate command address");
 });
+
+test("security reference descriptions override through alias chains without renaming flags", () => {
+  const components = {
+    securitySchemes: {
+      Alias: { $ref: "#/components/securitySchemes/Base", description: "Alias token" },
+      Base: { description: "Base token", scheme: "bearer", type: "http" },
+      Empty: { $ref: "#/components/securitySchemes/Alias", description: "" },
+      Inherited: { $ref: "#/components/securitySchemes/Alias" },
+      Outer: { $ref: "#/components/securitySchemes/Alias", description: "Outer token" },
+    },
+  };
+  for (const [name, description] of [
+    ["Base", "Base token"],
+    ["Alias", "Alias token"],
+    ["Outer", "Outer token"],
+    ["Inherited", "Alias token"],
+    ["Empty", ""],
+  ] as const) {
+    const result = run(document({ security: [{ [name]: [] }] }, "/things", { components }))
+      .operations[0]?.security;
+    expect(result?.key).toBe(name);
+    expect(result?.docs.description).toBe(description);
+  }
+  const invalid = {
+    securitySchemes: {
+      ...components.securitySchemes,
+      Bad: { $ref: "#/components/securitySchemes/Base", description: 42 },
+    },
+  };
+  const failure = fail(document({ security: [{ Bad: [] }] }, "/things", { components: invalid }));
+  expect(failure.location).toBe("/components/securitySchemes/Bad/description");
+
+  const legacy = run(
+    document({ security: [{ Bad: [] }] }, "/things", { components: invalid, openapi: "3.0.3" }),
+  );
+  expect(legacy.operations[0]?.security?.docs.description).toBe("Base token");
+});

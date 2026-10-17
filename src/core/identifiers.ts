@@ -61,6 +61,7 @@ export const identifierAllocator = () => {
     "Models",
     "Schemas",
     "Parameters",
+    "MultipartComponents",
     "RequestBodies",
     "SecuritySchemes",
     "Schema",

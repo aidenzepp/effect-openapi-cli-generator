@@ -4,6 +4,13 @@ import { schemaSource } from "./emit-schema.js";
 import { description, literal, propertyKey } from "./source-text.js";
 
 /**
+ * Whether this transport field consumes its schema in a native flag validator.
+ */
+export const multipartUsesSchema = (field: MultipartField): boolean =>
+  field.kind !== "file" &&
+  (field.schema.reference !== undefined || (field.schema.checks?.length ?? 0) > 0);
+
+/**
  * Render multipart transport inputs without applying content checks to local paths.
  */
 export const multipartFlagSource = (
@@ -64,7 +71,8 @@ export const multipartBodySource = (
     }
 
     if (field.kind === "text") {
-      fields.push(`${propertyKey(field.name)}: ${value}`);
+      const key = propertyKey(field.name);
+      fields.push(field.name === value ? value : `${key}: ${value}`);
     } else {
       files.push(`${input}: Multipart.${field.kind === "file" ? "file" : "files"}(${value})`);
       fields.push(`${propertyKey(field.name)}: files.${input}`);

@@ -967,6 +967,7 @@ const normalizeOperation = (
         document,
         Object.hasOwn(source, "security") ? source.security : own(root, "security"),
         Object.hasOwn(source, "security") ? `${opAt}/security` : "/security",
+        version,
       )) ?? undefined;
 
     const names = yield* pathNames(path, at);

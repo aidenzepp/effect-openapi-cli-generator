@@ -65,6 +65,7 @@ export const normalizeSecurity = (
   document: Schema.Json,
   input: Schema.Json | undefined,
   location: string,
+  version: "3.0" | "3.1",
 ): Effect.Effect<SecurityRequirement | null, GenerationError> =>
   Effect.gen(function* decodeSecurity() {
     const fail = (message: string) =>
@@ -116,14 +117,39 @@ export const normalizeSecurity = (
     );
     let source = resolved.value;
     let active = resolved.activeRefs;
+    let sourceLocation = resolved.location;
+    let description: string | undefined;
     while (Schema.is(Schema.JsonObject)(source) && Schema.is(Schema.String)(source.$ref)) {
+      if (version === "3.1" && Object.hasOwn(source, "description")) {
+        const { description: override } = source;
+        if (!Schema.is(Schema.String)(override)) {
+          return yield* Effect.fail(
+            new GenerationError({
+              code: "invalid_input",
+              hint: "Use a string description.",
+              location: `${sourceLocation}/description`,
+              message: "Security reference description must be a string.",
+            }),
+          );
+        }
+
+        description ??= override;
+      }
+
       const target = yield* resolveReference(document, source.$ref, location, active);
       source = target.value;
+      sourceLocation = target.location;
       active = target.activeRefs;
     }
     if (!Schema.is(Schema.JsonObject)(source)) {
       return yield* fail("Expected a security scheme object.");
     }
 
-    return yield* decodeScheme(source, key, location);
+    return yield* decodeScheme(
+      description === undefined
+        ? source
+        : { ...Object.fromEntries(Object.entries(source)), description },
+      key,
+      location,
+    );
   });

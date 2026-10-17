@@ -1,5 +1,6 @@
 import { Array, Order } from "effect";
 import { identifierAllocator } from "./identifiers.js";
+import { multipartUsesSchema } from "./emit-multipart.js";
 import { schemaSource } from "./emit-schema.js";
 import type { ApiModel, WireSchema } from "./model.js";
 import { comment } from "./source-text.js";
@@ -46,7 +47,7 @@ export const modelSource = (model: ApiModel) => {
     }
     if (operation.body?.multipart) {
       for (const field of operation.body.multipart.fields) {
-        if (field.kind !== "file") {
+        if (multipartUsesSchema(field)) {
           visit(field.schema, true);
         }
       }

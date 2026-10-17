@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Array, Effect, Schema } from "effect";
 import { HttpClientRequest } from "effect/http";
@@ -377,6 +377,7 @@ test("multipart capability subsets compile without unused models or imports", as
       [
         {},
         { file: { $ref: "#/components/schemas/Binary" } },
+        { file: { items: { $ref: "#/components/schemas/Binary" }, type: "array" } },
         { file: { $ref: "#/components/schemas/Alias" } },
         { file: { allOf: [{ $ref: "#/components/schemas/Text" }, { format: "binary" }] } },
         {
@@ -424,12 +425,17 @@ test("multipart capability subsets compile without unused models or imports", as
           expect(source(output, "components/schemas")).toBe("");
 
           const multipart = source(output, "builtins/multipart");
-          expect(multipart).not.toContain("export const files");
+          if (
+            !("file" in properties && "type" in properties.file && properties.file.type === "array")
+          ) {
+            expect(multipart).not.toContain("export const files");
+          }
+
           if (Object.keys(properties).length === 0) {
             expect(multipart).not.toContain("FileSystem");
             expect(source(output, "commands")).not.toContain("Flag");
           } else {
-            expect(source(output, "commands")).toContain('Flag.File("file"');
+            expect(source(output, "components/multipart")).toContain('Flag.File("file"');
           }
 
           await checkPackage(output);
@@ -594,3 +600,104 @@ test("explicit component categories preserve identity, overrides and inline defi
     }
   });
 }, 30_000);
+
+test("security reference help retains alias overrides with separate credential names", async () => {
+  const output = await Effect.runPromise(
+    generate({
+      components: {
+        securitySchemes: {
+          Alias: { $ref: "#/components/securitySchemes/Base", description: "Alias token" },
+          Base: { description: "Base token", scheme: "bearer", type: "http" },
+          Empty: { $ref: "#/components/securitySchemes/Alias", description: "" },
+          Outer: { $ref: "#/components/securitySchemes/Alias", description: "Outer token" },
+        },
+      },
+      info: { title: "Security references", version: "1" },
+      openapi: "3.1.0",
+      paths: Object.fromEntries(
+        ["Base", "Alias", "Outer", "Empty"].map((key) => [
+          `/${key.toLowerCase()}`,
+          { get: { responses: { "200": { description: "OK" } }, security: [{ [key]: [] }] } },
+        ]),
+      ),
+    }),
+  );
+  const security = source(output, "components/security-schemes");
+  expect(security).toContain('Flag.Redacted("alias")');
+  expect(security).toContain('Flag.withDescription("Alias token")');
+  expect(security).toContain('Flag.Redacted("outer")');
+  expect(security).toContain('Flag.withDescription("Outer token")');
+  expect(security).toContain('Flag.withDescription("")');
+  await checkPackage(output);
+});
+
+test("fresh eight-operation Resend output compiles without changing the checked-in slice", async () => {
+  const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.JsonObject))(
+    await readFile("examples/resend-generated/openapi.json", "utf-8"),
+  );
+  const output = await Effect.runPromise(generate(input, { name: "resend-generated" }));
+  expect(source(output, "commands")).toContain("Parameters.PaginationLimit");
+  await checkPackage(output);
+});
+
+test("multipart request-body aliases and JSON schema views retain explicit identities", async () => {
+  const responses = { "200": { description: "OK" } };
+  const uploadSchema = {
+    additionalProperties: false,
+    properties: { title: { minLength: 2, type: "string" } },
+    required: ["title"],
+    type: "object",
+  };
+  const output = await Effect.runPromise(
+    generate({
+      components: {
+        requestBodies: {
+          Alias: { $ref: "#/components/requestBodies/Upload" },
+          Upload: { content: { "multipart/form-data": { schema: uploadSchema } }, required: true },
+        },
+        schemas: { Upload: uploadSchema },
+      },
+      info: { title: "Shared transport views", version: "1" },
+      openapi: "3.1.0",
+      paths: {
+        "/alias": {
+          post: { requestBody: { $ref: "#/components/requestBodies/Alias" }, responses },
+        },
+        "/inline": {
+          post: {
+            requestBody: { content: { "multipart/form-data": { schema: uploadSchema } } },
+            responses,
+          },
+        },
+        "/json": {
+          post: {
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Upload" } } },
+            },
+            responses,
+          },
+        },
+        "/multipart": {
+          post: {
+            requestBody: {
+              content: {
+                "multipart/form-data": { schema: { $ref: "#/components/schemas/Upload" } },
+              },
+            },
+            responses,
+          },
+        },
+      },
+    }),
+  );
+  const bundles = source(output, "components/multipart");
+  expect(bundles).toContain("export const Alias = Upload;");
+  expect(bundles).toContain("export const Upload2 =");
+  expect(source(output, "components/schemas")).toContain("export const Upload = Schema.Struct");
+  expect(source(output, "commands")).toContain("MultipartComponents.Alias.title");
+  expect(source(output, "commands")).toContain(
+    "MultipartComponents.Upload2.title.pipe(Flag.optional)",
+  );
+  expect(source(output, "commands")).toContain('Flag.String("title").pipe(');
+  await checkPackage(output);
+});

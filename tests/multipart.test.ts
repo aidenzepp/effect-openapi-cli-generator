@@ -32,14 +32,14 @@ const operation = (schema: Schema.Json, required: boolean) => ({
 });
 
 const input = {
-  components: { schemas: { Upload: upload } },
+  components: { schemas: { Upload: upload, UploadAlias: { $ref: "#/components/schemas/Upload" } } },
   info: { title: "Multipart Proof", version: "1" },
   openapi: "3.1.0",
   paths: {
     "/empty": {
       post: operation({ additionalProperties: false, properties: {}, type: "object" }, true),
     },
-    "/optional": { post: operation({ $ref: "#/components/schemas/Upload" }, false) },
+    "/optional": { post: operation({ $ref: "#/components/schemas/UploadAlias" }, false) },
     "/upload": { post: operation({ $ref: "#/components/schemas/Upload" }, true) },
   },
 };
@@ -260,7 +260,12 @@ test("binary content constraints fail instead of checking local path spelling", 
   expect(failure.code).toBe("unsupported");
   expect(failure.message).toContain("content constraints");
 
-  const source = await readFile(path.join(directory, "src/commands.ts"), "utf-8");
+  const source = await readFile(path.join(directory, "src/components/multipart.ts"), "utf-8");
   expect(source).toContain('Flag.File("attachments"');
+  expect(source).toContain("export const UploadAlias = Upload");
+
+  const commands = await readFile(path.join(directory, "src/commands.ts"), "utf-8");
+  expect(commands).toContain("MultipartComponents.UploadAlias.document.pipe(Flag.optional)");
+  expect(commands).toContain("document: MultipartComponents.Upload.document");
   expect(source).toContain("Schema.isMaxLength(2)");
 });

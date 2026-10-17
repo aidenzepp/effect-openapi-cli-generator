@@ -8,7 +8,7 @@ import { comment, description, internalReference, literal } from "./source-text.
 /**
  * Allocate category-local names from explicit pointers, never structural equality.
  */
-const componentNames = (pointers: readonly string[]) => {
+export const componentNames = (pointers: readonly string[]) => {
   const allocate = identifierAllocator();
 
   return new Map(

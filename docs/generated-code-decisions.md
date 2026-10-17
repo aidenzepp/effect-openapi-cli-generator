@@ -521,4 +521,30 @@ Command.make("list", { baseUrl: Url.baseUrl, limit: Parameters.PaginationLimit }
 export const SharedLimit = Flag.Int("limit");
 ```
 
-Aliases retain explicit target reuse, such as `export const Alias = Base`; local descriptions can wrap a referenced flag with `Flag.withDescription`. A JSON request-body component exports its validator, including schema aliases through native destructuring when appropriate. Its handler still owns body requiredness and encoding; do not present this validator as the entire OpenAPI Request Body Object. Reference-site body descriptions remain on the local body flag. Multipart references remain normalized identities without an unused whole-body validator.
+Aliases retain explicit target reuse, such as `export const Alias = Base`; local descriptions can wrap a referenced flag with `Flag.withDescription`. A JSON request-body component exports its validator, including schema aliases through native destructuring when appropriate. Its handler still owns body requiredness and encoding; do not present this validator as the entire OpenAPI Request Body Object. Reference-site body descriptions remain on the local body flag. Explicit multipart schema references produce named native flag bundles in `components/multipart.ts`; their aliases retain target reuse. This file is a generator-owned transport view of source schemas, not an OpenAPI category or whole-body JSON validator.
+
+## Named multipart transport views
+
+Use `MultipartComponents` for named native flag bundles and `Multipart` for transport helpers. A schema-required file flag stays required in the bundle; an optional request body wraps that member locally. The handler still owns body presence, required-field checks, file reading and multipart encoding. Inline schemas stay inline. Do not infer reusable bundles from equal field shapes or pass file inputs through JSON string validators.
+
+```ts
+// components/multipart.ts
+export const CreateContactImportOptions = {
+  file: Flag.File("file", { mustExist: true }),
+  on_conflict: Flag.Literals("on-conflict", ["upsert", "skip"]).pipe(Flag.optional),
+};
+// Required body: reuse the native member directly.
+Command.make("create-import", { file: MultipartComponents.CreateContactImportOptions.file });
+// Optional body: preserve omission without weakening the source component.
+Command.make("preview-import", {
+  file: MultipartComponents.CreateContactImportOptions.file.pipe(Flag.optional),
+});
+```
+
+OpenAPI 3.1 Security Reference Object descriptions override inherited descriptions through alias chains, including empty-string overrides. Each effective scheme name owns its credential flag names, so security aliases are resolved contracts rather than shared flag objects. Do not claim general alias-object sharing for security schemes or rename an alias's credential flag to its target's flag.
+
+Multipart bundle identity prefers the schema reference. A referenced request body with an inline media schema supplies its request-body identity instead; aliases reuse the target bundle. The allocator distinguishes equal names from the two pointer categories. The same schema used in JSON and multipart has a JSON validator and a native multipart flag view.
+
+Security Reference Object description overrides apply only in OpenAPI 3.1. OpenAPI 3.0 ignores reference siblings. An explicit empty 3.1 description clears inherited CLI help.
+
+Scalar request headers retain their raw values as an explicit interoperability convention; this is not full RFC 6570 header expansion. Resend’s [official idempotency example](https://resend.com/docs/dashboard/emails/idempotency-keys) uses `welcome-user/123456789` unchanged. Header serialization is unchanged by component extraction.

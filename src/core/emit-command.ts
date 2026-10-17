@@ -1,7 +1,8 @@
 import { parameterSource } from "./emit-flag.js";
-import { multipartFlagSource, multipartBodySource } from "./emit-multipart.js";
+import { multipartFlagSource, multipartBodySource, multipartUsesSchema } from "./emit-multipart.js";
 import { Array, Order } from "effect";
 import { identifierAllocator } from "./identifiers.js";
+import type { multipartComponents } from "./emit-multipart-components.js";
 import type { parameterComponents, requestBodyComponents } from "./emit-components.js";
 import { hasSchemaReference } from "./emit-schema.js";
 import type { ApiModel, MultipartField, Operation, Parameter } from "./model.js";
@@ -37,7 +38,10 @@ const authenticationSource = (model: ApiModel) => {
         basic: `Basic authentication ${field}.`,
         bearer: "Bearer token for authentication.",
       };
-      const help = description(security.docs) || fallback[security.kind];
+      const help =
+        security.docs.description === undefined
+          ? fallback[security.kind]
+          : description(security.docs);
       lines.push(
         `${comment({ description: help })}export const ${name} = Flag.Redacted(${literal(flag)}).pipe(Flag.withDescription(${literal(help)}));`,
       );
@@ -197,6 +201,7 @@ const operationSource = (
   reference: (pointer: string) => string,
   parameters: ReturnType<typeof parameterComponents>,
   bodies: ReturnType<typeof requestBodyComponents>,
+  multipart: ReturnType<typeof multipartComponents>,
 ) => {
   const inputs = new Map<Parameter, string>();
   const multipartInputs = new Map<MultipartField, string>();
@@ -220,7 +225,7 @@ const operationSource = (
     for (const field of operation.body.multipart.fields) {
       const input = local(field.flagName);
       multipartInputs.set(field, input);
-      flags.set(input, multipartFlagSource(field, operation.body.required, reference));
+      flags.set(input, multipart.field(operation.body, field));
     }
     if (operation.body.multipart.additionalFields) {
       flags.set(
@@ -239,9 +244,11 @@ const operationSource = (
     );
   }
 
-  const fields = Array.sort([...flags.keys()], Order.String)
-    .map((key) => `${key}: ${flags.get(key)}`)
-    .join(",\n");
+  const fields =
+    (operation.body?.multipart ? multipart.empty(operation.body) : "") +
+    Array.sort([...flags.keys()], Order.String)
+      .map((key) => `${key}: ${flags.get(key)}`)
+      .join(",\n");
   const help = description(operation.docs);
 
   return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference, bodies)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
@@ -256,6 +263,7 @@ const commandImports = (
   hasAuth: boolean,
   parameters: ReturnType<typeof parameterComponents>,
   bodies: ReturnType<typeof requestBodyComponents>,
+  multipart: ReturnType<typeof multipartComponents>,
 ): readonly string[] => {
   const needsBody = model.operations.some(
     (operation) => operation.body !== undefined && operation.body.multipart === undefined,
@@ -276,11 +284,12 @@ const commandImports = (
       (operation) =>
         (operation.body !== undefined && !operation.body.multipart) ||
         operation.body?.multipart?.additionalFields === true ||
-        operation.body?.multipart?.fields.some((field) =>
-          multipartFlagSource(field, operation.body?.required === true, reference).includes(
-            "Schema.",
-          ),
-        ) === true ||
+        (!multipart.shared(operation.body) &&
+          operation.body?.multipart?.fields.some((field) =>
+            multipartFlagSource(field, operation.body?.required === true, reference).includes(
+              "Schema.",
+            ),
+          ) === true) ||
         operation.parameters.some(
           (parameter) =>
             !parameter.reference && parameterSource(parameter, reference).includes("Schema."),
@@ -301,7 +310,11 @@ const commandImports = (
         ) ||
         (operation.body !== undefined &&
           (operation.body.multipart === undefined ||
-            operation.body.multipart.fields.length > 0 ||
+            operation.body.multipart.fields.some(
+              (field) =>
+                !multipart.shared(operation.body) ||
+                (operation.body?.required === false && field.required),
+            ) ||
             operation.body.multipart.additionalFields)),
     )
       ? ["Flag"]
@@ -329,8 +342,9 @@ const commandImports = (
           (parameter) => !parameter.reference && hasSchemaReference(parameter.schema),
         ) ||
         (operation.body?.multipart
-          ? operation.body.multipart.fields.some(
-              (field) => field.kind !== "file" && hasSchemaReference(field.schema),
+          ? !multipart.shared(operation.body) &&
+            operation.body.multipart.fields.some(
+              (field) => multipartUsesSchema(field) && hasSchemaReference(field.schema),
             )
           : operation.body !== undefined &&
             !operation.body.reference &&
@@ -338,6 +352,9 @@ const commandImports = (
     )
       ? ['import * as Schemas from "./components/schemas.js";']
       : []),
+    ...(multipart.source === undefined
+      ? []
+      : ['import * as MultipartComponents from "./components/multipart.js";']),
     ...(parameters.source === undefined
       ? []
       : ['import * as Parameters from "./components/parameters.js";']),
@@ -358,6 +375,7 @@ export const commandSource = (
   reference: (pointer: string) => string,
   parameters: ReturnType<typeof parameterComponents>,
   bodies: ReturnType<typeof requestBodyComponents>,
+  multipart: ReturnType<typeof multipartComponents>,
 ) => {
   const auth = authenticationSource(model);
   const allocate = identifierAllocator();
@@ -365,7 +383,9 @@ export const commandSource = (
   const entries: { path: readonly string[]; name: string; deprecated: boolean }[] = [];
   for (const operation of model.operations) {
     const identifier = allocate(operation.operationId, "Command");
-    declarations.push(operationSource(operation, identifier, auth, reference, parameters, bodies));
+    declarations.push(
+      operationSource(operation, identifier, auth, reference, parameters, bodies, multipart),
+    );
     entries.push({
       deprecated: operation.docs.deprecated === true,
       name: identifier,
@@ -408,7 +428,14 @@ export const commandSource = (
       );
     }
   }
-  const imports = commandImports(model, reference, auth.source !== undefined, parameters, bodies);
+  const imports = commandImports(
+    model,
+    reference,
+    auth.source !== undefined,
+    parameters,
+    bodies,
+    multipart,
+  );
   const main = `#!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect } from "effect";
