@@ -14,7 +14,9 @@ export const builtinSources = (model: ApiModel): readonly GeneratedFile[] => {
     ),
   );
   const cookie = locations.has("cookie");
-  const body = model.operations.some((operation) => operation.body !== undefined);
+  const body = model.operations.some(
+    (operation) => operation.body !== undefined && !operation.body.multipart,
+  );
   const imports =
     '/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError is a schema class factory. */\nimport { Match, Schema } from "effect";\nimport { CliError } from "effect/cli";\nimport type { HttpClientError } from "effect/http";\n';
   let errors = `${imports}\n/** The transport failure subset active in this CLI. */\ntype TransportFailure = ${basic || apiKey ? "AuthenticationError | " : ""}PathError | HttpClientError.HttpClientError | CliError.UserError;\n\n${runtimeSources.errors}`;
@@ -74,6 +76,29 @@ export class AuthenticationError extends Schema.TaggedError<AuthenticationError>
   );
   if (body) {
     files.push({ content: runtimeSources.body, path: "src/builtins/body.ts" });
+  }
+
+  if (
+    model.operations.some((operation) =>
+      operation.parameters.some((parameter) => parameter.schema.kind === "array"),
+    )
+  ) {
+    files.push({ content: runtimeSources.query, path: "src/builtins/query.ts" });
+  }
+
+  if (model.operations.some((operation) => operation.body?.multipart)) {
+    const fields = model.operations.flatMap((operation) => operation.body?.multipart?.fields ?? []);
+    const single = fields.some((field) => field.kind === "file" || field.kind === "files");
+    const repeated = fields.some((field) => field.kind === "files");
+    const content = `import { Effect, Option${single ? ", FileSystem, Path" : ""} } from "effect";
+import { CliError } from "effect/cli";
+import { HttpClientRequest } from "effect/http";
+import type { HttpBody } from "effect/http";
+
+${single ? runtimeSources["multipart-file"] : ""}
+${repeated ? runtimeSources["multipart-files"] : ""}
+${runtimeSources.multipart}`;
+    files.push({ content, path: "src/builtins/multipart.ts" });
   }
 
   return files;

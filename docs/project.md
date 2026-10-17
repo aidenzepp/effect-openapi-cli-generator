@@ -26,9 +26,9 @@ flowchart LR
   C --> E[Emit Effect CLI source]
 ```
 
-OpenAPI JSON currently feeds this pipeline. The deferred HttpApi adapter must preserve required metadata before joining the same normalization boundary.
+OpenAPI JSON currently feeds this pipeline. The deferred HttpApi adapter must preserve the API wire contract and any optional naming overrides before joining the same normalization boundary.
 
-Operation metadata and overrides determine command names and grouping. Do not infer CRUD behavior from HTTP verbs or assume every operation is REST-shaped. Each generated handler must retain its operation's HTTP method, path, parameter locations, serialization, body encoding, and authentication requirements.
+Operation IDs, method/path defaults and optional naming overrides determine command names and grouping. Do not infer CRUD behavior from HTTP verbs or assume every operation is REST-shaped. Each generated handler must retain its operation's HTTP method, path, parameter locations, serialization, body encoding, and authentication requirements.
 
 Map representable schema fields to typed CLI inputs. Provide documented JSON and file input conventions for complex bodies and uploads. Follow the settled named-flag, nesting, precedence and collision contracts in [generated-code-decisions.md](generated-code-decisions.md); README.md records the supported input subset. Diagnose unsupported or ambiguous cases instead of silently changing request meaning.
 

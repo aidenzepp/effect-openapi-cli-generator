@@ -3,6 +3,8 @@ import { Array as EffectArray, Effect, Order, Schema } from "effect";
 import { mapCommands } from "./commands.js";
 import { GenerationError } from "./errors.js";
 import type {
+  MultipartField,
+  WireSchema,
   ApiModel,
   CommandProjection,
   Documentation,
@@ -220,6 +222,14 @@ const flagName = (name: string, location: string): Effect.Effect<string, Generat
 };
 
 /**
+ * Recognize primitive values that have an unambiguous scalar parameter representation.
+ */
+const scalarParameter = (schema: WireSchema): boolean =>
+  ["string", "integer", "number", "boolean"].includes(schema.kind) &&
+  !schema.nullable &&
+  !("enum" in schema && schema.enum !== undefined && schema.kind !== "string");
+
+/**
  * Validates scalar parameter serialization and preserves wire identity.
  *
  * @param document The complete OpenAPI document.
@@ -287,22 +297,21 @@ const normalizeParameter = (
       }
     }
     const schema = yield* normalizeSchema(document, source.schema, `${at}/schema`, version);
-    if (
-      schema.kind === "oneOf" ||
-      schema.kind === "object" ||
-      schema.kind === "array" ||
-      schema.kind === "null" ||
-      schema.nullable ||
-      (schema.enum !== undefined && schema.kind !== "string")
-    ) {
+    const scalar = scalarParameter(schema);
+    const queryArray =
+      schema.kind === "array" &&
+      parameterIn === "query" &&
+      !schema.nullable &&
+      scalarParameter(schema.items);
+    if (!scalar && !queryArray) {
       return yield* fail(
         `${at}/schema`,
-        "Parameters support nonnullable primitives and string enums only.",
+        "Parameters support nonnullable primitives and form query arrays of primitives.",
         "unsupported",
       );
     }
 
-    return {
+    const parameter: Parameter = {
       binding: "flag",
       docs: yield* docs(source, at),
       flagName: yield* flagName(name, `${at}/name`),
@@ -311,6 +320,8 @@ const normalizeParameter = (
       schema,
       wireName: name,
     };
+
+    return queryArray ? { ...parameter, explode: source.explode !== false } : parameter;
   });
 
 /**
@@ -458,6 +469,146 @@ const pathNames = (
   });
 
 /**
+ * Resolve transport annotations through the already validated reference/allOf subset.
+ */
+const multipartSchema = (
+  document: Schema.Json,
+  input: Schema.Json | undefined,
+  location: string,
+): Effect.Effect<{ value: Schema.JsonObject; location: string }, GenerationError> =>
+  Effect.gen(function* resolveMultipartSchema() {
+    const resolved = yield* dereference(document, input, location);
+    if (Schema.is(Schema.Array(Schema.JsonObject))(resolved.value.allOf)) {
+      const index = resolved.value.allOf.findIndex((member) => Object.hasOwn(member, "$ref"));
+      if (index !== -1) {
+        const target = yield* multipartSchema(
+          document,
+          resolved.value.allOf[index],
+          `${resolved.location}/allOf/${index}`,
+        );
+        const formats = new Set(
+          [
+            target.value.format,
+            resolved.value.format,
+            ...resolved.value.allOf.map((member) => member.format),
+          ].filter((format) => format !== undefined),
+        );
+        if (formats.size > 1) {
+          return yield* fail(
+            location,
+            "Conflicting multipart format annotations are unsupported.",
+            "unsupported",
+          );
+        }
+
+        const [format] = formats;
+
+        return format === undefined
+          ? target
+          : { ...target, value: { ...Object.fromEntries(Object.entries(target.value)), format } };
+      }
+    }
+
+    return resolved;
+  });
+
+/**
+ * Map one multipart property while keeping file-path and content constraints separate.
+ */
+const multipartField = (
+  document: Schema.Json,
+  input: Schema.Json | undefined,
+  property: { readonly name: string; readonly required: boolean; readonly schema: WireSchema },
+  at: string,
+): Effect.Effect<MultipartField, GenerationError> =>
+  Effect.gen(function* normalizeMultipartField() {
+    const raw = yield* multipartSchema(document, input, at);
+    const arrayField = property.schema.kind === "array";
+    const item = arrayField
+      ? yield* multipartSchema(document, raw.value.items, `${raw.location}/items`)
+      : raw;
+    const fieldSchema =
+      arrayField && property.schema.kind === "array" ? property.schema.items : property.schema;
+    const binary = item.value.format === "binary" && fieldSchema.kind === "string";
+    if (
+      binary &&
+      ((fieldSchema.checks?.length ?? 0) > 0 ||
+        ("enum" in fieldSchema && fieldSchema.enum !== undefined))
+    ) {
+      return yield* fail(
+        at,
+        "Binary multipart content constraints cannot be applied to a local file path.",
+        "unsupported",
+      );
+    }
+
+    if (
+      property.schema.nullable ||
+      fieldSchema.nullable ||
+      (!binary && (arrayField || !scalarParameter(fieldSchema)))
+    ) {
+      return yield* fail(
+        at,
+        "Multipart supports nonnullable primitive fields and binary file fields or arrays.",
+        "unsupported",
+      );
+    }
+
+    let kind: MultipartField["kind"] = "text";
+    if (binary) {
+      kind = arrayField ? "files" : "file";
+    }
+
+    return {
+      flagName: yield* flagName(property.name, at),
+      kind,
+      name: property.name,
+      required: property.required,
+      schema: property.schema,
+    };
+  });
+
+/**
+ * Normalize explicit multipart parts without interpreting descriptions as transport rules.
+ */
+const multipartFields = (
+  document: Schema.Json,
+  input: Schema.Json | undefined,
+  schema: WireSchema,
+  location: string,
+): Effect.Effect<NonNullable<NonNullable<Operation["body"]>["multipart"]>, GenerationError> =>
+  Effect.gen(function* normalizeMultipartFields() {
+    if (schema.kind !== "object" || schema.nullable) {
+      return yield* fail(
+        location,
+        "Multipart bodies require a nonnullable object schema.",
+        "unsupported",
+      );
+    }
+
+    if (schema.additionalProperties !== true && schema.additionalProperties !== false) {
+      return yield* fail(
+        location,
+        "Typed additional multipart properties are unsupported.",
+        "unsupported",
+      );
+    }
+
+    const resolved = yield* multipartSchema(document, input, location);
+    const properties = yield* object(
+      resolved.value.properties ?? {},
+      `${resolved.location}/properties`,
+    );
+    const fields: MultipartField[] = [];
+    for (const property of schema.properties) {
+      const at = `${resolved.location}/properties/${pointerSegment(property.name)}`;
+      fields.push(yield* multipartField(document, properties[property.name], property, at));
+    }
+
+    return { additionalFields: schema.additionalProperties, fields };
+  });
+
+/**
  * Accepts a single JSON body contract for supported HTTP methods.
  *
  * @param document The complete source document.
@@ -492,22 +643,32 @@ const requestBody = (
     }
 
     const content = yield* object(source.content, `${at}/content`);
-    if (Object.keys(content).length !== 1 || !Object.hasOwn(content, "application/json")) {
+    const [mediaType] = Object.keys(content);
+    if (
+      Object.keys(content).length !== 1 ||
+      (mediaType !== "application/json" && mediaType !== "multipart/form-data")
+    ) {
       return yield* fail(
         `${at}/content`,
-        "Only a single application/json media type is supported.",
+        "Only a single application/json or multipart/form-data media type is supported.",
         "unsupported",
       );
     }
 
-    const mediaAt = `${at}/content/application~1json`;
-    const media = yield* object(content["application/json"], mediaAt);
+    const mediaAt = `${at}/content/${pointerSegment(mediaType)}`;
+    const media = yield* object(content[mediaType], mediaAt);
     yield* keys(media, ["schema", "example", "examples"], mediaAt);
 
-    return {
-      required: source.required === true,
-      schema: yield* normalizeSchema(document, media.schema, `${mediaAt}/schema`, version),
-    };
+    const schema = yield* normalizeSchema(document, media.schema, `${mediaAt}/schema`, version);
+    const body = { required: source.required === true, schema };
+    if (mediaType === "multipart/form-data") {
+      return {
+        ...body,
+        multipart: yield* multipartFields(document, media.schema, schema, `${mediaAt}/schema`),
+      };
+    }
+
+    return body;
   });
 
 /**
@@ -642,12 +803,32 @@ const projectOperations = (
 
         parameters.push({ ...parameter, binding });
       }
+      if (body?.multipart) {
+        const flags = body.multipart.fields.map((field) => field.flagName);
+        if (body.multipart.additionalFields) {
+          flags.push("additional-fields");
+        }
+
+        for (const flag of flags) {
+          if (used.has(flag)) {
+            return yield* fail(
+              `${opAt}/requestBody`,
+              `Duplicate or reserved multipart flag: ${flag}.`,
+            );
+          }
+
+          used.add(flag);
+        }
+      }
+
       operations.push({
         body,
         commandPath: command,
         docs: documentation,
         method,
-        operationId: yield* string(source.operationId, `${opAt}/operationId`),
+        operationId: Object.hasOwn(source, "operationId")
+          ? yield* string(source.operationId, `${opAt}/operationId`)
+          : `${method} ${path}`,
         parameters,
         path,
         security,
@@ -836,9 +1017,27 @@ export const normalize = (document: Schema.Json): Effect.Effect<ApiModel, Genera
     const version = root.openapi.startsWith("3.0.") ? "3.0" : "3.1";
     yield* keys(
       root,
-      ["openapi", "info", "paths", "servers", "components", "security", "tags", "externalDocs"],
+      [
+        "openapi",
+        "info",
+        "paths",
+        "servers",
+        "components",
+        "security",
+        "tags",
+        "externalDocs",
+        "webhooks",
+      ],
       "",
     );
+
+    if (Object.hasOwn(root, "webhooks")) {
+      if (version !== "3.1") {
+        return yield* fail("/webhooks", "Inbound webhooks require OpenAPI 3.1.", "unsupported");
+      }
+
+      yield* object(root.webhooks, "/webhooks");
+    }
 
     const info = yield* object(root.info, "/info");
     if (!Schema.is(Schema.String)(info.title) || info.title.trim() === "") {
@@ -872,7 +1071,7 @@ export const normalize = (document: Schema.Json): Effect.Effect<ApiModel, Genera
 
         const opAt = `${at}/${key}`;
         const source = yield* object(item[key], opAt);
-        const projections = yield* mapCommands(source, opAt);
+        const projections = yield* mapCommands(source, opAt, { method, path });
         if (projections.length === 0) {
           continue;
         }

@@ -1,39 +1,10 @@
+import { parameterSource } from "./emit-flag.js";
+import { multipartFlagSource, multipartBodySource } from "./emit-multipart.js";
 import { Array, Order } from "effect";
 import { identifierAllocator } from "./identifiers.js";
 import { schemaSource } from "./emit-schema.js";
-import type { ApiModel, Operation, Parameter } from "./model.js";
+import type { ApiModel, MultipartField, Operation, Parameter } from "./model.js";
 import { comment, description, internalReference, literal, propertyKey } from "./source-text.js";
-
-/**
- * Render one API flag with its schema and source-owned help at the command boundary.
- */
-const parameterSource = (parameter: Parameter, reference: (pointer: string) => string): string => {
-  const { schema } = parameter;
-  let source = `Flag.String(${literal(parameter.flagName)})`;
-  if (schema.kind === "integer") {
-    source = `Flag.Int(${literal(parameter.flagName)})`;
-  } else if (schema.kind === "number") {
-    source = `Flag.Finite(${literal(parameter.flagName)})`;
-  } else if (schema.kind === "boolean") {
-    source = `Flag.Literals(${literal(parameter.flagName)}, ["true", "false"]).pipe(Flag.map((value) => value === "true"))`;
-  }
-
-  const constrained =
-    schema.reference !== undefined ||
-    (schema.checks?.length ?? 0) > 0 ||
-    ("enum" in schema && schema.enum !== undefined);
-  const pipes = constrained ? [`Flag.withSchema(${schemaSource(schema, reference)})`] : [];
-  const help = description(parameter.docs);
-  if (help) {
-    pipes.push(`Flag.withDescription(${literal(help)})`);
-  }
-
-  if (!parameter.required) {
-    pipes.push("Flag.optional");
-  }
-
-  return pipes.length > 0 ? `${source}.pipe(${pipes.join(",\n")})` : source;
-};
 
 /**
  * Allocate flags only for schemes used by selected operations.
@@ -115,21 +86,16 @@ const pathSource = (operation: Operation, inputs: ReadonlyMap<Parameter, string>
     .join(", ");
 
 /**
- * Build the direct request pipeline, mapping typed failures once at its boundary.
+ * Render scalar header and query fields in stable wire-name order.
  */
-const handlerSource = (
-  operation: Operation,
-  inputs: ReadonlyMap<Parameter, string>,
-  securityNames: readonly string[],
-  reference: (pointer: string) => string,
-): string => {
+const parameterPipes = (operation: Operation, inputs: ReadonlyMap<Parameter, string>): string[] => {
   const pipes: string[] = [];
   for (const location of ["header", "query"] as const) {
     const fields = Array.sort(
       operation.parameters,
       Order.mapInput(Order.String, (parameter: Parameter) => parameter.wireName),
     )
-      .filter((parameter) => parameter.location === location)
+      .filter((parameter) => parameter.location === location && parameter.schema.kind !== "array")
       .map((parameter) => {
         const name = inputs.get(parameter) ?? "";
         let value = parameter.required ? name : `Option.getOrUndefined(${name})`;
@@ -149,11 +115,34 @@ const handlerSource = (
       );
     }
   }
+
+  return pipes;
+};
+
+/**
+ * Build the direct request pipeline, mapping typed failures once at its boundary.
+ */
+const handlerSource = (
+  operation: Operation,
+  inputs: ReadonlyMap<Parameter, string>,
+  multipartInputs: ReadonlyMap<MultipartField, string>,
+  securityNames: readonly string[],
+  reference: (pointer: string) => string,
+): string => {
+  const pipes: string[] = [];
+  pipes.push(...parameterPipes(operation, inputs));
   if (operation.security?.kind === "bearer") {
     pipes.push(`HttpClientRequest.bearerToken(${securityNames[0]})`);
   }
 
   pipes.push(`Url.appendPathSegments(${pathSource(operation, inputs)})`);
+  for (const parameter of operation.parameters.filter((entry) => entry.schema.kind === "array")) {
+    const input = inputs.get(parameter) ?? "";
+    const value = parameter.required ? input : `Option.getOrUndefined(${input})`;
+    pipes.push(
+      `Effect.flatMap(Query.setArray(${literal(parameter.wireName)}, ${value}, ${parameter.explode === true}))`,
+    );
+  }
 
   const { security } = operation;
   if (security?.kind === "basic") {
@@ -168,7 +157,9 @@ const handlerSource = (
     );
   }
 
-  if (operation.body) {
+  if (operation.body?.multipart) {
+    pipes.push(multipartBodySource(operation.body, multipartInputs));
+  } else if (operation.body) {
     pipes.push(
       `Effect.flatMap(Body.withBody(body, bodyFile, ${operation.body.required}, ${schemaSource(operation.body.schema, reference)}))`,
     );
@@ -184,7 +175,11 @@ const handlerSource = (
     "baseUrl: apiUrl",
     ...inputs.values(),
     ...securityNames,
-    ...(operation.body ? ["body", "bodyFile"] : []),
+    ...multipartInputs.values(),
+    ...(operation.body?.multipart?.additionalFields === true ? ["additionalFields"] : []),
+    ...(operation.body !== undefined && operation.body.multipart === undefined
+      ? ["body", "bodyFile"]
+      : []),
   ];
 
   return `({ ${Array.sort(fields, Order.String).join(", ")} }) => ${operation.method === "TRACE" ? `HttpClientRequest.make("TRACE")` : `HttpClientRequest.${operation.method.toLowerCase()}`}(apiUrl).pipe(${pipes.join(",\n")})`;
@@ -200,8 +195,9 @@ const operationSource = (
   reference: (pointer: string) => string,
 ) => {
   const inputs = new Map<Parameter, string>();
+  const multipartInputs = new Map<MultipartField, string>();
   const local = identifierAllocator();
-  for (const reserved of ["apiUrl", "baseUrl", "body", "bodyFile"]) {
+  for (const reserved of ["apiUrl", "baseUrl", "body", "bodyFile", "additionalFields", "files"]) {
     local(reserved);
   }
   const securityNames =
@@ -216,7 +212,19 @@ const operationSource = (
     inputs.set(parameter, input);
     flags.set(input, parameterSource(parameter, reference));
   }
-  if (operation.body) {
+  if (operation.body?.multipart) {
+    for (const field of operation.body.multipart.fields) {
+      const input = local(field.flagName);
+      multipartInputs.set(field, input);
+      flags.set(input, multipartFlagSource(field, operation.body.required, reference));
+    }
+    if (operation.body.multipart.additionalFields) {
+      flags.set(
+        "additionalFields",
+        'Flag.String("additional-fields").pipe(Flag.withSchema(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String))), Flag.withDescription("Additional multipart text fields as a JSON object; declared names cannot be overridden."), Flag.optional)',
+      );
+    }
+  } else if (operation.body) {
     flags.set(
       "body",
       `Flag.String("body").pipe(Flag.mapEffect((value) => Schema.decodeUnknownEffect(Schema.fromJsonString(${schemaSource(operation.body.schema, reference)}))(value, { onExcessProperty: "error", reportInput: false }).pipe(Effect.mapError((cause) => new CliError.UserError({ cause, userMessage: cause.message })))), Flag.optional)`,
@@ -232,7 +240,83 @@ const operationSource = (
     .join(",\n");
   const help = description(operation.docs);
 
-  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, securityInputs, reference)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
+  return `${comment(operation.docs)}const ${identifier} = Command.make(${literal(operation.commandPath.at(-1) ?? "")}, {${fields}}, ${handlerSource(operation, inputs, multipartInputs, securityInputs, reference)})${help ? `.pipe(Command.withDescription(${literal(help)}))` : ""};`;
+};
+
+/**
+ * Select imports from the capabilities emitted by the command module.
+ */
+const commandImports = (
+  model: ApiModel,
+  reference: (pointer: string) => string,
+  hasAuth: boolean,
+  hasModels: boolean,
+): readonly string[] => {
+  const needsBody = model.operations.some(
+    (operation) => operation.body !== undefined && operation.body.multipart === undefined,
+  );
+  const needsMultipart = model.operations.some((operation) => operation.body?.multipart);
+  const needsAuthBuiltin = model.operations.some(
+    (operation) => operation.security !== undefined && operation.security.kind !== "bearer",
+  );
+  const needsOption =
+    needsMultipart ||
+    model.operations.some((operation) =>
+      operation.parameters.some((parameter) => !parameter.required),
+    );
+  const effectImports = [
+    "Effect",
+    ...(needsOption ? ["Option"] : []),
+    ...(model.operations.some(
+      (operation) =>
+        (operation.body !== undefined && !operation.body.multipart) ||
+        operation.body?.multipart?.additionalFields === true ||
+        operation.body?.multipart?.fields.some((field) =>
+          multipartFlagSource(field, operation.body?.required === true, reference).includes(
+            "Schema.",
+          ),
+        ) === true ||
+        operation.parameters.some((parameter) =>
+          parameterSource(parameter, reference).includes("Schema."),
+        ),
+    )
+      ? ["Schema"]
+      : []),
+  ];
+  const cliImports = [
+    ...(needsBody ? ["CliError"] : []),
+    "Command",
+    ...(model.operations.some(
+      (operation) =>
+        operation.parameters.length > 0 ||
+        (operation.body !== undefined &&
+          (operation.body.multipart === undefined ||
+            operation.body.multipart.fields.length > 0 ||
+            operation.body.multipart.additionalFields)),
+    )
+      ? ["Flag"]
+      : []),
+  ];
+  const imports = [
+    `import { ${effectImports.join(", ")} } from "effect";`,
+    `import { ${cliImports.join(", ")} } from "effect/cli";`,
+    'import { HttpClientRequest } from "effect/http";',
+    ...(hasAuth ? ['import * as Auth from "./auth.js";'] : []),
+    ...(needsAuthBuiltin ? ['import * as BuiltinAuth from "./builtins/auth.js";'] : []),
+    ...(needsBody ? ['import * as Body from "./builtins/body.js";'] : []),
+    ...(needsMultipart ? ['import * as Multipart from "./builtins/multipart.js";'] : []),
+    'import * as Errors from "./builtins/errors.js";',
+    'import * as Http from "./builtins/http.js";',
+    'import * as Url from "./builtins/url.js";',
+    ...(model.operations.some((operation) =>
+      operation.parameters.some((parameter) => parameter.schema.kind === "array"),
+    )
+      ? ['import * as Query from "./builtins/query.js";']
+      : []),
+    ...(hasModels ? ['import * as Models from "./models.js";'] : []),
+  ];
+
+  return imports;
 };
 
 /**
@@ -248,13 +332,6 @@ export const commandSource = (
   const allocate = identifierAllocator();
   const declarations: string[] = [];
   const entries: { path: readonly string[]; name: string; deprecated: boolean }[] = [];
-  const needsBody = model.operations.some((operation) => operation.body);
-  const needsAuthBuiltin = model.operations.some(
-    (operation) => operation.security !== undefined && operation.security.kind !== "bearer",
-  );
-  const needsOption = model.operations.some((operation) =>
-    operation.parameters.some((parameter) => !parameter.required),
-  );
   for (const operation of model.operations) {
     const identifier = allocate(operation.operationId, "Command");
     declarations.push(operationSource(operation, identifier, auth, reference));
@@ -300,40 +377,7 @@ export const commandSource = (
       );
     }
   }
-  const effectImports = [
-    "Effect",
-    ...(needsOption ? ["Option"] : []),
-    ...(model.operations.some(
-      (operation) =>
-        operation.body !== undefined ||
-        operation.parameters.some((parameter) =>
-          parameterSource(parameter, reference).includes("Schema."),
-        ),
-    )
-      ? ["Schema"]
-      : []),
-  ];
-  const cliImports = [
-    ...(needsBody ? ["CliError"] : []),
-    "Command",
-    ...(model.operations.some(
-      (operation) => operation.body !== undefined || operation.parameters.length > 0,
-    )
-      ? ["Flag"]
-      : []),
-  ];
-  const imports = [
-    `import { ${effectImports.join(", ")} } from "effect";`,
-    `import { ${cliImports.join(", ")} } from "effect/cli";`,
-    'import { HttpClientRequest } from "effect/http";',
-    ...(auth.source === undefined ? [] : ['import * as Auth from "./auth.js";']),
-    ...(needsAuthBuiltin ? ['import * as BuiltinAuth from "./builtins/auth.js";'] : []),
-    ...(needsBody ? ['import * as Body from "./builtins/body.js";'] : []),
-    'import * as Errors from "./builtins/errors.js";',
-    'import * as Http from "./builtins/http.js";',
-    'import * as Url from "./builtins/url.js";',
-    ...(hasModels ? ['import * as Models from "./models.js";'] : []),
-  ];
+  const imports = commandImports(model, reference, auth.source !== undefined, hasModels);
   const main = `#!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect } from "effect";
@@ -350,7 +394,5 @@ Command.run(rootCommand, { version: "0.0.0" }).pipe(Effect.provide(NodeHttpClien
     auth: auth.source,
     commands: `${imports.join("\n")}\n\n${declarations.join("\n\n")}\n`,
     main,
-    needsAuthBuiltin,
-    needsBody,
   };
 };

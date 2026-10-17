@@ -117,7 +117,7 @@ test.each([
     "/schema/required/1",
   ],
   [{ nullable: true, type: "string" }, "/schema/nullable"],
-  [{ type: ["string", "number"] }, "/schema/type"],
+  [{ type: ["string", "string", "number"] }, "/schema/type"],
   [{ enum: [1.5], type: "integer" }, "/schema/enum/0"],
   [{ enum: [null], type: "string" }, "/schema/enum/0"],
   [{ enum: ["a", "a"], type: "string" }, "/schema/enum/1"],
@@ -129,7 +129,7 @@ test.each([
     "/schema/properties/a~1b/maximum",
   ],
   [true, "/schema"],
-  [{ description: "missing" }, "/schema/type"],
+  [{ minLength: 1 }, "/schema/type"],
 ])("rejects unsupported or malformed schema at exact pointer %#", async (schema, location) => {
   await failure(schema, location);
 });

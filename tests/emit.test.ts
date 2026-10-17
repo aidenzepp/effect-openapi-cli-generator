@@ -364,3 +364,71 @@ test("formatted enum literals roundtrip lone surrogates, interpolation and line 
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("multipart capability subsets compile without unused models or imports", async () => {
+  await Effect.runPromise(
+    Effect.forEach(
+      [
+        {},
+        { file: { $ref: "#/components/schemas/Binary" } },
+        { file: { $ref: "#/components/schemas/Alias" } },
+        { file: { allOf: [{ $ref: "#/components/schemas/Text" }, { format: "binary" }] } },
+        {
+          file: { allOf: [{ $ref: "#/components/schemas/Binary" }, { description: "File bytes" }] },
+        },
+      ],
+      (properties) =>
+        Effect.promise(async () => {
+          const output = await Effect.runPromise(
+            generate({
+              components: {
+                schemas: {
+                  Alias: {
+                    allOf: [{ $ref: "#/components/schemas/Binary" }, { description: "File bytes" }],
+                  },
+                  Binary: { format: "binary", type: "string" },
+                  Container: { additionalProperties: false, properties, type: "object" },
+                  Text: { type: "string" },
+                },
+              },
+              info: { title: "Upload", version: "1.0.0" },
+              openapi: "3.1.0",
+              paths: {
+                "/upload": {
+                  post: {
+                    requestBody: {
+                      content: {
+                        "multipart/form-data": {
+                          schema: {
+                            allOf: [
+                              { $ref: "#/components/schemas/Container" },
+                              { description: "Multipart object" },
+                            ],
+                          },
+                        },
+                      },
+                      required: true,
+                    },
+                    responses: { "200": { description: "OK" } },
+                  },
+                },
+              },
+            }),
+          );
+          expect(source(output, "models")).toBe("");
+
+          const multipart = source(output, "builtins/multipart");
+          expect(multipart).not.toContain("export const files");
+          if (Object.keys(properties).length === 0) {
+            expect(multipart).not.toContain("FileSystem");
+            expect(source(output, "commands")).not.toContain("Flag");
+          } else {
+            expect(source(output, "commands")).toContain('Flag.File("file"');
+          }
+
+          await checkPackage(output);
+        }),
+      { concurrency: 1 },
+    ),
+  );
+}, 30_000);

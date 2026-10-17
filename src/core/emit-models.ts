@@ -34,7 +34,7 @@ export const modelSource = (model: ApiModel) => {
       }
     } else if (schema.kind === "array") {
       visit(schema.items, exported);
-    } else if (schema.kind === "oneOf") {
+    } else if (schema.kind === "oneOf" || schema.kind === "union") {
       for (const member of schema.members) {
         visit(member, exported);
       }
@@ -44,7 +44,13 @@ export const modelSource = (model: ApiModel) => {
     for (const parameter of operation.parameters) {
       visit(parameter.schema, true);
     }
-    if (operation.body) {
+    if (operation.body?.multipart) {
+      for (const field of operation.body.multipart.fields) {
+        if (field.kind !== "file") {
+          visit(field.schema, true);
+        }
+      }
+    } else if (operation.body) {
       visit(operation.body.schema, true);
     }
   }

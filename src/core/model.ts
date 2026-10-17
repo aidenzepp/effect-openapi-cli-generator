@@ -26,12 +26,17 @@ export type WireSchema = {
   readonly reference?: { readonly pointer: string; readonly schema: WireSchema };
   readonly checks?: readonly { readonly name: string; readonly value: number | string }[];
 } & (
-  | { readonly kind: "oneOf"; readonly nullable: false; readonly members: readonly WireSchema[] }
+  | {
+      readonly kind: "oneOf" | "union";
+      readonly nullable: false;
+      readonly members: readonly WireSchema[];
+    }
   | {
       readonly kind: "string" | "boolean" | "integer" | "number" | "null";
       readonly nullable: boolean;
       readonly enum: readonly JsonScalar[] | undefined;
     }
+  | { readonly kind: "json"; readonly nullable: true }
   | { readonly kind: "array"; readonly nullable: boolean; readonly items: WireSchema }
   | {
       readonly kind: "object";
@@ -56,6 +61,18 @@ export interface Parameter {
   readonly schema: WireSchema;
   readonly docs: Documentation;
   readonly binding: "flag" | "argument";
+  readonly explode?: boolean;
+}
+
+/**
+ * A multipart property and its explicit command-line transport representation.
+ */
+export interface MultipartField {
+  readonly name: string;
+  readonly flagName: string;
+  readonly required: boolean;
+  readonly schema: WireSchema;
+  readonly kind: "file" | "files" | "text";
 }
 
 /**
@@ -69,7 +86,16 @@ export interface Operation {
   readonly parameters: readonly Parameter[];
   readonly docs: Documentation;
   readonly security: SecurityRequirement | undefined;
-  readonly body: { readonly required: boolean; readonly schema: WireSchema } | undefined;
+  readonly body:
+    | {
+        readonly required: boolean;
+        readonly schema: WireSchema;
+        readonly multipart?: {
+          readonly fields: readonly MultipartField[];
+          readonly additionalFields: boolean;
+        };
+      }
+    | undefined;
 }
 
 /**

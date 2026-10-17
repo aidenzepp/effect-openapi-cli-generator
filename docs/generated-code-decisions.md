@@ -479,3 +479,19 @@ The generator additionally retains mutually exclusive `--body-file` through a sm
 ## Generator utility choices
 
 Use native Effect string capitalization and projected string orders where their semantics match exactly. Source identifiers preserve acronym spelling after the first character; command-token validation and title sanitization remain distinct contracts. Local Set/Map allocation and explicit composite ordering stay plain when that makes ownership and tie-breaking clearer. These utility choices do not change emitted source.
+
+## Additional full-spec request contracts
+
+OpenAPI 3.1 top-level `webhooks` describe inbound events. Preserve them in the source document and accept their object boundary without generating outbound commands or validating inbound payload schemas. OpenAPI 3.0 does not support this field.
+
+An unconstrained request schema emits `Schema.Json`. Explicit multi-type arrays emit native unions with finite JSON numbers and direct null schemas. Constraints alongside a multi-type array currently fail explicitly. No constraints are dropped to achieve generation.
+
+Primitive query arrays use a JSON array CLI value with `JSON_ARRAY` help and retain declared `form` serialization: `explode: false` joins items with commas; the default `explode: true` repeats the wire key. Empty arrays have no unambiguous representation and fail before HTTP; omission remains omission and a single empty string remains a present empty value. Comma-bearing items cannot be represented unambiguously with comma-delimited serialization and fail with a safe parameter-specific error. Repeated serialization permits commas within individual items. Source prose does not supply additional constraints, defaults or alternate CLI parsers.
+
+## Naming without extensions and multipart transport
+
+Naming extensions are optional. Slash-separated operation IDs define nesting; other punctuation is normalized to kebab case. An absent or punctuation-only identifier uses the path and method, with placeholders rendered as `by-name` groups. Explicit group and method overrides remain supported; group-only overrides retain the final operation ID segment action. Empty aliases explicitly exclude an operation. Collisions fail rather than renaming commands silently. The full Resend fixture uses raw upstream JSON without a naming overlay.
+
+For multipart only, `string` plus `format: binary` selects native `Flag.File`; arrays of binary strings use repeated file flags. This is an explicit generator convention for legacy binary schemas in OpenAPI 3.1, not a standard-imposed interpretation of format. JSON binary formats remain annotations. Native FormData owns boundaries. Files are buffered in memory. Content constraints on binary strings are unsupported; do not apply them to filesystem paths. Array bounds apply to the list of supplied paths.
+
+Unknown multipart fields use an explicit text-valued JSON object flag when allowed by the schema. Reject declared-name collisions. Do not infer binary parts, JSON structures, defaults or constraints from descriptions. Optional omission sends no body; required empty objects still send multipart. Structured multipart fields, typed rest fields and custom encoding remain unsupported. Emit only the file helpers actually used by that CLI.

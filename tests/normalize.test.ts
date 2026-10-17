@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Array, Effect } from "effect";
 import type { Schema } from "effect";
 import { normalize } from "../src/core/normalize.js";
 
@@ -108,7 +108,12 @@ test("checks only selected requests and permits operation security override", ()
       paths: {
         ...input.paths,
         "/unused": {
-          get: { callbacks: {}, operationId: "unused", parameters: [{ in: "header" }] },
+          get: {
+            callbacks: {},
+            operationId: "unused",
+            parameters: [{ in: "header" }],
+            "x-forge-aliases": [],
+          },
         },
       },
     }).operations,
@@ -313,3 +318,22 @@ test.each(["/users;active=true", "/users/{id}:disable", "/users/%2F", "/users/@m
     expect(fail(input).message).toContain("Static reserved URI syntax");
   },
 );
+
+test("mixed naming overrides and plain operations are stable under path reordering", () => {
+  const plain = { responses: { "200": { description: "OK" } } };
+  const paths = { "/custom": { post: operation() }, "/plain": { get: plain } };
+  const input = { info: { title: "Mixed", version: "1" }, openapi: "3.1.0", paths };
+  const first = run(input);
+  expect(first.operations.map((item) => item.commandPath)).toEqual([
+    ["things", "get"],
+    ["plain", "get"],
+  ]);
+  expect(
+    run({ ...input, paths: Object.fromEntries(Array.reverse(Object.entries(paths))) }),
+  ).toEqual(first);
+
+  const collision = { ...plain, operationId: "things/get" };
+  expect(
+    fail({ ...input, paths: { ...paths, "/duplicate": { get: collision } } }).message,
+  ).toContain("Duplicate command address");
+});

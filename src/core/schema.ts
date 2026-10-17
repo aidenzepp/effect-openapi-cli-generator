@@ -564,6 +564,47 @@ const compositionSchema = (
   });
 
 /**
+ * Normalize explicit multi-type unions without changing exclusive oneOf semantics.
+ */
+const typeUnion = (
+  document: Schema.Json,
+  schema: Schema.JsonObject,
+  location: string,
+  version: "3.0" | "3.1",
+  activeRefs: ReadonlySet<string>,
+  docs: Documentation,
+  normalizeChild: typeof normalizeSchema,
+): Effect.Effect<WireSchema | null, GenerationError> =>
+  Effect.gen(function* normalizeTypeUnion() {
+    if (
+      version === "3.1" &&
+      Schema.is(Schema.Array(Schema.String))(schema.type) &&
+      schema.type.filter((type) => type !== "null").length > 1
+    ) {
+      if (Object.keys(schema).some((key) => key !== "type" && !annotation(key))) {
+        return yield* invalid(
+          location,
+          "Constraints alongside multi-type unions are not supported yet.",
+          "unsupported",
+        );
+      }
+
+      if (new Set(schema.type).size !== schema.type.length) {
+        return yield* invalid(`${location}/type`, "Schema types must be unique.");
+      }
+
+      const members: WireSchema[] = [];
+      for (const type of schema.type) {
+        members.push(yield* normalizeChild(document, { type }, location, version, activeRefs));
+      }
+
+      return { docs, kind: "union", members, nullable: false };
+    }
+
+    return null;
+  });
+
+/**
  * Normalizes a supported request schema and rejects constraints it cannot preserve.
  *
  * @param document The complete source document.
@@ -636,6 +677,23 @@ export const normalizeSchema = (
         docs,
         normalizeSchema,
       );
+    }
+
+    if (Object.keys(schema).every(annotation)) {
+      return { docs, kind: "json", nullable: true };
+    }
+
+    const union = yield* typeUnion(
+      document,
+      schema,
+      location,
+      version,
+      activeRefs,
+      docs,
+      normalizeSchema,
+    );
+    if (union) {
+      return union;
     }
 
     const { kind, nullable } = yield* schemaKind(schema, location, version);

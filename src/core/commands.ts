@@ -97,108 +97,146 @@ const token = (
 };
 
 /**
- * Derives one command address independently of the HTTP method.
- *
- * @param source Metadata containing group and optional action.
- * @param operationId The fallback action source.
- * @param location The source metadata pointer.
- * @returns A validated command projection.
+ * Normalize unconstrained OpenAPI identifiers while preserving explicit-override strictness.
  */
-const projection = (
-  source: Schema.JsonObject,
-  operationId: string,
+const defaultToken = (value: string, prefix: string): string => {
+  const normalized = separateWords(value)
+    .replaceAll(/[^a-zA-Z0-9]+/gu, "-")
+    .replaceAll(/^-+|-+$/gu, "")
+    .toLowerCase();
+
+  return /^[0-9]/u.test(normalized) ? `${prefix}-${normalized}` : normalized;
+};
+
+/**
+ * Derive an address from operation identity or the explicit HTTP route.
+ */
+const defaultAddress = (
+  operation: Schema.JsonObject,
   location: string,
-): Effect.Effect<CommandProjection, GenerationError> =>
-  Effect.gen(function* decodeCommandProjection() {
-    const group = own(source, groupKey);
-    if (!Schema.is(Schema.String)(group) && !Schema.is(Schema.Array(Schema.Json))(group)) {
-      return yield* invalid(
-        `${location}/${groupKey}`,
-        "A group must be a dotted string or a nonempty string array.",
+  route: { readonly path: string; readonly method: string },
+): Effect.Effect<readonly string[], GenerationError> =>
+  Effect.gen(function* deriveDefaultAddress() {
+    const operationId = own(operation, "operationId");
+    if (Object.hasOwn(operation, "operationId")) {
+      if (!Schema.is(Schema.String)(operationId)) {
+        return yield* invalid(`${location}/operationId`, "Operation ID must be a nonempty string.");
+      }
+
+      if (operationId.trim() === "") {
+        return yield* invalid(`${location}/operationId`, "Operation ID must be a nonempty string.");
+      }
+
+      const names = operationId
+        .split("/")
+        .map((segment) => defaultToken(segment, "operation"))
+        .filter((segment) => segment !== "");
+      if (names.length > 0) {
+        return names;
+      }
+    }
+
+    const segments = route.path
+      .split("/")
+      .filter((segment) => segment !== "")
+      .map((segment) =>
+        defaultToken(segment.replaceAll(/\{(?<name>[^{}]+)\}/gu, "by-$<name>"), "path"),
       );
-    }
 
-    const segments: readonly Schema.Json[] = Schema.is(Schema.String)(group)
-      ? group.split(".")
-      : group;
-    if (segments.length === 0) {
-      return yield* invalid(
-        `${location}/${groupKey}`,
-        "A group must contain at least one segment.",
-      );
-    }
-
-    const path: string[] = [];
-    for (const [index, segment] of segments.entries()) {
-      path.push(
-        yield* token(
-          segment,
-          `${location}/${groupKey}${Schema.is(Schema.Array(Schema.Json))(group) ? `/${index}` : ""}`,
-        ),
-      );
-    }
-    const method = own(source, methodKey);
-    if (method !== undefined && !Schema.is(Schema.String)(method)) {
-      return yield* invalid(`${location}/${methodKey}`, "Method metadata must be a string.");
-    }
-
-    const last = operationId.split(/[-_]+/u).at(-1);
-    const fallback = last === undefined || last === "" ? "get" : last;
-    path.push(
-      yield* token(
-        method === undefined || method === "" ? fallback : method,
-        `${location}/${methodKey}`,
-      ),
-    );
-
-    return { commandPath: path };
+    return [...segments, route.method.toLowerCase()];
   });
 
 /**
- * Selects primary or alias command projections for one operation.
- *
- * @param operation The untrusted operation object.
- * @param location Its JSON Pointer.
- * @returns Validated projections, or an empty selection when required metadata is absent.
+ * Apply optional naming overrides without changing HTTP request semantics.
+ */
+const projection = (
+  source: Schema.JsonObject,
+  defaults: readonly string[],
+  location: string,
+  groupedAction: string,
+): Effect.Effect<CommandProjection, GenerationError> =>
+  Effect.gen(function* decodeCommandProjection() {
+    let groups = defaults.slice(0, -1);
+    if (Object.hasOwn(source, groupKey)) {
+      const group = own(source, groupKey);
+      if (!Schema.is(Schema.String)(group) && !Schema.is(Schema.Array(Schema.Json))(group)) {
+        return yield* invalid(
+          `${location}/${groupKey}`,
+          "A group must be a dotted string or a nonempty string array.",
+        );
+      }
+
+      const segments = Schema.is(Schema.String)(group) ? group.split(".") : group;
+      if (segments.length === 0) {
+        return yield* invalid(
+          `${location}/${groupKey}`,
+          "A group must contain at least one segment.",
+        );
+      }
+
+      groups = yield* Effect.forEach(
+        segments,
+        (segment, index) => token(segment, `${location}/${groupKey}/${index}`),
+        { concurrency: 1 },
+      );
+    }
+
+    groups = yield* Effect.forEach(groups, (segment) => token(segment, `${location}/${groupKey}`), {
+      concurrency: 1,
+    });
+    const fallback = Object.hasOwn(source, groupKey) ? groupedAction : defaults.at(-1);
+    const method = Object.hasOwn(source, methodKey) ? own(source, methodKey) : fallback;
+    const action = yield* token(method, `${location}/${methodKey}`);
+
+    return { commandPath: [...groups, action] };
+  });
+
+/**
+ * Select all operations by default; explicit aliases replace the default projection.
  */
 export const mapCommands = (
   operation: Schema.Json,
   location: string,
+  route: { readonly path: string; readonly method: string },
 ): Effect.Effect<readonly CommandProjection[], GenerationError> =>
   Effect.gen(function* deriveCommandAddresses() {
     if (!isRecord(operation)) {
       return yield* invalid(location, "An operation must be an object.");
     }
 
-    const operationId = own(operation, "operationId");
-    if (!Schema.is(Schema.String)(operationId)) {
-      return [];
-    }
-
+    const defaults = yield* defaultAddress(operation, location, route);
+    const id = own(operation, "operationId");
+    const last = Schema.is(Schema.String)(id) ? id.split(/[-_/]+/u).at(-1) : undefined;
+    const groupedAction = defaultToken(
+      last === undefined || last === "" ? route.method.toLowerCase() : last,
+      "operation",
+    );
     if (Object.hasOwn(operation, aliasesKey)) {
       const aliases = own(operation, aliasesKey);
       if (!Schema.is(Schema.Array(Schema.Json))(aliases)) {
         return yield* invalid(`${location}/${aliasesKey}`, "Aliases must be an array.");
       }
 
-      const projections: CommandProjection[] = [];
-      for (const [index, alias] of aliases.entries()) {
-        const aliasLocation = `${location}/${aliasesKey}/${index}`;
-        if (!isRecord(alias)) {
-          return yield* invalid(aliasLocation, "An alias must be an object with group metadata.");
-        }
+      return yield* Effect.forEach(
+        aliases,
+        (alias, index) =>
+          Effect.gen(function* decodeAlias() {
+            const at = `${location}/${aliasesKey}/${index}`;
+            if (!isRecord(alias)) {
+              return yield* invalid(at, "An alias must be an object with group metadata.");
+            }
 
-        projections.push(yield* projection(alias, operationId, aliasLocation));
-      }
+            if (!Object.hasOwn(alias, groupKey)) {
+              return yield* invalid(`${at}/${groupKey}`, "An alias must supply group metadata.");
+            }
 
-      return projections;
+            return yield* projection(alias, defaults, at, groupedAction);
+          }),
+        { concurrency: 1 },
+      );
     }
 
-    if (!Object.hasOwn(operation, groupKey)) {
-      return [];
-    }
-
-    return [yield* projection(operation, operationId, location)];
+    return [yield* projection(operation, defaults, location, groupedAction)];
   });
 
 /**

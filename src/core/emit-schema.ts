@@ -11,7 +11,9 @@ const regexSource = (pattern: string): string => new RegExp(pattern, "u").toStri
  * Determine null acceptance independently from non-null native checks.
  */
 const nullableSchema = (schema: WireSchema): boolean =>
-  "enum" in schema && schema.enum !== undefined ? schema.enum.includes(null) : schema.nullable;
+  schema.kind !== "json" &&
+  schema.kind !== "null" &&
+  ("enum" in schema && schema.enum !== undefined ? schema.enum.includes(null) : schema.nullable);
 
 /**
  * Additional-property validation applies only to keys absent from the declared property map.
@@ -24,6 +26,39 @@ const additionalKeySource = (schema: Extract<WireSchema, { kind: "object" }>): s
   const keys = schema.properties.map((property) => EffectRegExp.escape(property.name)).join("|");
 
   return `Schema.String.check(Schema.isPattern(${regexSource(String.raw`^(?!(?:${keys})(?![\s\S]))`)}))`;
+};
+
+/**
+ * Render explicit object fields and their additional-property contract.
+ */
+const objectSource = (
+  schema: Extract<WireSchema, { kind: "object" }>,
+  reference: (pointer: string) => string,
+  render: typeof schemaSource,
+): string => {
+  const fields = Array.sort(
+    schema.properties,
+    Order.mapInput(Order.String, (property: { readonly name: string }) => property.name),
+  )
+    .map((property) => {
+      const documentation = comment(property.schema.docs);
+      const registrationNotice =
+        property.schema.docs.deprecated === true
+          ? "// oxlint-disable-next-line typescript/no-deprecated -- Required schema registration for a supported deprecated API field.\n"
+          : "";
+      const schemaExpression = render(property.schema, reference);
+      const validator = property.required
+        ? schemaExpression
+        : `Schema.optionalKey(${schemaExpression})`;
+
+      return `${documentation}${registrationNotice}${propertyKey(property.name)}: ${validator}`;
+    })
+    .join(",\n");
+  const struct = `Schema.Struct({${fields}})`;
+
+  return schema.additionalProperties === false
+    ? struct
+    : `Schema.StructWithRest(${struct}, [Schema.Record(${additionalKeySource(schema)}, ${schema.additionalProperties === true ? "Schema.Json" : render(schema.additionalProperties, reference)})])`;
 };
 
 /**
@@ -44,34 +79,20 @@ export const schemaSource = (
 
   let expression: string;
   switch (schema.kind) {
+    case "json": {
+      expression = "Schema.Json";
+      break;
+    }
+    case "union": {
+      expression = `Schema.Union([${schema.members.map((member) => schemaSource(member, reference)).join(", ")}])`;
+      break;
+    }
     case "oneOf": {
       expression = `Schema.Union([${schema.members.map((member) => schemaSource(member, reference)).join(", ")}], { mode: "oneOf" })`;
       break;
     }
     case "object": {
-      const fields = Array.sort(
-        schema.properties,
-        Order.mapInput(Order.String, (property: { readonly name: string }) => property.name),
-      )
-        .map((property) => {
-          const documentation = comment(property.schema.docs);
-          const registrationNotice =
-            property.schema.docs.deprecated === true
-              ? "// oxlint-disable-next-line typescript/no-deprecated -- Required schema registration for a supported deprecated API field.\n"
-              : "";
-          const schemaExpression = schemaSource(property.schema, reference);
-          const validator = property.required
-            ? schemaExpression
-            : `Schema.optionalKey(${schemaExpression})`;
-
-          return `${documentation}${registrationNotice}${propertyKey(property.name)}: ${validator}`;
-        })
-        .join(",\n");
-      const struct = `Schema.Struct({${fields}})`;
-      expression =
-        schema.additionalProperties === false
-          ? struct
-          : `Schema.StructWithRest(${struct}, [Schema.Record(${additionalKeySource(schema)}, ${schema.additionalProperties === true ? "Schema.Json" : schemaSource(schema.additionalProperties, reference)})])`;
+      expression = objectSource(schema, reference, schemaSource);
       break;
     }
     case "array": {
