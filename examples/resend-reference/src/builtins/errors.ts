@@ -13,102 +13,156 @@ export class PathError extends Schema.TaggedError<PathError>()("PathError", {
 }) {}
 
 /**
- * A Basic credential field could not be read or validated, or the native encoder
- * could not represent the pair. Credential values and raw causes are excluded.
+ * A redacted credential was erased or is otherwise unavailable. Basic fields
+ * and API-key locations are represented separately without retaining secrets.
  */
 // oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
-export class BasicAuthenticationError extends Schema.TaggedError<BasicAuthenticationError>()(
-  "BasicAuthenticationError",
+export class CredentialUnavailable extends Schema.TaggedError<CredentialUnavailable>()(
+  "CredentialUnavailable",
   {
-    reason: Schema.Literals([
-      "UsernameUnavailable",
-      "PasswordUnavailable",
-      "UsernameInvalid",
-      "PasswordInvalid",
-      "Encoding",
+    credential: Schema.Union([
+      Schema.Struct({
+        field: Schema.Literals(["username", "password"]),
+        mechanism: Schema.Literal("basic"),
+      }),
+      Schema.Struct({
+        location: Schema.Literals(["header", "query", "cookie"]),
+        mechanism: Schema.Literal("apiKey"),
+      }),
     ]),
   },
-) {}
+) {
+  /**
+   * Identify the missing credential field or location without showing its value.
+   */
+  override get message(): string {
+    if (this.credential.mechanism === "basic") {
+      return `The Basic authentication ${this.credential.field} is unavailable. Supply the ${this.credential.field} again; no request was sent.`;
+    }
+
+    return `The API key for ${this.credential.location} authentication is unavailable. Supply the credential again; no request was sent.`;
+  }
+}
 
 /**
- * An API key could not be prepared at its configured transport location.
- * The reason describes a local stage, never a server's credential decision.
+ * A Basic field failed its native transport schema, without retaining the input.
  */
 // oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
-export class ApiKeyAuthenticationError extends Schema.TaggedError<ApiKeyAuthenticationError>()(
-  "ApiKeyAuthenticationError",
+export class InvalidBasicCredential extends Schema.TaggedError<InvalidBasicCredential>()(
+  "InvalidBasicCredential",
   {
-    location: Schema.Literals(["header", "query", "cookie"]),
-    reason: Schema.Literals([
-      "CredentialUnavailable",
-      "InvalidConfiguration",
-      "Encoding",
-      "Preparation",
-    ]),
+    field: Schema.Literals(["username", "password"]),
   },
-) {}
+) {
+  /**
+   * Describe the transport restriction belonging to the invalid field.
+   */
+  override get message(): string {
+    return this.field === "username"
+      ? "The Basic authentication username is invalid. Remove colons and control characters; no request was sent."
+      : "The Basic authentication password is invalid. Remove control characters; no request was sent.";
+  }
+}
 
 /**
- * Give field-specific Basic recovery guidance without showing supplied values.
+ * Validated Basic fields could not be represented by the native encoder.
  */
-const basicErrorMessage = (reason: BasicAuthenticationError["reason"]): string =>
-  Match.value(reason).pipe(
-    Match.when(
-      "UsernameUnavailable",
-      () =>
-        "The Basic authentication username is unavailable. Supply the username again; no request was sent.",
-    ),
-    Match.when(
-      "PasswordUnavailable",
-      () =>
-        "The Basic authentication password is unavailable. Supply the password again; no request was sent.",
-    ),
-    Match.when(
-      "UsernameInvalid",
-      () =>
-        "The Basic authentication username is invalid. Remove colons and control characters; no request was sent.",
-    ),
-    Match.when(
-      "PasswordInvalid",
-      () =>
-        "The Basic authentication password is invalid. Remove control characters; no request was sent.",
-    ),
-    Match.when(
-      "Encoding",
-      () =>
-        "Basic authentication could not be encoded. Use credentials containing only characters supported by Basic authentication encoding; no request was sent.",
-    ),
-    Match.exhaustive,
-  );
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class BasicEncodingError extends Schema.TaggedError<BasicEncodingError>()(
+  "BasicEncodingError",
+  {},
+) {
+  /**
+   * Explain the encoding limitation without exposing either credential.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- Overrides the native Error instance message contract.
+  override get message(): string {
+    return "Basic authentication could not be encoded. Use credentials containing only characters supported by Basic authentication encoding; no request was sent.";
+  }
+}
 
 /**
- * Identify the configured API-key location and failed local preparation stage.
- * Header and query wire validation may still occur during HTTP execution.
+ * Native cookie validation rejected API-key preparation or an existing cookie.
  */
-const apiKeyErrorMessage = (error: ApiKeyAuthenticationError): string =>
-  Match.value(error.reason).pipe(
-    Match.when(
-      "CredentialUnavailable",
-      () =>
-        `The API key for ${error.location} authentication is unavailable. Supply the credential again; no request was sent.`,
-    ),
-    Match.when(
-      "InvalidConfiguration",
-      () =>
-        `The API key for ${error.location} authentication could not be prepared. Check its configured name and existing ${error.location} values; no request was sent.`,
-    ),
-    Match.when(
-      "Encoding",
-      () =>
-        `The API key for ${error.location} authentication could not be encoded. Use valid Unicode in the credential and existing ${error.location} values; no request was sent.`,
-    ),
-    Match.when(
-      "Preparation",
-      () =>
-        `The API key for ${error.location} authentication could not be prepared. Check its configuration; no request was sent.`,
-    ),
-    Match.exhaustive,
-  );
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class CookieConfigurationError extends Schema.TaggedError<CookieConfigurationError>()(
+  "CookieConfigurationError",
+  {},
+) {
+  /**
+   * Direct configuration repair without revealing the configured cookie name.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- Overrides the native Error instance message contract.
+  override get message(): string {
+    return "The API key for cookie authentication could not be prepared. Check its configured name and existing cookie values; no request was sent.";
+  }
+}
+
+/**
+ * A cookie value could not be URI-encoded during API-key preparation.
+ */
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class CookieEncodingError extends Schema.TaggedError<CookieEncodingError>()(
+  "CookieEncodingError",
+  {},
+) {
+  /**
+   * Request valid Unicode without reproducing cookie values.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- Overrides the native Error instance message contract.
+  override get message(): string {
+    return "The API key for cookie authentication could not be encoded. Use valid Unicode in the credential and existing cookie values; no request was sent.";
+  }
+}
+
+/**
+ * Local header or query API-key construction failed before execution. Wire
+ * validation may still be deferred until execution when preparation succeeds.
+ */
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class ApiKeyPreparationError extends Schema.TaggedError<ApiKeyPreparationError>()(
+  "ApiKeyPreparationError",
+  {
+    location: Schema.Literals(["header", "query"]),
+  },
+) {
+  /**
+   * Identify the configured location and its preparation boundary.
+   */
+  override get message(): string {
+    return `The API key for ${this.location} authentication could not be prepared. Check its configuration; no request was sent.`;
+  }
+}
+
+/**
+ * Supported local authentication failures, each with its own safe message.
+ */
+export const AuthenticationErrorReason = Schema.Union([
+  CredentialUnavailable,
+  InvalidBasicCredential,
+  BasicEncodingError,
+  CookieConfigurationError,
+  CookieEncodingError,
+  ApiKeyPreparationError,
+]);
+
+/**
+ * Authentication preparation failed for a structured, secret-free reason.
+ */
+// oxlint-disable-next-line unicorn/throw-new-error -- Native schema class factory, not an error throw.
+export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
+  "AuthenticationError",
+  {
+    reason: AuthenticationErrorReason,
+  },
+) {
+  /**
+   * Preserve the reason's owned message at the authentication boundary.
+   */
+  override get message(): string {
+    return this.reason.message;
+  }
+}
 
 /**
  * Describe HTTP failures with neutral guidance, without exposing request details
@@ -139,19 +193,12 @@ const httpErrorMessage = (reason: HttpClientError.HttpClientErrorReason): string
  * Preserve native HTTP causes and already-safe CLI errors without reformatting.
  */
 export const toCliError = (
-  cause:
-    | PathError
-    | BasicAuthenticationError
-    | ApiKeyAuthenticationError
-    | HttpClientError.HttpClientError
-    | CliError.UserError,
+  cause: PathError | AuthenticationError | HttpClientError.HttpClientError | CliError.UserError,
 ) =>
   Match.value(cause).pipe(
     Match.tagsExhaustive({
-      ApiKeyAuthenticationError: (error) =>
-        new CliError.UserError({ cause: error, userMessage: apiKeyErrorMessage(error) }),
-      BasicAuthenticationError: (error) =>
-        new CliError.UserError({ cause: error, userMessage: basicErrorMessage(error.reason) }),
+      AuthenticationError: (error) =>
+        new CliError.UserError({ cause: error, userMessage: error.message }),
       HttpClientError: (error) =>
         new CliError.UserError({ cause: error, userMessage: httpErrorMessage(error.reason) }),
       PathError: (error) =>

@@ -64,25 +64,41 @@ export const basicAuth =
   (credentials: typeof BasicCredentials.Type) => (request: HttpClientRequest.HttpClientRequest) =>
     Effect.all({
       password: Effect.try({
-        catch: () => new Errors.BasicAuthenticationError({ reason: "PasswordUnavailable" }),
+        catch: () =>
+          new Errors.AuthenticationError({
+            reason: new Errors.CredentialUnavailable({
+              credential: { field: "password", mechanism: "basic" },
+            }),
+          }),
         try: () => Redacted.value(credentials.password),
       }).pipe(
         Effect.flatMap((value) =>
           Schema.decodeUnknownEffect(BasicPassword)(value, { reportInput: false }).pipe(
             Effect.mapError(
-              () => new Errors.BasicAuthenticationError({ reason: "PasswordInvalid" }),
+              () =>
+                new Errors.AuthenticationError({
+                  reason: new Errors.InvalidBasicCredential({ field: "password" }),
+                }),
             ),
           ),
         ),
       ),
       username: Effect.try({
-        catch: () => new Errors.BasicAuthenticationError({ reason: "UsernameUnavailable" }),
+        catch: () =>
+          new Errors.AuthenticationError({
+            reason: new Errors.CredentialUnavailable({
+              credential: { field: "username", mechanism: "basic" },
+            }),
+          }),
         try: () => Redacted.value(credentials.username),
       }).pipe(
         Effect.flatMap((value) =>
           Schema.decodeUnknownEffect(BasicUsername)(value, { reportInput: false }).pipe(
             Effect.mapError(
-              () => new Errors.BasicAuthenticationError({ reason: "UsernameInvalid" }),
+              () =>
+                new Errors.AuthenticationError({
+                  reason: new Errors.InvalidBasicCredential({ field: "username" }),
+                }),
             ),
           ),
         ),
@@ -90,7 +106,8 @@ export const basicAuth =
     }).pipe(
       Effect.flatMap((decoded) =>
         Effect.try({
-          catch: () => new Errors.BasicAuthenticationError({ reason: "Encoding" }),
+          catch: () =>
+            new Errors.AuthenticationError({ reason: new Errors.BasicEncodingError({}) }),
           try: () => HttpClientRequest.basicAuth(request, decoded.username, decoded.password),
         }),
       ),
@@ -106,9 +123,10 @@ export const apiKey =
   (request: HttpClientRequest.HttpClientRequest) =>
     Effect.try({
       catch: () =>
-        new Errors.ApiKeyAuthenticationError({
-          location: scheme.in,
-          reason: "CredentialUnavailable",
+        new Errors.AuthenticationError({
+          reason: new Errors.CredentialUnavailable({
+            credential: { location: scheme.in, mechanism: "apiKey" },
+          }),
         }),
       try: () => Redacted.value(credential),
     }).pipe(
@@ -117,21 +135,25 @@ export const apiKey =
           Match.when("header", () =>
             Effect.try({
               catch: () =>
-                new Errors.ApiKeyAuthenticationError({ location: "header", reason: "Preparation" }),
+                new Errors.AuthenticationError({
+                  reason: new Errors.ApiKeyPreparationError({ location: "header" }),
+                }),
               try: () => HttpClientRequest.setHeader(request, scheme.name, value),
             }),
           ),
           Match.when("query", () =>
             Effect.try({
               catch: () =>
-                new Errors.ApiKeyAuthenticationError({ location: "query", reason: "Preparation" }),
+                new Errors.AuthenticationError({
+                  reason: new Errors.ApiKeyPreparationError({ location: "query" }),
+                }),
               try: () => HttpClientRequest.setUrlParam(request, scheme.name, value),
             }),
           ),
           Match.when("cookie", () =>
             Effect.try({
               catch: () =>
-                new Errors.ApiKeyAuthenticationError({ location: "cookie", reason: "Encoding" }),
+                new Errors.AuthenticationError({ reason: new Errors.CookieEncodingError({}) }),
               try: () =>
                 Result.all(
                   Object.entries({
@@ -144,9 +166,8 @@ export const apiKey =
                 Effect.fromResult(result).pipe(
                   Effect.mapError(
                     () =>
-                      new Errors.ApiKeyAuthenticationError({
-                        location: "cookie",
-                        reason: "InvalidConfiguration",
+                      new Errors.AuthenticationError({
+                        reason: new Errors.CookieConfigurationError({}),
                       }),
                   ),
                 ),
