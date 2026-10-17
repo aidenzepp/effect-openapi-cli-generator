@@ -21,7 +21,12 @@ export interface Documentation {
 /**
  * The supported validation contract, retaining original property names and JSON domains.
  */
-export type WireSchema = { readonly docs: Documentation } & (
+export type WireSchema = {
+  readonly docs: Documentation;
+  readonly reference?: { readonly pointer: string; readonly schema: WireSchema };
+  readonly checks?: readonly { readonly name: string; readonly value: number | string }[];
+} & (
+  | { readonly kind: "oneOf"; readonly nullable: false; readonly members: readonly WireSchema[] }
   | {
       readonly kind: "string" | "boolean" | "integer" | "number" | "null";
       readonly nullable: boolean;
@@ -36,7 +41,7 @@ export type WireSchema = { readonly docs: Documentation } & (
         readonly required: boolean;
         readonly schema: WireSchema;
       }[];
-      readonly additionalProperties: boolean;
+      readonly additionalProperties: boolean | WireSchema;
     }
 );
 
@@ -46,7 +51,7 @@ export type WireSchema = { readonly docs: Documentation } & (
 export interface Parameter {
   readonly wireName: string;
   readonly flagName: string;
-  readonly location: "path" | "query";
+  readonly location: "path" | "query" | "header";
   readonly required: boolean;
   readonly schema: WireSchema;
   readonly docs: Documentation;
@@ -63,6 +68,7 @@ export interface Operation {
   readonly path: string;
   readonly parameters: readonly Parameter[];
   readonly docs: Documentation;
+  readonly security: SecurityRequirement | undefined;
   readonly body: { readonly required: boolean; readonly schema: WireSchema } | undefined;
 }
 
@@ -103,3 +109,19 @@ export interface GeneratedFile {
 export interface GeneratedApplication {
   readonly files: readonly GeneratedFile[];
 }
+
+/**
+ * An effective, supported security requirement; values remain runtime credentials.
+ */
+export type SecurityRequirement = {
+  readonly key: string;
+  readonly flagName: string;
+  readonly docs: Documentation;
+} & (
+  | { readonly kind: "bearer" | "basic" }
+  | {
+      readonly kind: "apiKey";
+      readonly location: "header" | "query" | "cookie";
+      readonly name: string;
+    }
+);

@@ -30,7 +30,7 @@ OpenAPI JSON currently feeds this pipeline. The deferred HttpApi adapter must pr
 
 Operation metadata and overrides determine command names and grouping. Do not infer CRUD behavior from HTTP verbs or assume every operation is REST-shaped. Each generated handler must retain its operation's HTTP method, path, parameter locations, serialization, body encoding, and authentication requirements.
 
-Map representable schema fields to typed CLI inputs. Provide documented JSON and file input conventions for complex bodies and uploads. Choose precise flag, positional, nesting, precedence, and collision rules during implementation; the earlier conversational examples do not settle those contracts. Diagnose unsupported or ambiguous cases instead of silently changing request meaning.
+Map representable schema fields to typed CLI inputs. Provide documented JSON and file input conventions for complex bodies and uploads. Follow the settled named-flag, nesting, precedence and collision contracts in [generated-code-decisions.md](generated-code-decisions.md); README.md records the supported input subset. Diagnose unsupported or ambiguous cases instead of silently changing request meaning.
 
 ## Code organization
 
@@ -45,7 +45,7 @@ Use kebab-case filenames. Keep modules focused and add them when real behavior n
 
 - `src/core/generate.ts` validates the public JSON boundary; `normalize.ts`, `schema.ts`, `references.ts`, and `commands.ts` derive explicit wire and command contracts.
 - `src/core/emit.ts` assembles package files. `emit-command.ts` renders native commands and HTTP handlers; `emit-schema.ts` renders validators; `source-text.ts` owns literal and documentation safety.
-- `src/core/runtime-template.ts` is ordinary checked TypeScript shared by generated applications. `tools/embed-runtime.ts` embeds it into an ignored module before test, check, and build; installed library calls need no source checkout or runtime IO.
+- `src/core/templates/` contains checked TypeScript units selected by generated runtime capabilities. `tools/embed-runtime.ts` embeds it into an ignored module before test, check, and build; installed library calls need no source checkout or runtime IO.
 - `src/cli/command.ts` reads input and calls the library, `write.ts` owns exclusive directory creation and rollback, and `main.ts` supplies Node services and diagnostics.
 
 ## Generated-code quality

@@ -1,0 +1,780 @@
+{
+  "openapi": "3.1.2",
+  "info": {
+    "title": "Resend",
+    "version": "1.5.1",
+    "description": "Resend is the email platform for developers."
+  },
+  "servers": [{ "url": "https://api.resend.com" }],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/domains": {
+      "get": {
+        "operationId": "domains/list",
+        "tags": ["Domains"],
+        "summary": "Retrieve a list of domains",
+        "parameters": [
+          { "$ref": "#/components/parameters/PaginationLimit" },
+          { "$ref": "#/components/parameters/PaginationAfter" },
+          { "$ref": "#/components/parameters/PaginationBefore" }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListDomainsResponse" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "operationId": "domains/create",
+        "tags": ["Domains"],
+        "summary": "Create a new domain",
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateDomainRequest" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateDomainResponse" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    "/domains/{domain_id}": {
+      "patch": {
+        "operationId": "domains/update",
+        "tags": ["Domains"],
+        "summary": "Update an existing domain",
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateDomainOptions" } }
+          }
+        },
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The ID of the domain."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UpdateDomainResponseSuccess" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "update"
+      },
+      "delete": {
+        "operationId": "domains/remove",
+        "tags": ["Domains"],
+        "summary": "Remove an existing domain",
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "The ID of the domain."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DeleteDomainResponse" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["domains"],
+        "x-fern-sdk-method-name": "delete"
+      }
+    },
+    "/emails": {
+      "post": {
+        "operationId": "emails/send",
+        "tags": ["Emails"],
+        "summary": "Send an email",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 256 },
+            "description": "A unique identifier for the request to ensure emails are only sent once. [Learn more](https://resend.com/docs/dashboard/emails/idempotency-keys)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SendEmailRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SendEmailResponse" } }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["emails"],
+        "x-fern-sdk-method-name": "send"
+      }
+    },
+    "/emails/batch": {
+      "post": {
+        "operationId": "emails/send-batch",
+        "tags": ["Emails"],
+        "summary": "Trigger up to 100 batch emails at once.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 256 },
+            "description": "A unique identifier for the request to ensure emails are only sent once. [Learn more](https://resend.com/docs/dashboard/emails/idempotency-keys)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/SendEmailRequest" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateBatchEmailsResponse" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["emails", "batch"],
+        "x-fern-sdk-method-name": "send"
+      }
+    },
+    "/emails/{email_id}/attachments": {
+      "get": {
+        "operationId": "emails/list-attachments",
+        "tags": ["Emails"],
+        "summary": "Retrieve a list of attachments for a sent email",
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The ID of the email."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer" },
+            "description": "Maximum number of attachments to return."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Pagination cursor to fetch results after this attachment ID. Cannot be used with 'before'."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Pagination cursor to fetch results before this attachment ID. Cannot be used with 'after'."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListAttachmentsResponse" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["emails", "attachments"],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/emails/{email_id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "emails/get-attachment",
+        "tags": ["Emails"],
+        "summary": "Retrieve a single attachment for a sent email",
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The ID of the email."
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The ID of the attachment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RetrievedAttachment" }
+              }
+            }
+          }
+        },
+        "x-fern-sdk-group-name": ["emails", "attachments"],
+        "x-fern-sdk-method-name": "get"
+      }
+    }
+  },
+  "tags": [
+    { "name": "Emails", "description": "Start sending emails through the Resend API." },
+    { "name": "Domains", "description": "Create and manage domains through the Resend API." }
+  ],
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "parameters": {
+      "PaginationLimit": {
+        "in": "query",
+        "name": "limit",
+        "required": false,
+        "schema": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "description": "Number of items to return."
+      },
+      "PaginationAfter": {
+        "in": "query",
+        "name": "after",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Return items after this cursor."
+      },
+      "PaginationBefore": {
+        "in": "query",
+        "name": "before",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Return items before this cursor."
+      }
+    },
+    "schemas": {
+      "SendEmailRequest": {
+        "type": "object",
+        "required": ["from", "to", "subject"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Sender email address. To include a friendly name, use the format \"Your Name <sender@domain.com>\"."
+          },
+          "to": {
+            "description": "Recipient email address. For multiple addresses, send as an array of strings. Max 50.",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 }
+            ]
+          },
+          "subject": { "type": "string", "description": "Email subject." },
+          "bcc": {
+            "description": "Bcc recipient email address. For multiple addresses, send as an array of strings.",
+            "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+          },
+          "cc": {
+            "description": "Cc recipient email address. For multiple addresses, send as an array of strings.",
+            "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+          },
+          "reply_to": {
+            "description": "Reply-to email address. For multiple addresses, send as an array of strings.",
+            "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+          },
+          "html": { "type": "string", "description": "The HTML version of the message." },
+          "text": { "type": "string", "description": "The plain text version of the message." },
+          "template": {
+            "allOf": [
+              { "$ref": "#/components/schemas/EmailTemplateInput" },
+              {
+                "description": "Use a published template to send the email. If provided, do not include html or text."
+              }
+            ]
+          },
+          "headers": { "type": "object", "description": "Custom headers to add to the email." },
+          "scheduled_at": {
+            "type": "string",
+            "description": "Schedule email to be sent later. The date should be in ISO 8601 format."
+          },
+          "attachments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Attachment" }
+          },
+          "tags": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } },
+          "topic_id": {
+            "type": "string",
+            "description": "The topic ID to scope the email to. If the recipient is a contact and opted-in to the topic, the email is sent. If opted-out, the email is not sent. If the recipient is not a contact, the email is sent if the topic's default subscription is opt_in."
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "format": "binary",
+            "description": "Content of an attached file."
+          },
+          "filename": { "type": "string", "description": "Name of attached file." },
+          "path": { "type": "string", "description": "Path where the attachment file is hosted" },
+          "content_type": {
+            "type": "string",
+            "description": "Optional content type for the attachment, if not set it will be derived from the filename property"
+          },
+          "content_id": {
+            "type": "string",
+            "description": "Content ID for embedding inline images using cid references (e.g., cid:image001)."
+          }
+        }
+      },
+      "Tag": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters."
+          },
+          "value": {
+            "type": "string",
+            "description": "The value of the email tag.It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters."
+          }
+        }
+      },
+      "EmailTemplateInput": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "The id of the published email template." },
+          "variables": {
+            "type": "object",
+            "additionalProperties": { "oneOf": [{ "type": "string" }, { "type": "number" }] },
+            "description": "Template variables object with key/value pairs.",
+            "example": { "variableName": "Sign up now", "variableName2": 123 }
+          }
+        },
+        "required": ["id"]
+      },
+      "SendEmailResponse": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "description": "The ID of the sent email." } }
+      },
+      "CreateBatchEmailsResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "description": "The ID of the sent email." }
+              }
+            }
+          }
+        }
+      },
+      "DomainCapabilities": {
+        "type": "object",
+        "description": "Configure the domain capabilities for sending and receiving emails. At least one capability must be enabled.",
+        "properties": {
+          "sending": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "description": "Enable or disable sending emails from this domain."
+          },
+          "receiving": {
+            "type": "string",
+            "enum": ["enabled", "disabled"],
+            "description": "Enable or disable receiving emails to this domain."
+          }
+        }
+      },
+      "CreateDomainRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "The name of the domain you want to create." },
+          "region": {
+            "type": "string",
+            "enum": ["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"],
+            "default": "us-east-1",
+            "description": "The region where emails will be sent from. Possible values are us-east-1 | eu-west-1 | sa-east-1 | ap-northeast-1"
+          },
+          "custom_return_path": {
+            "type": "string",
+            "description": "For advanced use cases, choose a subdomain for the Return-Path address. Defaults to 'send' (i.e., send.yourdomain.tld)."
+          },
+          "open_tracking": {
+            "type": "boolean",
+            "description": "Track the open rate of each email."
+          },
+          "click_tracking": {
+            "type": "boolean",
+            "description": "Track clicks within the body of each HTML email."
+          },
+          "tls": {
+            "type": "string",
+            "enum": ["opportunistic", "enforced"],
+            "default": "opportunistic",
+            "description": "TLS mode. Opportunistic attempts secure connection but falls back to unencrypted. Enforced requires TLS or email won't be sent."
+          },
+          "capabilities": { "$ref": "#/components/schemas/DomainCapabilities" },
+          "tracking_subdomain": {
+            "type": "string",
+            "description": "The subdomain to use for click and open tracking."
+          }
+        }
+      },
+      "CreateDomainResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "The ID of the domain." },
+          "name": { "type": "string", "description": "The name of the domain." },
+          "created_at": {
+            "type": "string",
+            "description": "The date and time the domain was created.",
+            "example": "2023-10-06 23:47:56.678+00"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "verified",
+              "failed",
+              "not_started",
+              "partially_verified",
+              "partially_failed"
+            ],
+            "description": "The status of the domain."
+          },
+          "capabilities": { "$ref": "#/components/schemas/DomainCapabilities" },
+          "records": { "type": "array", "items": { "$ref": "#/components/schemas/DomainRecord" } },
+          "region": { "type": "string", "description": "The region where the domain is hosted." },
+          "open_tracking": {
+            "type": "boolean",
+            "description": "Whether open tracking is enabled for this domain."
+          },
+          "click_tracking": {
+            "type": "boolean",
+            "description": "Whether click tracking is enabled for this domain."
+          },
+          "tracking_subdomain": {
+            "type": "string",
+            "description": "The subdomain used for click and open tracking."
+          }
+        }
+      },
+      "UpdateDomainOptions": {
+        "type": "object",
+        "properties": {
+          "open_tracking": {
+            "type": "boolean",
+            "description": "Track the open rate of each email."
+          },
+          "click_tracking": {
+            "type": "boolean",
+            "description": "Track clicks within the body of each HTML email."
+          },
+          "tls": {
+            "type": "string",
+            "enum": ["opportunistic", "enforced"],
+            "description": "enforced | opportunistic.",
+            "default": "opportunistic"
+          },
+          "capabilities": { "$ref": "#/components/schemas/DomainCapabilities" },
+          "tracking_subdomain": {
+            "type": "string",
+            "description": "The subdomain to use for click and open tracking."
+          }
+        }
+      },
+      "DomainRecord": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "string",
+            "enum": ["SPF", "DKIM", "Receiving", "Tracking", "TrackingCAA"],
+            "description": "The type of record (SPF for sending, DKIM for sending, Receiving for inbound emails, Tracking & TrackingCAA for click and open tracking)."
+          },
+          "name": { "type": "string", "description": "The name of the DNS record." },
+          "type": {
+            "type": "string",
+            "enum": ["MX", "TXT", "CNAME", "CAA"],
+            "description": "The DNS record type."
+          },
+          "ttl": { "type": "string", "description": "The time to live for the record." },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "verified", "failed", "temporary_failure", "not_started"],
+            "description": "The status of the record."
+          },
+          "value": { "type": "string", "description": "The value of the record." },
+          "priority": {
+            "type": "integer",
+            "description": "The priority of the record (only applicable for MX records)."
+          }
+        }
+      },
+      "ListDomainsResponse": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "description": "Type of the response object.",
+            "example": "list"
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indicates if there are more results available.",
+            "example": false
+          },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/ListDomainsItem" } }
+        }
+      },
+      "ListDomainsItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the domain.",
+            "example": "d91cd9bd-1176-453e-8fc1-35364d380206"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the domain.",
+            "example": "example.com"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "verified",
+              "failed",
+              "not_started",
+              "partially_verified",
+              "partially_failed"
+            ],
+            "description": "The status of the domain.",
+            "example": "not_started"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "The date and time the domain was created.",
+            "example": "2023-04-26 20:21:26.347412+00"
+          },
+          "region": {
+            "type": "string",
+            "description": "The region where the domain is hosted.",
+            "example": "us-east-1"
+          },
+          "open_tracking": {
+            "type": "boolean",
+            "description": "Whether open tracking is enabled for this domain."
+          },
+          "click_tracking": {
+            "type": "boolean",
+            "description": "Whether click tracking is enabled for this domain."
+          },
+          "capabilities": { "$ref": "#/components/schemas/DomainCapabilities" }
+        }
+      },
+      "UpdateDomainResponseSuccess": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the updated domain.",
+            "example": "d91cd9bd-1176-453e-8fc1-35364d380206"
+          },
+          "object": {
+            "type": "string",
+            "description": "The object type representing the updated domain.",
+            "example": "domain"
+          }
+        }
+      },
+      "DeleteDomainResponse": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "description": "The type of object.", "example": "domain" },
+          "id": {
+            "type": "string",
+            "description": "The ID of the domain.",
+            "example": "d91cd9bd-1176-453e-8fc1-35364d380206"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "Indicates whether the domain was deleted successfully.",
+            "example": true
+          }
+        }
+      },
+      "RetrievedAttachment": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "description": "The type of object.",
+            "example": "attachment"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ID of the attachment.",
+            "example": "660e8400-e29b-41d4-a716-446655440000"
+          },
+          "filename": {
+            "type": "string",
+            "nullable": true,
+            "description": "The filename of the attachment.",
+            "example": "document.pdf"
+          },
+          "content_type": {
+            "type": "string",
+            "description": "The MIME type of the attachment.",
+            "example": "application/pdf"
+          },
+          "content_id": {
+            "type": "string",
+            "description": "The content ID for inline attachments.",
+            "example": "img001"
+          },
+          "content_disposition": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["inline", "attachment"],
+            "description": "How the attachment should be displayed.",
+            "example": "attachment"
+          },
+          "download_url": {
+            "type": "string",
+            "description": "Signed URL to download the attachment content.",
+            "example": "https://cloudfront.example.com/path?Signature=..."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the download URL expires.",
+            "example": "2024-10-27T18:30:00.000Z"
+          },
+          "size": {
+            "type": "integer",
+            "description": "Size of the attachment in bytes.",
+            "example": 2048
+          }
+        }
+      },
+      "ListAttachmentsResponse": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "description": "Type of the response object.",
+            "example": "list"
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indicates if there are more results available.",
+            "example": false
+          },
+          "data": {
+            "type": "array",
+            "description": "Array containing attachment information.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The ID of the attachment.",
+                  "example": "660e8400-e29b-41d4-a716-446655440000"
+                },
+                "filename": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "The filename of the attachment.",
+                  "example": "document.pdf"
+                },
+                "content_type": {
+                  "type": "string",
+                  "description": "The MIME type of the attachment.",
+                  "example": "application/pdf"
+                },
+                "content_id": {
+                  "type": "string",
+                  "description": "The content ID for inline attachments.",
+                  "example": "img001"
+                },
+                "content_disposition": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": ["inline", "attachment"],
+                  "description": "How the attachment should be displayed.",
+                  "example": "attachment"
+                },
+                "download_url": {
+                  "type": "string",
+                  "description": "Signed URL to download the attachment content.",
+                  "example": "https://cloudfront.example.com/path?Signature=..."
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Timestamp when the download URL expires.",
+                  "example": "2024-10-27T18:30:00.000Z"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Size of the attachment in bytes.",
+                  "example": 2048
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

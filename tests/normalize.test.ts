@@ -64,7 +64,7 @@ test("preserves HTTP method, docs, parameter order, values and input", () => {
   expect(result.commandPath).toEqual(["things", "get"]);
   expect(result.parameters.map((p) => [p.wireName, p.flagName, p.binding])).toEqual([
     ["parentId", "parent-id", "flag"],
-    ["itemId", "item-id", "argument"],
+    ["itemId", "item-id", "flag"],
     ["isReady", "is-ready", "flag"],
   ]);
   expect(result.docs.description).toBe("Get things\nDetails");
@@ -113,7 +113,10 @@ test("checks only selected requests and permits operation security override", ()
       },
     }).operations,
   ).toHaveLength(1);
-  expect(fail(document({ parameters: [parameter("x", "header")] })).code).toBe("unsupported");
+  expect(
+    run(document({ parameters: [parameter("x", "header")] })).operations[0]?.parameters[0]
+      ?.location,
+  ).toBe("header");
 });
 
 test("rejects command duplicates and prefix conflicts", () => {
@@ -283,3 +286,30 @@ test("unknown JSON annotations survive boundary decoding without changing select
   const result = await Effect.runPromise(generate(input));
   expect(result.files.length).toBeGreaterThan(0);
 });
+
+test("effective security preserves overrides and rejects wire-field collisions and alternatives", () => {
+  const configuration = {
+    components: { securitySchemes: { token: { scheme: "Bearer", type: "http" } } },
+    security: [{ token: [] }],
+  };
+  const input = document({}, "/things", configuration);
+  expect(run(input).operations[0]?.security?.kind).toBe("bearer");
+  expect(
+    run(document({ security: [] }, "/things", configuration)).operations[0]?.security,
+  ).toBeUndefined();
+
+  const collision = document({ parameters: [parameter("Authorization", "header")] }, "/things", {
+    components: configuration.components,
+    security: configuration.security,
+  });
+  expect(fail(collision).message).toContain("authentication wire field");
+  expect(fail({ ...input, security: [{ token: [] }, {}] }).message).toContain("alternatives");
+});
+
+test.each(["/users;active=true", "/users/{id}:disable", "/users/%2F", "/users/@me"])(
+  "rejects unsupported static URI syntax %s without rewriting it",
+  (path) => {
+    const input = document({}, path);
+    expect(fail(input).message).toContain("Static reserved URI syntax");
+  },
+);

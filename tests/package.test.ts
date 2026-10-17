@@ -15,8 +15,13 @@ test("local tarball exposes typed library and executable with its formatter depe
   const root = process.cwd();
   const temporary = await mkdtemp(path.join(tmpdir(), "effect-cli-package-"));
   consumerDirectory = temporary;
-  const run = async (command: string[], cwd = temporary) => {
-    const child = Bun.spawn(command, { cwd, stderr: "pipe", stdout: "pipe" });
+  const run = async (command: string[], cwd = temporary, restricted = false) => {
+    const child = Bun.spawn(command, {
+      cwd,
+      env: restricted ? { ...process.env, PATH: temporary } : process.env,
+      stderr: "pipe",
+      stdout: "pipe",
+    });
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -55,10 +60,47 @@ test("local tarball exposes typed library and executable with its formatter depe
     `import { generate } from "effect-openapi-cli-generator";
 import { Effect } from "effect";
 const output = await Effect.runPromise(generate({openapi:"3.1.0",info:{title:"Packed API",version:"bad"},paths:{"/items":{get:{operationId:"items-get","x-fern-sdk-group-name":"items",responses:{"200":{description:"OK"}}}}}}));
-if(output.files.length !== 5) throw new Error("missing generated files");
+if(!output.files.some(file => file.path === "src/commands.ts")) throw new Error("missing generated modules");
 `,
   );
-  await run(["node", "consumer.mjs"]);
+  const node = Bun.which("node");
+  if (node === null) {
+    throw new Error("Node is required for the packaged consumer check.");
+  }
+
+  await run([node, "consumer.mjs"], temporary, true);
+  await writeFile(
+    path.join(temporary, "input.json"),
+    JSON.stringify({
+      info: { title: "Packed API", version: "1" },
+      openapi: "3.1.0",
+      paths: {
+        "/items": {
+          get: {
+            operationId: "items-list",
+            responses: { "200": { description: "OK" } },
+            "x-fern-sdk-group-name": "items",
+          },
+        },
+      },
+    }),
+  );
+  await run(
+    [
+      node,
+      path.join(packageRoot, "dist/cli.js"),
+      "--input",
+      path.join(temporary, "input.json"),
+      "--output",
+      path.join(temporary, "generated"),
+    ],
+    temporary,
+    true,
+  );
+  expect(await readFile(path.join(temporary, "generated/src/commands.ts"), "utf-8")).toContain(
+    "HttpClientRequest.get",
+  );
+  expect(entries).not.toContain("src");
   await writeFile(
     path.join(temporary, "consumer.ts"),
     'import { generate } from "effect-openapi-cli-generator";\nimport { Effect } from "effect";\nconst operation = generate({});\nexport const result = Effect.runPromise(operation);\n',

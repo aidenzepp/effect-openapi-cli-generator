@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { resolveName } from "./commands.js";
 import { formatApplication } from "./format.js";
 import type { ApiModel, GenerateOptions } from "./model.js";
-import { runtimeSource } from "./runtime-source.generated.js";
+import { modelSource } from "./emit-models.js";
+import { builtinSources } from "./emit-builtins.js";
 import { commandSource } from "./emit-command.js";
 
 /**
@@ -15,16 +16,24 @@ import { commandSource } from "./emit-command.js";
 export const emit = (model: ApiModel, options?: GenerateOptions) =>
   Effect.gen(function* assembleApplication() {
     const name = yield* resolveName(model.title, options);
-    const source = commandSource(model, name);
+    const models = modelSource(model);
+    const source = commandSource(model, name, models.reference, models.source !== undefined);
 
     return yield* formatApplication({
       files: [
-        { content: source, path: "src/main.ts" },
-        { content: runtimeSource, path: "src/runtime.ts" },
+        { content: source.main, path: "src/main.ts" },
+        { content: source.commands, path: "src/commands.ts" },
+        ...(source.auth === undefined ? [] : [{ content: source.auth, path: "src/auth.ts" }]),
+        ...(models.source === undefined ? [] : [{ content: models.source, path: "src/models.ts" }]),
+        ...builtinSources(model),
         {
           content: JSON.stringify({
             bin: { [name]: "./dist/main.js" },
-            dependencies: { "@effect/platform-node": "4.0.3", effect: "4.0.3" },
+            dependencies: {
+              "@effect/platform-node": "4.0.3",
+              "@effect/platform-node-shared": "4.0.3",
+              effect: "4.0.3",
+            },
             devDependencies: { "@types/node": "26.6.4", typescript: "7.0.2" },
             name,
             private: true,

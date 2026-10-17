@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile, cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Schema } from "effect";
 
 const root = process.cwd();
 
@@ -174,7 +175,19 @@ const cli = (...args: string[]) => run(["node", "dist/main.js", ...args]);
 const base = () => `http://127.0.0.1:${server.port}/api`;
 
 const get = (...args: string[]) =>
-  cli("account", "deep", "items", "get", "a/b雪", "--parent", "p/q", "--base-url", base(), ...args);
+  cli(
+    "account",
+    "deep",
+    "items",
+    "get",
+    "--id",
+    "a/b雪",
+    "--parent",
+    "p/q",
+    "--base-url",
+    base(),
+    ...args,
+  );
 
 beforeAll(async () => {
   temporary = await mkdtemp(path.join(tmpdir(), "effect-cli-integration-"));
@@ -197,7 +210,7 @@ afterAll(async () => {
 
 test("native help, title, version and completions need no base URL", async () => {
   const help = await cli("--help");
-  expect(help.stdout).toContain("Sample API");
+  expect(help.stdout).toContain("sample-api");
   expect(await cli("account", "deep", "items", "--help")).toMatchObject({ code: 0 });
 
   const version = await cli("--version");
@@ -211,7 +224,7 @@ test("actual POST preserves base path, encoded values, optional false zero empty
     '{"enabled":false,"unknown":0,"empty":"","nested":{"value":0},"__proto__":{"safe":true}}';
   expect(
     await get("--enabled", "false", "--count", "0", "--wire-name", "", "--body", body),
-  ).toMatchObject({ code: 0, stdout: "exact response" });
+  ).toMatchObject({ code: 0, stdout: "exact response\n" });
 
   const request = lastRequest();
   expect(request.method).toBe("POST");
@@ -221,7 +234,9 @@ test("actual POST preserves base path, encoded values, optional false zero empty
   expect(url.searchParams.get("enabled")).toBe("false");
   expect(url.searchParams.get("count")).toBe("0");
   expect(url.searchParams.get("wire_name")).toBe("");
-  expect(request.body).toBe(body);
+  expect(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(request.body)).toEqual(
+    Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(body),
+  );
   expect(request.contentType).toContain("application/json");
   expect(await get()).toMatchObject({ code: 0 });
   expect(lastRequest().body).toBe("");
@@ -269,12 +284,12 @@ test.each(
 });
 
 test("empty success, HTTP failure and refused connection are truthful", async () => {
-  expect(await cli("empty", "get", "--base-url", base())).toMatchObject({ code: 0, stdout: "" });
+  expect(await cli("empty", "get", "--base-url", base())).toMatchObject({ code: 0, stdout: "\n" });
 
   const failure = await cli("failure", "get", "--base-url", base());
   expect(failure.code).not.toBe(0);
   expect(failure.stderr).toContain("409");
-  expect(failure.stderr).toContain("denied");
+  expect(failure.stderr).not.toContain("denied");
 
   const refused = await cli("empty", "get", "--base-url", "http://127.0.0.1:1");
   expect(refused.code).not.toBe(0);
@@ -355,6 +370,7 @@ test("invalid base URL and dot subject cannot send requests", async () => {
     "deep",
     "items",
     "get",
+    "--id",
     "..",
     "--parent",
     "p",
@@ -430,7 +446,7 @@ test("hostile declared property strings remain executable data", async () => {
   expect(await get("--body", body)).toMatchObject({ code: 0 });
   expect(lastRequest().body).toBe(body);
 
-  const source = await readFile(path.join(application, "src/main.ts"), "utf-8");
+  const source = await readFile(path.join(application, "src/commands.ts"), "utf-8");
   expect(source).toContain("@deprecated");
   expect(source).toContain("@see");
   expect(source).toContain("\\@tag");

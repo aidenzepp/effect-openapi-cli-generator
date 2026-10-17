@@ -109,8 +109,8 @@ test("supports version-sensitive nullability and typed enums", async () => {
 
 test.each([
   [{ minimum: 1, type: "string" }, "/schema/minimum"],
-  [{ format: "date", type: "string" }, "/schema/format"],
-  [{ additionalProperties: { type: "string" }, type: "object" }, "/schema/additionalProperties"],
+  [{ minLength: -1, type: "string" }, "/schema/minLength"],
+  [{ additionalProperties: 2, type: "object" }, "/schema/additionalProperties"],
   [{ required: ["missing"], type: "object" }, "/schema/required/0"],
   [
     { properties: { a: { type: "string" } }, required: ["a", "a"], type: "object" },
@@ -125,7 +125,7 @@ test.each([
   [{ type: "array" }, "/schema/items"],
   [{ properties: {}, type: "string" }, "/schema/properties"],
   [
-    { properties: { "a/b": { maximum: 2, type: "number" } }, type: "object" },
+    { properties: { "a/b": { maximum: "2", type: "number" } }, type: "object" },
     "/schema/properties/a~1b/maximum",
   ],
   [true, "/schema"],

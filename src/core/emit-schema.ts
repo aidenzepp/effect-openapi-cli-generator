@@ -1,6 +1,30 @@
-import { Array } from "effect";
+import { Array, RegExp as EffectRegExp } from "effect";
 import type { WireSchema } from "./model.js";
-import { comment, literal, propertyKey } from "./source-text.js";
+import { comment, internalReference, literal, propertyKey } from "./source-text.js";
+
+/**
+ * Emit the exact validated regex as a Unicode literal, escaping literal delimiters.
+ */
+const regexSource = (pattern: string): string => new RegExp(pattern, "u").toString();
+
+/**
+ * Determine null acceptance independently from non-null native checks.
+ */
+const nullableSchema = (schema: WireSchema): boolean =>
+  "enum" in schema && schema.enum !== undefined ? schema.enum.includes(null) : schema.nullable;
+
+/**
+ * Additional-property validation applies only to keys absent from the declared property map.
+ */
+const additionalKeySource = (schema: Extract<WireSchema, { kind: "object" }>): string => {
+  if (schema.additionalProperties === true || schema.properties.length === 0) {
+    return "Schema.String";
+  }
+
+  const keys = schema.properties.map((property) => EffectRegExp.escape(property.name)).join("|");
+
+  return `Schema.String.check(Schema.isPattern(${regexSource(String.raw`^(?!(?:${keys})(?![\s\S]))`)}))`;
+};
 
 /**
  * Renders the normalized wire schema as a native Effect validator.
@@ -9,9 +33,21 @@ import { comment, literal, propertyKey } from "./source-text.js";
  * @param schema The validated supported schema and its documentation.
  * @returns A TypeScript expression preserving required fields and allowed JSON values.
  */
-export const schemaSource = (schema: WireSchema): string => {
+export const schemaSource = (
+  schema: WireSchema,
+  reference: (pointer: string) => string = () => "",
+): string => {
+  const referenced = schema.reference === undefined ? "" : reference(schema.reference.pointer);
+  if (referenced) {
+    return internalReference(referenced, schema.docs.deprecated === true);
+  }
+
   let expression: string;
   switch (schema.kind) {
+    case "oneOf": {
+      expression = `Schema.Union([${schema.members.map((member) => schemaSource(member, reference)).join(", ")}], { mode: "oneOf" })`;
+      break;
+    }
     case "object": {
       const fields = Array.sort(
         schema.properties,
@@ -33,7 +69,7 @@ export const schemaSource = (schema: WireSchema): string => {
             property.schema.docs.deprecated === true
               ? "// oxlint-disable-next-line typescript/no-deprecated -- Required schema registration for a supported deprecated API field.\n"
               : "";
-          const schemaExpression = schemaSource(property.schema);
+          const schemaExpression = schemaSource(property.schema, reference);
           const validator = property.required
             ? schemaExpression
             : `Schema.optionalKey(${schemaExpression})`;
@@ -42,13 +78,14 @@ export const schemaSource = (schema: WireSchema): string => {
         })
         .join(",\n");
       const struct = `Schema.Struct({${fields}})`;
-      expression = schema.additionalProperties
-        ? `Schema.StructWithRest(${struct}, [Schema.Record(Schema.String, Schema.Json)])`
-        : struct;
+      expression =
+        schema.additionalProperties === false
+          ? struct
+          : `Schema.StructWithRest(${struct}, [Schema.Record(${additionalKeySource(schema)}, ${schema.additionalProperties === true ? "Schema.Json" : schemaSource(schema.additionalProperties, reference)})])`;
       break;
     }
     case "array": {
-      expression = `Schema.Array(${schemaSource(schema.items)})`;
+      expression = `Schema.Array(${schemaSource(schema.items, reference)})`;
       break;
     }
     case "boolean":
@@ -63,16 +100,11 @@ export const schemaSource = (schema: WireSchema): string => {
         number: "Finite",
         string: "String",
       };
-      if (schema.enum) {
-        const values = schema.enum.filter((value) => value !== null);
-        expression = values.length === 0 ? "Schema.Null" : `Schema.Literals(${literal(values)})`;
-        if (values.length > 0 && schema.enum.includes(null)) {
-          expression = `Schema.NullOr(${expression})`;
-        }
-      } else {
-        expression = `Schema.${names[schema.kind]}`;
-      }
-
+      const values = schema.enum?.filter((value) => value !== null);
+      expression =
+        values === undefined
+          ? `Schema.${names[schema.kind]}`
+          : `Schema.Literals(${literal(values)})`;
       break;
     }
     default: {
@@ -80,7 +112,11 @@ export const schemaSource = (schema: WireSchema): string => {
     }
   }
 
-  return schema.nullable && !("enum" in schema && schema.enum)
-    ? `Schema.NullOr(${expression})`
-    : expression;
+  if (schema.checks && schema.checks.length > 0) {
+    expression += `.check(${schema.checks.map((check) => `Schema.${check.name}(${check.name === "isPattern" ? regexSource(String(check.value)) : literal(check.value)})`).join(", ")})`;
+  }
+
+  const allowsNull = nullableSchema(schema);
+
+  return allowsNull ? `Schema.NullOr(${expression})` : expression;
 };

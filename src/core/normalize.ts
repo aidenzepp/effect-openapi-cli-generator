@@ -9,8 +9,10 @@ import type {
   HttpMethod,
   Operation,
   Parameter,
+  SecurityRequirement,
 } from "./model.js";
 import { pointerSegment, resolveReference } from "./references.js";
+import { normalizeSecurity } from "./security.js";
 import { normalizeSchema } from "./schema.js";
 
 /**
@@ -234,7 +236,7 @@ const normalizeParameter = (
   at: string,
   version: "3.0" | "3.1",
   name: string,
-  parameterIn: "path" | "query",
+  parameterIn: "path" | "query" | "header",
 ): Effect.Effect<Parameter, GenerationError> =>
   Effect.gen(function* decodeParameter() {
     yield* keys(
@@ -266,7 +268,7 @@ const normalizeParameter = (
       return yield* fail(`${at}/required`, "Path parameters must be required.");
     }
 
-    const style = parameterIn === "path" ? "simple" : "form";
+    const style = parameterIn === "query" ? "form" : "simple";
     if (Object.hasOwn(source, "style") && source.style !== style) {
       return yield* fail(
         `${at}/style`,
@@ -286,6 +288,7 @@ const normalizeParameter = (
     }
     const schema = yield* normalizeSchema(document, source.schema, `${at}/schema`, version);
     if (
+      schema.kind === "oneOf" ||
       schema.kind === "object" ||
       schema.kind === "array" ||
       schema.kind === "null" ||
@@ -343,10 +346,10 @@ const parameterList = (
         return yield* fail(`${at}/name`, "Expected a nonempty parameter name.");
       }
 
-      if (source.in !== "path" && source.in !== "query") {
+      if (source.in !== "path" && source.in !== "query" && source.in !== "header") {
         return yield* fail(
           `${at}/in`,
-          "Only path and query parameters are supported.",
+          "Only scalar path, query and header parameters are supported.",
           "unsupported",
         );
       }
@@ -415,6 +418,26 @@ const pathNames = (
 
     if (/%(?![0-9a-f]{2})/iu.test(path)) {
       return yield* fail(location, "Malformed percent escape in path.");
+    }
+
+    yield* Effect.try({
+      catch: () =>
+        new GenerationError({
+          code: "unsupported",
+          hint: "Use a path with valid UTF-8 percent escapes.",
+          location,
+          message: "The path contains invalid encoded Unicode.",
+        }),
+      try: () => decodeURIComponent(path),
+    });
+
+    const staticPath = path.replaceAll(/\{[^{}]+\}/gu, "");
+    if (/[%:;@&=+$,[\]]/u.test(staticPath)) {
+      return yield* fail(
+        location,
+        "Static reserved URI syntax and percent escapes are unsupported; the generator cannot preserve their exact spelling with segment encoding.",
+        "unsupported",
+      );
     }
 
     const names: string[] = [];
@@ -566,6 +589,7 @@ const projectOperations = (
   ordered: readonly Parameter[],
   body: Operation["body"],
   documentation: Documentation,
+  security: SecurityRequirement | undefined,
   addresses: string[][],
   operations: Operation[],
 ) =>
@@ -589,15 +613,22 @@ const projectOperations = (
         return yield* fail(opAt, "Empty command path.");
       }
 
-      const subject =
-        action === "list" || action === "bulk" || action.startsWith("bulk-")
-          ? undefined
-          : names.at(-1);
       const used = new Set(reservedFlags);
+      if (security) {
+        for (const flag of security.kind === "basic"
+          ? [`${security.flagName}-username`, `${security.flagName}-password`]
+          : [security.flagName]) {
+          if (used.has(flag)) {
+            return yield* fail(opAt, `Reserved security flag: ${flag}.`);
+          }
+
+          used.add(flag);
+        }
+      }
+
       const parameters: Parameter[] = [];
       for (const parameter of ordered) {
-        const binding =
-          parameter.location === "path" && parameter.wireName === subject ? "argument" : "flag";
+        const binding = "flag";
         if (binding === "flag") {
           if (used.has(parameter.flagName)) {
             return yield* fail(
@@ -619,6 +650,7 @@ const projectOperations = (
         operationId: yield* string(source.operationId, `${opAt}/operationId`),
         parameters,
         path,
+        security,
       });
     }
 
@@ -682,17 +714,12 @@ const normalizeOperation = (
       opAt,
     );
 
-    const security = Object.hasOwn(source, "security") ? source.security : own(root, "security");
-    if (
-      security !== undefined &&
-      (!Schema.is(Schema.Array(Schema.Json))(security) || security.length !== 0)
-    ) {
-      return yield* fail(
+    const security =
+      (yield* normalizeSecurity(
+        document,
+        Object.hasOwn(source, "security") ? source.security : own(root, "security"),
         Object.hasOwn(source, "security") ? `${opAt}/security` : "/security",
-        "Security requirements are unsupported; use an explicit empty security array.",
-        "unsupported",
-      );
-    }
+      )) ?? undefined;
 
     const names = yield* pathNames(path, at);
     const template = path.replaceAll(/\{[^{}]+\}/gu, "{}");
@@ -723,6 +750,26 @@ const normalizeOperation = (
       merged.set(JSON.stringify([parameter.location, parameter.wireName]), parameter);
     }
     const all = [...merged.values()];
+    if (security) {
+      const location = security.kind === "apiKey" ? security.location : "header";
+      const name = security.kind === "apiKey" ? security.name : "authorization";
+      if (
+        all.some(
+          (parameter) =>
+            parameter.location === location &&
+            (location === "header"
+              ? parameter.wireName.toLowerCase() === name.toLowerCase()
+              : parameter.wireName === name),
+        )
+      ) {
+        return yield* fail(
+          `${opAt}/parameters`,
+          "An API parameter conflicts with the active authentication wire field.",
+          "unsupported",
+        );
+      }
+    }
+
     const pathParameters = all.filter((parameter) => parameter.location === "path");
     if (
       pathParameters.length !== names.length ||
@@ -743,7 +790,7 @@ const normalizeOperation = (
 
       ordered.push(parameter);
     }
-    ordered.push(...all.filter((parameter) => parameter.location === "query"));
+    ordered.push(...all.filter((parameter) => parameter.location !== "path"));
 
     const body = yield* requestBody(
       document,
@@ -765,6 +812,7 @@ const normalizeOperation = (
       ordered,
       body,
       documentation,
+      security,
       addresses,
       operations,
     );

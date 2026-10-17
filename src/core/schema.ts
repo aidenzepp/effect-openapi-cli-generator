@@ -29,6 +29,7 @@ const annotations = new Set([
   "examples",
   "externalDocs",
   "$comment",
+  "format",
 ]);
 
 /**
@@ -42,6 +43,18 @@ const structural = new Set([
   "additionalProperties",
   "items",
   "enum",
+  "oneOf",
+  "allOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minItems",
+  "maxItems",
 ]);
 
 /**
@@ -319,12 +332,12 @@ const objectSchema = (
 
     if (
       Object.hasOwn(schema, "additionalProperties") &&
+      !record(schema.additionalProperties) &&
       !Schema.is(Schema.Boolean)(schema.additionalProperties)
     ) {
       return yield* invalid(
         `${location}/additionalProperties`,
-        "Only boolean additionalProperties is supported.",
-        "unsupported",
+        "Expected a boolean or schema object.",
       );
     }
 
@@ -365,12 +378,189 @@ const objectSchema = (
     }
 
     return {
-      additionalProperties: schema.additionalProperties !== false,
+      additionalProperties: record(schema.additionalProperties)
+        ? yield* normalizeChild(
+            document,
+            schema.additionalProperties,
+            `${location}/additionalProperties`,
+            version,
+            activeRefs,
+          )
+        : schema.additionalProperties !== false,
       docs,
       kind: "object",
       nullable,
       properties: normalized,
     };
+  });
+
+/**
+ * Validate supported constraints and retain their native Schema equivalents.
+ */
+const schemaChecks = (
+  schema: Schema.JsonObject,
+  kind: string,
+  location: string,
+  version: "3.0" | "3.1",
+) =>
+  Effect.gen(function* decodeSchemaChecks() {
+    const checks: { name: string; value: number | string }[] = [];
+    const rules = [
+      ["minLength", "string", "isMinCodePoints"],
+      ["maxLength", "string", "isMaxCodePoints"],
+      ["minItems", "array", "isMinLength"],
+      ["maxItems", "array", "isMaxLength"],
+      ["minimum", "numeric", "isGreaterThanOrEqualTo"],
+      ["maximum", "numeric", "isLessThanOrEqualTo"],
+      ["exclusiveMinimum", "numeric", "isGreaterThan"],
+      ["exclusiveMaximum", "numeric", "isLessThan"],
+      ["multipleOf", "numeric", "isMultipleOf"],
+      ["pattern", "string", "isPattern"],
+    ] as const;
+    for (const [key, domain, native] of rules) {
+      if (!Object.hasOwn(schema, key)) {
+        continue;
+      }
+
+      if (domain === "numeric" ? kind !== "integer" && kind !== "number" : kind !== domain) {
+        return yield* invalid(
+          `${location}/${key}`,
+          `Keyword ${key} is incompatible with type ${kind}.`,
+          "unsupported",
+        );
+      }
+
+      let value = schema[key];
+      const name: string = native;
+      if (version === "3.0" && (key === "exclusiveMinimum" || key === "exclusiveMaximum")) {
+        if (!Schema.is(Schema.Boolean)(value)) {
+          return yield* invalid(`${location}/${key}`, "Expected a boolean.");
+        }
+
+        if (!value) {
+          continue;
+        }
+
+        value = schema[key === "exclusiveMinimum" ? "minimum" : "maximum"];
+      }
+
+      if (key === "pattern") {
+        if (!Schema.is(Schema.String)(value)) {
+          return yield* invalid(`${location}/${key}`, "Expected a regex string.");
+        }
+
+        yield* Effect.try({
+          catch: () =>
+            new GenerationError({
+              code: "unsupported",
+              hint: "Use a supported ECMAScript pattern.",
+              location: `${location}/${key}`,
+              message: "Pattern is not a valid Unicode ECMAScript regular expression.",
+            }),
+          try: () => new RegExp(value, "u"),
+        });
+      } else {
+        const bound =
+          domain === "array" || domain === "string"
+            ? Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+            : Schema.Finite;
+        if (!Schema.is(bound)(value) || (key === "multipleOf" && Number(value) <= 0)) {
+          return yield* invalid(`${location}/${key}`, "Expected a valid finite constraint bound.");
+        }
+      }
+
+      if (Schema.is(Schema.Union([Schema.Number, Schema.String]))(value)) {
+        checks.push({ name, value });
+      }
+    }
+
+    return checks;
+  });
+
+/**
+ * Normalize exclusive alternatives or an annotation-only reference composition.
+ */
+const compositionSchema = (
+  document: Schema.Json,
+  schema: Schema.JsonObject,
+  location: string,
+  version: "3.0" | "3.1",
+  activeRefs: ReadonlySet<string>,
+  docs: Documentation,
+  normalizeChild: typeof normalizeSchema,
+): Effect.Effect<WireSchema, GenerationError> =>
+  Effect.gen(function* normalizeComposition() {
+    if (Object.hasOwn(schema, "allOf")) {
+      if (!Schema.is(Schema.Array(Schema.Json))(schema.allOf)) {
+        return yield* invalid(`${location}/allOf`, "Expected an array.");
+      }
+
+      const structuralMembers = schema.allOf.filter(
+        (member) => !record(member) || Object.keys(member).some((key) => !annotation(key)),
+      );
+      if (
+        structuralMembers.length !== 1 ||
+        !record(structuralMembers[0]) ||
+        !Object.hasOwn(structuralMembers[0], "$ref") ||
+        Object.keys(schema).some((key) => key !== "allOf" && !annotation(key))
+      ) {
+        return yield* invalid(
+          `${location}/allOf`,
+          "Only a model reference combined with annotations is supported.",
+          "unsupported",
+        );
+      }
+
+      const compositionDocs: MutableDocumentation = {};
+      for (const [index, member] of schema.allOf.entries()) {
+        if (record(member)) {
+          Object.assign(
+            compositionDocs,
+            yield* documentation(member, `${location}/allOf/${index}`),
+          );
+        }
+      }
+      const resolved = yield* normalizeChild(
+        document,
+        structuralMembers[0],
+        `${location}/allOf`,
+        version,
+        activeRefs,
+      );
+
+      return { ...resolved, docs: { ...resolved.docs, ...compositionDocs, ...docs } };
+    }
+
+    if (Object.hasOwn(schema, "oneOf")) {
+      if (!Schema.is(Schema.Array(Schema.Json))(schema.oneOf) || schema.oneOf.length === 0) {
+        return yield* invalid(`${location}/oneOf`, "Expected a nonempty array of schemas.");
+      }
+
+      if (Object.keys(schema).some((key) => key !== "oneOf" && !annotation(key))) {
+        return yield* invalid(
+          location,
+          "Constraints alongside oneOf are unsupported.",
+          "unsupported",
+        );
+      }
+
+      const members: WireSchema[] = [];
+      for (const [index, member] of schema.oneOf.entries()) {
+        members.push(
+          yield* normalizeChild(
+            document,
+            member,
+            `${location}/oneOf/${index}`,
+            version,
+            activeRefs,
+          ),
+        );
+      }
+
+      return { docs, kind: "oneOf", members, nullable: false };
+    }
+
+    return yield* invalid(location, "Expected a supported composition.", "unsupported");
   });
 
 /**
@@ -429,10 +619,27 @@ export const normalizeSchema = (
         resolved.activeRefs,
       );
 
-      return { ...result, docs: { ...result.docs, ...docs } };
+      return {
+        ...result,
+        docs: { ...result.docs, ...docs },
+        reference: { pointer: resolved.location, schema: result },
+      };
+    }
+
+    if (Object.hasOwn(schema, "allOf") || Object.hasOwn(schema, "oneOf")) {
+      return yield* compositionSchema(
+        document,
+        schema,
+        location,
+        version,
+        activeRefs,
+        docs,
+        normalizeSchema,
+      );
     }
 
     const { kind, nullable } = yield* schemaKind(schema, location, version);
+    const checks = yield* schemaChecks(schema, kind, location, version);
     for (const key of ["additionalProperties", "items", "properties", "required"]) {
       if (Object.hasOwn(schema, key) && (key === "items" ? kind !== "array" : kind !== "object")) {
         return yield* invalid(
@@ -461,6 +668,7 @@ export const normalizeSchema = (
       }
 
       return {
+        checks,
         docs,
         items: yield* normalizeSchema(
           document,
@@ -476,5 +684,5 @@ export const normalizeSchema = (
 
     const values = yield* enumValues(schema, location, kind, nullable);
 
-    return { docs, enum: values, kind, nullable };
+    return { checks, docs, enum: values, kind, nullable };
   });

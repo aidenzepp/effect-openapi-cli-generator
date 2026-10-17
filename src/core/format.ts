@@ -20,30 +20,53 @@ export const formatApplication = (
         continue;
       }
 
-      const result = yield* Effect.tryPromise({
-        catch: (cause) =>
-          new GenerationError({
+      let { content } = file;
+      let stable = false;
+      // Oxfmt can reflow nested JSDoc after the first pass changes its indentation.
+      for (let pass = 0; pass < 4; pass += 1) {
+        const input = content;
+        const result = yield* Effect.tryPromise({
+          catch: (cause) =>
+            new GenerationError({
+              code: "format",
+              hint: "",
+              location: file.path,
+              message: String(cause),
+            }),
+          try: () =>
+            format(file.path, input, {
+              endOfLine: "lf",
+              jsdoc: { commentLineStrategy: "multiline", lineWrappingStyle: "balance" },
+              sortImports: { newlinesBetween: false },
+            }),
+        });
+        if (result.errors.length > 0) {
+          return yield* new GenerationError({
             code: "format",
             hint: "",
             location: file.path,
-            message: String(cause),
-          }),
-        try: () =>
-          format(file.path, file.content, {
-            endOfLine: "lf",
-            jsdoc: { commentLineStrategy: "multiline", lineWrappingStyle: "balance" },
-          }),
-      });
-      if (result.errors.length > 0) {
+            message: JSON.stringify(result.errors),
+          });
+        }
+
+        const next = `${result.code.trimEnd()}\n`;
+        if (next === content) {
+          stable = true;
+          break;
+        }
+
+        content = next;
+      }
+      if (!stable) {
         return yield* new GenerationError({
           code: "format",
-          hint: "",
+          hint: "Inspect the formatter result for unstable formatting.",
           location: file.path,
-          message: JSON.stringify(result.errors),
+          message: "Formatting did not stabilize within four passes.",
         });
       }
 
-      files.push({ content: `${result.code.trimEnd()}\n`, path: file.path });
+      files.push({ content, path: file.path });
     }
 
     return { files };
