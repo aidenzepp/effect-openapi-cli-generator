@@ -1,0 +1,11 @@
+{
+  "operations": [
+    { "method": "get", "path": "/user/tokens" },
+    { "method": "get", "path": "/user/tokens/permission_groups" },
+    { "method": "get", "path": "/user/tokens/verify" }
+  ],
+  "revision": "15656f084dd7a0ada54f8f659c749a7248254b9f",
+  "sha256": "d1d390a0d062d5686c448b01f57a7a72e7f61594929f1888137e81499efc97c9",
+  "sliceSha256": "0664b4752f98f9614c3551db471b5d945fc6daef661f981a425f94f0719cc68b",
+  "url": "https://raw.githubusercontent.com/cloudflare/api-schemas/15656f084dd7a0ada54f8f659c749a7248254b9f/openapi.json"
+}

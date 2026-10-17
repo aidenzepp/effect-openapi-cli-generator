@@ -91,3 +91,5 @@ Referenced JSON request bodies reuse validators from `components/request-bodies.
 Multipart bundle identity prefers an explicit schema reference. When the media schema is inline inside a referenced request body, its request-body pointer supplies the bundle identity instead; request-body aliases reuse that bundle. Names are allocated across both pointer categories without collisions.
 
 API-derived descriptions retain source text, including whitespace and explicit empty descriptions. Summary or title is a fallback only when description is absent. The generator adds no default summaries, requiredness prose or JSON-array instructions to these descriptions; source prose mentioning defaults remains unchanged. Native Effect usage and choices remain available, and generator-owned flags retain their own help.
+
+[Cloudflare token-discovery example](examples/cloudflare-generated/README.md) generates three unchanged operations from a checksum-pinned official specification. Its extraction tool preserves upstream naming and transitive references without overlays; the example README records current full-spec blockers.
