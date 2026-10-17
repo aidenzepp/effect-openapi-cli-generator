@@ -1,4 +1,3 @@
-import { sourceExamples } from "./examples.js";
 import { array, boolean, object, string } from "./input.js";
 import { Array as EffectArray, Effect, Order, Schema } from "effect";
 import { mapCommands } from "./commands.js";
@@ -367,7 +366,6 @@ const normalizeParameter = (
     const parameter: Parameter = {
       binding: "flag",
       docs: yield* docs(source, at),
-      examples: yield* sourceExamples(document, source),
       flagName: yield* flagName(name, `${at}/name`),
       location: parameterIn,
       required: source.required === true,
@@ -722,12 +720,7 @@ const requestBody = (
     yield* keys(media, ["schema", "example", "examples"], mediaAt);
 
     const schema = yield* normalizeSchema(document, media.schema, `${mediaAt}/schema`, version);
-    const body = {
-      docs: yield* docs(source, at),
-      examples: yield* sourceExamples(document, media),
-      required: source.required === true,
-      schema,
-    };
+    const body = { docs: yield* docs(source, at), required: source.required === true, schema };
     if (mediaType === "multipart/form-data") {
       return yield* bodyReference(
         {

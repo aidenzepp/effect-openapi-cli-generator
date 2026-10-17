@@ -1,5 +1,3 @@
-import { exampleSchema } from "../src/core/example-schema.js";
-import { normalizeSchema } from "../src/core/schema.js";
 import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -268,23 +266,11 @@ test("model constraints preserve code points, exact oneOf, extras and null enum 
       models.Case4,
       models.Case5,
     ];
-    const nativeValidators = await Promise.all(
-      variants.map(async (variant) =>
-        exampleSchema(await Effect.runPromise(normalizeSchema({}, variant, "/schema", "3.1"))),
-      ),
-    );
     const accepts = (index: number, value: Schema.Json) => {
       const validator = validators[index];
       if (validator === undefined) {
         throw new Error("Missing fixture validator.");
       }
-
-      const native = nativeValidators[index];
-      if (native === undefined) {
-        throw new Error("Missing native validator.");
-      }
-
-      expect(Schema.is(native)(value)).toBe(Schema.is(validator)(value));
 
       return Schema.is(validator)(value);
     };
@@ -984,103 +970,3 @@ test("authored descriptions remain exact while empty overrides and fallbacks sta
   expect(parameters).not.toContain("Server default");
   await checkPackage(output);
 });
-
-test("native examples run literal shell values through the emitted CLI and preserve source help", async () => {
-  const hostile = "-value ' $(printf injected) `printf injected`";
-  const payload = {
-    count: 0,
-    enabled: false,
-    message: `${hostile}\nnext`,
-    nothing: null,
-    values: ["", "a,b"],
-  };
-  const input = {
-    components: { schemas: { Payload: { additionalProperties: true, type: "object" } } },
-    info: { title: "Example App", version: "1" },
-    openapi: "3.1.0",
-    paths: {
-      "/records": {
-        post: {
-          description: "Source-owned description.",
-          operationId: "records/create",
-          parameters: [
-            {
-              example: hostile,
-              in: "query",
-              name: "search",
-              required: true,
-              schema: { type: "string" },
-            },
-            {
-              example: ["", "a,b"],
-              in: "query",
-              name: "labels",
-              schema: { items: { type: "string" }, type: "array" },
-            },
-          ],
-          requestBody: {
-            content: {
-              "application/json": {
-                examples: { complete: { description: "Source-owned example.", value: payload } },
-                schema: { $ref: "#/components/schemas/Payload" },
-              },
-            },
-            required: true,
-          },
-          responses: { "200": { description: "OK" } },
-        },
-      },
-    },
-  };
-  const output = await Effect.runPromise(generate(input));
-  expect(source(output, "commands")).toContain("Command.withExamples");
-  await checkPackage(output, async (directory) => {
-    const build = Bun.spawnSync([path.resolve("node_modules/.bin/tsc"), "-p", directory]);
-    expect(build.exitCode).toBe(0);
-
-    const main = path.join(directory, "dist/main.js");
-    const rendered = Bun.spawnSync(["node", main, "records", "create", "--help"]);
-    expect(rendered.exitCode).toBe(0);
-
-    const text = rendered.stdout.toString();
-    expect(text).toContain("Source-owned description.");
-    expect(text).toContain("Source-owned example.");
-    expect(text).toContain("EXAMPLES");
-
-    const usage =
-      text
-        .split("\n")
-        .find((line) => line.trimStart().startsWith("example-app records create --"))
-        ?.trim() ?? "";
-    expect(usage).not.toBe("");
-
-    const requests: { body: unknown; search: string | null; labels: string[] }[] = [];
-    const server = Bun.serve({
-      async fetch(request) {
-        const url = new URL(request.url);
-        requests.push({
-          body: await request.json(),
-          labels: url.searchParams.getAll("labels"),
-          search: url.searchParams.get("search"),
-        });
-
-        return new Response("ok");
-      },
-      port: 0,
-    });
-    try {
-      const executable = `node '${main}'`;
-      const command = usage.replace(/^example-app/u, executable);
-      const run = Bun.spawn(["/bin/sh", "-c", command], {
-        env: { ...process.env, API_BASE_URL: server.url.toString() },
-        stderr: "pipe",
-        stdout: "pipe",
-      });
-      const [code, stderr] = await Promise.all([run.exited, new Response(run.stderr).text()]);
-      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
-      expect(requests).toEqual([{ body: payload, labels: ["", "a,b"], search: hostile }]);
-    } finally {
-      await server.stop(true);
-    }
-  });
-}, 30_000);

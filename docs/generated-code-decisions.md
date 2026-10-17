@@ -574,10 +574,4 @@ Native Effect usage, enum choices and the `JSON_ARRAY` metavar remain native. Ge
 
 JSDoc retains safe escaping and structural `@deprecated` and `@see` annotations. Do not replace native help rendering or infer validation/error messages from documentation.
 
-## Source-owned usage examples
-
-Use native `Command.withExamples` for a separate `EXAMPLES` section; do not rewrite descriptions to add usage. Prefer usable complete media `example`/named `examples`, then complete schema `example`/`examples`. Resolve local example aliases without fetching `externalValue`. Preserve named-example descriptions and OpenAPI reference dialect behavior. Validate candidates against the same normalized contract as generated validators, including exclusive unions, additional properties, nullability and native checks.
-
-Assemble at most one object from property examples when every required property is available and the complete object validates. Do not assemble union branches, invent values from defaults/enums, or expand combinations. Parameters use their first valid source example; a missing required value suppresses the whole command example. Bound body alternatives to three. This establishes supported-schema validity, not business-level compatibility of independently authored examples.
-
-Use actual executable, command projections and flag spellings. POSIX shell values use single-quote escaping with `--flag=value`; base URL and auth use conspicuous required environment placeholders. Check copied rendered help against the real generated CLI on a local server. Skip scalar NUL/line-break examples that argv or native help cannot preserve; JSON escaping preserves these characters inside bodies. Multipart examples remain deferred so binary content examples cannot become path names. Do not change source descriptions, insert defaults, fetch external examples or execute examples against live APIs.
+Generated CLIs do not emit usage examples or `Command.withExamples`. OpenAPI example fields remain in the source specification and are not converted into command help.

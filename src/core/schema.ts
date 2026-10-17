@@ -90,9 +90,6 @@ const invalid = (
     }),
   );
 
-const allowsExampleAnnotations = (input: Schema.JsonObject, version: "3.0" | "3.1"): boolean =>
-  !Object.hasOwn(input, "$ref") || version === "3.1";
-
 /**
  * Decodes schema annotations while preserving their exact text.
  *
@@ -103,19 +100,9 @@ const allowsExampleAnnotations = (input: Schema.JsonObject, version: "3.0" | "3.
 const documentation = (
   input: Schema.JsonObject,
   location: string,
-  examplesAllowed = true,
 ): Effect.Effect<Documentation, GenerationError> =>
   Effect.gen(function* decodeSchemaDocumentation() {
     const docs: MutableDocumentation = {};
-    const examples = input.example === undefined ? [] : [{ value: input.example }];
-    if (Schema.is(Schema.Array(Schema.Json))(input.examples)) {
-      examples.push(...input.examples.map((value) => ({ value })));
-    }
-
-    if (examplesAllowed && examples.length > 0) {
-      docs.examples = examples;
-    }
-
     for (const key of ["deprecated", "description", "externalDocs", "title"] as const) {
       if (!Object.hasOwn(input, key)) {
         continue;
@@ -529,11 +516,7 @@ const compositionSchema = (
         if (record(member)) {
           Object.assign(
             compositionDocs,
-            yield* documentation(
-              member,
-              `${location}/allOf/${index}`,
-              allowsExampleAnnotations(member, version),
-            ),
+            yield* documentation(member, `${location}/allOf/${index}`),
           );
         }
       }
@@ -657,7 +640,7 @@ export const normalizeSchema = (
         );
       }
     }
-    const docs = yield* documentation(schema, location, allowsExampleAnnotations(schema, version));
+    const docs = yield* documentation(schema, location);
     if (hasRef) {
       if (!Schema.is(Schema.String)(schema.$ref)) {
         return yield* invalid(`${location}/$ref`, "Expected a reference string.");

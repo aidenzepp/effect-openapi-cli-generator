@@ -1026,14 +1026,7 @@ const contactsCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("contacts/create"),
     ),
-).pipe(
-  Command.withDescription("Create a new contact"),
-  Command.withExamples([
-    {
-      command: `resend-full-generated contacts create --base-url="\${API_BASE_URL:?Set API_BASE_URL}" --bearer-auth="\${API_TOKEN:?Set API_TOKEN}" --body='{"audience_id":"78261eea-8f8b-4381-83c6-79fa7120f1cf","email":"steve.wozniak@gmail.com","first_name":"Steve","last_name":"Wozniak","unsubscribed":false}'`,
-    },
-  ]),
-);
+).pipe(Command.withDescription("Create a new contact"));
 
 /**
  * Retrieve a list of contact imports
@@ -2679,14 +2672,7 @@ const suppressionsAddCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/add"),
     ),
-).pipe(
-  Command.withDescription("Create a suppression"),
-  Command.withExamples([
-    {
-      command: `resend-full-generated suppressions add --base-url="\${API_BASE_URL:?Set API_BASE_URL}" --bearer-auth="\${API_TOKEN:?Set API_TOKEN}" --body='{"email":"steve.wozniak@gmail.com"}'`,
-    },
-  ]),
-);
+).pipe(Command.withDescription("Create a suppression"));
 
 /**
  * Add up to 100 suppressions at once
@@ -2722,14 +2708,7 @@ const suppressionsBatchAddCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/batch-add"),
     ),
-).pipe(
-  Command.withDescription("Add up to 100 suppressions at once"),
-  Command.withExamples([
-    {
-      command: `resend-full-generated suppressions batch-add --base-url="\${API_BASE_URL:?Set API_BASE_URL}" --bearer-auth="\${API_TOKEN:?Set API_TOKEN}" --body='{"emails":["steve.wozniak@gmail.com"]}'`,
-    },
-  ]),
-);
+).pipe(Command.withDescription("Add up to 100 suppressions at once"));
 
 /**
  * Remove up to 100 suppressions at once
@@ -2765,14 +2744,7 @@ const suppressionsBatchRemoveCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("suppressions/batch-remove"),
     ),
-).pipe(
-  Command.withDescription("Remove up to 100 suppressions at once"),
-  Command.withExamples([
-    {
-      command: `resend-full-generated suppressions batch-remove --base-url="\${API_BASE_URL:?Set API_BASE_URL}" --bearer-auth="\${API_TOKEN:?Set API_TOKEN}" --body='{"emails":["steve.wozniak@gmail.com"],"ids":["e169aa45-1ecf-4183-9955-b1499d5701d3"]}'`,
-    },
-  ]),
-);
+).pipe(Command.withDescription("Remove up to 100 suppressions at once"));
 
 /**
  * Retrieve a single suppression by ID or email
@@ -3228,14 +3200,7 @@ const webhooksCreateCommand = Command.make(
       Effect.mapError(Errors.toCliError),
       Effect.withSpan("webhooks/create"),
     ),
-).pipe(
-  Command.withDescription("Create a new webhook"),
-  Command.withExamples([
-    {
-      command: `resend-full-generated webhooks create --base-url="\${API_BASE_URL:?Set API_BASE_URL}" --bearer-auth="\${API_TOKEN:?Set API_TOKEN}" --body='{"endpoint":"https://webhook.example.com/handler","events":["email.sent","email.delivered","email.bounced","email.suppressed"]}'`,
-    },
-  ]),
-);
+).pipe(Command.withDescription("Create a new webhook"));
 
 /**
  * Retrieve a single webhook

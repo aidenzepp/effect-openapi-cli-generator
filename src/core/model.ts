@@ -1,5 +1,3 @@
-import type { Schema } from "effect";
-
 /**
  * The original supported HTTP verbs; command spelling never changes this value.
  */
@@ -13,13 +11,7 @@ export type JsonScalar = string | number | boolean | null;
 /**
  * Source annotations retained for generated help, JSDoc, and deprecation metadata.
  */
-export interface SourceExample {
-  readonly value: Schema.Json;
-  readonly description?: string;
-}
-
 export interface Documentation {
-  readonly examples?: readonly SourceExample[];
   readonly summary?: string;
   readonly title?: string;
   readonly description?: string;
@@ -63,7 +55,6 @@ export type WireSchema = {
  * A scalar request parameter whose wire identity remains separate from its CLI binding.
  */
 export interface Parameter {
-  readonly examples?: readonly SourceExample[];
   readonly reference?: { readonly pointer: string; readonly parameter: Parameter };
   readonly wireName: string;
   readonly flagName: string;
@@ -104,7 +95,6 @@ export interface Operation {
  * A request-body contract with its explicit component identity and use-site documentation.
  */
 export interface RequestBody {
-  readonly examples?: readonly SourceExample[];
   readonly required: boolean;
   readonly schema: WireSchema;
   readonly docs: Documentation;
