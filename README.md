@@ -54,7 +54,7 @@ The library accepts parsed JSON and performs no filesystem or network access. Fa
 - Supported request schemas include primitive types, scalar enums, arrays, objects, required properties, boolean or schema-valued additionalProperties and explicit local references. Nullable behavior follows the OpenAPI version.
 - Unsupported request features fail with a location-bearing diagnostic: remote/cyclic references, unsupported schema compositions/validation keywords, security alternatives/combinations, ordinary cookie parameters, complex parameter serialization, and unsupported body media types. This is a deliberate subset, not full OpenAPI or Forge parity.
 
-Read [the project direction](docs/project.md) for architecture and generated-code quality requirements, and [AGENTS.md](AGENTS.md) before contributing.
+Read [the project direction](docs/project.md) for architecture and generated-code quality requirements, [the conversation audit](docs/conversation-decision-audit.md) for decision and rejection history, and [AGENTS.md](AGENTS.md) before contributing.
 
 ## Modular output and expanded request support
 

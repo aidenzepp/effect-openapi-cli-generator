@@ -6,7 +6,7 @@ Read README.md and docs/project.md first. For emitted code or reference changes,
 
 - Follow existing repository and supplied reference patterns. Explain necessary deviations before introducing a different convention.
 - Use verified, version-pinned GitHub source URLs for external dependency `@see` links; do not link installed `node_modules` paths.
-- In hand-written references and generated CLI output, inline API flag definitions in each owning command. Share schemas only through explicit OpenAPI model references, not inferred structural similarity. CLI-owned configuration such as baseUrl may remain shared.
+- In hand-written references and generated CLI output, keep flags for inline API definitions inside each owning command. Explicit OpenAPI parameter references share native flags; explicit schema references share validators, not entire flags. Preserve named request-body and multipart component reuse as documented. Do not infer sharing from structural similarity. CLI-owned configuration such as baseUrl may remain shared.
 - Keep normal lint key ordering; do not add key-sort exceptions to preserve CLI flag order.
 - Use Effect APIs and typed errors at runtime. Preserve HTTP request semantics and wire schemas; command names do not imply HTTP verbs.
 - Prefer the smallest explicit implementation. Reject unsupported input with useful errors rather than silently guessing.
@@ -24,7 +24,7 @@ Keep changes local for user review. Do not push, publish, or deploy without expl
 
 - Use `.agents/skills/conventional-commits/SKILL.md` when staging or committing.
 - Use `.agents/skills/document-code/SKILL.md` when writing or reviewing code; keep JSDoc multiline and imports contiguous.
-- For the hand-written reference and generated CLI output, prefer documentation from standard OpenAPI summaries and descriptions. This overrides blanket declaration coverage: add implementation comments only for meaningful non-obvious constraints, not redundant constant or group descriptions.
+- For the hand-written reference and generated CLI output, prefer documentation from standard OpenAPI summaries and descriptions. This overrides blanket API-declaration coverage: do not add redundant constant or group descriptions. Generator-owned builtins have known contracts and require concise authored JSDoc, even when no OpenAPI prose exists.
 - Use `.agents/skills/effect-design/SKILL.md` when writing or reviewing Effect code, schemas, or configuration composition. Read its labeled examples and inspect installed APIs before building custom equivalents. Name selected native capabilities and justify custom glue in the handoff.
 - Before writing Effect code, read `node_modules/effect/AGENTS.md` completely and follow relevant links; consult installed source for uncovered APIs and preserve pinned versions.
 - Use `.agents/skills/trace-effect/SKILL.md` when changing effectful operations or reviewing observability. Trace meaningful operations and external requests; review coverage without tests for every span or log.

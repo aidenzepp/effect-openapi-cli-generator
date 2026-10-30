@@ -1,6 +1,6 @@
 # Generated code decisions
 
-This is the canonical guide to the approved output style and its reasons. Read it before changing emission or the hand-written references. The goal is maintainable Effect CLI code whose choices can be traced to the OpenAPI specification.
+This is the canonical guide to the approved output style and its reasons. Read it before changing emission or the hand-written references. The goal is maintainable Effect CLI code whose choices can be traced to the OpenAPI specification. The [conversation audit](conversation-decision-audit.md) records the approval and rejection history, quote anchors, and remaining evidence limits; this guide owns the current rules.
 
 ## Target and implementation status
 
@@ -158,7 +158,7 @@ The semantic shortcut obscures the original keyword. The predicate and message r
 
 Select native checks by semantics, not name alone. In the pinned Effect version, `isMinLength` counts UTF-16 code units; JSON Schema string lengths count Unicode code points. The illustrated bound of one is equivalent. For general string bounds, the installed native `Schema.isMinCodePoints` and `Schema.isMaxCodePoints` preserve JSON Schema semantics; use Unicode tests to verify their application. Regex flags and escaping likewise need verification before generalizing this example.
 
-URL construction must preserve path segments independently of schema validation. A missing pattern does not authorize adding domain restrictions to the schema. Handling otherwise unrepresentable path values is a separate request-construction responsibility; this guide does not settle its future API.
+URL construction must preserve path segments independently of schema validation. A missing pattern does not authorize adding domain restrictions to the schema. Handling otherwise unrepresentable path values is a separate request-construction responsibility, implemented by the shared segment helpers described under [request construction](#share-cli-execution-keep-request-construction-explicit).
 
 ## Share only when the specification declares reuse
 
@@ -345,27 +345,16 @@ const appendPathSegments =
 
 Assemble complete segments before encoding. `appendPathSegments("files", "bar.json")` retains the dotted filename; ``appendPathSegments("files", `${name}.json`)`` encodes the completed mixed segment, including any slash within `name`, as one segment. Do not split a parameter on slash or encode a multi-segment path string as one value. The helper preserves the configured base URL prefix. `runRequest` still owns HTTP execution/output; `Errors.toCliError` owns CLI conversion.
 
-Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`, so map that failure before entering `runRequest`. Preserve its typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors. Map encoding errors inside the body operation, after `Effect.flatMap` enters that operation. A mapping around the whole pipeline would incorrectly replace path errors with a JSON encoding message.
+Use checked `HttpClientRequest.bodyJson` for JSON bodies. Encoding returns an Effect with `HttpBodyError`; the body helper owns its safe conversion before entering `runRequest`. Preserve the typed cause; the HTTP reason formatter handles HTTP errors, not JSON body errors. Keep encoding-error conversion inside the body operation. A mapping around the whole pipeline would incorrectly replace path errors with a JSON encoding message.
 
 **POSITIVE — Keep encoding failure in the Effect error channel.**
 
 ```ts
 HttpClientRequest.post(apiUrl).pipe(
-  appendPathSegments("users", user, "posts"),
-  Effect.flatMap((request) =>
-    HttpClientRequest.bodyJson(request, body).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CliError.UserError({
-            cause,
-            userMessage: "The request body could not be encoded as JSON. Check the body values.",
-          }),
-      ),
-    ),
-  ),
-  Effect.flatMap(runRequest),
+  Url.appendPathSegments("users", user, "posts"),
+  Effect.flatMap(Body.withBody(body, bodyFile, true, Schemas.CreatePost)),
+  Effect.flatMap(Http.runRequest),
   Effect.mapError(Errors.toCliError),
-  Effect.withSpan("posts.create"),
 );
 ```
 
@@ -476,7 +465,7 @@ A representative optional body path keeps absence distinct from JSON data:
   );
 ```
 
-The generator additionally retains mutually exclusive `--body-file` through a small native filesystem/body helper; the schema remains explicit at the command boundary. The resulting encoding error is mapped to `CliError.UserError` before `Effect.flatMap(runRequest)`. Do not substitute a default object or array, or make the flag required because the endpoint usually expects a body.
+The generator additionally retains mutually exclusive `--body-file` through a small native filesystem/body helper; the schema remains explicit at the command boundary. The body helper maps an encoding failure to a safe native CLI error before HTTP execution. Do not substitute a default object or array, or make the flag required because the endpoint usually expects a body.
 
 ## Generator utility choices
 
@@ -575,3 +564,23 @@ Native Effect usage, enum choices and the `JSON_ARRAY` metavar remain native. Ge
 JSDoc retains safe escaping and structural `@deprecated` and `@see` annotations. Do not replace native help rendering or infer validation/error messages from documentation.
 
 Generated CLIs do not emit usage examples or `Command.withExamples`. OpenAPI example fields remain in the source specification and are not converted into command help.
+
+## Executable identity and native help
+
+The generator library option `name` and generator CLI `--name` explicitly override the executable/package name. Otherwise derive it from `info.title`. These are generation-time options, not flags of the generated API CLI. The generated package version is independent of `info.version`.
+
+Keep generated flags in kebab case while retaining original API field names on the wire. Reject collisions with CLI-owned flags such as `--base-url`; do not overwrite either contract. The current normalizer also rejects conflicting native/global and body/auth flag names. TypeScript identifier collisions are a separate allocation problem from visible command/flag collisions.
+
+Use native Effect help and validation. The installed help metadata records requiredness, but its default flag renderer does not label every required/optional flag. The user accepted that limitation rather than authoring extra description text. `Flag.optional` still controls runtime omission; `Flag.withDefault` changes runtime values and must not be used merely to display server defaults. Native enum choices are appropriate; invented enum choices are not.
+
+Source prose about a format does not change the declared type. Resend's `column_map` describes JSON-encoded text but declares a string: the caller passes one shell-quoted JSON-looking string, and the CLI sends that string unchanged. Do not parse it as an object merely because the description says JSON.
+
+## Output review and rejected presentation features
+
+Develop a small, readable handwritten target from an actual specification, review it in chat, and then make the generator reproduce that style. Expand with pinned real specifications and compare input, generated source and actual CLI output. A handwritten reference is a design target, not proof of generator coverage.
+
+Show snippets of proposed or changed output in chat and identify the exact file being reviewed. Read disk state and regenerate from current source when an editor view and a claimed change disagree. Do not attribute unexplained file reversions to the user or editor without evidence. Keep applicable template lint/format/skill conventions; database-specific machinery and Superpowers process documents are not product deliverables.
+
+Do not add generated-file warning banners or blanket top-of-file JSDoc. The user withdrew that request and left reconsideration for later. This is separate from meaningful builtin JSDoc and source-derived API documentation.
+
+No usage examples are emitted. `Command.withExamples` was implemented and then explicitly removed; the subsequent suggestion to select `servers[].url` instead of shell environment placeholders was never approved as replacement work. Do not revive either approach through an unrelated change.

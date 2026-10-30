@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build `effect-openapi-cli-generator`: a reusable TypeScript package and generator CLI that produce standalone, maintainable Effect CLI source from OpenAPI specifications or Effect HttpApi definitions. Generated applications should feel like code an Effect developer would choose to maintain.
+Build `effect-openapi-cli-generator`: a reusable TypeScript package and generator CLI whose primary input is OpenAPI JSON and whose output is standalone, maintainable Effect CLI source. Effect HttpApi is intended as a shorthand adapter for an API the caller owns, feeding the same pipeline rather than a separate generator architecture. Generated applications should feel like code an Effect developer would choose to maintain.
 
 The repository implements the OpenAPI 3.0/3.1 JSON generation path, including a pure library, a Node CLI, standalone source output, and executable boundary tests. The Effect HttpApi adapter and npm publication remain deferred. README.md records the supported input subset and invocation contract.
 
@@ -50,7 +50,7 @@ Use kebab-case filenames. Keep modules focused and add them when real behavior n
 
 ## Generated-code quality
 
-[Generated code decisions](generated-code-decisions.md) records the approved output style, rationale, positive and negative examples, and differences between the hand-written targets and current generator support.
+[Generated code decisions](generated-code-decisions.md) records the approved output style, rationale, positive and negative examples, and differences between the hand-written targets and current generator support. The [conversation decision audit](conversation-decision-audit.md) distinguishes accepted, rejected, superseded and unresolved discussion, with source anchors.
 
 - Use Effect's CLI, Schema, HTTP, Config, FileSystem, and runtime facilities where applicable. Use its process and resource facilities when a feature requires them.
 - Preserve schema constraints and wire representations through decoding and request construction. Report failures through typed errors with actionable context.
@@ -64,4 +64,4 @@ Use kebab-case filenames. Keep modules focused and add them when real behavior n
 
 Start with a small end-to-end slice: accept a supported specification, generate a real Effect command, compile it, and verify the resulting HTTP request. Expand supported inputs and overrides from tested contracts.
 
-The requested [users reference](../examples/reference/README.md) and [content reference](../examples/content-reference/README.md) are hand-written output targets. The [demo specification](../examples/demo/openapi.json) exercises the current generator. Benchmark suites and Alchemy infrastructure remain outside this work. Large public API specifications can later measure generation time, memory, output size, startup cost, and supported-operation coverage. Add those evaluation assets in a separate implementation task.
+The requested [users reference](../examples/reference/README.md) and [content reference](../examples/content-reference/README.md) are hand-written output targets. The [demo specification](../examples/demo/openapi.json) exercises the current generator. Benchmark suites and Alchemy infrastructure remain outside this work. Pinned Resend and Cloudflare examples now exercise real specifications; their READMEs distinguish handwritten targets, generated slices and the full Resend output. Benchmarking generation time, memory, output size and startup cost remains outside the current work. Broader Cloudflare support is follow-up work, not an approved implementation plan merely because its blockers have been identified.
