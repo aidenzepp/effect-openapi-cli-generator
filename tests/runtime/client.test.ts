@@ -513,3 +513,37 @@ describe("responses the loop does not follow", () => {
     expect(seen.length).toBe(1);
   });
 });
+
+const credentialed = (url: string) =>
+  HttpClientRequest.get(url).pipe(
+    HttpClientRequest.setHeaders({
+      Authorization: "Bearer caller-secret",
+      Cookie: "caller=1",
+      "Proxy-Authorization": "Basic caller-proxy",
+    }),
+  );
+
+describe("RT-5: caller credentials do not cross an origin change", () => {
+  const names = ["authorization", "cookie", "proxy-authorization"] as const;
+  const present = (hop: Seen) => names.map((name) => Option.isSome(Headers.get(hop.headers, name)));
+
+  test("Authorization, Proxy-Authorization and Cookie are absent on a cross-origin hop", async () => {
+    const { outcome, seen } = await run(credentialed(`${A}/r/302/B`));
+    expect(outcome).toBe("Response:200");
+    expect(seen.map(present)).toEqual([
+      [true, true, true],
+      [false, false, false],
+    ]);
+  });
+
+  test("they are still present on a same-origin hop", async () => {
+    const { outcome, seen } = await run(
+      credentialed(`${A}/loc`).pipe(HttpClientRequest.setUrlParam("to", "/final")),
+    );
+    expect(outcome).toBe("Response:200");
+    expect(seen.map(present)).toEqual([
+      [true, true, true],
+      [true, true, true],
+    ]);
+  });
+});

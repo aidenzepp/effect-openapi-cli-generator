@@ -22,6 +22,11 @@ export type Attach = (
  * The statuses the loop follows. Any other 3xx, and a 3xx without a usable `Location`, is the
  * final response.
  */
+/**
+ * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
+ */
+const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
+
 const redirectStatuses: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 /**
@@ -111,7 +116,9 @@ const nextHop = (
       target.href,
       UrlParams.empty,
       hash,
-      next.headers,
+      target.origin === from.origin
+        ? next.headers
+        : Headers.removeMany(next.headers, credentialHeaders),
       next.body,
     ),
   );
