@@ -49,7 +49,7 @@ const buildOptions = {
   noEmit: false,
   outDir: "dist",
   rewriteRelativeImportExtensions: true,
-  rootDir: "src",
+  rootDir: ".",
 };
 
 const unprintable = () => new PackageEmitError({ reason: "unprintable-package" });
@@ -71,7 +71,7 @@ export const emitPackageFiles = (
       Effect.mapError(invalidSource),
     );
     const manifest = yield* decodeJson({
-      bin: { [config.binName]: "dist/bin.js" },
+      bin: { [config.binName]: "dist/src/bin.js" },
       dependencies: pins.dependencies,
       devDependencies: pins.devDependencies,
       engines: pins.engines,
