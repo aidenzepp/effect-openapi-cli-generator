@@ -1,1 +1,3 @@
-/* oxlint-disable unicorn/no-empty-file -- stub until m1-gn1 adds the public API */
+export { generate, GenerateRefused } from "./generate.ts";
+
+export type { GenerateConfig, GenerateInput, GenerateResult, SpecSource } from "./generate.ts";
