@@ -1,4 +1,15 @@
-import { Context, Effect, FileSystem, Layer, Option, Ref, Stdio, Stream } from "effect";
+import {
+  Context,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schema,
+  Stdio,
+  Stream,
+} from "effect";
 import { Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
@@ -182,3 +193,227 @@ export const binaryBody = (options: {
 
   return options.bodyFile.value === "-" ? openStdin() : openFile(options.bodyFile.value);
 };
+
+/**
+ * A JSON number kept as its source text. A field flag for an `int64` property passes its digit
+ * string this way; a merged body marks any number whose text `JSON.parse` would change (digits
+ * past 2^53, `1.50`, `1e2`). `mergeBody` writes it with `JSON.rawJSON` at serialization only.
+ */
+export class JsonNumber {
+  readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+}
+
+type FieldValue = string | number | boolean | JsonNumber;
+
+type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
+
+type JsonNode = null | boolean | number | string | JsonNumber | readonly JsonNode[] | JsonObject;
+
+interface JsonObject {
+  [key: string]: JsonNode;
+}
+
+interface RawJson {
+  readonly rawJSON: string;
+}
+
+type Reviver = (key: string, value: JsonNode, context: { readonly source?: string }) => JsonNode;
+
+// TypeScript 7.0.2 and @types/bun 1.4.2 declare no `JSON.rawJSON` and no reviver `context`, while
+// Bun provides both (measured, m1.md 3). One typed binding here, no global augmentation.
+// oxlint-disable-next-line typescript/no-inferrable-types -- the wide type selects Reflect.get's untyped overload
+const jsonGlobal: string = "JSON";
+
+const bunJson: {
+  readonly parse: (text: string, reviver?: Reviver) => JsonNode;
+  readonly rawJSON: (text: string) => RawJson;
+  // oxlint-disable-next-line anti-slop/no-reflect-get, typescript/no-unsafe-assignment -- the one way to type Bun's JSON without a global augmentation
+} = Reflect.get(globalThis, jsonGlobal);
+
+const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
+
+const isObject = (value: JsonNode | undefined): value is JsonObject =>
+  Predicate.isObject(value) && !Array.isArray(value) && !(value instanceof JsonNumber);
+
+// oxlint-disable-next-line typescript/no-unsafe-return -- Object.create(null) is any; the result holds only JsonNode values
+const bare = (source: JsonObject = {}): JsonObject => Object.assign(Object.create(null), source);
+
+const revive: Reviver = (_key, value, context) => {
+  if (Predicate.isNumber(value)) {
+    return context.source !== undefined && String(value) !== context.source
+      ? new JsonNumber(context.source)
+      : value;
+  }
+
+  return isObject(value) ? bare(value) : value;
+};
+
+const replace = (_key: string, value: JsonNode): JsonNode | RawJson =>
+  value instanceof JsonNumber ? bunJson.rawJSON(value.text) : value;
+
+const segmentsOf = (pointer: string): readonly string[] | undefined =>
+  pointer.startsWith("/")
+    ? pointer
+        .slice(1)
+        .split("/")
+        .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
+    : undefined;
+
+const setAt = (
+  root: JsonObject,
+  pointer: string,
+  value: JsonNode,
+): Effect.Effect<void, UsageError> => {
+  const segments = segmentsOf(pointer);
+  const last = segments?.at(-1);
+
+  if (segments === undefined || last === undefined) {
+    return Effect.fail(usage("body", "a field has no valid body pointer"));
+  }
+
+  let node = root;
+  for (const segment of segments.slice(0, -1)) {
+    const next = Object.hasOwn(node, segment) ? node[segment] : undefined;
+
+    if (isObject(next)) {
+      node = next;
+    } else {
+      const fresh = bare();
+
+      node[segment] = fresh;
+      node = fresh;
+    }
+  }
+
+  node[last] = value;
+
+  return Effect.void;
+};
+
+const supplied = (value: Fields[string]): FieldValue | readonly FieldValue[] | undefined => {
+  if (Option.isOption(value)) {
+    return Option.getOrUndefined(value);
+  }
+
+  return value.length === 0 ? undefined : value;
+};
+
+const hasBadNumber = (value: FieldValue | readonly FieldValue[]): boolean =>
+  value instanceof JsonNumber
+    ? !int64Digits.test(value.text)
+    : Array.isArray(value) && value.some(hasBadNumber);
+
+const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
+  Effect.try({
+    catch: () => usage(flag, "is not valid UTF-8"),
+    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+  });
+
+const sourceOf = (options: {
+  readonly body: Option.Option<string>;
+  readonly bodyFile: Option.Option<string>;
+}): Effect.Effect<
+  Option.Option<{ readonly bytes: Uint8Array; readonly flag: string }>,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> => {
+  if (Option.isSome(options.body)) {
+    return Option.isSome(options.bodyFile)
+      ? Effect.fail(usage("body", `cannot be used with --${bodyFileName}`))
+      : Effect.succeed(Option.some({ bytes: encoder.encode(options.body.value), flag: "body" }));
+  }
+
+  return Option.isSome(options.bodyFile)
+    ? readBodyFile(options.bodyFile.value).pipe(
+        Effect.map((bytes) => Option.some({ bytes, flag: bodyFileName })),
+      )
+    : Effect.succeed(Option.none());
+};
+
+/**
+ * The JSON request body from `--body` or `--body-file` and the field flags (design 4.5). Field
+ * flags are keyed by RFC 6901 pointer from the body root and override the body; the objects they
+ * touch have no prototype, so `__proto__`, `constructor` and `prototype` are ordinary own keys.
+ * The merged value is asserted against `schema`, never decoded, and the merged value is what is
+ * sent. Without a field flag the operator's bytes are sent verbatim. With no input at all a
+ * required body is `{}` (still asserted) and an optional one is empty. Failures name a flag and
+ * never a value or a path.
+ */
+export const mergeBody = (options: {
+  readonly body: Option.Option<string>;
+  readonly bodyFile: Option.Option<string>;
+  readonly fields: Fields;
+  readonly required: boolean;
+  readonly schema: Schema.Top;
+}): Effect.Effect<
+  HttpBody.HttpBody,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  Effect.gen(function* merge() {
+    const source = yield* sourceOf(options);
+    const flag = Option.match(source, { onNone: () => "body", onSome: (found) => found.flag });
+    const overrides = Object.entries(options.fields).flatMap(([pointer, field]) => {
+      const value = supplied(field);
+
+      return value === undefined ? [] : [[pointer, value] as const];
+    });
+    const parse = (text: string, reviver?: Reviver): Effect.Effect<JsonNode, UsageError> =>
+      Effect.try({
+        catch: () => usage(flag, "is not valid JSON"),
+        try: () => bunJson.parse(text, reviver),
+      });
+    const assert = (text: string) =>
+      parse(text).pipe(
+        Effect.filterOrFail(Schema.is(options.schema), () =>
+          usage(flag, "the request body does not match its schema"),
+        ),
+      );
+
+    if (Option.isNone(source) && overrides.length === 0) {
+      if (!options.required) {
+        return HttpBody.empty;
+      }
+
+      yield* assert("{}");
+
+      return HttpBody.uint8Array(encoder.encode("{}"));
+    }
+
+    if (Option.isSome(source) && overrides.length === 0) {
+      yield* assert(yield* decodeText(source.value.bytes, flag));
+
+      return HttpBody.uint8Array(source.value.bytes);
+    }
+
+    const base = Option.isSome(source)
+      ? yield* decodeText(source.value.bytes, flag).pipe(
+          Effect.flatMap((text) => parse(text, revive)),
+        )
+      : bare();
+
+    if (!isObject(base)) {
+      return yield* Effect.fail(usage(flag, "must be a JSON object to take field flags"));
+    }
+
+    for (const [pointer, value] of overrides) {
+      if (hasBadNumber(value)) {
+        return yield* Effect.fail(usage(flag, "an integer field is not a digit string"));
+      }
+
+      yield* setAt(base, pointer, value);
+    }
+
+    const text = yield* Effect.try({
+      catch: () => usage(flag, "the merged body cannot be serialized"),
+      try: () => JSON.stringify(base, replace),
+    });
+
+    yield* assert(text);
+
+    return HttpBody.uint8Array(encoder.encode(text));
+  });

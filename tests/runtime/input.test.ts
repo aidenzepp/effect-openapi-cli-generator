@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer, Option, Sink, Stdio, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
 import { Command } from "effect/cli";
 import { HttpBody } from "effect/http";
 import * as FileBodyModule from "../../src/runtime-src/runtime/file-body.ts";
@@ -345,5 +345,259 @@ describe("one stdin consumer", () => {
 
     await run(once.pipe(Effect.provide(inputLayer(bytes))));
     await run(once.pipe(Effect.provide(inputLayer(bytes))));
+  });
+});
+
+const decoder = new TextDecoder();
+
+const Person = Schema.Struct({
+  address: Schema.optionalKey(Schema.Struct({ city: Schema.optionalKey(Schema.String) })),
+  count: Schema.optionalKey(Schema.Number),
+  name: Schema.String,
+});
+
+const merge = (options: {
+  readonly body?: string;
+  readonly bodyFile?: string;
+  readonly fields?: Readonly<
+    Record<string, Option.Option<string | number | boolean | Input.JsonNumber>>
+  >;
+  readonly required?: boolean;
+  readonly schema?: Schema.Top;
+}) =>
+  Input.mergeBody({
+    body: Option.fromNullishOr(options.body),
+    bodyFile: Option.fromNullishOr(options.bodyFile),
+    fields: options.fields ?? {},
+    required: options.required ?? true,
+    schema: options.schema ?? Schema.Unknown,
+  });
+
+const mergedText = (...args: Parameters<typeof merge>) =>
+  merge(...args).pipe(
+    Effect.flatMap(readBody),
+    Effect.map((read) => decoder.decode(read)),
+    Effect.provide(inputLayer()),
+  );
+
+const failure = (...args: Parameters<typeof merge>) =>
+  merge(...args).pipe(Effect.flip, Effect.provide(inputLayer()));
+
+describe("Input.mergeBody", () => {
+  test("--body with --body-file is a UsageError naming the flag", async () => {
+    const error = await run(failure({ body: "{}", bodyFile: "x" }));
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body");
+  });
+
+  test("the field /__proto__/x merges into an own key and Object.prototype is untouched", async () => {
+    const text = await run(
+      mergedText({ fields: { "/__proto__/x": Option.some("1") }, required: false }),
+    );
+
+    expect(text).toBe('{"__proto__":{"x":"1"}}');
+    expect(Object.hasOwn(Object.prototype, "x")).toBe(false);
+    expect("x" in {}).toBe(false);
+  });
+
+  test("constructor and prototype are ordinary own keys, also from the body", async () => {
+    const text = await run(
+      mergedText({
+        body: '{"constructor":{"a":1},"__proto__":{"b":2}}',
+        fields: { "/constructor/c": Option.some("3"), "/prototype/d": Option.some("4") },
+      }),
+    );
+
+    expect(text).toBe('{"constructor":{"a":1,"c":"3"},"__proto__":{"b":2},"prototype":{"d":"4"}}');
+    expect(Object.hasOwn(Object.prototype, "b")).toBe(false);
+    expect(Object.hasOwn(Object.prototype, "c")).toBe(false);
+  });
+
+  test("a property name containing . or / (pointer /a~1b, /c~0d, /e.f) lands under one key", async () => {
+    const text = await run(
+      mergedText({
+        fields: {
+          "/a~1b": Option.some("1"),
+          "/c~0d": Option.some("2"),
+          "/e.f": Option.some("3"),
+          "/g/h~1i": Option.some("4"),
+        },
+      }),
+    );
+
+    expect(JSON.parse(text)).toEqual({ "a/b": "1", "c~d": "2", "e.f": "3", g: { "h/i": "4" } });
+  });
+
+  test("a field flag overrides the body at its pointer and keeps the rest", async () => {
+    const text = await run(
+      mergedText({
+        body: '{"name":"body","address":{"city":"X","zip":"1"},"keep":true}',
+        fields: { "/address/city": Option.some("flag"), "/name": Option.some("flag") },
+      }),
+    );
+
+    expect(JSON.parse(text)).toEqual({
+      address: { city: "flag", zip: "1" },
+      keep: true,
+      name: "flag",
+    });
+  });
+
+  test("a field flag replaces a non-object body value on its path", async () => {
+    const text = await run(
+      mergedText({ body: '{"address":"x"}', fields: { "/address/city": Option.some("c") } }),
+    );
+
+    expect(JSON.parse(text)).toEqual({ address: { city: "c" } });
+  });
+
+  test("a field flag cannot be merged into a body that is not an object", async () => {
+    const error = await run(failure({ body: "[1]", fields: { "/name": Option.some("a") } }));
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body");
+  });
+
+  test("a missing required property after the merge is a UsageError, a supplied one is not", async () => {
+    const error = await run(failure({ fields: { "/count": Option.some(2) }, schema: Person }));
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body");
+
+    const text = await run(
+      mergedText({
+        body: '{"count":2}',
+        fields: { "/name": Option.some("n") },
+        schema: Person,
+      }),
+    );
+
+    expect(JSON.parse(text)).toEqual({ count: 2, name: "n" });
+  });
+
+  test("the merged value is asserted, never decoded: unknown properties are sent", async () => {
+    const text = await run(mergedText({ body: '{"name":"n","extra":1}', schema: Person }));
+
+    expect(text).toBe('{"name":"n","extra":1}');
+  });
+
+  test("an assertion failure names the flag and never the value", async () => {
+    const error = await run(
+      failure({ body: '{"name":"s3cret-value","count":"x"}', schema: Person }),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(JSON.stringify(error)).not.toContain("s3cret-value");
+  });
+
+  test("a body that is not JSON is a UsageError", async () => {
+    const error = await run(failure({ body: "{nope" }));
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body");
+  });
+
+  test("body bytes with no field override are sent verbatim", async () => {
+    const source = '{ "id" : 9007199254740993 ,  "name":"n", "f" : 1.50 }';
+    const text = await run(mergedText({ body: source, schema: Person }));
+
+    expect(text).toBe(source);
+  });
+
+  test("9007199254740993 in the body arrives as the same digits through a merge", async () => {
+    const text = await run(
+      mergedText({
+        body: '{"id":9007199254740993,"big":-9007199254740995,"f":1.5,"name":"a"}',
+        fields: { "/name": Option.some("b") },
+      }),
+    );
+
+    expect(text).toBe('{"id":9007199254740993,"big":-9007199254740995,"f":1.5,"name":"b"}');
+  });
+
+  test("an int64 field flag arrives as the same digits and is asserted as a number", async () => {
+    const text = await run(
+      mergedText({
+        fields: {
+          "/count": Option.some(new Input.JsonNumber("9007199254740993")),
+          "/name": Option.some("n"),
+        },
+        schema: Person,
+      }),
+    );
+
+    expect(text).toBe('{"count":9007199254740993,"name":"n"}');
+  });
+
+  test("a repeatable field flag is an array and an empty one is unset", async () => {
+    const text = await run(
+      Input.mergeBody({
+        body: none,
+        bodyFile: none,
+        fields: { "/none": [], "/tags": ["a", "b"] },
+        required: true,
+        schema: Schema.Unknown,
+      }).pipe(
+        Effect.flatMap(readBody),
+        Effect.map((read) => decoder.decode(read)),
+        Effect.provide(inputLayer()),
+      ),
+    );
+
+    expect(text).toBe('{"tags":["a","b"]}');
+  });
+
+  test("an int64 field flag that is not digits is a UsageError that omits the value", async () => {
+    const error = await run(
+      failure({ fields: { "/count": Option.some(new Input.JsonNumber("12x-secret")) } }),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(JSON.stringify(error)).not.toContain("12x-secret");
+  });
+
+  test("a required body with no input is {} and fails on required properties", async () => {
+    expect(await run(mergedText({}))).toBe("{}");
+
+    const error = await run(failure({ schema: Person }));
+
+    expect(error._tag).toBe("UsageError");
+  });
+
+  test("an optional body with no input is empty", async () => {
+    const body = await run(merge({ required: false }).pipe(Effect.provide(inputLayer())));
+
+    expect(body._tag).toBe("Empty");
+  });
+
+  test("--body-file merges, and - claims stdin once", async () => {
+    const text = await run(
+      withTempFile(new TextEncoder().encode('{"name":"file"}'), (path) =>
+        merge({ bodyFile: path, fields: { "/count": Option.some(1) } }).pipe(
+          Effect.flatMap(readBody),
+          Effect.map((read) => decoder.decode(read)),
+        ),
+      ).pipe(Effect.provide(inputLayer())),
+    );
+
+    expect(JSON.parse(text)).toEqual({ count: 1, name: "file" });
+
+    const error = await run(
+      Effect.gen(function* twice() {
+        yield* merge({ bodyFile: "-" });
+
+        return yield* Effect.flip(merge({ bodyFile: "-" }));
+      }).pipe(Effect.provide(inputLayer(new TextEncoder().encode("{}")))),
+    );
+
+    expect(error._tag).toBe("UsageError");
+  });
+
+  test("an unreadable --body-file names the flag, not the path", async () => {
+    const error = await run(failure({ bodyFile: "/nonexistent/secret-path" }));
+
+    expect(error.flag).toBe("body-file");
+    expect(JSON.stringify(error)).not.toContain("secret-path");
   });
 });
