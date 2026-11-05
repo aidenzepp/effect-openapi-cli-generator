@@ -90,6 +90,16 @@ export const ModuleSpecifier = Schema.String.pipe(
 
 type ModuleSpecifierType = typeof ModuleSpecifier.Type;
 
+/**
+ * The interpreter line of an executable module, after `#!`: an absolute path and its arguments.
+ */
+export const Shebang = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^\/[!-~]+(?: [!-~]+)*$/u)),
+  Schema.brand("Shebang"),
+);
+
+type ShebangType = typeof Shebang.Type;
+
 type JsDocTextType = typeof JsDocText.Type;
 
 export type TypeExpr =
@@ -134,7 +144,13 @@ export type Expr =
       readonly returns?: TypeExpr;
       readonly body: Expr;
     }
-  | { readonly _tag: "RegExp"; readonly source: string }
+  | { readonly _tag: "New"; readonly callee: Expr; readonly args: readonly Expr[] }
+  | {
+      readonly _tag: "Conditional";
+      readonly test: Expr;
+      readonly consequent: Expr;
+      readonly alternate: Expr;
+    }
   | { readonly _tag: "Plus"; readonly left: Expr; readonly right: Expr };
 
 export interface Field {
@@ -164,7 +180,8 @@ export type Statement =
       readonly name: IdentifierType;
       readonly type: TypeExpr;
       readonly doc?: JsDocTextType;
-    };
+    }
+  | { readonly _tag: "Expression"; readonly value: Expr };
 
 export type Import =
   | {
@@ -181,6 +198,7 @@ export type Import =
     };
 
 export interface Module {
+  readonly shebang?: ShebangType;
   readonly imports: readonly Import[];
   readonly statements: readonly Statement[];
 }
@@ -195,7 +213,10 @@ export class PrinterError extends Data.TaggedError("PrinterError")<{
     | "unbreakable-line"
     | "unsupported-arrow-body"
     | "unsupported-chain"
+    | "unsupported-conditional"
+    | "unsupported-expression"
     | "unsupported-member"
+    | "unsupported-new"
     | "unsupported-package-json"
     | "unsupported-plus";
   readonly subject: string;
@@ -231,7 +252,22 @@ export const arrow = (params: readonly Param[], body: Expr, returns?: TypeExpr):
     ? { _tag: "Arrow", body, params }
     : { _tag: "Arrow", body, params, returns };
 
-export const regExp = (source: string): Expr => ({ _tag: "RegExp", source });
+export const newExpr = (callee: Expr, args: readonly Expr[]): Expr => ({
+  _tag: "New",
+  args,
+  callee,
+});
+
+const regExpName = Schema.decodeSync(Identifier)("RegExp");
+
+export const regExp = (source: string): Expr => newExpr(ident(regExpName), [str(source), str("u")]);
+
+export const conditional = (test: Expr, consequent: Expr, alternate: Expr): Expr => ({
+  _tag: "Conditional",
+  alternate,
+  consequent,
+  test,
+});
 
 export const plus = (left: Expr, right: Expr): Expr => ({ _tag: "Plus", left, right });
 
@@ -454,8 +490,20 @@ const flat = (expr: Expr): string | undefined =>
     Boolean: (literal) => String(literal.value),
     Call: (invocation) =>
       flatPair(flat(invocation.callee), "", flatList(invocation.args.map(flat), "(", ")")),
+    Conditional: (choice) =>
+      flatPair(
+        flatPair(flat(choice.test), " ? ", flat(choice.consequent)),
+        " : ",
+        flat(choice.alternate),
+      ),
     Identifier: (name) => name.name,
     Member: (access) => flatPair(flat(access.object), ".", access.name),
+    New: (construct) =>
+      flatPair(
+        `new ${flat(construct.callee) ?? ""}`,
+        "",
+        flatList(construct.args.map(flat), "(", ")"),
+      ),
     Number: (literal) => numberText(literal.value),
     Object: (literal) => {
       const entries = sortEntries(literal.entries).map(([key, value]) =>
@@ -465,7 +513,6 @@ const flat = (expr: Expr): string | undefined =>
       return flatList(entries, "{ ", " }");
     },
     Plus: (sum) => flatPair(flat(sum.left), " + ", flat(sum.right)),
-    RegExp: (pattern) => `new RegExp(${stringLiteral(pattern.source)}, "u")`,
     String: (literal) => stringLiteral(literal.value),
     Undefined: () => "undefined",
   });
@@ -493,11 +540,21 @@ const fillLines = (items: readonly string[], indent: number): readonly string[] 
   return lines.map((line) => `${pad(indent)}${line}`);
 };
 
+// A conditional moves below `=` or `:` when its test does not fit after it.
+const movesConditional = (expr: Expr, place: Place): boolean =>
+  expr._tag === "Conditional" && !fits(flat(expr.test), { ...place, tail: 0 });
+
 const renderProperty = (key: string, value: Expr, indent: number, render: Render): string => {
   const place = { column: indent + textWidth(key) + 2, indent, tail: 1 };
   const text = flat(value);
   if (movesWhenLong(value) && textWidth(key) >= 5 && !fits(text, place)) {
     return `${key}:\n${pad(indent + 2)}${text ?? ""}`;
+  }
+
+  if (textWidth(key) >= 5 && movesConditional(value, place)) {
+    const inner = indent + 2;
+
+    return `${key}:\n${pad(inner)}${render(value, { column: inner, indent: inner, tail: 1 })}`;
   }
 
   return `${key}: ${render(value, place)}`;
@@ -641,6 +698,20 @@ const renderArrow = (expr: ArrowExpr, place: Place, render: Render): string => {
   return renderMovedBody(expr, place.indent, place.tail, render);
 };
 
+type ConditionalExpr = Extract<Expr, { readonly _tag: "Conditional" }>;
+
+// The test stays on the line; each branch starts a line one level deeper, after `? ` or `: `, and
+// lays out two columns further in.
+const renderConditional = (expr: ConditionalExpr, place: Place, render: Render): string => {
+  const inner = place.indent + 2;
+  const branch = { column: inner + 2, indent: inner + 2, tail: 0 };
+  const test = render(expr.test, { ...place, tail: 0 });
+  const consequent = render(expr.consequent, branch);
+  const alternate = render(expr.alternate, { ...branch, tail: place.tail });
+
+  return `${test}\n${pad(inner)}? ${consequent}\n${pad(inner)}: ${alternate}`;
+};
+
 const render: Render = (expr, place) => {
   const text = flat(expr);
   if (fits(text, place)) {
@@ -660,21 +731,22 @@ const render: Render = (expr, place) => {
 
       return `${callee}${renderArgs(invocation.args, { ...place, column }, render)}`;
     },
+    Conditional: (choice) => renderConditional(choice, place, render),
     Identifier: leaf,
     Member: (access) => {
       const tail = place.tail + 1 + access.name.length;
 
       return `${render(access.object, { ...place, tail })}.${access.name}`;
     },
+    New: (construct) => {
+      const head = `new ${flat(construct.callee) ?? ""}`;
+      const column = place.column + textWidth(head);
+
+      return `${head}${renderArgs(construct.args, { ...place, column }, render)}`;
+    },
     Number: leaf,
     Object: (literal) => renderObject(literal.entries, place.indent, render),
     Plus: (sum) => `${flat(sum.left) ?? ""} +\n${pad(place.indent + 2)}${flat(sum.right) ?? ""}`,
-    RegExp: (pattern) => {
-      const column = place.column + "new RegExp".length;
-      const args = renderArgs([str(pattern.source), str("u")], { ...place, column }, render);
-
-      return `new RegExp${args}`;
-    },
     String: leaf,
     Undefined: leaf,
   });
@@ -764,7 +836,7 @@ const check = (expr: Expr, role: Role): Issue => {
   return Match.valueTags(expr, {
     Array: (list) => firstIssue(list.elements, asValue),
     Arrow: (fn) =>
-      fn.body._tag === "Arrow" || fn.body._tag === "Plus"
+      fn.body._tag === "Arrow" || fn.body._tag === "Conditional" || fn.body._tag === "Plus"
         ? issue("unsupported-arrow-body", fn.body._tag)
         : asValue(fn.body),
     Boolean: none,
@@ -773,6 +845,16 @@ const check = (expr: Expr, role: Role): Issue => {
         Option.orElse(() => check(invocation.callee, "callee")),
         Option.orElse(() => firstIssue(invocation.args, (arg) => check(arg, "argument"))),
       ),
+    Conditional: (choice) => {
+      const operands = [choice.test, choice.consequent, choice.alternate];
+      const nested = operands.find(
+        (operand) => operand._tag === "Conditional" || operand._tag === "Arrow",
+      );
+
+      return nested === undefined
+        ? firstIssue(operands, asValue)
+        : issue("unsupported-conditional", nested._tag);
+    },
     Identifier: none,
     Member: (access) => {
       if (isPath(access)) {
@@ -783,6 +865,10 @@ const check = (expr: Expr, role: Role): Issue => {
         ? asValue(access.object)
         : issue("unsupported-member", access.name);
     },
+    New: (construct) =>
+      isPath(construct.callee)
+        ? firstIssue(construct.args, (arg) => check(arg, "argument"))
+        : issue("unsupported-new", construct.callee._tag),
     Number: (literal) =>
       Number.isFinite(literal.value)
         ? Option.none()
@@ -792,7 +878,6 @@ const check = (expr: Expr, role: Role): Issue => {
       role === "argument" && isLeaf(sum.left) && isLeaf(sum.right)
         ? Option.orElse(asValue(sum.left), () => asValue(sum.right))
         : issue("unsupported-plus", role),
-    RegExp: none,
     String: none,
     Undefined: none,
   });
@@ -820,6 +905,10 @@ const constBody = (statement: Extract<Statement, { readonly _tag: "Const" }>, he
   const text = flat(value);
   const moves =
     movesWhenLong(value) || (asConst && (value._tag === "Number" || value._tag === "Boolean"));
+  if (movesConditional(value, place)) {
+    return `${head}\n  ${render(value, { column: 2, indent: 2, tail: tail.length })}${tail}`;
+  }
+
   const body = moves && !fits(text, place) ? `\n  ${text ?? ""}` : ` ${render(value, place)}`;
 
   return `${head}${body}${tail}`;
@@ -853,9 +942,20 @@ const printInterface = (statement: Extract<Statement, { readonly _tag: "Interfac
   return succeedUnless(failure, () => withDoc(statement.doc, text));
 };
 
+// A top-level call, such as `BunRuntime.runMain(program);`. Other expressions are not statements
+// the generator writes.
+const printExpression = (statement: Extract<Statement, { readonly _tag: "Expression" }>) => {
+  const { value } = statement;
+  const failure =
+    value._tag === "Call" ? check(value, "value") : issue("unsupported-expression", value._tag);
+
+  return succeedUnless(failure, () => `${render(value, { column: 0, indent: 0, tail: 1 })};`);
+};
+
 const printStatement = (statement: Statement): Effect.Effect<string, PrinterError> =>
   Match.valueTags(statement, {
     Const: printConst,
+    Expression: printExpression,
     Interface: printInterface,
     TypeAlias: (alias) => {
       const line = `export type ${alias.name} = ${typeText(alias.type)};`;
@@ -910,13 +1010,17 @@ const importLine = (entry: Import): string => {
 };
 
 /**
- * Prints a module in the `docs/printer.md` layout. Fails with a `PrinterError` when the module
- * holds a construct outside the printer's syntax subset.
+ * Prints a module in the `docs/printer.md` layout, after its shebang line when it has one. Fails
+ * with a `PrinterError` when the module holds a construct outside the printer's syntax subset.
  */
 export const printModule = (module: Module): Effect.Effect<string, PrinterError> =>
   Effect.map(Effect.all(module.statements.map(printStatement)), (statements) => {
     const imports = mergeImports(module.imports).map(importLine);
-    const blocks = imports.length === 0 ? statements : [imports.join("\n"), ...statements];
+    const blocks = [
+      ...(module.shebang === undefined ? [] : [`#!${module.shebang}`]),
+      ...(imports.length === 0 ? [] : [imports.join("\n")]),
+      ...statements,
+    ];
 
     return blocks.length === 0 ? "" : `${blocks.join("\n\n")}\n`;
   });

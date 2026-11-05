@@ -8,12 +8,15 @@ import {
   Identifier,
   MemberName,
   ModuleSpecifier,
+  Shebang,
   arr,
   arrow,
   bool,
   call,
+  conditional,
   ident,
   member,
+  newExpr,
   num,
   obj,
   plus,
@@ -67,6 +70,8 @@ const S = Schema.decodeUnknownSync(ModuleSpecifier);
 
 const doc = Schema.decodeUnknownSync(JsDocText);
 
+const shebang = Schema.decodeUnknownSync(Shebang);
+
 const json = Schema.decodeUnknownSync(JsonLiteral);
 
 // `path("a.b.c")` is the member access `a.b.c`.
@@ -97,7 +102,11 @@ const fn = (dotted: string, ...args: readonly Expr[]) => call(path(dotted), args
 
 const pipe = (head: Expr, ...args: readonly Expr[]) => call(member(head, M("pipe")), args);
 
-const constant = (name: string, value: Expr, exported = true): Statement => ({
+const constant = (
+  name: string,
+  value: Expr,
+  exported = true,
+): Extract<Statement, { readonly _tag: "Const" }> => ({
   _tag: "Const",
   exported,
   name: I(name),
@@ -886,6 +895,254 @@ describe("hostile seeds", () => {
   }, 30_000);
 });
 
+const a = (n: number) => str("a".repeat(n));
+
+const b = (n: number) => str("b".repeat(n));
+
+const statement = (value: Expr): Statement => ({ _tag: "Expression", value });
+
+const entryModule: Module = {
+  imports: [
+    { _tag: "Named", from: S("@effect/platform-bun"), names: [I("BunRuntime")], typeOnly: false },
+    { _tag: "Named", from: S("./program.ts"), names: [I("program")], typeOnly: false },
+  ],
+  shebang: shebang("/usr/bin/env bun"),
+  statements: [
+    statement(fn("BunRuntime.runMain", path("program"))),
+    statement(
+      fn(
+        "BunRuntime.runMain",
+        pipe(
+          path("program"),
+          fn(
+            "Effect.provide",
+            fn(
+              "Layer.mergeAll",
+              path("MainLayerOne"),
+              path("MainLayerTwo"),
+              path("MainLayerThree"),
+            ),
+          ),
+        ),
+      ),
+    ),
+    statement(
+      fn(
+        "BunRuntime.runMain",
+        obj([
+          ["disableErrorReporting", bool(true)],
+          ["a".repeat(46), num(1)],
+          ["b", num(2)],
+        ]),
+      ),
+    ),
+  ],
+};
+
+const entryExpected = `#!/usr/bin/env bun
+
+import { BunRuntime } from "@effect/platform-bun";
+import { program } from "./program.ts";
+
+BunRuntime.runMain(program);
+
+BunRuntime.runMain(
+  program.pipe(Effect.provide(Layer.mergeAll(MainLayerOne, MainLayerTwo, MainLayerThree))),
+);
+
+BunRuntime.runMain({
+  ${"a".repeat(46)}: 1,
+  b: 2,
+  disableErrorReporting: true,
+});
+`;
+
+const conditionalModule: Module = {
+  imports: [],
+  statements: [
+    constant("shortCond", conditional(path("flag"), str("yes"), str("no"))),
+    constant("longCond", conditional(path("someCondition"), a(38), b(43))),
+    constant(
+      "longCallCond",
+      conditional(path("someCondition"), fn("Effect.succeed", a(83)), fn("Effect.fail", str("b"))),
+    ),
+    constant("argCond", fn("f", conditional(path("someCondition"), a(38), b(43)))),
+    constant("argCond2", fn("f", path("x"), conditional(path("someCondition"), a(91), b(43)))),
+    constant(
+      "propCond",
+      obj([
+        ["a", conditional(path("someCondition"), a(38), b(43))],
+        ["longerKey", conditional(path(`c${"x".repeat(80)}`), str("a"), str("b"))],
+      ]),
+    ),
+    constant("longTest", conditional(path(`c${"x".repeat(79)}`), str("a"), str("b"))),
+    constant(
+      "memberTest",
+      conditional(
+        path("process.env.NO_COLOR"),
+        fn("Effect.succeed", a(24)),
+        fn("Effect.fail", b(43)),
+      ),
+    ),
+    constant(
+      "callAsTest",
+      conditional(fn("Option.isSome", path(`v${"x".repeat(55)}`)), a(5), b(10)),
+    ),
+    constant(
+      "objBranch",
+      conditional(
+        path("cond"),
+        obj([
+          ["a".repeat(29), num(1)],
+          ["b".repeat(34), num(2)],
+          ["c".repeat(18), num(3)],
+        ]),
+        obj([]),
+      ),
+    ),
+    constant(
+      "arrBranch",
+      conditional(path("cond"), arr([a(29), b(34), str("c".repeat(18))]), arr([])),
+    ),
+  ],
+};
+
+const conditionalExpected = `export const shortCond = flag ? "yes" : "no";
+
+export const longCond = someCondition
+  ? "${"a".repeat(38)}"
+  : "${"b".repeat(43)}";
+
+export const longCallCond = someCondition
+  ? Effect.succeed(
+      "${"a".repeat(83)}",
+    )
+  : Effect.fail("b");
+
+export const argCond = f(
+  someCondition
+    ? "${"a".repeat(38)}"
+    : "${"b".repeat(43)}",
+);
+
+export const argCond2 = f(
+  x,
+  someCondition
+    ? "${"a".repeat(91)}"
+    : "${"b".repeat(43)}",
+);
+
+export const propCond = {
+  a: someCondition
+    ? "${"a".repeat(38)}"
+    : "${"b".repeat(43)}",
+  longerKey: c${"x".repeat(80)}
+    ? "a"
+    : "b",
+};
+
+export const longTest =
+  c${"x".repeat(79)} ? "a" : "b";
+
+export const memberTest = process.env.NO_COLOR
+  ? Effect.succeed("${"a".repeat(24)}")
+  : Effect.fail("${"b".repeat(43)}");
+
+export const callAsTest = Option.isSome(v${"x".repeat(55)})
+  ? "aaaaa"
+  : "bbbbbbbbbb";
+
+export const objBranch = cond
+  ? {
+      ${"a".repeat(29)}: 1,
+      ${"b".repeat(34)}: 2,
+      ${"c".repeat(18)}: 3,
+    }
+  : {};
+
+export const arrBranch = cond
+  ? ["${"a".repeat(29)}", "${"b".repeat(34)}", "${"c".repeat(18)}"]
+  : [];
+`;
+
+const newModule: Module = {
+  imports: [],
+  statements: [
+    constant(
+      "s",
+      newExpr(path("Set"), [arr([a(16), b(23), str("c".repeat(22)), str("d".repeat(22))])]),
+    ),
+    constant("t", newExpr(path("Set"), [strings("a", "b")])),
+    constant("u", newExpr(path("Map"), [])),
+    constant("v", newExpr(path("Foo.Bar"), [path("a"), path("b")])),
+    constant("newArgs", newExpr(path("Foo"), [a(53), b(39)])),
+    constant(
+      "nested",
+      newExpr(path("Set"), [arr([newExpr(path("Foo"), [a(53)]), newExpr(path("Foo"), [b(39)])])]),
+    ),
+    constant("pattern", regExp("^[a-z]+$")),
+  ],
+};
+
+const newExpected = `export const s = new Set([
+  "${"a".repeat(16)}",
+  "${"b".repeat(23)}",
+  "${"c".repeat(22)}",
+  "${"d".repeat(22)}",
+]);
+
+export const t = new Set(["a", "b"]);
+
+export const u = new Map();
+
+export const v = new Foo.Bar(a, b);
+
+export const newArgs = new Foo(
+  "${"a".repeat(53)}",
+  "${"b".repeat(39)}",
+);
+
+export const nested = new Set([
+  new Foo("${"a".repeat(53)}"),
+  new Foo("${"b".repeat(39)}"),
+]);
+
+export const pattern = new RegExp("^[a-z]+$", "u");
+`;
+
+describe("entry-module constructs", () => {
+  test("a shebang line and top-level call statements print in the vp fmt layout", () => {
+    const printed = print(entryModule);
+    expect(printed).toBe(entryExpected);
+    expectFixedPoint(printed, "ts");
+  }, 30_000);
+
+  test("a module with only a shebang ends with one newline", () => {
+    expect(print({ imports: [], shebang: shebang("/usr/bin/env bun"), statements: [] })).toBe(
+      "#!/usr/bin/env bun\n",
+    );
+  });
+
+  test("conditionals print flat, broken past column 100, and moved below =", () => {
+    const printed = print(conditionalModule);
+    expect(printed).toBe(conditionalExpected);
+    expectFixedPoint(printed, "ts");
+  }, 30_000);
+
+  test("new expressions take any constructor path and lay out arguments by the call rule", () => {
+    const printed = print(newModule);
+    expect(printed).toBe(newExpected);
+    expectFixedPoint(printed, "ts");
+  }, 30_000);
+
+  test("a shebang is one line that starts with /", () => {
+    expect(Schema.is(Shebang)("/usr/bin/env bun")).toBe(true);
+    expect(Schema.is(Shebang)("usr/bin/env bun")).toBe(false);
+    expect(Schema.is(Shebang)("/usr/bin/env\nbun")).toBe(false);
+    expect(Schema.is(Shebang)("/usr/bin/env  bun")).toBe(false);
+  });
+});
+
 const reason = (value: Expr) => failureOf({ imports: [], statements: [constant("x", value)] });
 
 describe("unsupported constructs", () => {
@@ -911,6 +1168,19 @@ describe("unsupported constructs", () => {
     expect(reason(arrow([], arrow([], num(1))))).toMatchObject({
       reason: "unsupported-arrow-body",
     });
+    expect(reason(arrow([], conditional(path("a"), num(1), num(2))))).toMatchObject({
+      reason: "unsupported-arrow-body",
+    });
+    expect(
+      reason(conditional(path("a"), conditional(path("b"), num(1), num(2)), num(3))),
+    ).toMatchObject({ reason: "unsupported-conditional" });
+    expect(reason(conditional(path("a"), arrow([], num(1)), num(2)))).toMatchObject({
+      reason: "unsupported-conditional",
+    });
+    expect(reason(newExpr(fn("f"), []))).toMatchObject({ reason: "unsupported-new" });
+    expect(
+      failureOf({ imports: [], statements: [{ _tag: "Expression", value: path("a.b") }] }),
+    ).toMatchObject({ reason: "unsupported-expression" });
   });
 });
 
