@@ -1302,16 +1302,72 @@ const unprintable = () => new DomainEmitError({ reason: "unprintable-code" });
 const definitionOf = (
   name: string,
   code: SchemaRepresentation.Code,
-  recursive: boolean,
 ): Effect.Effect<Definition, DomainEmitError> =>
   Effect.gen(function* parse() {
     const runtime = parseExpression(code.runtime);
-    const type = recursive ? parseType(code.Type) : undefined;
-    if (runtime === undefined || (recursive && type === undefined)) {
+    if (runtime === undefined) {
       return yield* unprintable();
     }
 
-    return { name, runtime, type };
+    return { name, runtime, type: parseType(code.Type) };
+  });
+
+const typeNames = (type: Ty): readonly string[] =>
+  Match.valueTags(type, {
+    Inter: (inter) => inter.members.flatMap(typeNames),
+    Lit: () => [],
+    Obj: (object) =>
+      object.members.flatMap((member) => [
+        ...typeNames(member.type),
+        ...(member.index === undefined ? [] : typeNames(member.index)),
+      ]),
+    Ref: (reference) => [
+      ...(reference.path.length === 1 ? reference.path : []),
+      ...reference.args.flatMap(typeNames),
+    ],
+    Tuple: (tuple) => tuple.elements.flatMap((element) => typeNames(element.type)),
+    Union: (union) => union.members.flatMap(typeNames),
+  });
+
+// Names a `Schema.Codec<T>` annotation in a thunk of `Schema.suspend` reads as a type.
+const suspendedTypes = (ex: Ex): readonly string[] =>
+  Match.valueTags(ex, {
+    Arr: (array) => array.elements.flatMap(suspendedTypes),
+    Arrow: (arrow) => [...typeNames(arrow.returns), ...suspendedTypes(arrow.body)],
+    Call: (call) => [call.callee, ...call.args].flatMap(suspendedTypes),
+    Ident: () => [],
+    Member: (member) => suspendedTypes(member.object),
+    Num: () => [],
+    Obj: (object) => object.entries.flatMap((entry) => suspendedTypes(entry.value)),
+    Str: () => [],
+  });
+
+// A definition keeps its `export type` when a `Schema.Codec<T>` annotation names it, directly or
+// through the type of one that does; a recursive definition always does.
+const withTypes = (
+  definitions: readonly Definition[],
+  recursives: ReadonlySet<string>,
+): Effect.Effect<readonly Definition[], DomainEmitError> =>
+  Effect.gen(function* keep() {
+    const known = new Map(definitions.map((definition) => [definition.name, definition]));
+    const needed = new Set<string>();
+    const pending = [...recursives, ...definitions.flatMap((d) => suspendedTypes(d.runtime))];
+    for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
+      const definition = known.get(name);
+      if (definition !== undefined && !needed.has(name)) {
+        needed.add(name);
+        if (definition.type === undefined) {
+          return yield* unprintable();
+        }
+
+        pending.push(...typeNames(definition.type));
+      }
+    }
+
+    return definitions.map((definition) => ({
+      ...definition,
+      type: needed.has(definition.name) ? definition.type : undefined,
+    }));
   });
 
 // Names a value reads when the module runs; the thunk of `Schema.suspend` runs later.
@@ -1552,7 +1608,7 @@ const emptyModule = "export {};\n";
  * `roots` (examples and defaults removed, properties sorted) imported through
  * `SchemaRepresentation.fromJsonSchemaMultiDocument` and printed from `toCodeDocument`, one
  * `export const` per definition after the names it reads, and one `export type` before each
- * recursive definition, whose `Schema.suspend` names it.
+ * definition a `Schema.Codec<T>` annotation of `Schema.suspend` names (every recursive one).
  *
  * `identifiers` is the names plan's map (`domainIdentifiers`). The copy is rekeyed to it, with its
  * references, before import, so every export and its `identifier` annotation carry the folded
@@ -1581,12 +1637,13 @@ export const emitDomainSchemas = (
     }
 
     const parsed = yield* Effect.all([
-      ...code.references.nonRecursives.map((entry) => definitionOf(entry.$ref, entry.code, false)),
+      ...code.references.nonRecursives.map((entry) => definitionOf(entry.$ref, entry.code)),
       ...Object.entries(code.references.recursives).map(([name, entry]) =>
-        definitionOf(name, entry, true),
+        definitionOf(name, entry),
       ),
     ]);
-    const ordered = orderOf(new Map(parsed.map((definition) => [definition.name, definition])));
+    const typed = yield* withTypes(parsed, new Set(Object.keys(code.references.recursives)));
+    const ordered = orderOf(new Map(typed.map((definition) => [definition.name, definition])));
     if (ordered === undefined) {
       return yield* new DomainEmitError({ reason: "reference-cycle" });
     }
