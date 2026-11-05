@@ -9,6 +9,7 @@ import { boundOrigins } from "../../src/normalize/servers.ts";
 import { planNames } from "../../src/names/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import { emitApi, inputKeys } from "../../src/emit/api.ts";
+import { SafeFileSegment } from "../../src/names/fold.ts";
 
 const fixture = nodePath.resolve(import.meta.dir, "../fixtures/golden/users-update");
 
@@ -50,14 +51,7 @@ const emit = (value: Schema.Json) =>
     ),
   );
 
-const failure = (value: Schema.Json) =>
-  Effect.runPromise(
-    pipeline(value).pipe(
-      Effect.flatMap(({ api, bound, plan }) =>
-        Effect.flip(emitApi({ api, boundOrigins: bound.origins, plan })),
-      ),
-    ),
-  );
+const planOf = (value: Schema.Json) => Effect.runPromise(pipeline(value)).then(({ plan }) => plan);
 
 const contentOf =
   (files: readonly { readonly content: string; readonly path: string }[]) =>
@@ -113,7 +107,7 @@ describe("emitApi: the golden users-update fixture", () => {
 });
 
 describe("emitApi: shapes beyond the fixture", () => {
-  test("a group whose file segment is a fixed api/ module is refused", async () => {
+  test("a group whose file segment is a fixed api/ module is refused by the names plan", async () => {
     const renamed = withPaths({
       "/users/{id}": {
         patch: {
@@ -122,7 +116,29 @@ describe("emitApi: shapes beyond the fixture", () => {
         },
       },
     });
-    const error = await failure(renamed);
+    const plan = await planOf(renamed);
+    const refusals = plan.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TAG-02/reserved-segment",
+    );
+
+    expect(refusals.map((diagnostic) => diagnostic.severity)).toEqual(["refusal"]);
+    expect(plan.groups.map((group) => group.segment)).not.toContain("servers");
+
+    const files = await emit(renamed);
+
+    expect(files.map((file) => file.path)).toEqual(["src/api/security.ts", "src/api/servers.ts"]);
+  });
+
+  test("emitApi refuses a reserved group segment in a plan built by hand", async () => {
+    const { api, bound, plan } = await Effect.runPromise(pipeline(spec));
+    const reserved = Schema.decodeUnknownSync(SafeFileSegment)("servers");
+    const forged = {
+      ...plan,
+      groups: plan.groups.map((group) => ({ ...group, segment: reserved })),
+    };
+    const error = await Effect.runPromise(
+      Effect.flip(emitApi({ api, boundOrigins: bound.origins, plan: forged })),
+    );
 
     expect(error._tag).toBe("ApiEmitError");
     expect(error._tag === "ApiEmitError" ? error.reason : undefined).toBe("reserved-segment");

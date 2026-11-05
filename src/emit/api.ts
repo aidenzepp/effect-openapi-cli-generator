@@ -46,7 +46,8 @@ export interface ApiEmitInput {
 
 /**
  * The plan or model holds something the `api/` layer cannot express. Earlier stages refuse every
- * input that reaches this except `reserved-segment`, a group whose file segment is a fixed module.
+ * input that reaches this. A group whose file segment is a fixed module is refused by the names
+ * plan first (`TAG-02/reserved-segment`); `reserved-segment` here is a defense-in-depth check.
  */
 export class ApiEmitError extends Data.TaggedError("ApiEmitError")<{
   readonly reason:
