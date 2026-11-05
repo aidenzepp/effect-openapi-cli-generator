@@ -565,10 +565,10 @@ describe("SCH-37 pattern", () => {
     ]);
   });
 
-  test("a 3.0 pattern is checked under the same row", () => {
+  test("a 3.0 pattern is reported under S30-09", () => {
     expect(
       summary("3.0", { components: { schemas: { A: { pattern: "\\-", type: "string" } } } }),
-    ).toEqual([["SCH-37/not-unicode-compilable", "notice", "element"]]);
+    ).toEqual([["S30-09/not-unicode-compilable", "notice", "element"]]);
   });
 
   test("a schema keyword named pattern inside properties is a property, not a pattern", () => {
@@ -580,6 +580,111 @@ describe("SCH-37 pattern", () => {
       }),
     ).toEqual([]);
   });
+});
+
+const schemas = (A: Json): Members => ({ components: { schemas: { A } } });
+
+describe("3.0 schema rules", () => {
+  test("S30-22: type array without items is refused at the items pointer", () => {
+    const found = check("3.0", schemas({ type: "array" }));
+
+    expect(
+      found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+    ).toEqual([["S30-22/array-without-items", "refusal", "element"]]);
+    expect(pointers(found)).toEqual(["/components/schemas/A/items"]);
+  });
+
+  test("S30-22: items present, or another line, or another type, is clean", () => {
+    expect(check("3.0", schemas({ items: {}, type: "array" }))).toEqual([]);
+    expect(check("3.1", schemas({ type: "array" }))).toEqual([]);
+    expect(check("3.0", schemas({ type: "object" }))).toEqual([]);
+  });
+
+  test("S30-30: readOnly and writeOnly both true is refused at the schema", () => {
+    const found = check("3.0", schemas({ readOnly: true, type: "string", writeOnly: true }));
+
+    expect(
+      found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+    ).toEqual([["S30-30/read-and-write-only", "refusal", "element"]]);
+    expect(pointers(found)).toEqual(["/components/schemas/A"]);
+  });
+
+  test("S30-30: one of the two, or false, is clean", () => {
+    expect(check("3.0", schemas({ readOnly: true, writeOnly: false }))).toEqual([]);
+    expect(check("3.0", schemas({ writeOnly: true }))).toEqual([]);
+  });
+});
+
+// S0 .. Sdepth: every level lists the next level twice, so the paths double at each level.
+const diamond = (depth: number, keyword: "allOf" | "anyOf" | "oneOf", leaf?: Json): Members => ({
+  components: {
+    schemas: Object.fromEntries(
+      Array.from({ length: depth + 1 }, (_, level) => [
+        `S${level}`,
+        level === depth
+          ? (leaf ?? { type: "object" })
+          : {
+              [keyword]: [
+                { $ref: `#/components/schemas/S${level + 1}` },
+                { $ref: `#/components/schemas/S${level + 1}` },
+              ],
+              discriminator: { propertyName: "kind" },
+            },
+      ]),
+    ),
+  },
+});
+
+const refused = (depth: number, keyword: "allOf" | "anyOf" | "oneOf") =>
+  pointers(check("3.1", diamond(depth, keyword)));
+
+describe("requires() on a reused schema graph", () => {
+  test("a depth-20 diamond finishes and finds the property not required", () => {
+    const found = refused(20, "allOf");
+
+    expect(found).toHaveLength(20);
+    expect(found[0]).toBe("/components/schemas/S0/discriminator/propertyName");
+  }, 2000);
+
+  test("a depth-64 diamond finishes fast under oneOf, anyOf and allOf", () => {
+    for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+      expect(refused(64, keyword)).toHaveLength(64);
+    }
+  }, 2000);
+
+  test("a property required on every leaf path is found through the diamond", () => {
+    expect(check("3.1", diamond(20, "oneOf", { required: ["kind"], type: "object" }))).toEqual([]);
+  }, 2000);
+
+  test("a cycle does not hide a requirement reached by another branch", () => {
+    expect(
+      check("3.1", {
+        components: {
+          schemas: {
+            A: {
+              allOf: [{ $ref: "#/components/schemas/B" }, { $ref: "#/components/schemas/C" }],
+              discriminator: { propertyName: "kind" },
+            },
+            B: { allOf: [{ $ref: "#/components/schemas/B" }, { $ref: "#/components/schemas/A" }] },
+            C: { required: ["kind"] },
+          },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  test("past the step budget the only finding is a document-scope refusal", () => {
+    const found = Effect.runSync(
+      resolved("3.1", diamond(20, "allOf")).pipe(
+        Effect.flatMap((resolution) => checkGrammar(resolution, { maxNodes: 10 })),
+      ),
+    );
+
+    expect(found.map((diagnostic) => [diagnostic.code, diagnostic.scope])).toEqual([
+      ["REF-18/node-budget", "document"],
+    ]);
+    expect(pointers(found)).toEqual([""]);
+  }, 2000);
 });
 
 describe("the check entry", () => {

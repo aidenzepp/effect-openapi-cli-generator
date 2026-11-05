@@ -2,8 +2,8 @@ import { Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
-import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import type { Resolution } from "../resolve/index.ts";
+import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.ts";
+import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer, formatPointer, parseFragment } from "../resolve/pointer.ts";
 import type { Json } from "../resolve/pointer.ts";
 
@@ -16,7 +16,7 @@ interface Rule {
   readonly element: string;
   readonly hint?: string;
   readonly message: string;
-  readonly scope: "element" | "operation";
+  readonly scope: "document" | "element" | "operation";
   readonly severity: "notice" | "refusal";
 }
 
@@ -80,6 +80,14 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
+  "REF-18/node-budget": {
+    anchor: "reference-object",
+    element: "Schema graph",
+    hint: "Reduce how often schemas reuse each other through allOf, oneOf and anyOf.",
+    message: "The schema graph needs more steps to check than the node budget allows.",
+    scope: "document",
+    severity: "refusal",
+  },
   "RSP-09/invalid-header-name": {
     anchor: "response-headers",
     element: "Response header name",
@@ -93,6 +101,30 @@ const rules = {
     element: "Response status key",
     hint: "Use a status code from 100 to 599, a range from 1XX to 5XX, or default.",
     message: "A responses key is not a status code in 100 to 599, a range 1XX to 5XX, or default.",
+    scope: "element",
+    severity: "refusal",
+  },
+  "S30-09/not-unicode-compilable": {
+    anchor: "json-schema-keywords",
+    element: "Schema pattern",
+    hint: "Escape the pattern for Unicode mode, or accept that the server validates it.",
+    message: "The pattern does not compile in Unicode mode; the value is sent unvalidated.",
+    scope: "element",
+    severity: "notice",
+  },
+  "S30-22/array-without-items": {
+    anchor: "json-schema-keywords",
+    element: "Schema items",
+    hint: "Add items with the schema of the array elements.",
+    message: "A 3.0 schema of type array has no items.",
+    scope: "element",
+    severity: "refusal",
+  },
+  "S30-30/read-and-write-only": {
+    anchor: "schema-read-only",
+    element: "Schema readOnly and writeOnly",
+    hint: "Set at most one of readOnly and writeOnly to true.",
+    message: "A schema sets readOnly and writeOnly to true together.",
     scope: "element",
     severity: "refusal",
   },
@@ -304,19 +336,68 @@ const mappingResolves = (resolution: Resolution, value: string): boolean => {
   return pointer !== undefined && isObject(nodeAt(resolution.value, pointer));
 };
 
+// One checkGrammar call's walk through allOf, oneOf and anyOf: answers already settled, the
+// schemas being walked (by depth) and the steps left. Reuse across members is a DAG, so each
+// (schema, name) pair is settled once; the budget bounds a hostile graph that stays large anyway.
+interface Search {
+  readonly active: Map<string, number>;
+  readonly budget: number;
+  exhausted: boolean;
+  readonly memo: Map<string, boolean>;
+  steps: number;
+}
+
+const searches = new WeakMap<Resolution, Search>();
+
+const startSearch = (resolution: Resolution, budget: number): Search => {
+  const fresh: Search = { active: new Map(), budget, exhausted: false, memo: new Map(), steps: 0 };
+  searches.set(resolution, fresh);
+
+  return fresh;
+};
+
+const searchOf = (resolution: Resolution): Search =>
+  searches.get(resolution) ?? startSearch(resolution, defaultLimits.maxNodes);
+
+interface Answer {
+  readonly found: boolean;
+  // The shallowest schema still being walked that this answer assumed to be no; unsettled below it.
+  readonly low: number;
+}
+
+const settled = (found: boolean): Answer => ({ found, low: Infinity });
+
 // Whether the schema at `place` requires `name`: directly, through allOf, or in every
 // oneOf/anyOf branch. References are followed; a schema already on the path counts as no.
-const requires = (
+// A no that leaned on such a schema is kept only once that schema is settled.
+const requiresAt = (
   resolution: Resolution,
+  search: Search,
   place: Place,
   name: string,
-  path: readonly string[],
-): boolean => {
-  if (path.includes(place.pointer)) {
-    return false;
+  depth: number,
+): Answer => {
+  const key = `${place.pointer}\u0000${name}`;
+  const known = search.memo.get(key);
+  const walking = search.active.get(key);
+  search.steps += 1;
+
+  if (known !== undefined) {
+    return settled(known);
   }
 
-  const next = [...path, place.pointer];
+  if (walking !== undefined) {
+    return { found: false, low: walking };
+  }
+
+  if (search.steps > search.budget) {
+    search.exhausted = true;
+
+    return { found: false, low: -1 };
+  }
+
+  search.active.set(key, depth);
+
   const members = (keyword: string): readonly Place[] =>
     listOf(place.node[keyword]).flatMap((member, index) => {
       const located = locate(
@@ -327,16 +408,54 @@ const requires = (
 
       return located === undefined ? [] : [located];
     });
-  const direct = listOf(place.node.required).includes(name);
-  const alternatives = [...members("oneOf"), ...members("anyOf")];
+  const within = (member: Place): Answer => requiresAt(resolution, search, member, name, depth + 1);
+  const answer = ((): Answer => {
+    if (listOf(place.node.required).includes(name)) {
+      return settled(true);
+    }
 
-  return (
-    direct ||
-    members("allOf").some((member) => requires(resolution, member, name, next)) ||
-    (alternatives.length > 0 &&
-      alternatives.every((member) => requires(resolution, member, name, next)))
-  );
+    let low = Infinity;
+
+    for (const member of members("allOf")) {
+      const inner = within(member);
+
+      if (inner.found) {
+        return settled(true);
+      }
+
+      low = Math.min(low, inner.low);
+    }
+
+    const alternatives = [...members("oneOf"), ...members("anyOf")];
+
+    if (alternatives.length === 0) {
+      return { found: false, low };
+    }
+
+    for (const member of alternatives) {
+      const inner = within(member);
+
+      if (!inner.found) {
+        return { found: false, low: Math.min(low, inner.low) };
+      }
+    }
+
+    return settled(true);
+  })();
+
+  search.active.delete(key);
+
+  if (answer.found || answer.low >= depth) {
+    search.memo.set(key, answer.found);
+
+    return settled(answer.found);
+  }
+
+  return answer;
 };
+
+const requires = (resolution: Resolution, place: Place, name: string): boolean =>
+  requiresAt(resolution, searchOf(resolution), place, name, 0).found;
 
 const discriminatorFindings = (
   resolution: Resolution,
@@ -345,7 +464,7 @@ const discriminatorFindings = (
 ): readonly Finding[] => {
   const base = child(place.pointer, "discriminator");
   const name = stringMember(discriminator, "propertyName");
-  const required = name !== undefined && requires(resolution, place, name, []);
+  const required = name !== undefined && requires(resolution, place, name);
   const defaultMapping = stringMember(discriminator, "defaultMapping");
   const property =
     name === undefined || required || resolution.line === "3.2"
@@ -373,11 +492,19 @@ const discriminatorFindings = (
 const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Finding[] => {
   const { node, pointer } = place;
   const pattern = Predicate.isString(node.pattern) ? node.pattern : undefined;
+  const legacy = resolution.line === "3.0";
+  const patternCode = legacy ? "S30-09/not-unicode-compilable" : "SCH-37/not-unicode-compilable";
 
   return [
     ...(pattern === undefined || compilesWithU(pattern)
       ? []
-      : [at("SCH-37/not-unicode-compilable", child(pointer, "pattern"))()]),
+      : [at(patternCode, child(pointer, "pattern"))()]),
+    ...(legacy && node.type === "array" && node.items === undefined
+      ? [at("S30-22/array-without-items", child(pointer, "items"))()]
+      : []),
+    ...(legacy && node.readOnly === true && node.writeOnly === true
+      ? [at("S30-30/read-and-write-only", pointer)()]
+      : []),
     ...(isObject(node.discriminator)
       ? discriminatorFindings(resolution, place, node.discriminator)
       : []),
@@ -954,13 +1081,22 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
 /**
  * The spec-text checks on values and grammars (design 3.4 rows 10 to 17): server variables and
  * URLs, security requirement names, media type keys, header-name tokens, discriminators, status
- * keys and patterns. Pure over the resolved document; findings are refusals except the 3.0 server
- * default and the pattern notices. The 3.0 rows S30-22 and S30-30 wait on the Diagnostic row
- * pattern, which rejects `S30`.
+ * keys and patterns, and the 3.0 rows on `items`, `readOnly` and `writeOnly`. Pure over the
+ * resolved document; findings are refusals except the 3.0 server default and the pattern notices.
+ * Walking allOf, oneOf and anyOf is bounded by `limits.maxNodes` steps; past it the only finding
+ * is a document-scope refusal (design 9 I5).
  */
-export const checkGrammar = (resolution: Resolution): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.all(
-    [...elementFindings(resolution), ...operationFindingsOf(resolution)].map((finding) =>
-      toDiagnostic(resolution, finding),
-    ),
-  );
+export const checkGrammar = (
+  resolution: Resolution,
+  limits: Pick<ResolveLimits, "maxNodes"> = defaultLimits,
+): Effect.Effect<readonly Diagnostic[]> =>
+  Effect.suspend(() => {
+    const search = startSearch(resolution, limits.maxNodes);
+    const findings = [...elementFindings(resolution), ...operationFindingsOf(resolution)];
+
+    return Effect.all(
+      (search.exhausted ? [at("REF-18/node-budget", "")()] : findings).map((finding) =>
+        toDiagnostic(resolution, finding),
+      ),
+    );
+  });
