@@ -32,6 +32,19 @@ describe("Diagnostic", () => {
     expect(Schema.encodeSync(Diagnostic)(diagnostic)).toEqual(base);
   });
 
+  test("the optional wire name decodes and round-trips, alongside an S30 row", () => {
+    const encoded = {
+      ...base,
+      code: "S30-22/array-without-items",
+      openapi: "3.0.3",
+      row: "S30-22",
+      wire: "session",
+    };
+    const diagnostic = Schema.decodeUnknownSync(Diagnostic)(encoded);
+    expect(diagnostic.wire).toBe("session");
+    expect(Schema.encodeSync(Diagnostic)(diagnostic)).toEqual(encoded);
+  });
+
   test("a malformed code is rejected", () => {
     const rejected = [
       "PRM-27",

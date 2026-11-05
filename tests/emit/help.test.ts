@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { normalizeParameter } from "../../src/normalize/parameters.ts";
+import { resolve } from "../../src/resolve/index.ts";
 import hostileSeeds from "../fixtures/seeds/hostile.json" with { type: "json" };
-import { SafeText } from "../../src/model/brands.ts";
+import { DocumentUri, SafeText } from "../../src/model/brands.ts";
 import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { Operation, SecurityScheme } from "../../src/model/entities.ts";
 import type { HelpInput } from "../../src/emit/help.ts";
@@ -320,6 +322,47 @@ describe("operationHelp", () => {
       "RESPONSES",
       "REFUSED",
     ]);
+  });
+
+  test("two refused cookie parameters from normalizeParameter are each listed by wire name", () => {
+    const parameters = ["session", "csrf"].map((name) => ({
+      in: "cookie",
+      name,
+      schema: { type: "string" },
+    }));
+    const value = {
+      components: {},
+      info: { title: "t", version: "1" },
+      openapi: "3.1.1",
+      paths: {
+        "/users/{id}": {
+          patch: { parameters, responses: { "200": { description: "ok" } } },
+        },
+      },
+    };
+    const resolution = Effect.runSync(
+      resolve({
+        document: Schema.decodeUnknownSync(DocumentUri)(origin.document),
+        line: "3.1",
+        value,
+      }),
+    );
+    const diagnostics = parameters.flatMap((_, index) => {
+      const outcome = Effect.runSync(
+        normalizeParameter(resolution, {
+          openapi: "3.1.1",
+          operation: { method: "PATCH", path: "/users/{id}" },
+          pointer: `/paths/~1users~1{id}/patch/parameters/${index}`,
+        }),
+      );
+
+      return outcome.diagnostics;
+    });
+    const refused = sectionText(operationHelp({ ...input, diagnostics }), "REFUSED");
+
+    expect(refused).toContain("session: ");
+    expect(refused).toContain("csrf: ");
+    expect(refused).not.toContain("Parameter in cookie");
   });
 
   test("notices and other operations' refusals are not listed", () => {
