@@ -325,6 +325,28 @@ const revive: Reviver = (_key, value, context) => {
   return isObject(value) ? bare(value) : value;
 };
 
+// A field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2` decode
+// to the same number, and a `JsonNumber` in a field must be a digit string.
+const reviveIntegers: Reviver = (key, value, context) =>
+  Predicate.isNumber(value) && context.source !== undefined && !int64Digits.test(context.source)
+    ? value
+    : revive(key, value, context);
+
+/**
+ * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
+ * uses (digits past 2^53 stay a `JsonNumber`, objects have no prototype). A text that is not JSON
+ * fails the flag with an error that names `--name` and never the text.
+ */
+export const jsonFlag = (name: string) =>
+  Flag.String(name).pipe(
+    Flag.mapEffect((raw) =>
+      Effect.try({
+        catch: () => asCliError(usage(name, "is not valid JSON")),
+        try: () => bunJson.parse(raw, reviveIntegers),
+      }),
+    ),
+  );
+
 const replace = (_key: string, value: JsonNode): JsonNode | RawJson =>
   value instanceof JsonNumber ? bunJson.rawJSON(value.text) : value;
 
