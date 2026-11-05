@@ -1,5 +1,6 @@
 import { Effect, Exit, Inspectable, Option, Pipeable, Result, Scope, Stream } from "effect";
 import {
+  FetchHttpClient,
   Headers,
   HttpBody,
   HttpClient,
@@ -11,6 +12,7 @@ import {
 } from "effect/http";
 import { RedirectRefused } from "../domain/errors.ts";
 import type { UsageError } from "../domain/errors.ts";
+import { isLoopbackHost } from "./auth.ts";
 
 /**
  * The most redirects one request follows (design 6.5 Redirect loop). The response to the last
@@ -25,6 +27,13 @@ export const maxRedirects = 10;
 export type Attach = (
   request: HttpClientRequest.HttpClientRequest,
 ) => Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError>;
+
+/**
+ * The request init a loopback hop executes with, supplied by the entry (design 6.5 Loopback hosts).
+ * It is opaque here: the runtime never names its keys, and `bin.ts` decides what routes a hop
+ * direct.
+ */
+export type DirectRoute = FetchHttpClient.RequestInit["Service"];
 
 /**
  * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
@@ -51,6 +60,23 @@ const isOneShot = (body: HttpBody.HttpBody): boolean =>
 const becomesGet = (status: number, method: string): boolean =>
   ((status === 301 || status === 302) && method === "POST") ||
   (status === 303 && method !== "GET" && method !== "HEAD");
+
+/**
+ * A hop to a loopback host executes with the direct-route init; every other hop is sent with no
+ * added init, so the platform routes it from the proxy environment. The decision reads the hop's
+ * own URL and is made on every hop.
+ */
+const routeHop = <A, E, R>(
+  attached: HttpClientRequest.HttpClientRequest,
+  direct: DirectRoute,
+  send: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> => {
+  const url = Url.make(attached.url, attached.urlParams, Option.getOrUndefined(attached.hash));
+
+  return Result.isSuccess(url) && isLoopbackHost(url.success.hostname)
+    ? Effect.provideService(send, FetchHttpClient.RequestInit, direct)
+    : send;
+};
 
 const asGet = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
   request.pipe(
@@ -220,7 +246,8 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
 
 /**
  * The runtime-owned redirect loop (design 6.5 Redirect loop; settled: spike S2), an
- * `HttpClient.transform` over the provided client. Each hop runs the attach step, then is sent in
+ * `HttpClient.transform` over the provided client. Each hop runs the attach step, then is sent
+ * (with `direct` as its request init when the hop's host is loopback, design 6.5 Loopback hosts) in
  * its own scope, a child of the caller's `Scope`; a followed or refused 3xx closes that scope,
  * which aborts the response instead of reading its body. The final response owns its scope (see
  * `OwnedResponse`), so it stays readable and is aborted when its body ends or when the caller's
@@ -229,7 +256,7 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
  * `followRedirects` is used nowhere.
  */
 export const redirectLoop =
-  (attach: Attach) =>
+  (attach: Attach, direct: DirectRoute) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
   ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R | Scope.Scope> => {
@@ -239,7 +266,9 @@ export const redirectLoop =
         Effect.gen(function* sendHop() {
           const attached = yield* restore(attach(request));
           const scope = yield* Scope.fork(yield* Scope.Scope);
-          const response = yield* restore(scoped.postprocess(Effect.succeed(attached))).pipe(
+          const response = yield* restore(
+            routeHop(attached, direct, scoped.postprocess(Effect.succeed(attached))),
+          ).pipe(
             Scope.provide(scope),
             Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
           );

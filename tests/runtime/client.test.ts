@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Cause, Effect, Exit, Option, Redacted, Stream } from "effect";
 import {
+  FetchHttpClient,
   Headers,
   HttpBody,
   HttpClient,
@@ -32,10 +33,14 @@ const bytes = (text: string) => new TextEncoder().encode(text);
 
 const decode = (data: Uint8Array) => new TextDecoder().decode(data);
 
+// The direct-route init the entry hands the policy. Opaque to the runtime, so any object serves.
+const sentinel: Client.DirectRoute = { cache: "no-store" };
+
 interface Seen {
   readonly body: string;
   readonly hash: Option.Option<string>;
   readonly headers: Headers.Headers;
+  readonly init: Client.DirectRoute | undefined;
   readonly method: string;
   readonly origin: string;
   readonly path: string;
@@ -114,12 +119,16 @@ const fixture = () => {
   const client = HttpClient.make((request, url, signal) =>
     Effect.gen(function* answer() {
       const body = yield* bodyText(request.body);
+      const routed = Option.getOrUndefined(
+        yield* Effect.serviceOption(FetchHttpClient.RequestInit),
+      );
       const target = new URL(url.href);
       target.hash = "";
       seen.push({
         body,
         hash: request.hash,
         headers: request.headers,
+        init: routed,
         method: request.method,
         origin: target.origin,
         path: `${target.pathname}${target.search}`,
@@ -181,7 +190,7 @@ const run = async (
 ) => {
   const { client, pulls, seen } = fixture();
   const program = client
-    .pipe(Client.redirectLoop(attach))
+    .pipe(Client.redirectLoop(attach, sentinel))
     .execute(request)
     .pipe(
       Effect.map((response): Outcome => `Response:${response.status}`),
@@ -198,7 +207,10 @@ const refusal = (request: HttpClientRequest.HttpClientRequest) => {
   const { client } = fixture();
 
   return Effect.runPromise(
-    client.pipe(Client.redirectLoop(noAttach)).execute(request).pipe(Effect.flip, Effect.scoped),
+    client
+      .pipe(Client.redirectLoop(noAttach, sentinel))
+      .execute(request)
+      .pipe(Effect.flip, Effect.scoped),
   );
 };
 
@@ -461,7 +473,7 @@ describe("SP2: the discarded 3xx response is aborted, not drained", () => {
     const { client } = fixture();
     const text = await Effect.runPromise(
       client
-        .pipe(Client.redirectLoop(noAttach))
+        .pipe(Client.redirectLoop(noAttach, sentinel))
         .execute(HttpClientRequest.get(`${A}/endless/307`))
         .pipe(
           // Read only a 200: a 3xx here carries the endless body.
@@ -486,7 +498,7 @@ const owned = async <A>(
   const { client, pulls, seen } = fixture();
   const exit = await Effect.runPromiseExit(
     client
-      .pipe(Client.redirectLoop(noAttach))
+      .pipe(Client.redirectLoop(noAttach, sentinel))
       .execute(HttpClientRequest.get(url))
       .pipe(
         Effect.orDie,
@@ -640,7 +652,7 @@ describe("RT-5: the method assertion and the User-Agent", () => {
       client
         .pipe(
           Client.assertMethod(allow),
-          Client.redirectLoop(noAttach),
+          Client.redirectLoop(noAttach, sentinel),
           Client.withUserAgent("acme", "1.2.3"),
         )
         .execute(request)
@@ -702,5 +714,67 @@ describe("RT-5: the method assertion and the User-Agent", () => {
     expect(
       seen.map((hop) => Option.getOrUndefined(Headers.get(hop.headers, "user-agent"))),
     ).toEqual(["acme/1.2.3"]);
+  });
+});
+
+// The init each hop of the given requests, sent in order through one client, executed with.
+const initsOf = (...urls: readonly string[]) => {
+  const { client, seen } = fixture();
+  const looped = client.pipe(Client.redirectLoop(noAttach, sentinel));
+
+  return Effect.runPromise(
+    Effect.all(
+      urls.map((url) => looped.execute(HttpClientRequest.get(url)).pipe(Effect.scoped)),
+      { concurrency: 1 },
+    ),
+  ).then(() => seen.map((hop) => hop.init));
+};
+
+describe("RT-5: loopback hops go direct", () => {
+  test("redirect into loopback", async () => {
+    const loopback = await Promise.all(
+      ["http://127.0.0.1:1/", "http://localhost:1/", "http://[::1]:1/"].map((url) => initsOf(url)),
+    );
+    expect(loopback.map((inits) => inits.length)).toEqual([1, 1, 1]);
+    expect(loopback.map(([only]) => only === sentinel)).toEqual([true, true, true]);
+
+    const outside = await Promise.all(
+      ["http://192.0.2.10:1/", "http://example.test/"].map((url) => initsOf(url)),
+    );
+    expect(outside).toEqual([[undefined], [undefined]]);
+
+    const out = encodeURIComponent("http://example.test/final");
+    const via = encodeURIComponent(`http://127.0.0.1:1/loc?to=${out}`);
+    const chain = await initsOf(`http://example.test/loc?to=${via}`);
+    expect(chain).toHaveLength(3);
+    expect(chain[0]).toBeUndefined();
+    expect(chain[1]).toBe(sentinel);
+    expect(chain[2]).toBeUndefined();
+
+    const same = await initsOf("http://127.0.0.1:1/status/307?to=/final");
+    expect(same).toHaveLength(2);
+    expect(same[0]).toBe(sentinel);
+    expect(same[1]).toBe(sentinel);
+  });
+
+  test("a public hop into loopback carries the init only on the loopback hop", async () => {
+    const inits = await initsOf("http://192.0.2.10:1/r/302/A");
+
+    expect(inits).toHaveLength(2);
+    expect(inits[0]).toBeUndefined();
+    expect(inits[1]).toBe(sentinel);
+  });
+
+  test("the decision is per hop and not cached on the client", async () => {
+    const inits = await initsOf(
+      "http://127.0.0.1:1/",
+      "http://example.test/",
+      "http://localhost:1/",
+    );
+
+    expect(inits).toHaveLength(3);
+    expect(inits[0]).toBe(sentinel);
+    expect(inits[1]).toBeUndefined();
+    expect(inits[2]).toBe(sentinel);
   });
 });
