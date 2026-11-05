@@ -52,7 +52,7 @@ export const bodyFileFlag = Flag.String(bodyFileName).pipe(
 export class StdinClaim extends Context.Service<
   StdinClaim,
   { readonly claim: (flag: string) => Effect.Effect<void, UsageError> }
->()("runtime/StdinClaim") {}
+>()("openapi-cli/runtime/StdinClaim") {}
 
 /**
  * A fresh claim for one invocation. The root `services` layer provides it once.

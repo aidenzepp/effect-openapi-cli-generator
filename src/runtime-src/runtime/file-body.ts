@@ -11,7 +11,7 @@ export class FileBody extends Context.Service<
   {
     readonly open: (path: string) => Effect.Effect<HttpBody.HttpBody, PlatformError.PlatformError>;
   }
->()("runtime/FileBody") {}
+>()("openapi-cli/runtime/FileBody") {}
 
 /**
  * The platform-neutral default: `HttpBody.file` over the provided `FileSystem`.
