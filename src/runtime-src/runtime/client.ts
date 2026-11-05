@@ -1,6 +1,14 @@
-import { Effect, Exit, Option, Result, Scope } from "effect";
-import { Headers, HttpBody, HttpClient, HttpClientRequest, Url, UrlParams } from "effect/http";
-import type { HttpClientResponse } from "effect/http";
+import { Effect, Exit, Inspectable, Option, Pipeable, Result, Scope, Stream } from "effect";
+import {
+  Headers,
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  HttpIncomingMessage,
+  Url,
+  UrlParams,
+} from "effect/http";
 import { RedirectRefused } from "../domain/errors.ts";
 import type { UsageError } from "../domain/errors.ts";
 
@@ -19,14 +27,14 @@ export type Attach = (
 ) => Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError>;
 
 /**
- * The statuses the loop follows. Any other 3xx, and a 3xx without a usable `Location`, is the
- * final response.
- */
-/**
  * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
  */
 const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
 
+/**
+ * The statuses the loop follows. Any other 3xx, and a 3xx without a usable `Location`, is the
+ * final response.
+ */
 const redirectStatuses: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 /**
@@ -125,24 +133,112 @@ const nextHop = (
 };
 
 /**
+ * The final hop's response. Its scope closes when the body ends, fails or is cancelled; the scope
+ * is a child of the caller's, so a response dropped unread is aborted when the caller's scope
+ * closes. `upgrade` hands the connection over, so it leaves the scope to the caller's.
+ */
+class OwnedResponse implements HttpClientResponse.HttpClientResponse {
+  readonly [HttpClientResponse.TypeId] = HttpClientResponse.TypeId;
+  readonly [HttpIncomingMessage.TypeId] = HttpIncomingMessage.TypeId;
+  readonly #original: HttpClientResponse.HttpClientResponse;
+  readonly #release: Effect.Effect<void>;
+
+  constructor(original: HttpClientResponse.HttpClientResponse, scope: Scope.Closeable) {
+    this.#original = original;
+    this.#release = Scope.close(scope, Exit.void);
+  }
+
+  get request() {
+    return this.#original.request;
+  }
+
+  get url() {
+    return this.#original.url;
+  }
+
+  get status() {
+    return this.#original.status;
+  }
+
+  get headers() {
+    return this.#original.headers;
+  }
+
+  get cookies() {
+    return this.#original.cookies;
+  }
+
+  get remoteAddress() {
+    return this.#original.remoteAddress;
+  }
+
+  get arrayBuffer() {
+    return Effect.ensuring(this.#original.arrayBuffer, this.#release);
+  }
+
+  get formData() {
+    return Effect.ensuring(this.#original.formData, this.#release);
+  }
+
+  get json() {
+    return Effect.ensuring(this.#original.json, this.#release);
+  }
+
+  get text() {
+    return Effect.ensuring(this.#original.text, this.#release);
+  }
+
+  get urlParamsBody() {
+    return Effect.ensuring(this.#original.urlParamsBody, this.#release);
+  }
+
+  get stream() {
+    return Stream.ensuring(this.#original.stream, this.#release);
+  }
+
+  get upgrade() {
+    return this.#original.upgrade;
+  }
+
+  toJSON() {
+    return this.#original.toJSON();
+  }
+
+  toString() {
+    return this.#original.toString();
+  }
+
+  [Inspectable.NodeInspectSymbol]() {
+    return this.#original[Inspectable.NodeInspectSymbol]();
+  }
+
+  pipe() {
+    // oxlint-disable-next-line prefer-rest-params
+    return Pipeable.pipeArguments(this, arguments);
+  }
+}
+
+/**
  * The runtime-owned redirect loop (design 6.5 Redirect loop; settled: spike S2), an
  * `HttpClient.transform` over the provided client. Each hop runs the attach step, then is sent in
- * its own scope; a followed or refused 3xx closes that scope, which aborts the response instead
- * of reading its body. The final response's scope is left open so its body stays readable. The
- * send and the decision are one uninterruptible step around the interruptible attach and send, so
- * a discarded 3xx cannot escape its scope. Native `followRedirects` is used nowhere.
+ * its own scope, a child of the caller's `Scope`; a followed or refused 3xx closes that scope,
+ * which aborts the response instead of reading its body. The final response owns its scope (see
+ * `OwnedResponse`), so it stays readable and is aborted when its body ends or when the caller's
+ * scope closes, whichever comes first. The send and the decision are one uninterruptible step
+ * around the interruptible attach and send, so a discarded 3xx cannot escape its scope. Native
+ * `followRedirects` is used nowhere.
  */
 export const redirectLoop =
   (attach: Attach) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
-  ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R> => {
+  ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R | Scope.Scope> => {
     const scoped = HttpClient.withScope(client);
     const hop = (request: HttpClientRequest.HttpClientRequest, followed: number) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* sendHop() {
           const attached = yield* restore(attach(request));
-          const scope = yield* Scope.make();
+          const scope = yield* Scope.fork(yield* Scope.Scope);
           const response = yield* restore(scoped.postprocess(Effect.succeed(attached))).pipe(
             Scope.provide(scope),
             Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
@@ -150,9 +246,11 @@ export const redirectLoop =
           const next = yield* nextHop(request, response, followed).pipe(
             Effect.onError(() => Scope.close(scope, Exit.void)),
           );
-          if (Option.isSome(next)) {
-            yield* Scope.close(scope, Exit.void);
+          if (Option.isNone(next)) {
+            return { next, response: new OwnedResponse(response, scope) };
           }
+
+          yield* Scope.close(scope, Exit.void);
 
           return { next, response };
         }),
@@ -160,7 +258,11 @@ export const redirectLoop =
     const loop = (
       request: HttpClientRequest.HttpClientRequest,
       followed: number,
-    ): Effect.Effect<HttpClientResponse.HttpClientResponse, E | RedirectRefused | UsageError, R> =>
+    ): Effect.Effect<
+      HttpClientResponse.HttpClientResponse,
+      E | RedirectRefused | UsageError,
+      R | Scope.Scope
+    > =>
       Effect.flatMap(hop(request, followed), ({ next, response }) =>
         Option.isNone(next) ? Effect.succeed(response) : loop(next.value, followed + 1),
       );
@@ -172,15 +274,15 @@ export const redirectLoop =
  * Asserts the request method against the allowlist `bin.ts` provides with the client layer
  * (design 6.7). Bun's `fetch` sends any token outside its own table as `GET`, so the generator
  * never emits one and a miss is a defect (exit 70): the request is never sent. The token is
- * compared as given, with no case folding. Apply it outermost, so it sees the caller's request;
- * a redirect only ever changes a method to `GET`.
+ * compared as given, with no case folding. Apply it inside `redirectLoop`, so it sees every hop,
+ * including one a redirect turned into `GET`.
  */
 export const assertMethod =
   (allowed: ReadonlySet<string>) =>
   <E, R>(client: HttpClient.HttpClient.With<E, R>): HttpClient.HttpClient.With<E, R> =>
-    HttpClient.mapRequestInputEffect(client, (request) =>
+    HttpClient.transform(client, (send, request) =>
       allowed.has(request.method)
-        ? Effect.succeed(request)
+        ? send
         : Effect.die(
             new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
           ),

@@ -189,7 +189,7 @@ const run = async (
         Effect.succeed(`RedirectRefused:${refused.reason}`),
       ),
     );
-  const outcome = await Effect.runPromise(program);
+  const outcome = await Effect.runPromise(Effect.scoped(program));
 
   return { outcome, pulls: pulls(), seen };
 };
@@ -198,7 +198,7 @@ const refusal = (request: HttpClientRequest.HttpClientRequest) => {
   const { client } = fixture();
 
   return Effect.runPromise(
-    client.pipe(Client.redirectLoop(noAttach)).execute(request).pipe(Effect.flip),
+    client.pipe(Client.redirectLoop(noAttach)).execute(request).pipe(Effect.flip, Effect.scoped),
   );
 };
 
@@ -339,9 +339,8 @@ describe("attach runs on every hop", () => {
   });
 
   test("a hop never inherits the previous hop's attach output", async () => {
-    // Audit D F3: a cookie name that the strip cannot parse back. The next hop is built from the
-    // request before attach, so the attached cookie never reaches it.
-    const hostile: Auth.SecurityScheme = { in: "cookie", kind: "apiKey", name: "a; admin=1" };
+    // The next hop is built from the request before attach, so the attached cookie never reaches it.
+    const hostile: Auth.SecurityScheme = { in: "cookie", kind: "apiKey", name: "session" };
     const attach = Auth.attach(
       { schemes: { hostile } },
       {
@@ -447,7 +446,8 @@ describe("SP2: the discarded 3xx response is aborted, not drained", () => {
   test("a 3xx body that never ends neither hangs nor is read", async () => {
     const { outcome, pulls, seen } = await run(HttpClientRequest.get(`${A}/endless/302`));
     expect(outcome).toBe("Response:200");
-    expect(seen.map((hop) => hop.signal.aborted)).toEqual([true, false]);
+    // The final hop is aborted too, by the caller's scope closing (audit G F3).
+    expect(seen.map((hop) => hop.signal.aborted)).toEqual([true, true]);
     expect(pulls).toBeLessThan(4);
   }, 10_000);
 
@@ -468,9 +468,71 @@ describe("SP2: the discarded 3xx response is aborted, not drained", () => {
           Effect.flatMap((response) =>
             response.status === 200 ? response.text : Effect.succeed(`status ${response.status}`),
           ),
+          Effect.scoped,
         ),
     );
     expect(text).toBe("final");
+  }, 10_000);
+});
+
+// The final hop's signal is the last one the fixture saw.
+const lastAborted = (seen: readonly Seen[]): boolean => seen.at(-1)?.signal.aborted ?? false;
+
+// Runs the loop under a caller scope and hands the final response to `use` inside it.
+const owned = async <A>(
+  url: string,
+  use: (response: HttpClientResponse.HttpClientResponse, seen: readonly Seen[]) => Effect.Effect<A>,
+) => {
+  const { client, pulls, seen } = fixture();
+  const exit = await Effect.runPromiseExit(
+    client
+      .pipe(Client.redirectLoop(noAttach))
+      .execute(HttpClientRequest.get(url))
+      .pipe(
+        Effect.orDie,
+        Effect.flatMap((response) => use(response, seen)),
+        Effect.scoped,
+      ),
+  );
+
+  return { exit, pulls: pulls(), seen };
+};
+
+describe("audit G F3: the final hop's scope has an owner", () => {
+  test("a final response dropped unread is aborted when the caller's scope closes", async () => {
+    const { exit, seen } = await owned(`${A}/r/302/A`, () => Effect.void);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(seen.map((hop) => hop.signal.aborted)).toEqual([true, true]);
+  });
+
+  test("an interrupt after the loop returns, before reading, aborts the final hop", async () => {
+    const { exit, seen } = await owned(`${A}/r/302/A`, () => Effect.interrupt);
+    expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
+    expect(seen.map((hop) => hop.signal.aborted)).toEqual([true, true]);
+  });
+
+  test("a body read to its end closes the final hop's scope", async () => {
+    const { exit } = await owned(`${A}/r/302/A`, (response, seen) =>
+      response.text.pipe(
+        Effect.orDie,
+        Effect.map((text) => [text, lastAborted(seen)]),
+      ),
+    );
+    expect(exit).toEqual(Exit.succeed(["final", true]));
+  });
+
+  test("a cancelled body stream closes the final hop's scope", async () => {
+    // A 200 whose body never ends; the stream is cut after one chunk.
+    const { exit, pulls } = await owned(`${A}/endless/200`, (response, seen) =>
+      response.stream.pipe(
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.orDie,
+        Effect.map(() => lastAborted(seen)),
+      ),
+    );
+    expect(exit).toEqual(Exit.succeed(true));
+    expect(pulls).toBeLessThan(8);
   }, 10_000);
 });
 
@@ -569,16 +631,20 @@ const token = (method: string, url: string) =>
 describe("RT-5: the method assertion and the User-Agent", () => {
   const allowed: ReadonlySet<string> = new Set(["GET", "POST", "PURGE"]);
 
-  const policed = (request: HttpClientRequest.HttpClientRequest) => {
+  const policed = (
+    request: HttpClientRequest.HttpClientRequest,
+    allow: ReadonlySet<string> = allowed,
+  ) => {
     const { client, seen } = fixture();
     const exit = Effect.runPromiseExit(
       client
         .pipe(
+          Client.assertMethod(allow),
           Client.redirectLoop(noAttach),
-          Client.assertMethod(allowed),
           Client.withUserAgent("acme", "1.2.3"),
         )
-        .execute(request),
+        .execute(request)
+        .pipe(Effect.scoped),
     );
 
     return exit.then((result) => ({ exit: result, seen }));
@@ -601,6 +667,17 @@ describe("RT-5: the method assertion and the User-Agent", () => {
       expect(seen).toEqual([]);
     },
   );
+
+  test("a redirect that turns into GET is a defect when GET is not allowed", async () => {
+    const { exit, seen } = await policed(
+      withBody("POST", `${A}/r/303/A`, memoryBody()),
+      new Set(["POST"]),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+    expect(seen.map((hop) => hop.method)).toEqual(["POST"]);
+    expect(seen.map((hop) => hop.signal.aborted)).toEqual([true]);
+  });
 
   test("the defect does not carry the URL", async () => {
     const { exit } = await policed(token("LINK", `${A}/final?api_key=SECRET`));
