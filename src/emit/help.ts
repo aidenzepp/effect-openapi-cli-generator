@@ -95,7 +95,7 @@ const record = (
 ): Readonly<Record<string, string>> => Object.fromEntries(entries);
 
 const mediaTypes = (alternatives: readonly { readonly mediaType: string }[]): string =>
-  alternatives.map((alternative) => alternative.mediaType).join(" | ");
+  alternatives.map((alternative) => alternative.mediaType).join(" or ");
 
 const requestLine = (operation: Operation): string => {
   const { body, key, operationId } = operation;
