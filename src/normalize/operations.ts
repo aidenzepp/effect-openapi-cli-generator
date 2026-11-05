@@ -121,6 +121,7 @@ const OperationFields = Schema.Struct({
   requestBody: Schema.optionalKey(Schema.Json),
   servers: Schema.optionalKey(Schema.Json),
   summary: Schema.optionalKey(Schema.String),
+  tags: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 const ParameterIdentity = Schema.Struct({ in: Schema.String, name: Schema.String });
@@ -568,6 +569,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       rows: rowsOf(shared, raw, merged, { body: body.body, declared: policy.policy.declared }),
       security: policy.policy,
       servers: servers.servers,
+      tags: (raw.fields.tags ?? []).map(sanitizeProse),
     };
     if (body.body !== undefined) {
       fields.body = body.body;
