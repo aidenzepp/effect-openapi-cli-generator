@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Runtime } from "effect";
+import { Effect, Runtime, Stream } from "effect";
+import { HttpBody } from "effect/http";
+import type { HttpClientRequest } from "effect/http";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 import type { Value } from "../../src/runtime-src/runtime/serialize.ts";
@@ -660,5 +662,327 @@ describe("allowEmptyValue", () => {
 
   test("a defined value is unchanged", async () => {
     expect(await query(Serialize.form("q", "a", allowed))).toBe("q=a");
+  });
+});
+
+const headerOptions = (
+  options: Partial<Serialize.HeaderOptions> = {},
+): Serialize.HeaderOptions => ({
+  explode: false,
+  required: false,
+  ...options,
+});
+
+const headerText = (value: Value, options: Partial<Serialize.HeaderOptions> = {}) =>
+  Effect.runPromise(Serialize.header("X-Test", value, headerOptions(options)).expand);
+
+describe("header", () => {
+  test("a scalar is sent as its text with no percent-encoding", async () => {
+    expect(await headerText("a b/c%20é")).toBe("a b/c%20é");
+    expect(await headerText(42)).toBe("42");
+    expect(await headerText(true)).toBe("true");
+  });
+
+  test("arrays and objects use the simple style", async () => {
+    expect(await headerText(["a", "b", 3])).toBe("a,b,3");
+    expect(await headerText({ G: 200, R: 100 })).toBe("G,200,R,100");
+    expect(await headerText({ G: 200, R: 100 }, { explode: true })).toBe("G=200,R=100");
+    expect(await headerText(["a", "b"], { explode: true })).toBe("a,b");
+  });
+
+  test("an empty value is sent, not refused", async () => {
+    expect(await headerText("")).toBe("");
+    expect(await headerText([""])).toBe("");
+    expect(await headerText({ k: "" })).toBe("k,");
+  });
+
+  test("null, undefined, [] and {} send nothing, or are refused when required", async () => {
+    expect(await headerText(null)).toBeUndefined();
+    // oxlint-disable-next-line unicorn/no-useless-undefined -- the value under test
+    expect(await headerText(undefined)).toBeUndefined();
+    expect(await headerText([])).toBeUndefined();
+    expect(await headerText({})).toBeUndefined();
+    await expectUsage(Serialize.header("X-Test", null, headerOptions({ required: true })).expand);
+    await expectUsage(Serialize.header("X-Test", [], headerOptions({ required: true })).expand);
+  });
+
+  test.each(["a\rb", "a\nb", "a\0b", " a", "a ", "\ta", "a\t"])(
+    "a value with a forbidden character is refused: %j",
+    async (value) => {
+      await expectUsage(Serialize.header("X-Test", value, headerOptions()).expand);
+      await expectUsage(Serialize.header("X-Test", [value], headerOptions()).expand);
+      await expectUsage(Serialize.header("X-Test", { k: value }, headerOptions()).expand);
+    },
+  );
+
+  test("an item with edge whitespace is refused inside a list", async () => {
+    await expectUsage(Serialize.header("X-Test", ["a", " b"], headerOptions()).expand);
+    await expectUsage(Serialize.header("X-Test", { " k": "v" }, headerOptions()).expand);
+  });
+
+  test("interior whitespace is kept", async () => {
+    expect(await headerText("a b\tc")).toBe("a b\tc");
+  });
+
+  test("a comma inside an item or member is refused, a scalar keeps its comma", async () => {
+    expect(await headerText("a,b")).toBe("a,b");
+    await expectUsage(Serialize.header("X-Test", ["a,b"], headerOptions()).expand);
+    await expectUsage(Serialize.header("X-Test", { k: "a,b" }, headerOptions()).expand);
+    await expectUsage(Serialize.header("X-Test", { "k,": "v" }, headerOptions()).expand);
+    await expectUsage(Serialize.header("X-Test", ["a,b"], headerOptions({ explode: true })).expand);
+  });
+
+  test("an exploded object key with an equals sign is refused", async () => {
+    await expectUsage(
+      Serialize.header("X-Test", { "a=b": "v" }, headerOptions({ explode: true })).expand,
+    );
+    expect(await headerText({ k: "a=b" }, { explode: true })).toBe("k=a=b");
+  });
+
+  test("a lone surrogate or a name that is not a token is refused", async () => {
+    await expectUsage(Serialize.header("X-Test", "\uD800", headerOptions()).expand);
+    await expectUsage(Serialize.header("X Test", "v", headerOptions()).expand);
+    await expectUsage(Serialize.header("X-Test\r\nInjected", "v", headerOptions()).expand);
+    await expectUsage(Serialize.header("", "v", headerOptions()).expand);
+  });
+
+  test("a nested value is refused", async () => {
+    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parsed JSON is any
+    const nested: Value = JSON.parse('{"k":{"deeper":1}}');
+
+    await expectUsage(Serialize.header("X-Test", nested, headerOptions()).expand);
+  });
+});
+
+const refusal = async (...parameters: Serialize.PathParameter[]) => {
+  const error = await Effect.runPromise(
+    Effect.flip(Serialize.path("/users/{id}", parameters).expand),
+  );
+
+  expect(error).toBeInstanceOf(UsageError);
+  expect(error).toMatchObject({ _tag: "UsageError" });
+  expect(error.message).toContain("id");
+
+  return error;
+};
+
+describe("path refuses an empty expansion", () => {
+  test("an empty string and a list of one empty string are refused, naming the parameter", async () => {
+    await refusal(Serialize.simple("id", "", plain));
+    await refusal(Serialize.simple("id", [""], plain));
+  });
+
+  test("the refusal names the parameter and never the value", async () => {
+    const error = await refusal(Serialize.simple("id", "", plain));
+
+    expect(error.message).not.toContain("''");
+  });
+
+  test("a matrix and a label expand an empty string to a non-empty text", async () => {
+    expect(await pathOf("/u{id}", Serialize.matrix("id", "", plain))).toBe("/u;id");
+    expect(await pathOf("/u{id}", Serialize.label("id", "", plain))).toBe("/u.");
+  });
+
+  test("the parameter alone still expands to the empty string", async () => {
+    expect(await expand(Serialize.simple("id", "", plain))).toBe("");
+  });
+});
+
+describe("matrix parameter name", () => {
+  test("a lone surrogate in the name is refused without echoing it", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(Serialize.matrix("a\uD800", "v", plain).expand),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).not.toContain("\uD800");
+  });
+
+  test("a paired surrogate in the name is encoded", async () => {
+    expect(await expand(Serialize.matrix("a\u{1F600}", "v", plain))).toBe(";a%F0%9F%98%80=v");
+  });
+});
+
+const describeRequest = (parts: Partial<Serialize.RequestParts> = {}) =>
+  Serialize.request("GET", {
+    headers: [],
+    path: Serialize.path("/users/{id}", [Serialize.simple("id", 42, plain)]),
+    query: [],
+    ...parts,
+  });
+
+const run = (request: Serialize.Request) => Effect.runPromise(request);
+
+describe("request", () => {
+  test("the URL is the expanded path plus the query pairs, with no origin and no urlParams", async () => {
+    const built = await run(
+      describeRequest({
+        query: [
+          Serialize.form("notify", true, { allowReserved: false, explode: true, required: false }),
+          Serialize.form("skip", undefined, {
+            allowReserved: false,
+            explode: true,
+            required: false,
+          }),
+          Serialize.form("tag", ["a b", "c"], {
+            allowReserved: false,
+            explode: true,
+            required: false,
+          }),
+        ],
+      }),
+    );
+
+    expect(built.url).toBe("/users/42?notify=true&tag=a%20b&tag=c");
+    expect([...built.urlParams]).toEqual([]);
+    expect(built.method).toBe("GET");
+  });
+
+  test("with no query pair the URL has no question mark", async () => {
+    const built = await run(
+      describeRequest({
+        query: [
+          Serialize.form("skip", null, { allowReserved: false, explode: true, required: false }),
+        ],
+      }),
+    );
+
+    expect(built.url).toBe("/users/42");
+  });
+
+  test("the method is kept", async () => {
+    const built = await run(
+      Serialize.request("PATCH", { headers: [], path: Serialize.path("/", []), query: [] }),
+    );
+
+    expect(built.method).toBe("PATCH");
+    expect(built.url).toBe("/");
+  });
+
+  test("header descriptors set their headers and skip the ones with no value", async () => {
+    const built = await run(
+      describeRequest({
+        headers: [
+          Serialize.header("If-Match", "etag-1", headerOptions()),
+          Serialize.header("X-Tags", ["a", "b"], headerOptions()),
+          Serialize.header("X-Skip", undefined, headerOptions()),
+        ],
+      }),
+    );
+
+    expect(built.headers["if-match"]).toBe("etag-1");
+    expect(built.headers["x-tags"]).toBe("a,b");
+    expect(built.headers["x-skip"]).toBeUndefined();
+  });
+
+  test("an empty header value is sent", async () => {
+    const built = await run(
+      describeRequest({ headers: [Serialize.header("X-Empty", "", headerOptions())] }),
+    );
+
+    expect(built.headers["x-empty"]).toBe("");
+  });
+
+  test("a refusal in any descriptor fails the effect with UsageError", async () => {
+    await expectUsage(
+      describeRequest({ path: Serialize.path("/users/{id}", [Serialize.simple("id", "", plain)]) }),
+    );
+    await expectUsage(
+      describeRequest({
+        query: [Serialize.form("q", null, { allowReserved: false, explode: true, required: true })],
+      }),
+    );
+    await expectUsage(
+      describeRequest({ headers: [Serialize.header("X-Test", "a\nb", headerOptions())] }),
+    );
+    await expectUsage(
+      describeRequest({ body: Serialize.body("application/json", { n: Number.NaN }) }),
+    );
+    await expectUsage(describeRequest({ body: Serialize.body("text/plain", { not: "text" }) }));
+  });
+});
+
+const withBody = (mediaType: string, value: Serialize.Body) =>
+  run(
+    Serialize.request("POST", {
+      body: Serialize.body(mediaType, value),
+      headers: [],
+      path: Serialize.path("/", []),
+      query: [],
+    }),
+  );
+
+const bytes = (built: HttpClientRequest.HttpClientRequest) =>
+  built.body._tag === "Uint8Array" ? new TextDecoder().decode(built.body.body) : undefined;
+
+describe("body", () => {
+  test("a JSON value is sent as compact JSON text under its media type", async () => {
+    const built = await withBody("application/json", { name: "Ada", tags: ["a"] });
+
+    expect(built.headers["content-type"]).toBe("application/json");
+    expect(bytes(built)).toBe('{"name":"Ada","tags":["a"]}');
+  });
+
+  test("a JSON string is quoted, a structured +json type is JSON", async () => {
+    expect(bytes(await withBody("application/json", "x"))).toBe('"x"');
+    expect(bytes(await withBody("application/merge-patch+json", { a: null }))).toBe('{"a":null}');
+  });
+
+  test("a text media type sends the string as given", async () => {
+    const built = await withBody("text/plain", "line\n");
+
+    expect(built.headers["content-type"]).toBe("text/plain");
+    expect(bytes(built)).toBe("line\n");
+  });
+
+  test("Content-Type is the media type given, set in one place", async () => {
+    const built = await withBody(
+      "image/png",
+      HttpBody.uint8Array(new Uint8Array([1, 2]), "text/other"),
+    );
+
+    expect(built.headers["content-type"]).toBe("image/png");
+    expect(built.body._tag).toBe("Uint8Array");
+  });
+
+  test("a binary stream is sent as the stream, with the media type", async () => {
+    const stream = HttpBody.stream(Stream.make(new Uint8Array([1, 2, 3])));
+    const built = await withBody("application/octet-stream", stream);
+
+    expect(built.body).toBe(stream);
+    expect(built.headers["content-type"]).toBe("application/octet-stream");
+  });
+
+  test("a binary body under a JSON media type is sent as the stream", async () => {
+    const stream = HttpBody.stream(Stream.make(new Uint8Array([1])));
+    const built = await withBody("application/json", stream);
+
+    expect(built.body).toBe(stream);
+  });
+
+  test("a lone surrogate in a text body or a media type with a control character is refused", async () => {
+    await expectUsage(
+      Serialize.request("POST", {
+        body: Serialize.body("text/plain", "\uD800"),
+        headers: [],
+        path: Serialize.path("/", []),
+        query: [],
+      }),
+    );
+    await expectUsage(
+      Serialize.request("POST", {
+        body: Serialize.body("text/plain\r\nX: y", "v"),
+        headers: [],
+        path: Serialize.path("/", []),
+        query: [],
+      }),
+    );
+  });
+
+  test("a request with no body has an empty body and no Content-Type", async () => {
+    const built = await run(describeRequest());
+
+    expect(built.body._tag).toBe("Empty");
+    expect(built.headers["content-type"]).toBeUndefined();
   });
 });
