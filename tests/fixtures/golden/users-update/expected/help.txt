@@ -1,0 +1,22 @@
+DESCRIPTION
+  Update a user.
+
+USAGE
+  example users update [flags] <id>
+
+ARGUMENTS
+  id string    User id.    (path id)
+
+FLAGS
+  --address.city string                                  (body /address/city)
+  --body string            Whole request body; field flags override it
+  --body-file path|-       Whole request body from a file or stdin
+  --if-match string                                      (header If-Match)
+  --name string            Display name.                 (body /name)
+  --notify                 Send a notification email.    (query notify; --no-notify sends false)
+
+REQUEST   PATCH /users/{id}, body application/json (required), operationId users-update
+AUTH      bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH
+RESPONSES 200 application/json; 404; default application/json. Non-2xx exits 1 (401/403 exit 3)
+
+Run 'example --help' for global flags
