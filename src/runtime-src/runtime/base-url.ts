@@ -87,12 +87,13 @@ export const validateBaseUrl = (label: string, raw: string): Effect.Effect<strin
     return Effect.fail(usage(label, "not an absolute URL"));
   }
 
-  const { protocol } = new URL(raw);
+  const parsed = new URL(raw);
+  const { protocol } = parsed;
   if (protocol !== "http:" && protocol !== "https:") {
     return Effect.fail(usage(label, "the scheme must be http or https"));
   }
 
-  if (authorityOf(raw).includes("@")) {
+  if (authorityOf(raw).includes("@") || parsed.username !== "" || parsed.password !== "") {
     return Effect.fail(usage(label, "the URL must not contain userinfo"));
   }
 

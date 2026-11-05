@@ -172,6 +172,8 @@ describe("invalid values never echo the value", () => {
     ["not absolute", canary],
     ["userinfo", `https://user:${canary}@example.org`],
     ["empty userinfo", `https://@${canary}.example.org`],
+    ["userinfo after a slash run", `https:///user:${canary}@example.org`],
+    ["userinfo after a backslash", `https:/\\${canary}@example.org`],
     ["query", `https://example.org/?token=${canary}`],
     ["empty query", `https://${canary}.example.org/?`],
     ["fragment", `https://example.org/#${canary}`],
