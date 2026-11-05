@@ -3,6 +3,7 @@ import { referenceAt } from "../../src/resolve/index.ts";
 import type { Resolution } from "../../src/resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../../src/model/pointer.ts";
 import type { Json, PointerEvalError, PointerSyntaxError } from "../../src/model/pointer.ts";
+import { isObject, isArray } from "../../src/model/json-tree.ts";
 
 type Document = Resolution["document"];
 
@@ -40,14 +41,6 @@ export type WalkElement =
   | (Site & { readonly kind: "server"; readonly url: string });
 
 export type WalkError = PointerEvalError | PointerSyntaxError;
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
-
-const isObject = (value: Json | undefined): value is JsonObject => Predicate.isObject(value);
-
-const isArray = (value: Json | undefined): value is readonly Json[] => Array.isArray(value);
 
 const member = (node: Json | undefined, key: string): Json | undefined =>
   isObject(node) ? node[key] : undefined;

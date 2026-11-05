@@ -6,22 +6,20 @@ import { documentBase, resolveUri, schemaBase, stringMember, stripFragment } fro
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
 import {
-  escapeToken,
   evaluateTokens,
   parseFragment,
   parsePointer,
   formatPointer,
+  childPointer,
 } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { isObject, isArray } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
 
 type Document = typeof DocumentUri.Type;
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
 
 /**
  * One document of the set (a set of one in Milestone 1), with the `openapi` line it declares.
@@ -219,11 +217,6 @@ const failure = (code: DocumentCode, pointer: string, related?: CanonicalKey): F
   finding: related === undefined ? { code, pointer } : { code, pointer, related },
 });
 
-const isObject = (value: Json): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isArray = (value: Json): value is readonly Json[] => Array.isArray(value);
-
 type Kind =
   | ReferenceKind
   | "components"
@@ -378,8 +371,6 @@ const isReferenceKind = (kind: Kind): kind is ReferenceKind => referenceKinds.ha
 const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
-
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
 
 const tokensOf = (pointer: string): readonly string[] => {
   const exit = Effect.runSyncExit(parsePointer(pointer));
@@ -690,7 +681,7 @@ class Resolver {
       if (uriSyntax.test(name)) {
         this.findings.push({
           code: "SEC-10/uri-like-name",
-          pointer: child(child(pointer, "securitySchemes"), name),
+          pointer: childPointer(childPointer(pointer, "securitySchemes"), name),
         });
       }
     }
@@ -706,7 +697,7 @@ class Resolver {
     };
 
     for (const [name, value] of Object.entries(node)) {
-      const at = child(pointer, name);
+      const at = childPointer(pointer, name);
       const field = fieldOf(this.line, kind, name);
       if (members !== undefined && !name.startsWith("x-")) {
         enqueue(members, value, at);
@@ -714,11 +705,11 @@ class Resolver {
         enqueue(field[1], value, at);
       } else if (field?.[2] === "list" && isArray(value)) {
         for (const [index, item] of value.entries()) {
-          enqueue(field[1], item, child(at, `${index}`));
+          enqueue(field[1], item, childPointer(at, `${index}`));
         }
       } else if (field?.[2] === "map" && isObject(value)) {
         for (const [entry, item] of Object.entries(value)) {
-          enqueue(field[1], item, child(at, entry));
+          enqueue(field[1], item, childPointer(at, entry));
         }
       }
     }

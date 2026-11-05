@@ -19,12 +19,10 @@ import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.t
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { isObject, isArray, stringMember } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 type Document = typeof DocumentUri.Type;
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
 
 /**
  * The design 2.2 `Shape` facts of one stored schema, which flattening and serialization read: the
@@ -124,19 +122,8 @@ const within = <A>(budget: Budget, value: A): Effect.Effect<A, SchemaBudgetExcee
     ? Effect.fail(new SchemaBudgetExceeded({ limit: budget.limit }))
     : Effect.succeed(value);
 
-const isObject = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isArray = (value: Json | undefined): value is readonly Json[] => Array.isArray(value);
-
 const member = (node: JsonObject, key: string): Json | undefined =>
   Object.hasOwn(node, key) ? node[key] : undefined;
-
-const stringMember = (node: JsonObject, key: string): string | undefined => {
-  const value = member(node, key);
-
-  return Predicate.isString(value) ? value : undefined;
-};
 
 const strings = (value: Json | undefined): readonly string[] =>
   isArray(value) ? value.filter(Predicate.isString) : [];

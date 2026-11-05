@@ -7,7 +7,7 @@ import type { MediaAlternative } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
@@ -94,8 +94,6 @@ interface Finding {
   readonly code: Code;
   readonly pointer: string;
 }
-
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
 
 // The location a use site stands for: the end of its reference chain, or the site itself.
 const follow = (resolution: Resolution, pointer: string): string =>
@@ -185,7 +183,7 @@ const alternativeOf = (
   findings: Finding[],
 ): Effect.Effect<Option.Option<PlainAlternative>> =>
   Effect.gen(function* alternative() {
-    const site = child(child(responsePointer, "content"), mediaType);
+    const site = childPointer(childPointer(responsePointer, "content"), mediaType);
     if (!isMediaRange(mediaType)) {
       findings.push({ code: "RSP-05/invalid-media-type", pointer: site });
 
@@ -206,11 +204,11 @@ const alternativeOf = (
       rows: ["RSP-05"],
     };
     if (media.itemSchema !== undefined) {
-      plain.itemSchema = schemaRefAt(resolution, child(pointer, "itemSchema"));
+      plain.itemSchema = schemaRefAt(resolution, childPointer(pointer, "itemSchema"));
     }
 
     if (media.schema !== undefined) {
-      plain.schema = schemaRefAt(resolution, child(pointer, "schema"));
+      plain.schema = schemaRefAt(resolution, childPointer(pointer, "schema"));
     }
 
     return Option.some(plain);
@@ -226,14 +224,14 @@ const headersOf = (
     if (name.toLowerCase() === "content-type") {
       findings.push({
         code: "RSP-09/ignored-content-type",
-        pointer: child(child(responsePointer, "headers"), name),
+        pointer: childPointer(childPointer(responsePointer, "headers"), name),
       });
     } else if (isHeaderName(name)) {
       names.push({ name });
     } else {
       findings.push({
         code: "RSP-09/invalid-header-name",
-        pointer: child(child(responsePointer, "headers"), name),
+        pointer: childPointer(childPointer(responsePointer, "headers"), name),
       });
     }
   }
@@ -267,7 +265,7 @@ const caseOf = (
   findings: Finding[],
 ): Effect.Effect<PlainCase> =>
   Effect.gen(function* responseCase() {
-    const site = child(responsesPointer, text);
+    const site = childPointer(responsesPointer, text);
     const pointer = follow(resolution, site);
     const response = yield* evaluatePointer(resolution.value, pointer).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(ResponseObject)),
@@ -355,7 +353,7 @@ export const normalizeResponses = (
       if (key === "invalid" || key === "out-of-range") {
         findings.push({
           code: key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range",
-          pointer: child(pointer, text),
+          pointer: childPointer(pointer, text),
         });
       } else if (key !== "extension") {
         cases.push(yield* caseOf(resolution, pointer, text, key, findings));

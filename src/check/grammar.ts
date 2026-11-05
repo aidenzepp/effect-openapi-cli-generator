@@ -4,13 +4,11 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
 import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, formatPointer, parseFragment } from "../model/pointer.ts";
+import { escapeToken, formatPointer, parseFragment, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
+import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 interface Rule {
   readonly anchor: string;
@@ -257,30 +255,12 @@ const schemaMaps = [
   "properties",
 ] as const;
 
-const isObject = (value: Json | undefined): value is JsonObject => Predicate.isObject(value);
-
-const isArray = (value: Json | undefined): value is readonly Json[] => Array.isArray(value);
-
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
-
 const entriesOf = (value: Json | undefined): readonly (readonly [string, Json])[] =>
   isObject(value) ? Object.entries(value) : [];
 
 const listOf = (value: Json | undefined): readonly Json[] => (isArray(value) ? value : []);
 
 const isReference = (node: JsonObject): boolean => Predicate.isString(node.$ref);
-
-const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const exit = Effect.runSyncExit(evaluatePointer(root, pointer));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
-
-const stringMember = (node: JsonObject, name: string): string | undefined => {
-  const value = node[name];
-
-  return Predicate.isString(value) ? value : undefined;
-};
 
 // An object at a use site, followed through its Reference Object to the end of the chain.
 const locate = (
@@ -401,7 +381,7 @@ const requiresAt = (
     listOf(place.node[keyword]).flatMap((member, index) => {
       const located = locate(
         resolution,
-        child(child(place.pointer, keyword), String(index)),
+        childPointer(childPointer(place.pointer, keyword), String(index)),
         member,
       );
 
@@ -461,28 +441,28 @@ const discriminatorFindings = (
   place: Place,
   discriminator: JsonObject,
 ): readonly Finding[] => {
-  const base = child(place.pointer, "discriminator");
+  const base = childPointer(place.pointer, "discriminator");
   const name = stringMember(discriminator, "propertyName");
   const required = name !== undefined && requires(resolution, place, name);
   const defaultMapping = stringMember(discriminator, "defaultMapping");
   const property =
     name === undefined || required || resolution.line === "3.2"
       ? []
-      : [at("DSC-09/property-not-required", child(base, "propertyName"))()];
+      : [at("DSC-09/property-not-required", childPointer(base, "propertyName"))()];
   const optional =
     name === undefined || required || resolution.line !== "3.2" || defaultMapping !== undefined
       ? []
       : [at("DSC-10/missing-default-mapping", base)()];
   const mapped = entriesOf(discriminator.mapping).flatMap(([key, value]) =>
     Predicate.isString(value) && !mappingResolves(resolution, value)
-      ? [at("DSC-03/unresolved-target", child(child(base, "mapping"), key))()]
+      ? [at("DSC-03/unresolved-target", childPointer(childPointer(base, "mapping"), key))()]
       : [],
   );
   const fallback =
     resolution.line === "3.2" &&
     defaultMapping !== undefined &&
     !mappingResolves(resolution, defaultMapping)
-      ? [at("DSC-04/unresolved-target", child(base, "defaultMapping"))()]
+      ? [at("DSC-04/unresolved-target", childPointer(base, "defaultMapping"))()]
       : [];
 
   return [...property, ...optional, ...mapped, ...fallback];
@@ -497,9 +477,9 @@ const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Findi
   return [
     ...(pattern === undefined || compilesWithU(pattern)
       ? []
-      : [at(patternCode, child(pointer, "pattern"))()]),
+      : [at(patternCode, childPointer(pointer, "pattern"))()]),
     ...(legacy && node.type === "array" && node.items === undefined
-      ? [at("S30-22/array-without-items", child(pointer, "items"))()]
+      ? [at("S30-22/array-without-items", childPointer(pointer, "items"))()]
       : []),
     ...(legacy && node.readOnly === true && node.writeOnly === true
       ? [at("S30-30/read-and-write-only", pointer)()]
@@ -521,19 +501,23 @@ const schemaFindings = (
   }
 
   const below = (token: string, value: Json | undefined): readonly Finding[] =>
-    schemaFindings(resolution, value, child(pointer, token));
+    schemaFindings(resolution, value, childPointer(pointer, token));
 
   return [
     ...ownSchemaFindings(resolution, { node, pointer }),
     ...schemaMembers.flatMap((keyword) => below(keyword, node[keyword])),
     ...schemaLists.flatMap((keyword) =>
       listOf(node[keyword]).flatMap((member, index) =>
-        schemaFindings(resolution, member, child(child(pointer, keyword), String(index))),
+        schemaFindings(
+          resolution,
+          member,
+          childPointer(childPointer(pointer, keyword), String(index)),
+        ),
       ),
     ),
     ...schemaMaps.flatMap((keyword) =>
       entriesOf(node[keyword]).flatMap(([name, member]) =>
-        schemaFindings(resolution, member, child(child(pointer, keyword), name)),
+        schemaFindings(resolution, member, childPointer(childPointer(pointer, keyword), name)),
       ),
     ),
   ];
@@ -574,29 +558,31 @@ interface Media {
 const media: Media = {
   content: (resolution, content, pointer) =>
     entriesOf(content).flatMap(([name, mediaType]) => [
-      ...(isMediaRange(name) ? [] : [at("MED-24/invalid-media-type", child(pointer, name))()]),
-      ...media.mediaType(resolution, mediaType, child(pointer, name)),
+      ...(isMediaRange(name)
+        ? []
+        : [at("MED-24/invalid-media-type", childPointer(pointer, name))()]),
+      ...media.mediaType(resolution, mediaType, childPointer(pointer, name)),
     ]),
   encoding: (resolution, node, pointer) =>
     isObject(node) && !isReference(node)
       ? media.headers(
           resolution,
           node.headers,
-          child(pointer, "headers"),
+          childPointer(pointer, "headers"),
           "HDR-01/invalid-header-name",
         )
       : [],
   header: (resolution, node, pointer) =>
     isObject(node) && !isReference(node)
       ? [
-          ...schemaFindings(resolution, node.schema, child(pointer, "schema")),
-          ...media.content(resolution, node.content, child(pointer, "content")),
+          ...schemaFindings(resolution, node.schema, childPointer(pointer, "schema")),
+          ...media.content(resolution, node.content, childPointer(pointer, "content")),
         ]
       : [],
   headers: (resolution, headers, pointer, code) =>
     entriesOf(headers).flatMap(([name, header]) => [
-      ...(isToken(name) ? [] : [at(code, child(pointer, name))()]),
-      ...media.header(resolution, header, child(pointer, name)),
+      ...(isToken(name) ? [] : [at(code, childPointer(pointer, name))()]),
+      ...media.header(resolution, header, childPointer(pointer, name)),
     ]),
   mediaType: (resolution, node, pointer) => {
     if (!isObject(node) || isReference(node)) {
@@ -604,17 +590,17 @@ const media: Media = {
     }
 
     return [
-      ...schemaFindings(resolution, node.schema, child(pointer, "schema")),
-      ...schemaFindings(resolution, node.itemSchema, child(pointer, "itemSchema")),
+      ...schemaFindings(resolution, node.schema, childPointer(pointer, "schema")),
+      ...schemaFindings(resolution, node.itemSchema, childPointer(pointer, "itemSchema")),
       ...entriesOf(node.encoding).flatMap(([name, encoding]) =>
-        media.encoding(resolution, encoding, child(child(pointer, "encoding"), name)),
+        media.encoding(resolution, encoding, childPointer(childPointer(pointer, "encoding"), name)),
       ),
-      ...media.encoding(resolution, node.itemEncoding, child(pointer, "itemEncoding")),
+      ...media.encoding(resolution, node.itemEncoding, childPointer(pointer, "itemEncoding")),
       ...listOf(node.prefixEncoding).flatMap((encoding, index) =>
         media.encoding(
           resolution,
           encoding,
-          child(child(pointer, "prefixEncoding"), String(index)),
+          childPointer(childPointer(pointer, "prefixEncoding"), String(index)),
         ),
       ),
     ];
@@ -633,7 +619,7 @@ const parameterFindings = (
   const name = stringMember(node, "name");
   const badName =
     node.in === "header" && name !== undefined && !isToken(name)
-      ? [at("PRM-20/invalid-header-name", child(pointer, "name"))()]
+      ? [at("PRM-20/invalid-header-name", childPointer(pointer, "name"))()]
       : [];
 
   return [...badName, ...media.header(resolution, node, pointer)];
@@ -645,7 +631,7 @@ const parameterListFindings = (
   pointer: string,
 ): readonly Finding[] =>
   listOf(list).flatMap((parameter, index) =>
-    parameterFindings(resolution, parameter, child(pointer, String(index))),
+    parameterFindings(resolution, parameter, childPointer(pointer, String(index))),
   );
 
 const responseFindings = (
@@ -658,10 +644,10 @@ const responseFindings = (
         ...media.headers(
           resolution,
           node.headers,
-          child(pointer, "headers"),
+          childPointer(pointer, "headers"),
           "RSP-09/invalid-header-name",
         ),
-        ...media.content(resolution, node.content, child(pointer, "content")),
+        ...media.content(resolution, node.content, childPointer(pointer, "content")),
       ]
     : [];
 
@@ -674,8 +660,10 @@ const responsesFindings = (
     code.startsWith("x-")
       ? []
       : [
-          ...(statusKey.test(code) ? [] : [at("RSS-10/invalid-status", child(pointer, code))()]),
-          ...responseFindings(resolution, response, child(pointer, code)),
+          ...(statusKey.test(code)
+            ? []
+            : [at("RSS-10/invalid-status", childPointer(pointer, code))()]),
+          ...responseFindings(resolution, response, childPointer(pointer, code)),
         ],
   );
 
@@ -685,7 +673,7 @@ const requestBodyFindings = (
   pointer: string,
 ): readonly Finding[] =>
   isObject(node) && !isReference(node)
-    ? media.content(resolution, node.content, child(pointer, "content"))
+    ? media.content(resolution, node.content, childPointer(pointer, "content"))
     : [];
 
 const methodMembers = (line: Resolution["line"]): readonly string[] =>
@@ -714,17 +702,29 @@ const items: Items = {
   callback: (resolution, node, pointer) =>
     isObject(node) && !isReference(node)
       ? entriesOf(node).flatMap(([key, item]) =>
-          key.startsWith("x-") ? [] : items.pathItem(resolution, item, child(pointer, key)),
+          key.startsWith("x-") ? [] : items.pathItem(resolution, item, childPointer(pointer, key)),
         )
       : [],
   operation: (resolution, node, pointer) =>
     isObject(node)
       ? [
-          ...parameterListFindings(resolution, node.parameters, child(pointer, "parameters")),
-          ...requestBodyFindings(resolution, node.requestBody, child(pointer, "requestBody")),
-          ...responsesFindings(resolution, node.responses, child(pointer, "responses")),
+          ...parameterListFindings(
+            resolution,
+            node.parameters,
+            childPointer(pointer, "parameters"),
+          ),
+          ...requestBodyFindings(
+            resolution,
+            node.requestBody,
+            childPointer(pointer, "requestBody"),
+          ),
+          ...responsesFindings(resolution, node.responses, childPointer(pointer, "responses")),
           ...entriesOf(node.callbacks).flatMap(([name, callback]) =>
-            items.callback(resolution, callback, child(child(pointer, "callbacks"), name)),
+            items.callback(
+              resolution,
+              callback,
+              childPointer(childPointer(pointer, "callbacks"), name),
+            ),
           ),
         ]
       : [],
@@ -734,18 +734,21 @@ const items: Items = {
     }
 
     const fixed = methodMembers(resolution.line).map(
-      (method) => [child(pointer, method), node[method]] as const,
+      (method) => [childPointer(pointer, method), node[method]] as const,
     );
     const extra =
       resolution.line === "3.2"
         ? entriesOf(node.additionalOperations).map(
             ([name, operation]) =>
-              [child(child(pointer, "additionalOperations"), name), operation] as const,
+              [
+                childPointer(childPointer(pointer, "additionalOperations"), name),
+                operation,
+              ] as const,
           )
         : [];
 
     return [
-      ...parameterListFindings(resolution, node.parameters, child(pointer, "parameters")),
+      ...parameterListFindings(resolution, node.parameters, childPointer(pointer, "parameters")),
       ...[...fixed, ...extra].flatMap(([place, operation]) =>
         items.operation(resolution, operation, place),
       ),
@@ -764,7 +767,7 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
     visit: (node: Json | undefined, pointer: string) => readonly Finding[],
   ): readonly Finding[] =>
     entriesOf(components[section]).flatMap(([name, node]) =>
-      visit(node, child(child("/components", section), name)),
+      visit(node, childPointer(childPointer("/components", section), name)),
     );
 
   return [
@@ -783,7 +786,7 @@ const elementFindings = (resolution: Resolution): readonly Finding[] => {
   const root = isObject(resolution.value) ? resolution.value : {};
   const under = (member: string): readonly Finding[] =>
     entriesOf(root[member]).flatMap(([key, item]) =>
-      items.pathItem(resolution, item, child(child("", member), key)),
+      items.pathItem(resolution, item, childPointer(childPointer("", member), key)),
     );
 
   return [
@@ -796,7 +799,7 @@ const elementFindings = (resolution: Resolution): readonly Finding[] => {
 const pathItems = (resolution: Resolution): readonly PathItem[] =>
   entriesOf(isObject(resolution.value) ? resolution.value.paths : undefined).flatMap(
     ([key, value]) => {
-      const use = child("/paths", key);
+      const use = childPointer("/paths", key);
       const located = locate(resolution, use, value);
 
       return located === undefined
@@ -812,9 +815,14 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
       ? entriesOf(item.node.additionalOperations).map(([name]) => name)
       : [];
   const entries = [
-    ...fixed.map((name) => [name, name.toUpperCase(), child(item.pointer, name)] as const),
+    ...fixed.map((name) => [name, name.toUpperCase(), childPointer(item.pointer, name)] as const),
     ...extra.map(
-      (name) => [name, name, child(child(item.pointer, "additionalOperations"), name)] as const,
+      (name) =>
+        [
+          name,
+          name,
+          childPointer(childPointer(item.pointer, "additionalOperations"), name),
+        ] as const,
     ),
   ];
 
@@ -854,7 +862,7 @@ const serverFindings = (
       ? [
           at(
             "SRV-12/default-not-in-enum",
-            child(child(pointer, "variables"), name),
+            childPointer(childPointer(pointer, "variables"), name),
           )({
             severity: defaultSeverity,
           }),
@@ -864,9 +872,9 @@ const serverFindings = (
 
   return [
     ...(url !== undefined && /[?#]/u.test(url)
-      ? [at("SRV-18/query-or-fragment", child(pointer, "url"))()]
+      ? [at("SRV-18/query-or-fragment", childPointer(pointer, "url"))()]
       : []),
-    ...(repeated ? [at("SRV-19/repeated-variable", child(pointer, "url"))()] : []),
+    ...(repeated ? [at("SRV-19/repeated-variable", childPointer(pointer, "url"))()] : []),
     ...variables,
   ];
 };
@@ -894,7 +902,8 @@ const effectiveServers = (
   const [servers, owner] = serversOf(resolution, operation);
 
   return servers.map(
-    (server, index) => [server, child(child(owner, "servers"), String(index))] as const,
+    (server, index) =>
+      [server, childPointer(childPointer(owner, "servers"), String(index))] as const,
   );
 };
 
@@ -943,7 +952,7 @@ const requirementFindings = (
   const code = resolution.line === "3.2" ? "SEC-10/unresolved-scheme" : "SEC-09/unresolved-scheme";
   const names = entriesOf(alternative).map(([name, scopes]) => {
     const scheme = schemeNode(resolution, name);
-    const place = child(pointer, name);
+    const place = childPointer(pointer, name);
 
     return scheme === undefined
       ? { scopes: [], unresolved: [at(code, place)()] }
@@ -969,7 +978,7 @@ const securityList = (
   pointer: string,
 ): SecurityList => {
   const requirements = list.map((alternative, index) =>
-    requirementFindings(resolution, alternative, child(pointer, String(index))),
+    requirementFindings(resolution, alternative, childPointer(pointer, String(index))),
   );
 
   return {
@@ -990,7 +999,7 @@ const ownSecurity = (resolution: Resolution, operation: Operation): readonly Fin
     return [];
   }
 
-  const found = securityList(resolution, list, child(operation.pointer, "security"));
+  const found = securityList(resolution, list, childPointer(operation.pointer, "security"));
 
   return [
     ...(found.exhausted ? operationScoped(found.unresolved, operation) : found.unresolved),
