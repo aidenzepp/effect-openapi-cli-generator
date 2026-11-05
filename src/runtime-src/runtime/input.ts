@@ -250,7 +250,7 @@ export class JsonNumber {
  * A field flag's value: a scalar, an `int64` digit string as a `JsonNumber`, or a decoded JSON
  * value (an object, an array, `null`) for a property that is not flattened (design 4.5).
  */
-type FieldValue =
+export type FieldValue =
   | null
   | boolean
   | number
@@ -259,11 +259,18 @@ type FieldValue =
   | readonly FieldValue[]
   | { readonly [key: string]: FieldValue };
 
-type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
+export type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
 
-type JsonNode = null | boolean | number | string | JsonNumber | readonly JsonNode[] | JsonObject;
+export type JsonNode =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonNumber
+  | readonly JsonNode[]
+  | JsonObject;
 
-interface JsonObject {
+export interface JsonObject {
   [key: string]: JsonNode;
 }
 
