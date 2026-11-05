@@ -46,6 +46,25 @@ const codes = (diagnostics: readonly Diagnostic[]): readonly string[] =>
 const kinds = (schemes: Json, line: Line = "3.1"): readonly Json[] =>
   run(line, withSchemes(schemes)).schemes.schemes.map((scheme): Json => scheme.kind);
 
+describe("cookie apiKey names", () => {
+  test("a cookie name that is not a token is refused at element scope", () => {
+    for (const name of ["a; admin=1", "a b", "a=b", "a,b", "a\u0007b", ""]) {
+      const result = run("3.1", withSchemes({ c: { in: "cookie", name, type: "apiKey" } }));
+
+      expect(result.schemes.schemes).toEqual([]);
+      expect(result.schemes.unusable).toEqual(["c"]);
+      expect(result.schemes.diagnostics.map((d) => [d.code, d.scope, d.severity])).toEqual([
+        ["SSC-14/invalid-cookie-name", "element", "refusal"],
+      ]);
+      expect(JSON.stringify(result.schemes.diagnostics)).not.toContain("admin=1");
+    }
+  });
+
+  test("a header or query apiKey name is not held to the cookie token rule", () => {
+    expect(kinds({ h: { in: "header", name: "X-Key", type: "apiKey" } }).length).toBe(1);
+  });
+});
+
 describe("scheme kinds", () => {
   test("apiKey in header, query and cookie", () => {
     expect(

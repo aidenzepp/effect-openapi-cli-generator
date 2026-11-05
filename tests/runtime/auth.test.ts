@@ -459,6 +459,34 @@ describe("Auth.attach", () => {
     }
   });
 
+  test("a cookie apiKey whose name is not a token is refused without the value", async () => {
+    const definition: Auth.SecurityTable["schemes"][string] = {
+      in: "cookie",
+      kind: "apiKey",
+      name: "a; admin=1",
+    };
+    const odd: Auth.SecurityTable = { schemes: { oddCookie: definition } };
+    const request = HttpClientRequest.get(`${bound}/v1`);
+    const result = await Effect.runPromise(
+      Effect.result(
+        Auth.attach(odd, {
+          credentials: [
+            {
+              definition,
+              scheme: "oddCookie",
+              value: Redacted.make(secret),
+            },
+          ],
+          origins: [bound],
+        })(request),
+      ),
+    );
+    const error = Result.isFailure(result) ? result.failure : undefined;
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "odd-cookie-file" });
+    expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
   test("a bad basic user-id or password names the scheme only", async () => {
     const values = [
       `us\u0007er:${secret}`,
@@ -558,5 +586,38 @@ describe("Auth.redactedNames", () => {
     expect(UrlParams.redactUrl(`${bound}/v1?api_key=${secret}&page=2`, names.params)).not.toContain(
       secret,
     );
+  });
+});
+
+const hostnameOf = (host: string): string => new URL(`http://${host}/`).hostname;
+
+describe("loopback predicate", () => {
+  test("design 6.5 loopback forms", () => {
+    const loopback = [
+      "127.0.0.1",
+      "127.255.255.255",
+      "0x7f.1",
+      "2130706433",
+      "[::1]",
+      "[::ffff:127.0.0.1]",
+      "localhost",
+      "LOCALHOST.",
+      "api.localhost",
+      "API.LOCALHOST.",
+    ];
+    const other = [
+      "0.0.0.0",
+      "[::]",
+      "[::2]",
+      "[::ffff:8.8.8.8]",
+      "128.0.0.1",
+      "10.0.0.1",
+      "localhost.example.com",
+      "127.example.com",
+      "localhost..",
+    ];
+
+    expect(loopback.filter((host) => !Auth.isLoopbackHost(hostnameOf(host)))).toEqual([]);
+    expect(other.filter((host) => Auth.isLoopbackHost(hostnameOf(host)))).toEqual([]);
   });
 });

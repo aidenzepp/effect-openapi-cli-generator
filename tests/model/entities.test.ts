@@ -233,4 +233,16 @@ describe("model entities", () => {
       decodes(EncodingRule, { ...encodingRule, headers: [{ name: "Bad Name", required: false }] }),
     ).toBe(false);
   });
+
+  test("a cookie apiKey name must be a token", () => {
+    const cookie = (name: string) => ({
+      ...securityScheme,
+      kind: { in: "cookie", name, type: "apiKey" },
+    });
+    const header = { ...securityScheme, kind: { in: "header", name: "a; b", type: "apiKey" } };
+
+    expect(decodes(SecurityScheme, cookie("sid"))).toBe(true);
+    expect(decodes(SecurityScheme, cookie("a; admin=1"))).toBe(false);
+    expect(decodes(SecurityScheme, header)).toBe(true);
+  });
 });

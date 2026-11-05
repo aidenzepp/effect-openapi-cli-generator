@@ -1,4 +1,5 @@
 import { Effect, Option, Schema } from "effect";
+import { CookieName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
@@ -229,6 +230,26 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
           element: "Security Scheme Object",
           hint: "Only the basic and bearer http schemes are supported.",
           message: "The http authentication scheme is not supported.",
+          pointer,
+        },
+      ],
+    };
+  }
+
+  if (
+    node.type === "apiKey" &&
+    node.in === "cookie" &&
+    node.name !== undefined &&
+    Option.isNone(Schema.decodeUnknownOption(CookieName)(node.name))
+  ) {
+    return {
+      findings: [
+        {
+          anchor: "security-scheme-name",
+          code: "SSC-14/invalid-cookie-name",
+          element: "Security Scheme Object",
+          hint: 'A cookie name must be an RFC 6265 token: no space, control, or any of ()<>@,;:\\"/[]?={}.',
+          message: "The cookie apiKey name is not a valid cookie name.",
           pointer,
         },
       ],

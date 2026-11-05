@@ -423,6 +423,9 @@ const unsafeHeaderValue = (value: string): boolean =>
   value.includes("\u0000") ||
   value !== value.trim();
 
+// An RFC 6265 cookie-name is an RFC 9110 token.
+const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+
 const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> =>
@@ -478,6 +481,10 @@ const attachOne = (
     return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, value));
   }
 
+  if (!cookieNameToken.test(definition.name)) {
+    return refuse(scheme, "has a cookie name that is not a token");
+  }
+
   if (!cookieOctets.test(secret)) {
     return refuse(scheme, "is not a valid cookie value");
   }
@@ -529,3 +536,25 @@ export const redactedNames = (table: SecurityTable) =>
       ]),
     ),
   );
+
+const dottedLoopback = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u;
+
+const mappedLoopback = /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/u;
+
+/**
+ * The one loopback predicate (design 6.5 Loopback hosts). Its input is a WHATWG `URL.hostname`:
+ * lowercase, IPv6 in brackets, IPv4 in dotted form. Loopback is `localhost` or a `.localhost`
+ * name (one trailing dot allowed), a dotted IPv4 address in `127.0.0.0/8`, `[::1]`, and an
+ * IPv4-mapped address in `127.0.0.0/8`, which `URL` writes in hex (`[::ffff:7f00:1]`).
+ */
+export const isLoopbackHost = (hostname: string): boolean => {
+  const name = hostname.replace(/\.$/u, "");
+
+  return (
+    name === "localhost" ||
+    name.endsWith(".localhost") ||
+    name === "[::1]" ||
+    dottedLoopback.test(name) ||
+    mappedLoopback.test(name)
+  );
+};
