@@ -1,4 +1,4 @@
-import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type {
   Api,
   MediaAlternative,
@@ -93,6 +93,69 @@ export const inputKeys = (operation: Operation): readonly InputKey[] => {
     return { key, parameter };
   });
 };
+
+type JsonNode = Readonly<Record<string, Schema.Json>>;
+
+const refPrefix = "#/$defs/";
+
+const maxRefHops = 64;
+
+const scalarTypes: ReadonlySet<string> = new Set(["boolean", "integer", "number", "string"]);
+
+const own = (record: JsonNode, key: string): Schema.Json | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
+const isNode = (json: Schema.Json | undefined): json is JsonNode =>
+  Predicate.isObject(json) && !Array.isArray(json);
+
+// The node a schema reaches after its `$ref` chain through the store, or the key that does not
+// resolve. A chain stops at 64 hops, as `isBooleanSchema` does (design 3.3).
+const settle = (
+  defs: Defs,
+  start: Schema.Json | undefined,
+  subject: string,
+): Result.Result<JsonNode, string> => {
+  let current = start;
+  let key = subject;
+  for (let hop = 0; hop <= maxRefHops; hop += 1) {
+    if (!isNode(current)) {
+      return Result.fail(key);
+    }
+
+    const ref = own(current, "$ref");
+    if (ref === undefined) {
+      return Result.succeed(current);
+    }
+
+    if (!Predicate.isString(ref) || !ref.startsWith(refPrefix)) {
+      return Result.fail(key);
+    }
+
+    key = ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~");
+    current = own(defs, key);
+  }
+
+  return Result.fail(key);
+};
+
+/**
+ * Whether a stored parameter schema is `type: "array"` whose `items` is a scalar type (design 6.1):
+ * the operator gives such a parameter once per item. An array without `items`, or of objects or
+ * arrays, is not one. The failure is the store key that does not resolve.
+ */
+export const isScalarArraySchema = (defs: Defs, key: string): Result.Result<boolean, string> =>
+  Result.flatMap(settle(defs, own(defs, key), key), (node) => {
+    const items = own(node, "items");
+    if (own(node, "type") !== "array" || items === undefined) {
+      return Result.succeed(false);
+    }
+
+    return Result.map(settle(defs, items, key), (item) => {
+      const type = own(item, "type");
+
+      return Predicate.isString(type) && scalarTypes.has(type);
+    });
+  });
 
 const refuse = (reason: ApiEmitError["reason"], subject: string) =>
   new ApiEmitError({ reason, subject });
@@ -221,11 +284,18 @@ const parameterParts = (
       return yield* refuse("unresolved-schema", boolean.failure.key);
     }
 
-    const scalar = typeKeyword(boolean.success ? "boolean" : "string");
+    const array = isScalarArraySchema(defs, parameter.schema.key);
+    if (Result.isFailure(array)) {
+      return yield* refuse("unresolved-schema", array.failure);
+    }
+
+    const valueType = array.success
+      ? typeRef(I("ReadonlyArray"), [], [typeKeyword("string")])
+      : typeKeyword(boolean.success ? "boolean" : "string");
     const field: Field = {
       key,
       optional: !parameter.required,
-      type: parameter.required ? scalar : optionalOf(scalar),
+      type: parameter.required ? valueType : optionalOf(valueType),
     };
     const value = member(ident(I("input")), yield* memberName(key));
     const { allowReserved, explode, style } = serialization;

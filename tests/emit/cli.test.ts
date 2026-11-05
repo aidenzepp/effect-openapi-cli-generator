@@ -609,3 +609,65 @@ describe("emitCli: package-scope refusals", () => {
     expect(failureReason(exit)).toBe("unknown-parent");
   });
 });
+
+const metricsOperation = (parameters: readonly Schema.Json[], path = "/emails/{ids}/metrics") =>
+  withPaths({
+    [path]: { get: { operationId: "metrics", parameters, responses: ok, tags: ["users"] } },
+  });
+
+describe("emitCli: array parameters", () => {
+  const stringArray = { items: { type: "string" }, type: "array" };
+  const ids = { in: "path", name: "ids", required: true, schema: stringArray };
+  const queries: readonly Schema.Json[] = [
+    {
+      explode: false,
+      in: "query",
+      name: "metrics",
+      schema: { items: { enum: ["sent", "opened"], type: "string" }, type: "array" },
+      style: "form",
+    },
+    {
+      in: "query",
+      name: "tag",
+      required: true,
+      schema: { items: { type: "integer" }, type: "array" },
+    },
+    { in: "header", name: "X-Trace", schema: stringArray },
+  ];
+
+  test("a query or header array is a repeatable flag passed through as an array", async () => {
+    const output = await emit(metricsOperation([ids, ...queries]));
+    expect(output.refusals).toEqual([]);
+
+    const text = contentOf(output, "src/cli/users.ts") ?? "";
+    expect(text).toContain('metrics: Flag.String("metrics").pipe(Flag.atLeast(0))');
+    expect(text).toContain('tag: Flag.String("tag").pipe(Flag.atLeast(1))');
+    expect(text).toContain('xTrace: Flag.String("x-trace").pipe(Flag.atLeast(0))');
+    expect(text).toContain("metrics: flags.metrics,");
+    expect(text).toContain("tag: flags.tag,");
+    expect(text).toContain("xTrace: flags.xTrace,");
+    expect(text).not.toContain("Option.getOrUndefined(flags.metrics)");
+    expect(contentOf(output, "src/cli/users.ts")).not.toBe(read("expected/src/cli/users.ts"));
+  });
+
+  test("a final path array is a positional that takes one or more values", async () => {
+    const output = await emit(metricsOperation([ids]));
+    expect(output.refusals).toEqual([]);
+
+    const text = contentOf(output, "src/cli/users.ts") ?? "";
+    expect(text).toContain('ids: Argument.String("ids").pipe(Argument.atLeast(1))');
+    expect(text).toContain("ids: flags.ids");
+  });
+
+  test("a path array before another positional refuses its operation", async () => {
+    const output = await emit(
+      metricsOperation(
+        [ids, { in: "path", name: "kind", required: true, schema: { type: "string" } }],
+        "/emails/{ids}/{kind}",
+      ),
+    );
+    expect(refusalsOf(output)).toEqual([
+      { path: "/emails/{ids}/{kind}", reason: "unsupported-parameter", scope: "operation" },
+    ]);
+  });
+});

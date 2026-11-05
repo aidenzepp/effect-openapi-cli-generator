@@ -10,7 +10,7 @@ import type {
   PlannedPositional,
 } from "../names/index.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { inputKeys } from "./api.ts";
+import { inputKeys, isScalarArraySchema } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
@@ -46,7 +46,8 @@ export interface CliEmitInput {
  * form and multipart request bodies are `unsupported-body` until their merge exists (follow-up
  * em4c). `unsupported-flag` is a flag with no call-expression form today: an integer field whose
  * width the walk cannot settle, and a required boolean
- * parameter (absent would send `false`). `unsupported-parameter` is a boolean path parameter.
+ * parameter (absent would send `false`). `unsupported-parameter` is a boolean path parameter, or
+ * a path array before another positional (a repeated argument would take the later ones).
  * Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
@@ -350,12 +351,24 @@ const parameterOf = (operation: Operation, location: string, wireName: string) =
     (parameter) => parameter.location === location && parameter.wireName === wireName,
   );
 
+// Whether a parameter is an array of scalar items, given once per item (design 6.1).
+const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
+  Effect.gen(function* scalarArray() {
+    const array = isScalarArraySchema(context.defs, parameter.schema.key);
+    if (Result.isFailure(array)) {
+      return yield* refuse("unresolved-schema", array.failure);
+    }
+
+    return array.success;
+  });
+
 const parameterDescription = (parameter: Parameter): string =>
   parameter.docs.description ?? parameter.docs.summary ?? "";
 
 const positionalEntry = (
   operation: Operation,
   positional: PlannedPositional,
+  last: boolean,
   context: CommandContext,
 ) =>
   Effect.gen(function* entry() {
@@ -374,11 +387,16 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
+    const array = yield* isArrayParameter(parameter, context);
+    if (array && !last) {
+      return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
+    }
+
     const described = describedBy(parameterDescription(parameter));
-    const value = pipe(
-      fn("Argument.String", str(positional.name)),
-      described.length === 0 ? [] : [fn("Argument.withDescription", ...described)],
-    );
+    const value = pipe(fn("Argument.String", str(positional.name)), [
+      ...(array ? [fn("Argument.atLeast", num(1))] : []),
+      ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
+    ]);
 
     return [positional.identifier, value] as const;
   });
@@ -428,11 +446,13 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
         return yield* refuse("unsupported-flag", flag.name);
       }
 
+      const array = yield* isArrayParameter(parameter, context);
       const head = flag.boolean
         ? fn("Flag.Boolean", str(flag.name))
         : fn("Flag.String", str(flag.name));
+      const presence = parameter.required ? [] : [path("Flag.optional")];
       const steps = [
-        ...(parameter.required ? [] : [path("Flag.optional")]),
+        ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
         ...describedBy(parameterDescription(parameter)).map((text) =>
           fn("Flag.withDescription", text),
         ),
@@ -672,8 +692,9 @@ const configOf = (command: PlannedCommand, choices: Choices, context: CommandCon
   Effect.gen(function* config() {
     const { operation } = command;
     const entries: Entry[] = [];
-    for (const positional of command.positionals) {
-      entries.push(yield* positionalEntry(operation, positional, context));
+    for (const [index, positional] of command.positionals.entries()) {
+      const last = index === command.positionals.length - 1;
+      entries.push(yield* positionalEntry(operation, positional, last, context));
     }
 
     for (const flag of command.flags) {
@@ -691,8 +712,9 @@ const configOf = (command: PlannedCommand, choices: Choices, context: CommandCon
     return entries;
   });
 
-// The builder's argument entries for the operation's parameters, keyed by `inputKeys`.
-const parameterInputs = (command: PlannedCommand) =>
+// The builder's argument entries for the operation's parameters, keyed by `inputKeys`. An array
+// parameter's flag or argument already yields the array, empty when an optional one is absent.
+const parameterInputs = (command: PlannedCommand, context: CommandContext) =>
   Effect.gen(function* inputs() {
     const entries: Entry[] = [];
     for (const { key, parameter } of inputKeys(command.operation)) {
@@ -710,7 +732,8 @@ const parameterInputs = (command: PlannedCommand) =>
       }
 
       const value = yield* flagValue(owner.identifier);
-      entries.push([key, parameter.required ? value : fn("Option.getOrUndefined", value)]);
+      const passed = parameter.required || (yield* isArrayParameter(parameter, context));
+      entries.push([key, passed ? value : fn("Option.getOrUndefined", value)]);
     }
 
     return entries;
@@ -760,7 +783,7 @@ const commandStatement = (
     const body = yield* bodyPlan(command, meta, choices.choosesType, context);
     const inputs: Entry[] = [
       ...Option.match(body, { onNone: () => [], onSome: (plan) => plan.args }),
-      ...(yield* parameterInputs(command)),
+      ...(yield* parameterInputs(command, context)),
     ];
     const builder = member(namespace, yield* memberName(command.identifier));
     const built = call(builder, inputs.length === 0 ? [] : [obj(inputs)]);
