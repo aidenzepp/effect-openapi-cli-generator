@@ -571,6 +571,23 @@ describe("every wire form of a credential is scrubbed (audit F2)", () => {
   });
 });
 
+describe("overlapping credential forms are scrubbed as one run (recheck N1)", () => {
+  test("a short form overlapping the start of a longer credential leaves neither in clear", () => {
+    const token = "SECRETTOKEN-abcdefghijklmnopqrstuvwxyz01";
+    const longToken: Credential = { ...bearer, value: Redacted.make(token) };
+    const shortPassword: Credential = { ...basic, value: Redacted.make("alice:word2SECRET") };
+    const text = scrub(`echo word2${token} end`, [longToken, shortPassword]);
+
+    expect(text).toBe("echo <redacted:basicAuth> end");
+    expect(text).not.toContain("word2");
+    expect(text).not.toContain("TOKEN");
+  });
+
+  test("forms that only touch are replaced once", () => {
+    expect(scrub(`[${canary}${canary}]`, [bearer])).toBe("[<redacted:bearer>]");
+  });
+});
+
 describe("sanitize", () => {
   test("keeps LF and TAB; removes C0, DEL, C1, bidi, format and line separators", () => {
     const dirty = "a\u0000b\u001Bc\u007Fd\u0085e\u202Ef\u200Bg\u2028h\u2029i\n\tj";

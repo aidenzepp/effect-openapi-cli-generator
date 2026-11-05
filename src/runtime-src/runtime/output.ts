@@ -237,47 +237,71 @@ const wireForms = (credential: Credential): readonly string[] => {
   return forms.filter((form) => form !== "");
 };
 
-const byLongestForm = Order.mapInput(
-  Order.flip(Order.Number),
-  ([form]: readonly [string, string]) => form.length,
+interface Covered {
+  readonly start: number;
+  readonly end: number;
+  readonly placeholder: string;
+}
+
+const byStartThenLongest = Order.combine(
+  Order.mapInput(Order.Number, (range: Covered) => range.start),
+  Order.mapInput(Order.flip(Order.Number), (range: Covered) => range.end),
 );
 
 /**
- * Each wire form of each credential with its placeholder, longest form first.
+ * Every occurrence of every wire form of every credential as a character range, overlapping
+ * occurrences included.
  */
-const placeholders = (credentials: readonly Credential[]): ReadonlyMap<string, string> =>
-  new Map(
-    Arr.sort(
-      credentials.flatMap((credential) =>
-        wireForms(credential).map((form): readonly [string, string] => [
-          form,
-          `<redacted:${credential.scheme}>`,
-        ]),
-      ),
-      byLongestForm,
-    ),
+const occurrences = (text: string, credentials: readonly Credential[]): readonly Covered[] =>
+  credentials.flatMap((credential) =>
+    wireForms(credential).flatMap((form) => {
+      const placeholder = `<redacted:${credential.scheme}>`;
+      const found: Covered[] = [];
+
+      for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
+        found.push({ end: at + form.length, placeholder, start: at });
+      }
+
+      return found;
+    }),
   );
 
-const regexSyntax = /[\\^$.*+?()[\]{}|/]/gu;
+/**
+ * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,
+ * longest range.
+ */
+const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
+  const runs: Covered[] = [];
+
+  for (const range of Arr.sort(ranges, byStartThenLongest)) {
+    const last = runs.at(-1);
+
+    if (last !== undefined && range.start <= last.end) {
+      runs[runs.length - 1] = { ...last, end: Math.max(last.end, range.end) };
+    } else {
+      runs.push(range);
+    }
+  }
+
+  return runs;
+};
 
 /**
  * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
- * C5) in one pass. At each position the longest form wins, so a form that contains another is
- * not left half visible, and no form is matched inside an inserted placeholder.
+ * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
+ * character of any form survives (recheck N1), and placeholders are never rescanned.
  */
 export const scrub = (text: string, credentials: readonly Credential[]): string => {
-  const forms = placeholders(credentials);
+  const runs = mergeRuns(occurrences(text, credentials));
+  let scrubbed = "";
+  let at = 0;
 
-  if (forms.size === 0) {
-    return text;
+  for (const run of runs) {
+    scrubbed += text.slice(at, run.start) + run.placeholder;
+    at = run.end;
   }
 
-  const pattern = new RegExp(
-    [...forms.keys()].map((form) => form.replaceAll(regexSyntax, "\\$&")).join("|"),
-    "gu",
-  );
-
-  return text.replaceAll(pattern, (match) => forms.get(match) ?? match);
+  return scrubbed + text.slice(at);
 };
 
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.

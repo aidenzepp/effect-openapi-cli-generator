@@ -90,13 +90,14 @@ const locationNote = (response: HttpClientResponse.HttpClientResponse): string =
  * of the running fiber (`UrlParams.CurrentRedactedNames`, which the runtime extends with every spec
  * `apiKey` name); outside a fiber only Effect's defaults apply. The body excerpt is bounded and
  * rendered elsewhere (RT-6), so the caller passes it in. A 3xx with no excerpt carries its redacted
- * `Location` there instead. `credentials` are scrubbed from the request id before it is bounded.
+ * `Location` there instead. `credentials` are scrubbed from the request id before it is bounded;
+ * they are required so a caller cannot silently skip the scrub.
  */
 export const toApiResponseError = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
-  bodyExcerpt = "",
-  credentials: readonly Credential[] = [],
+  bodyExcerpt: string,
+  credentials: readonly Credential[],
 ): ApiResponseError => {
   const key = matchResponse(table.responses, response.status);
   const mediaType = mediaTypeOf(response);
@@ -123,7 +124,7 @@ export const toApiResponseError = (
 export const classify = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
-  credentials: readonly Credential[] = [],
+  credentials: readonly Credential[],
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, ApiResponseError> =>
   Effect.suspend(() =>
     isSuccess(response.status)

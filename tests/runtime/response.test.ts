@@ -27,7 +27,7 @@ const redacting = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.provideService(effect, UrlParams.CurrentRedactedNames, ["access_token", "api_key"]);
 
 const apiError = (response: HttpClientResponse.HttpClientResponse, using = table) =>
-  Effect.runPromise(Effect.flip(redacting(classify(using, response))));
+  Effect.runPromise(Effect.flip(redacting(classify(using, response, []))));
 
 const transport = (cause?: unknown) =>
   new HttpClientError.HttpClientError({
@@ -67,8 +67,8 @@ describe("classify", () => {
     const onlyDefault: ResponseTable = { operation: "op", responses: { default: [] } };
     const response = respond(204);
 
-    expect(await Effect.runPromise(classify(onlyDefault, response))).toBe(response);
-    expect(await Effect.runPromise(classify(table, respond(200)))).toBeDefined();
+    expect(await Effect.runPromise(classify(onlyDefault, response, []))).toBe(response);
+    expect(await Effect.runPromise(classify(table, respond(200), []))).toBeDefined();
   });
 
   test("a non-2xx status fails with the matched key and exit 1", async () => {
@@ -168,13 +168,13 @@ describe("classify", () => {
       responses: { "401": [], "500": [], "5XX": [] },
     };
 
-    expect(toApiResponseError(declared, respond(500)).matched).toBe("500");
-    expect(toApiResponseError(declared, respond(503)).matched).toBe("5XX");
-    expect(toApiResponseError(declared, respond(401)).matched).toBe("401");
+    expect(toApiResponseError(declared, respond(500), "", []).matched).toBe("500");
+    expect(toApiResponseError(declared, respond(503), "", []).matched).toBe("5XX");
+    expect(toApiResponseError(declared, respond(401), "", []).matched).toBe("401");
   });
 
   test("toApiResponseError keeps the excerpt it is given", () => {
-    expect(toApiResponseError(table, respond(404), "not found").bodyExcerpt).toBe("not found");
+    expect(toApiResponseError(table, respond(404), "not found", []).bodyExcerpt).toBe("not found");
   });
 });
 
