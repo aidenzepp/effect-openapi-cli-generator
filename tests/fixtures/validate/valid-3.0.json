@@ -1,0 +1,12 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Fixture", "version": "1" },
+  "paths": {
+    "/things": {
+      "get": {
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  }
+}

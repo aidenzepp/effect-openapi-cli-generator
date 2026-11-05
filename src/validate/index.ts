@@ -1,0 +1,142 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import {
+  validate as compile,
+  registerSchema,
+  setShouldValidateFormat,
+} from "@hyperjump/json-schema/draft-2020-12";
+import "@hyperjump/json-schema/draft-04";
+// The vendored 3.1 and 3.2 meta-schemas require the OAS base vocabulary; these modules define it
+// (design 3.2). They also register the library's own undated OAS ids, which are never validated
+// against.
+import "@hyperjump/json-schema/openapi-3-1";
+import "@hyperjump/json-schema/openapi-3-2";
+import { Data, Effect } from "effect";
+import { lineOf, schemaUri } from "./dispatch.ts";
+import type { Line, UnsupportedOpenApiVersion, ValidatorInput } from "./dispatch.ts";
+import { manifest } from "./schemas/manifest.ts";
+
+export { UnsupportedOpenApiVersion } from "./dispatch.ts";
+
+export type { Line, ValidatorInput } from "./dispatch.ts";
+
+/**
+ * A vendored schema file cannot be read or differs from the manifest.
+ */
+export class SchemaManifestError extends Data.TaggedError("SchemaManifestError")<{
+  readonly file: string;
+  readonly reason: "unreadable" | "sha256-mismatch";
+}> {}
+
+/**
+ * The validator library failed to register, compile or run a schema.
+ */
+export class ValidatorError extends Data.TaggedError("ValidatorError")<{
+  readonly cause: unknown;
+}> {}
+
+/**
+ * One BASIC output error unit. `instanceLocation` is a URI fragment, not yet decoded (m1-va2).
+ */
+export interface ValidationUnit {
+  readonly absoluteKeywordLocation: string;
+  readonly instanceLocation: string;
+  readonly keyword: string;
+}
+
+/**
+ * The verdict of the official schema for the line the document declares.
+ */
+export interface ValidationResult {
+  readonly errors: readonly ValidationUnit[];
+  readonly line: Line;
+  readonly schema: string;
+  readonly valid: boolean;
+}
+
+/**
+ * Reads the bytes of one vendored file.
+ */
+export type ReadSchema = (file: string) => Effect.Effect<Uint8Array, unknown>;
+
+const readVendored: ReadSchema = (file) =>
+  Effect.try(() => readFileSync(new URL(`schemas/${file}`, import.meta.url)));
+
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Reads every vendored file and checks its sha256 against the manifest, in registration order.
+ * Returns the verified bytes in manifest order.
+ */
+export const checkManifest = (
+  read: ReadSchema,
+): Effect.Effect<readonly Uint8Array[], SchemaManifestError> =>
+  Effect.all(
+    manifest.map((entry) =>
+      read(entry.file).pipe(
+        Effect.mapError(() => new SchemaManifestError({ file: entry.file, reason: "unreadable" })),
+        Effect.flatMap((bytes) =>
+          sha256(bytes) === entry.sha256
+            ? Effect.succeed(bytes)
+            : Effect.fail(new SchemaManifestError({ file: entry.file, reason: "sha256-mismatch" })),
+        ),
+      ),
+    ),
+  );
+
+const register = checkManifest(readVendored).pipe(
+  Effect.flatMap((files) =>
+    Effect.try({
+      catch: (cause) => new ValidatorError({ cause }),
+      try: () => {
+        setShouldValidateFormat(false);
+
+        for (const bytes of files) {
+          // oxlint-disable-next-line typescript/no-unsafe-argument -- JSON.parse yields any; the sha256-checked vendored file is the library's own schema document
+          registerSchema(JSON.parse(new TextDecoder().decode(bytes)));
+        }
+      },
+    }),
+  ),
+);
+
+// Registration is global library state, so it runs once per process.
+const registered = Effect.runSync(Effect.cached(register));
+
+/**
+ * Validates a document against the official schema of its `openapi` line (design 3.2): BASIC
+ * output, format assertion off, no result cache. The only Promise boundary is `compile` (R7).
+ */
+export const validateDocument = (
+  document: ValidatorInput,
+): Effect.Effect<
+  ValidationResult,
+  SchemaManifestError | UnsupportedOpenApiVersion | ValidatorError
+> =>
+  Effect.gen(function* validateDocumentGen() {
+    const line = yield* lineOf(document);
+
+    yield* registered;
+
+    const schema = schemaUri[line];
+    const validator = yield* Effect.tryPromise({
+      catch: (cause) => new ValidatorError({ cause }),
+      try: () => compile(schema),
+    });
+    const output = validator(document, "BASIC");
+
+    return {
+      errors: output.valid
+        ? []
+        : (output.errors ?? []).map(
+            ({ absoluteKeywordLocation, instanceLocation, keyword }): ValidationUnit => ({
+              absoluteKeywordLocation,
+              instanceLocation,
+              keyword,
+            }),
+          ),
+      line,
+      schema,
+      valid: output.valid,
+    };
+  });
