@@ -76,18 +76,46 @@ const maxRefHops = 64;
 
 const refPrefix = "#/$defs/";
 
-const SchemaNode = Schema.Struct({
-  $ref: Schema.optionalKey(Schema.String),
-  additionalProperties: Schema.optionalKey(Schema.Json),
-  allOf: Schema.optionalKey(Schema.Array(Schema.Json)),
-  anyOf: Schema.optionalKey(Schema.Json),
-  items: Schema.optionalKey(Schema.Json),
-  oneOf: Schema.optionalKey(Schema.Json),
-  properties: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
-  type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
-});
+interface JsonObject {
+  readonly [key: string]: Schema.Json;
+}
 
-const decodeNode = Schema.decodeUnknownOption(SchemaNode);
+const isObject = (json: Schema.Json | undefined): json is JsonObject =>
+  Predicate.isObject(json) && !Arr.isArray(json);
+
+interface SchemaNode {
+  readonly $ref?: string;
+  readonly additionalProperties?: Schema.Json;
+  readonly allOf?: readonly Schema.Json[];
+  readonly anyOf?: Schema.Json;
+  readonly items?: Schema.Json;
+  readonly oneOf?: Schema.Json;
+  readonly properties?: JsonObject;
+  readonly type?: string | readonly string[];
+}
+
+const isTypeKeyword = (value: Schema.Json | undefined): value is string | readonly string[] =>
+  Predicate.isString(value) || (Arr.isArray(value) && value.every(Predicate.isString));
+
+/**
+ * Read only the keyword shapes this module uses, one level deep: children are never walked, so
+ * one visit costs the keyword count, not the subtree size. A keyword of the wrong shape makes
+ * the node opaque.
+ */
+const decodeNode = (json: Schema.Json): Option.Option<SchemaNode> => {
+  if (!isObject(json)) {
+    return Option.none();
+  }
+
+  const { $ref, allOf, properties, type } = json;
+  const wellFormed =
+    ($ref === undefined || Predicate.isString($ref)) &&
+    (allOf === undefined || Arr.isArray(allOf)) &&
+    (properties === undefined || isObject(properties)) &&
+    (type === undefined || isTypeKeyword(type));
+
+  return wellFormed ? Option.some(json) : Option.none();
+};
 
 type Scalar = "boolean" | "integer" | "number" | "string";
 
@@ -251,6 +279,11 @@ const walkProperties = (
   const flags: BodyFlag[] = [];
   const skipped: SkippedProperty[] = [];
   for (const [key, child] of Object.entries(properties)) {
+    ctx.visits += 1;
+    if (ctx.visits > maxVisits) {
+      return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
     const tokens = [...at.tokens, key];
     const pointer = formatPointer(tokens);
     const folded = foldKebab(key);
@@ -326,14 +359,14 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
 ];
 
 /**
- * Flatten one request media alternative into flag descriptors (design 4.5). Top-level
- * properties and one nested object level become typed flags; scalar arrays repeat; everything
- * else the design names (objects below depth 2, arrays of objects, maps, `oneOf`/`anyOf`,
- * multi-type lists, conflicting `allOf`) is one JSON-valued flag. `defs` is the schema store's
- * `$defs` map and `alternative.schema` is the root's key in it. JSON and form bodies get field
- * flags plus `--body` and `--body-file`; a binary body only `--body-file`; any other codec
- * both whole-body flags and no field flags. Work is bounded: each `$defs` key is classified once
- * per call and node visits share one budget (`BodyBudgetExceeded`).
+ * Flatten one request media alternative into flag descriptors (design 4.5). Top-level properties
+ * and one nested object level become typed flags; scalar arrays repeat; everything else the design
+ * names (objects below depth 2, arrays of objects, maps, `oneOf`/`anyOf`, multi-type lists,
+ * conflicting `allOf`) is one JSON-valued flag. `defs` is the schema store's `$defs` map and
+ * `alternative.schema` is the root's key in it. JSON and form bodies get field flags plus `--body`
+ * and `--body-file`; a binary body only `--body-file`; any other codec both whole-body flags and no
+ * field flags. Work is bounded: each `$defs` key is classified once per call, and node visits,
+ * including every property entry, share one budget (`BodyBudgetExceeded`).
  */
 export const flattenBody = (
   defs: Defs,
