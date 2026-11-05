@@ -42,13 +42,13 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text, XML,
- * form and multipart request bodies are `unsupported-body` until their merge exists (follow-up
- * em4c). `unsupported-flag` is a flag with no call-expression form today: an integer field whose
- * width the walk cannot settle, and a required boolean
- * parameter (absent would send `false`). `unsupported-parameter` is a boolean path parameter, or
- * a path array before another positional (a repeated argument would take the later ones).
- * Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
+ * The plan, model or author config holds something the `cli/` layer cannot express. Text, form and
+ * multipart request bodies are `unsupported-body` until their merge exists (follow-up em4c); an XML
+ * body is opaque `--body-file` bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
+ * with no call-expression form today: an integer field whose width the walk cannot settle, and a
+ * required boolean parameter (absent would send `false`). `unsupported-parameter` is a boolean path
+ * parameter, or a path array before another positional (a repeated argument would take the later
+ * ones). Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
   readonly reason:
@@ -501,6 +501,11 @@ const wholeBody = (
   return flag === undefined ? Effect.succeed(fn("Option.none")) : flagValue(flag.identifier);
 };
 
+// Bodies sent as the operator's bytes from `--body-file`: binary, and XML, which is never built
+// from its XML Object (design 6.3).
+const isOpaque = (alternative: MediaAlternative): boolean =>
+  alternative.codec === "binary" || alternative.codec === "xml";
+
 const alternativeBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
@@ -512,7 +517,7 @@ const alternativeBody = (
       ["body", yield* wholeBody(command, "body")],
       ["bodyFile", yield* wholeBody(command, "body-file")],
     ];
-    if (alternative.codec === "binary") {
+    if (isOpaque(alternative)) {
       return {
         domain: [],
         value: fn("Input.binaryBody", obj([...sources, ["required", bool(required)]])),
@@ -565,7 +570,7 @@ const bodyPlan = (
 
     if (!choosesType) {
       const single = yield* alternativeBody(command, first, body.required, context);
-      const parameter = first.codec === "binary" ? "loaded" : "merged";
+      const parameter = isOpaque(first) ? "loaded" : "merged";
 
       return Option.some({
         args: [["body", ident(I(parameter))]],
