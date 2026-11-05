@@ -747,6 +747,10 @@ const initsOf = (...urls: readonly string[]) => {
 };
 
 describe("RT-5: loopback hops go direct", () => {
+  test("the runtime owns the direct route: proxy false", () => {
+    expect(Object.entries(Client.directRoute ?? {})).toEqual([["proxy", false]]);
+  });
+
   test("redirect into loopback", async () => {
     const loopback = await Promise.all(
       ["http://127.0.0.1:1/", "http://localhost:1/", "http://[::1]:1/"].map((url) => initsOf(url)),
