@@ -130,6 +130,12 @@ const rules = {
     message: "An accepted default must not carry userinfo.",
     scope: "document",
   },
+  "SRV-02/value-leaves-authority": {
+    element: "Accepted server",
+    hint: "Keep path variable values to path text that stays under the server's origin.",
+    message: "A path variable value moves an accepted server to another origin.",
+    scope: "document",
+  },
   "SRV-05/too-many-origins": {
     element: "Accepted server",
     hint: "Narrow the enums, or list the origins in acceptedOrigins.",
@@ -290,6 +296,45 @@ const assignments = (
   return acc;
 };
 
+/**
+ * Judges the values of the variables outside the origin span, one value at a time with the other
+ * variables at their defaults: a value must not carry a query or fragment, and the full URL must
+ * stay on one of the origins already accepted. Returns the refusal, if any.
+ */
+const judgePathValues = (
+  raw: RawServer,
+  spanNames: readonly string[],
+  origins: readonly DocumentUri[],
+  base: string | undefined,
+): RuleCode | undefined => {
+  const variables = raw.variables ?? {};
+  const defaults = (name: string) => variables[name]?.default ?? "";
+
+  for (const name of variableNames(raw.url).filter((each) => !spanNames.includes(each))) {
+    for (const value of domainOf(variables[name] ?? { default: "" })) {
+      if (/[?#]/u.test(value)) {
+        return "SRV-18/query-or-fragment";
+      }
+
+      const full = raw.url.replace(variablePattern, (_match, each: string) =>
+        each === name ? value : defaults(each),
+      );
+
+      if (!URL.canParse(full, base)) {
+        return "SRV-02/unparseable";
+      }
+
+      const { origin } = new URL(full, base);
+
+      if (!origins.some((accepted) => accepted === origin)) {
+        return "SRV-02/value-leaves-authority";
+      }
+    }
+  }
+
+  return undefined;
+};
+
 const expandOrigins = (
   raw: RawServer,
   context: ServersContext,
@@ -337,11 +382,12 @@ const expandOrigins = (
     return { code: failure.code, origins: [] };
   }
 
-  return {
-    origins: sortOrigins(
-      verdicts.flatMap((verdict) => (verdict._tag === "Origin" ? [verdict.origin] : [])),
-    ),
-  };
+  const origins = sortOrigins(
+    verdicts.flatMap((verdict) => (verdict._tag === "Origin" ? [verdict.origin] : [])),
+  );
+  const valueCode = judgePathValues(raw, names, origins, retrievalUri);
+
+  return valueCode === undefined ? { origins } : { code: valueCode, origins: [] };
 };
 
 const acceptedIndex = (raw: RawServer, line32: boolean, config: AuthorConfig): number =>

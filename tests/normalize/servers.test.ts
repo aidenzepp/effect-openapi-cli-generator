@@ -338,6 +338,45 @@ describe("server variables and the bound origin set", () => {
     ]);
   });
 
+  test("a path variable default or enum member carrying ? or # is refused without echoing it", () => {
+    const template = "https://api.example.com/{v}";
+    const withDefault = (fallback: string) =>
+      normalize(
+        [url(template, { variables: { v: { default: fallback } } })],
+        context(accepting(template)),
+      );
+    const withMember = (member: string) =>
+      normalize(
+        [url(template, { variables: { v: { default: "v1", enum: ["v1", member] } } })],
+        context(accepting(template)),
+      );
+    const query = withDefault("v1?canary-secret=1");
+    const fragment = withDefault("v1#canary-secret");
+    const queryMember = withMember("v2?canary-secret=1");
+    const fragmentMember = withMember("v2#canary-secret");
+    for (const result of [query, fragment, queryMember, fragmentMember]) {
+      see(codes(result.diagnostics)).toEqual(["SRV-18/query-or-fragment"]);
+      see(result.servers.map((s) => [s.accepted, s.origins])).toEqual([[false, []]]);
+      see(JSON.stringify(result.diagnostics)).not.toContain("canary-secret");
+    }
+  });
+
+  test("a path variable value that leaves the template authority is refused", () => {
+    const relative = normalize(
+      [url("/{x}", { variables: { x: { default: "/evil.com" } } })],
+      context({ ...accepting("/{x}"), retrievalUri: "https://api.example.com/spec.json" }),
+    );
+    const member = normalize(
+      [url("/{x}", { variables: { x: { default: "v1", enum: ["v1", "/evil.com"] } } })],
+      context({ ...accepting("/{x}"), retrievalUri: "https://api.example.com/spec.json" }),
+    );
+    for (const result of [relative, member]) {
+      see(codes(result.diagnostics)).toEqual(["SRV-02/value-leaves-authority"]);
+      see(result.servers.map((s) => [s.accepted, s.origins])).toEqual([[false, []]]);
+      see(JSON.stringify(result.diagnostics)).not.toContain("evil.com");
+    }
+  });
+
   test("a path variable needs no enum and adds no origin", () => {
     const result = normalize(
       [url("https://api.example.com/{version}", { variables: { version: { default: "v1" } } })],
