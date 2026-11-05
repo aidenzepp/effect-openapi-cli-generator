@@ -1,4 +1,5 @@
-import { Effect, Predicate } from "effect";
+import { Effect, Option, Predicate } from "effect";
+import { Headers, HttpBody, HttpClientRequest } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 
 /**
@@ -158,14 +159,20 @@ const encodeUnreserved = (text: string) =>
  */
 const pathReserved = ":[]@!$&'()*+,;=";
 
-const encoder = (allowReserved: boolean) => (text: string) =>
-  allowReserved
-    ? text.replaceAll(/%[0-9A-Fa-f]{2}|[\S\s]/gu, (token) =>
-        percentTriplet.test(token) || pathReserved.includes(token)
-          ? token
-          : encodeUnreserved(token),
-      )
-    : encodeUnreserved(text);
+/**
+ * Reserved characters a query value may pass under `allowReserved`: RFC 3986 reserved less the form
+ * delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded.
+ */
+const queryReserved = ":/?[]@!$'()*,;";
+
+const encoder =
+  (allowReserved: boolean, passed = pathReserved) =>
+  (text: string) =>
+    allowReserved
+      ? text.replaceAll(/%[0-9A-Fa-f]{2}|[\S\s]/gu, (token) =>
+          percentTriplet.test(token) || passed.includes(token) ? token : encodeUnreserved(token),
+        )
+      : encodeUnreserved(text);
 
 type PathStyle = PathParameter["style"];
 
@@ -229,12 +236,12 @@ const encodeText = (text: Text, encode: (text: string) => string): Text => {
 /**
  * The comma-joined form of every non-exploded expansion.
  */
-const flat = (text: Text) => {
+const flat = (text: Text, separator = ",") => {
   if (text.kind === "primitive") {
     return text.text;
   }
 
-  return text.kind === "array" ? text.items.join(",") : text.members.flat().join(",");
+  return text.kind === "array" ? text.items.join(separator) : text.members.flat().join(separator);
 };
 
 const expandMatrix = (name: string, text: Text, explode: boolean) => {
@@ -287,6 +294,11 @@ const styled =
   (style: PathStyle) =>
   (name: string, value: Value, options: PathOptions): PathParameter => ({
     expand: Effect.gen(function* styleExpansion() {
+      // Only a matrix expansion emits the name.
+      if (style === "matrix" && unpairedSurrogate.test(name)) {
+        return yield* refuse("a matrix parameter has a name with no UTF-8 form");
+      }
+
       const text = yield* toText(name, value, true);
 
       if (text === undefined) {
@@ -341,7 +353,14 @@ export const path = (template: string, parameters: readonly PathParameter[]): Pa
     const expansions = new Map<string, string>();
 
     for (const parameter of parameters) {
-      expansions.set(parameter.name, yield* parameter.expand);
+      const expansion = yield* parameter.expand;
+
+      // An empty simple expansion would collapse its segment; matrix and label never expand to "".
+      if (expansion === "") {
+        return yield* refuse(`path parameter ${parameter.name} expands to nothing`);
+      }
+
+      expansions.set(parameter.name, expansion);
     }
 
     const used = new Set<string>();
@@ -375,3 +394,411 @@ export const path = (template: string, parameters: readonly PathParameter[]): Pa
   }),
   template,
 });
+
+export interface QueryOptions {
+  readonly allowEmptyValue?: boolean;
+  readonly allowReserved: boolean;
+  readonly explode: boolean;
+  readonly required: boolean;
+}
+
+/**
+ * A query parameter: plain data plus its expansion, which fails with `UsageError` instead of
+ * throwing. The expansion is the encoded pairs joined by `&`, or `undefined` when the parameter
+ * sends nothing.
+ */
+export interface QueryParameter {
+  readonly expand: Effect.Effect<string | undefined, UsageError>;
+  readonly name: string;
+  readonly style: "deepObject" | "form" | "pipeDelimited" | "spaceDelimited";
+}
+
+type QueryStyle = QueryParameter["style"];
+
+/**
+ * Delimiters the style emits as `%20` or `%7C` or leaves unencoded: an item containing one cannot
+ * be told apart from the delimiter after expansion. Exploded values repeat the name, so they have
+ * none.
+ */
+const queryDelimiter = (
+  style: QueryStyle,
+  text: Text,
+  options: QueryOptions,
+): string | undefined => {
+  if (options.explode || text.kind === "primitive") {
+    return undefined;
+  }
+
+  if (style === "spaceDelimited") {
+    return " ";
+  }
+
+  if (style === "pipeDelimited") {
+    return "|";
+  }
+
+  return style === "form" && options.allowReserved ? "," : undefined;
+};
+
+/**
+ * Under `allowReserved` a percent triplet passes unchanged, so one that spells the joiner is
+ * byte-identical to it.
+ */
+const encodedDelimiters: Partial<Record<QueryStyle, string>> = {
+  pipeDelimited: "%7C",
+  spaceDelimited: "%20",
+};
+
+const checkQueryDelimiter = (
+  name: string,
+  style: QueryStyle,
+  text: Text,
+  options: QueryOptions,
+) => {
+  const banned = queryDelimiter(style, text, options);
+  const encoded = options.allowReserved ? encodedDelimiters[style] : undefined;
+  const clash =
+    banned !== undefined &&
+    parts(text).some(
+      (part) =>
+        part.includes(banned) || (encoded !== undefined && part.toUpperCase().includes(encoded)),
+    );
+
+  return clash
+    ? refuse(`parameter ${name} holds a character its ${style} expansion would leave ambiguous`)
+    : Effect.void;
+};
+
+const joiners = {
+  deepObject: ",",
+  form: ",",
+  pipeDelimited: "%7C",
+  spaceDelimited: "%20",
+} as const;
+
+const composeQuery = (
+  style: QueryStyle,
+  name: string,
+  raw: Text,
+  explode: boolean,
+  encode: (text: string) => string,
+) => {
+  const key = encodeUnreserved(name);
+  const text = encodeText(raw, encode);
+
+  // Keys that become names are always strictly encoded; `allowReserved` is for values only.
+  if (raw.kind === "object" && style === "deepObject") {
+    return raw.members
+      .map(
+        ([member, memberText]) => `${key}%5B${encodeUnreserved(member)}%5D=${encode(memberText)}`,
+      )
+      .join("&");
+  }
+
+  if (explode && text.kind === "array") {
+    return text.items.map((item) => `${key}=${item}`).join("&");
+  }
+
+  if (explode && raw.kind === "object") {
+    return raw.members
+      .map(([member, memberText]) => `${encodeUnreserved(member)}=${encode(memberText)}`)
+      .join("&");
+  }
+
+  return `${key}=${flat(text, joiners[style])}`;
+};
+
+const isEmptyCompound = (value: Value) =>
+  isList(value) ? value.length === 0 : Predicate.isObject(value) && Object.keys(value).length === 0;
+
+const queryStyled =
+  (style: QueryStyle) =>
+  (name: string, value: Value, options: QueryOptions): QueryParameter => ({
+    expand: Effect.gen(function* queryExpansion() {
+      if (unpairedSurrogate.test(name)) {
+        return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
+      }
+
+      const text = yield* toText(name, value, false);
+
+      if (text === undefined) {
+        if (options.allowEmptyValue === true && isEmptyCompound(value)) {
+          return `${encodeUnreserved(name)}=`;
+        }
+
+        return options.required
+          ? yield* refuse(`parameter ${name} is required and has no value`)
+          : undefined;
+      }
+
+      if (style === "deepObject" && text.kind !== "object") {
+        return yield* refuse(`parameter ${name} is not an object, which deepObject requires`);
+      }
+
+      yield* checkQueryDelimiter(name, style, text, options);
+
+      return composeQuery(
+        style,
+        name,
+        text,
+        options.explode,
+        encoder(options.allowReserved, queryReserved),
+      );
+    }),
+    name,
+    style,
+  });
+
+/**
+ * Query `form`: RFC 6570 `{?name}` and `{?name*}`.
+ */
+export const form = queryStyled("form");
+
+/**
+ * Query `spaceDelimited`: a non-exploded list joined by an encoded space.
+ */
+export const spaceDelimited = queryStyled("spaceDelimited");
+
+/**
+ * Query `pipeDelimited`: a non-exploded list joined by an encoded pipe.
+ */
+export const pipeDelimited = queryStyled("pipeDelimited");
+
+/**
+ * Query `deepObject`: an object with scalar members as `name[key]=value`, brackets encoded.
+ * `explode` has no effect.
+ */
+export const deepObject = queryStyled("deepObject");
+
+export interface HeaderOptions {
+  readonly explode: boolean;
+  readonly required: boolean;
+}
+
+/**
+ * A header parameter: plain data plus its expansion, which fails with `UsageError` instead of
+ * throwing. The expansion is the value text, or `undefined` when the header sends nothing.
+ */
+export interface HeaderParameter {
+  readonly expand: Effect.Effect<string | undefined, UsageError>;
+  readonly name: string;
+  readonly style: "simple";
+}
+
+/**
+ * RFC 9110 `token`.
+ */
+const headerToken = /^[\w!#$%&'*+.^`|~-]+$/u;
+
+const headerLineBreak = /[\n\r]/u;
+
+const edgeSpace = /^[\t ]|[\t ]$/u;
+
+/**
+ * Any code point above U+00FF: a header field carries one byte per character, so it has no form.
+ */
+const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
+
+/**
+ * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
+ * 5.5): CR, LF, NUL, leading or trailing whitespace and a code point above U+00FF.
+ */
+const unsafeHeaderText = (text: string) =>
+  headerLineBreak.test(text) ||
+  text.includes("\u0000") ||
+  edgeSpace.test(text) ||
+  wideCodePoint.test(text);
+
+const headerTexts = (text: Text): readonly string[] =>
+  text.kind === "primitive" ? [text.text] : parts(text);
+
+/**
+ * `,` inside an item or member cannot be told from the separator, and `=` inside an exploded
+ * object key cannot be told from the pair delimiter, because header text is never percent-encoded.
+ */
+const headerAmbiguity = (text: Text, explode: boolean): readonly string[] => {
+  if (text.kind === "primitive") {
+    return [];
+  }
+
+  const keys = explode && text.kind === "object" ? text.members.map(([key]) => key) : [];
+
+  return [
+    ...parts(text).filter((part) => part.includes(",")),
+    ...keys.filter((key) => key.includes("=")),
+  ];
+};
+
+/**
+ * Header `simple` (RFC 6570 `{name}`, `{name*}`) with no percent-encoding in any line.
+ */
+export const header = (name: string, value: Value, options: HeaderOptions): HeaderParameter => ({
+  expand: Effect.gen(function* headerExpansion() {
+    if (!headerToken.test(name)) {
+      return yield* refuse("a header parameter has a name that is not an RFC 9110 token");
+    }
+
+    const text = yield* toText(name, value, options.required);
+
+    if (text === undefined) {
+      return text;
+    }
+
+    if (headerTexts(text).some(unsafeHeaderText)) {
+      return yield* refuse(`header ${name} holds a value no header line can carry unchanged`);
+    }
+
+    if (headerAmbiguity(text, options.explode).length > 0) {
+      return yield* refuse(
+        `header ${name} holds a character its simple expansion leaves ambiguous`,
+      );
+    }
+
+    return compose("simple", name, text, options.explode, (raw) => raw);
+  }),
+  name,
+  style: "simple",
+});
+
+/**
+ * A JSON value.
+ */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly Json[]
+  | { readonly [member: string]: Json };
+
+/**
+ * A request body: a JSON or text value, or a binary stream that is already an `HttpBody` (a
+ * `FileBody` file or stdin).
+ */
+export type Body = Json | HttpBody.HttpBody;
+
+/**
+ * A request body and its media type: plain data plus its evaluation, which fails with `UsageError`
+ * instead of throwing.
+ */
+export interface RequestBody {
+  readonly expand: Effect.Effect<HttpBody.HttpBody, UsageError>;
+  readonly mediaType: string;
+}
+
+const isJsonMedia = (mediaType: string) => {
+  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
+
+  return essence === "application/json" || essence.endsWith("+json");
+};
+
+const hasNonFinite = (value: Json): boolean => {
+  if (Predicate.isNumber(value)) {
+    return !Number.isFinite(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item: Json) => hasNonFinite(item));
+  }
+
+  return Predicate.isObject(value) && Object.values(value).some((member) => hasNonFinite(member));
+};
+
+/**
+ * Compact JSON text. `JSON.stringify` turns a non-finite number into `null`, which is a different
+ * value, so one is refused.
+ */
+const jsonText = (value: Json) =>
+  hasNonFinite(value)
+    ? refuse("the body holds a number with no JSON text form")
+    : Effect.succeed(JSON.stringify(value));
+
+const bodyOf = (mediaType: string, value: Body) =>
+  Effect.gen(function* bodyEvaluation() {
+    if (mediaType === "" || unsafeHeaderText(mediaType)) {
+      return yield* refuse("the request media type is not a valid header value");
+    }
+
+    if (HttpBody.isHttpBody(value)) {
+      return value;
+    }
+
+    if (isJsonMedia(mediaType)) {
+      return HttpBody.text(yield* jsonText(value), mediaType);
+    }
+
+    if (!Predicate.isString(value)) {
+      return yield* refuse("a body for a non-JSON media type must be text or a binary stream");
+    }
+
+    if (unpairedSurrogate.test(value)) {
+      return yield* refuse("the body holds an unpaired surrogate, which has no UTF-8 form");
+    }
+
+    return HttpBody.text(value, mediaType);
+  });
+
+/**
+ * The body for `mediaType`. `Content-Type` is set from `mediaType` by `request` and nowhere else.
+ */
+export const body = (mediaType: string, value: Body): RequestBody => ({
+  expand: bodyOf(mediaType, value),
+  mediaType,
+});
+
+/**
+ * A request built from descriptors: it fails with `UsageError` on any refusal, before a connection.
+ */
+export type Request = Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError>;
+
+export interface RequestParts {
+  readonly body?: RequestBody | undefined;
+  readonly headers: readonly HeaderParameter[];
+  readonly path: Path;
+  readonly query: readonly QueryParameter[];
+}
+
+/**
+ * Evaluate the descriptors into a request whose URL is the expanded path plus the query pairs
+ * joined by `&`, with no origin (the caller prefixes the base) and no `urlParams`.
+ */
+export const request = (method: string, descriptors: RequestParts): Request =>
+  Effect.gen(function* requestEvaluation() {
+    const expandedPath = yield* descriptors.path.expand;
+    const pairs = yield* Effect.all(descriptors.query.map((parameter) => parameter.expand));
+    const query = pairs.filter(Predicate.isNotUndefined).join("&");
+    const names = descriptors.headers.map((parameter) => parameter.name.toLowerCase());
+
+    if (new Set(names).size !== names.length) {
+      return yield* refuse("two header parameters have one name");
+    }
+
+    const values = yield* Effect.all(
+      descriptors.headers.map((parameter) =>
+        parameter.expand.pipe(Effect.map((text) => [parameter.name, text] as const)),
+      ),
+    );
+    const url = query === "" ? expandedPath : `${expandedPath}?${query}`;
+    let built = HttpClientRequest.setUrl(
+      HttpClientRequest.makeWith(method, "", [], Option.none(), Headers.empty, HttpBody.empty),
+      url,
+    );
+
+    for (const [name, text] of values) {
+      if (text !== undefined) {
+        built = HttpClientRequest.setHeader(built, name, text);
+      }
+    }
+
+    if (descriptors.body === undefined) {
+      return built;
+    }
+
+    const requestBody = yield* descriptors.body.expand;
+
+    const withBody = HttpClientRequest.setBody(built, requestBody);
+
+    return requestBody._tag === "Empty"
+      ? withBody
+      : HttpClientRequest.setHeader(withBody, "Content-Type", descriptors.body.mediaType);
+  });
