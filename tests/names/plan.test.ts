@@ -536,6 +536,33 @@ describe("planNames: positionals and flags", () => {
   });
 });
 
+describe("planNames: multipart parts", () => {
+  test("part flags, no whole-body flags, and a notice for an unsupported part", () => {
+    const result = plan({
+      defs: {
+        Body: object({
+          file: { format: "binary", type: "string" },
+          meta: object({ a: { type: "string" } }),
+          name: { type: "string" },
+        }),
+      },
+      operations: [
+        {
+          body: [{ codec: "multipart", media: "multipart/form-data", schema: "Body" }],
+          method: "POST",
+          operationId: "upload",
+          path: "/u",
+        },
+      ],
+    });
+
+    expect(flagNames(commandOf(result, "upload"))).toEqual(["file", "name"]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/unnamed-property", scope: "element", severity: "notice" },
+    ]);
+  });
+});
+
 describe("planNames: overrides", () => {
   const input: ApiInput = {
     operations: [{ method: "GET", operationId: "list", path: "/l" }],

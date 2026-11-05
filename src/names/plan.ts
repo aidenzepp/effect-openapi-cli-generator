@@ -719,7 +719,9 @@ const draftBody = (
           operation,
           "RQB-03/unnamed-property",
           "Request body",
-          `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`,
+          skipped.reason === "EmptyFold"
+            ? `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`
+            : `The multipart part at ${skipped.pointer} has no flag; its shape is not supported.`,
           { pointer, scope: "element", severity: "notice" },
         );
       }

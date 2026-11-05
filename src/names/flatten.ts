@@ -7,12 +7,14 @@ import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
 
 /**
- * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), or the whole body.
+ * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
+ * binary multipart part), or the whole body.
  */
 export type BodyFlagKind =
   | "body"
   | "body-file"
   | "boolean"
+  | "file"
   | "integer"
   | "json"
   | "number"
@@ -47,11 +49,13 @@ export interface ReservedClash {
 }
 
 /**
- * A property that has no field flag because its name folds to nothing; `--body` still reaches it.
+ * A property that has no field flag: its name folds to nothing (`EmptyFold`; `--body` still
+ * reaches it), or it is a multipart part whose shape no part flag carries (`UnsupportedPart`: an
+ * object, an array of objects, a map or a `oneOf`/`anyOf`; no whole-body flag reaches it).
  */
 export interface SkippedProperty {
   readonly pointer: string;
-  readonly reason: "EmptyFold";
+  readonly reason: "EmptyFold" | "UnsupportedPart";
 }
 
 export interface FlattenedBody {
@@ -96,6 +100,9 @@ interface SchemaNode {
   readonly additionalProperties?: Schema.Json;
   readonly allOf?: readonly Schema.Json[];
   readonly anyOf?: Schema.Json;
+  readonly contentEncoding?: Schema.Json;
+  readonly contentMediaType?: Schema.Json;
+  readonly format?: Schema.Json;
   readonly items?: Schema.Json;
   readonly oneOf?: Schema.Json;
   readonly properties?: JsonObject;
@@ -125,7 +132,7 @@ const decodeNode = (json: Schema.Json): Option.Option<SchemaNode> => {
   return wellFormed ? Option.some(json) : Option.none();
 };
 
-type Scalar = "boolean" | "integer" | "number" | "string";
+type Scalar = "boolean" | "file" | "integer" | "number" | "string";
 
 /**
  * Where a schema node sits: its `$defs` key and the tokens below that definition.
@@ -160,11 +167,20 @@ const inProgress = Symbol("inProgress");
  */
 interface Ctx {
   readonly defs: Defs;
+  /**
+   * Multipart only: a binary string is a `file` part, not a `string`.
+   */
+  readonly fileParts: boolean;
   readonly memo: Map<string, Result.Result<Classified, FlattenError> | typeof inProgress>;
   visits: number;
 }
 
-const newCtx = (defs: Defs): Ctx => ({ defs, memo: new Map(), visits: 0 });
+const newCtx = (defs: Defs, fileParts: boolean): Ctx => ({
+  defs,
+  fileParts,
+  memo: new Map(),
+  visits: 0,
+});
 
 const below = (site: Site, ...tokens: readonly string[]): Site => ({
   key: site.key,
@@ -263,6 +279,31 @@ const scalarKinds: ReadonlySet<string> = new Set(["boolean", "integer", "number"
 
 const isScalar = (value: string): value is Scalar => scalarKinds.has(value);
 
+const isBareSchema = (schema: SchemaNode): boolean => Object.keys(schema).length === 0;
+
+/**
+ * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, or 3.1+ `contentMediaType`
+ * without a `contentEncoding`, or a schema with no keyword at all. `format: byte`, any
+ * `contentEncoding` and any other type are text.
+ */
+const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
+  if (type === "string" && schema.format === "binary") {
+    return true;
+  }
+
+  if (schema.format !== undefined || schema.contentEncoding !== undefined) {
+    return false;
+  }
+
+  if (type !== undefined && type !== "string") {
+    return false;
+  }
+
+  return (
+    Predicate.isString(schema.contentMediaType) || (type === undefined && isBareSchema(schema))
+  );
+};
+
 /**
  * The `allOf` merge: every member an object, and a key two members declare equal in both (its
  * first declaration kept). The equality checks spend from the call's budget.
@@ -319,6 +360,16 @@ const lookupRef = (
   return Result.succeed(
     seen === undefined ? { _tag: "Fresh", name, target } : { _tag: "Cached", result: seen },
   );
+};
+
+const leaf = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): Classified => {
+  if (ctx.fileParts && isBinary(schema, type)) {
+    return { _tag: "Scalar", kind: "file", repeated: false };
+  }
+
+  return Predicate.isString(type) && isScalar(type)
+    ? { _tag: "Scalar", kind: type, repeated: false }
+    : opaque;
 };
 
 const classify = (
@@ -392,11 +443,7 @@ const classify = (
     );
   }
 
-  return Result.succeed(
-    Predicate.isString(type) && isScalar(type)
-      ? { _tag: "Scalar", kind: type, repeated: false }
-      : opaque,
-  );
+  return Result.succeed(leaf(ctx, schema, type));
 };
 
 interface Walk {
@@ -465,6 +512,52 @@ const walkProperties = (
   return Result.succeed({ flags, skipped });
 };
 
+/**
+ * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
+ * (repeated parts) or a binary `file` part; any other shape is skipped with a reason.
+ */
+const walkParts = (
+  ctx: Ctx,
+  properties: ReadonlyMap<string, Property>,
+): Result.Result<Walk, FlattenError> => {
+  const flags: BodyFlag[] = [];
+  const skipped: SkippedProperty[] = [];
+  for (const [key, { schema: child, site }] of properties) {
+    ctx.visits += 1;
+    if (ctx.visits > maxVisits) {
+      return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    const pointer = formatPointer([key]);
+    const folded = foldKebab(key);
+    if (Result.isFailure(folded)) {
+      skipped.push({ pointer, reason: "EmptyFold" });
+      continue;
+    }
+
+    const classified = classify(ctx, child, site, 0);
+    if (Result.isFailure(classified)) {
+      return Result.fail(classified.failure);
+    }
+
+    if (classified.success._tag !== "Scalar") {
+      skipped.push({ pointer, reason: "UnsupportedPart" });
+      continue;
+    }
+
+    flags.push({
+      kind: classified.success.kind,
+      name: folded.success.name,
+      notes: folded.success.notes,
+      pointer,
+      repeated: classified.success.repeated,
+      schemaPointer: sourcePointer(site),
+    });
+  }
+
+  return Result.succeed({ flags, skipped });
+};
+
 const wholeBody = (kind: "body" | "body-file"): BodyFlag => ({
   kind,
   name: kind,
@@ -499,9 +592,10 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * names (objects below depth 2, arrays of objects, maps, `oneOf`/`anyOf`, multi-type lists,
  * conflicting `allOf`) is one JSON-valued flag. `defs` is the schema store's `$defs` map and
  * `alternative.schema` is the root's key in it. JSON and form bodies get field flags plus `--body`
- * and `--body-file`; a binary body only `--body-file`; any other codec both whole-body flags and no
- * field flags. Work is bounded: each `$defs` key is classified once per call, and node visits,
- * including every property entry, share one budget (`BodyBudgetExceeded`).
+ * and `--body-file`; a binary or XML body only `--body-file`; a multipart body one flag per
+ * top-level part and no whole-body flag (design 6.3, D-ENC1 a); any other codec both whole-body
+ * flags and no field flags. Work is bounded: each `$defs` key is classified once per call, and node
+ * visits, including every property entry, share one budget (`BodyBudgetExceeded`).
  */
 export const flattenBody = (
   defs: Defs,
@@ -512,13 +606,18 @@ export const flattenBody = (
     return Result.succeed({ flags: [wholeBody("body-file")], reserved: [], skipped: [] });
   }
 
-  const whole = [wholeBody("body"), wholeBody("body-file")];
+  if (codec === "xml") {
+    return Result.succeed({ flags: [wholeBody("body-file")], reserved: [], skipped: [] });
+  }
+
+  const multipart = codec === "multipart";
+  const whole = multipart ? [] : [wholeBody("body"), wholeBody("body-file")];
   const key = alternative.schema?.key;
-  if ((codec !== "json" && codec !== "form") || key === undefined) {
+  if ((codec !== "json" && codec !== "form" && !multipart) || key === undefined) {
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs);
+  const ctx = newCtx(defs, multipart);
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));
@@ -529,9 +628,14 @@ export const flattenBody = (
     return Result.fail(classified.failure);
   }
 
+  const { success: rootClass } = classified;
+  const walkRoot = (properties: ReadonlyMap<string, Property>) =>
+    multipart
+      ? walkParts(ctx, properties)
+      : walkProperties(ctx, properties, { depth: 1, names: [], tokens: [] });
   const walked =
-    classified.success._tag === "Object"
-      ? walkProperties(ctx, classified.success.properties, { depth: 1, names: [], tokens: [] })
+    rootClass._tag === "Object"
+      ? walkRoot(rootClass.properties)
       : Result.succeed<Walk>({ flags: [], skipped: [] });
 
   return walked.pipe(

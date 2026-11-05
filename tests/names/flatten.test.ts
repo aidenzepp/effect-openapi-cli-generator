@@ -326,3 +326,81 @@ describe("flattenBody", () => {
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
 });
+
+describe("flattenBody: multipart and xml", () => {
+  const parts = {
+    Root: object({
+      avatar: { format: "binary", type: "string" },
+      count: { type: "integer" },
+      meta: object({ a: { type: "string" } }),
+      name: { type: "string" },
+      photos: { items: { format: "binary", type: "string" }, type: "array" },
+      tags: { items: { type: "string" }, type: "array" },
+    }),
+  } satisfies Defs;
+
+  test("a multipart body gets one flag per part and no whole-body flag", () => {
+    const flattened = run(parts, "multipart");
+    expect(
+      flattened.flags.map(({ kind, name, pointer, repeated }) => [name, kind, pointer, repeated]),
+    ).toEqual([
+      ["avatar", "file", "/avatar", false],
+      ["count", "integer", "/count", false],
+      ["name", "string", "/name", false],
+      ["photos", "file", "/photos", true],
+      ["tags", "string", "/tags", true],
+    ]);
+    expect(flattened.skipped).toEqual([{ pointer: "/meta", reason: "UnsupportedPart" }]);
+  });
+
+  test("3.1 binary: contentMediaType and a schemaless part are files, base64 text is not", () => {
+    const flattened = run(
+      {
+        Root: object({
+          any: {},
+          b64: { contentEncoding: "base64", type: "string" },
+          bytes: { format: "byte", type: "string" },
+          png: { contentMediaType: "image/png", type: "string" },
+        }),
+      },
+      "multipart",
+    );
+    expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([
+      ["any", "file"],
+      ["b64", "string"],
+      ["bytes", "string"],
+      ["png", "file"],
+    ]);
+  });
+
+  test("oneOf, array-of-object and map parts are skipped with a reason", () => {
+    const flattened = run(
+      {
+        Root: object({
+          choice: { oneOf: [{ type: "string" }, { type: "integer" }] },
+          list: { items: object({ a: { type: "string" } }), type: "array" },
+          map: { additionalProperties: { type: "string" }, type: "object" },
+        }),
+      },
+      "multipart",
+    );
+    expect(flattened.flags).toEqual([]);
+    expect(flattened.skipped.map(({ pointer }) => pointer)).toEqual(["/choice", "/list", "/map"]);
+  });
+
+  test("a binary property stays a string flag in json and form bodies", () => {
+    expect(run(parts, "json").flags.find(({ name }) => name === "avatar")?.kind).toBe("string");
+    expect(run(parts, "form").flags.find(({ name }) => name === "avatar")?.kind).toBe("string");
+  });
+
+  test("a multipart part named like a reserved flag is reported as a clash", () => {
+    const flattened = run({ Root: object({ output: { type: "string" } }) }, "multipart");
+    expect(flattened.reserved.map(({ flag }) => flag)).toEqual(["output"]);
+  });
+
+  test("an xml body is offered --body-file only", () => {
+    expect(run({ Root: object({ a: { type: "string" } }) }, "xml").flags).toEqual([
+      expect.objectContaining({ kind: "body-file", name: "body-file" }),
+    ]);
+  });
+});
