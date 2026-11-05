@@ -1,9 +1,15 @@
 import { Array as Arr, Data, Effect, Match, Option, Order, Predicate, Schema } from "effect";
 import type { JsonLiteral } from "../model/brands.ts";
-import { asciiStringLiteral, guardTemplateCurly, jsDoc, stringLiteral } from "./escape.ts";
+import {
+  guardTemplateCurly,
+  jsDoc,
+  stringLiteral,
+  lineWidth,
+  identifierPattern,
+  keyText,
+  numberText,
+} from "./escape.ts";
 import type { JsDocText } from "./escape.ts";
-
-const identifierPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 
 const reservedWords: ReadonlySet<string> = new Set([
   "arguments",
@@ -301,8 +307,6 @@ type ArrowExpr = Extract<Expr, { readonly _tag: "Arrow" }>;
 
 type Entry = readonly [string, Expr];
 
-const lineWidth = 100;
-
 // East Asian Wide and Fullwidth blocks: vp fmt counts each such code point as two columns.
 const wideRanges: readonly (readonly [number, number])[] = [
   [0x11_00, 0x11_5f],
@@ -399,20 +403,9 @@ const flatList = (
   return items.every(isDefined) ? `${open}${items.join(", ")}${close}` : undefined;
 };
 
-const keyText = (key: string): string => {
-  if (key === "__proto__") {
-    return `[${stringLiteral(key)}]`;
-  }
-
-  return identifierPattern.test(key) ? key : asciiStringLiteral(key);
-};
-
 const byKey = Order.mapInput(Order.String, (entry: Entry) => entry[0]);
 
 const sortEntries = (entries: readonly Entry[]): readonly Entry[] => Arr.sort(entries, byKey);
-
-const numberText = (value: number): string =>
-  value < 0 ? `-${numberText(-value)}` : String(value).replace("e+", "e");
 
 const literalTypeText = (value: boolean | number | string): string => {
   if (Predicate.isString(value)) {
