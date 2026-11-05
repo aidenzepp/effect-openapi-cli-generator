@@ -1110,7 +1110,170 @@ export const nested = new Set([
 export const pattern = new RegExp("^[a-z]+$", "u");
 `;
 
+// The Resend witness shape (D1): request builders whose `(input: XInput): Serialize.Request =>`
+// head runs past column 100 break their parameter list.
+const request = (method: string, ...parts: readonly (readonly [string, Expr])[]) =>
+  fn("request", str(method), obj(parts));
+
+const simple = (wire: string, value: string) =>
+  fn(
+    "simple",
+    str(wire),
+    path(value),
+    obj([
+      ["allowReserved", bool(false)],
+      ["explode", bool(false)],
+    ]),
+  );
+
+const builder = (name: string, params: readonly Param[], body: Expr) =>
+  constant(name, arrow(params, body, ref("Serialize.Request")));
+
+const arrowModule: Module = {
+  imports: [],
+  statements: [
+    builder(
+      "emailsListReceivingAttachments",
+      [param("input", ref("EmailsListReceivingAttachmentsInput"))],
+      request(
+        "GET",
+        ["headers", arr([])],
+        [
+          "path",
+          fn(
+            "path",
+            str("/emails/receiving/{email_id}/attachments"),
+            arr([simple("email_id", "input.emailId")]),
+          ),
+        ],
+        ["query", arr([])],
+      ),
+    ),
+    builder(
+      "emailsGetReceivingAttachment",
+      [param("input", ref("EmailsGetReceivingAttachmentInput"))],
+      request(
+        "GET",
+        ["headers", arr([])],
+        [
+          "path",
+          fn(
+            "path",
+            str("/emails/receiving/{email_id}/attachments/{id}"),
+            arr([simple("email_id", "input.emailId"), simple("id", "input.id")]),
+          ),
+        ],
+        ["query", arr([])],
+      ),
+    ),
+    builder(`x${"a".repeat(51)}`, [param("input", ref("T"))], fn("f", path("input"))),
+    builder(`y${"a".repeat(52)}`, [param("input", ref("T"))], fn("f", path("input"))),
+    builder(
+      `p${"a".repeat(48)}`,
+      [param("input", ref("T"))],
+      obj([
+        ["a", num(1)],
+        ["b".repeat(75), num(2)],
+      ]),
+    ),
+    builder(
+      `q${"a".repeat(49)}`,
+      [param("input", ref("T"))],
+      obj([
+        ["a", num(1)],
+        ["b".repeat(75), num(2)],
+      ]),
+    ),
+    builder(`s${"a".repeat(50)}`, [param("input", ref("T"))], arr([num(1), b(89)])),
+    builder(
+      "twoParams",
+      [param("input", ref("A".repeat(38))), param("other", ref("B".repeat(29)))],
+      fn("f", path("input")),
+    ),
+    constant(
+      "argArrow",
+      fn(
+        "Effect.map",
+        path("someValue"),
+        arrow(
+          [param("input", ref("A".repeat(70)))],
+          fn("f", path("input")),
+          ref("Serialize.Request"),
+        ),
+      ),
+    ),
+  ],
+};
+
+const arrowExpected = `export const emailsListReceivingAttachments = (
+  input: EmailsListReceivingAttachmentsInput,
+): Serialize.Request =>
+  request("GET", {
+    headers: [],
+    path: path("/emails/receiving/{email_id}/attachments", [
+      simple("email_id", input.emailId, { allowReserved: false, explode: false }),
+    ]),
+    query: [],
+  });
+
+export const emailsGetReceivingAttachment = (
+  input: EmailsGetReceivingAttachmentInput,
+): Serialize.Request =>
+  request("GET", {
+    headers: [],
+    path: path("/emails/receiving/{email_id}/attachments/{id}", [
+      simple("email_id", input.emailId, { allowReserved: false, explode: false }),
+      simple("id", input.id, { allowReserved: false, explode: false }),
+    ]),
+    query: [],
+  });
+
+export const x${"a".repeat(51)} = (input: T): Serialize.Request =>
+  f(input);
+
+export const y${"a".repeat(52)} = (
+  input: T,
+): Serialize.Request => f(input);
+
+export const p${"a".repeat(48)} = (input: T): Serialize.Request => ({
+  a: 1,
+  ${"b".repeat(75)}: 2,
+});
+
+export const q${"a".repeat(49)} = (
+  input: T,
+): Serialize.Request => ({
+  a: 1,
+  ${"b".repeat(75)}: 2,
+});
+
+export const s${"a".repeat(50)} = (
+  input: T,
+): Serialize.Request => [
+  1,
+  "${"b".repeat(89)}",
+];
+
+export const twoParams = (
+  input: ${"A".repeat(38)},
+  other: ${"B".repeat(29)},
+): Serialize.Request => f(input);
+
+export const argArrow = Effect.map(
+  someValue,
+  (
+    input: ${"A".repeat(70)},
+  ): Serialize.Request => f(input),
+);
+`;
+
 describe("entry-module constructs", () => {
+  test("arrow parameters break when the head runs past column 100", () => {
+    const printed = print(arrowModule);
+    expect(printed).toBe(arrowExpected);
+    expectFixedPoint(printed, "ts");
+  }, 30_000);
+
   test("a shebang line and top-level call statements print in the vp fmt layout", () => {
     const printed = print(entryModule);
     expect(printed).toBe(entryExpected);

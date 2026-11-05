@@ -120,6 +120,13 @@ per line, indented one level, each followed by `,`. Flat lists have no trailing 
   expressions, never blocks. An object or array literal body stays on the `=>` line (an object body
   in parentheses). Any other body stays on the `=>` line only when it fits flat; otherwise it starts
   on the next line, indented one level, and is laid out there.
+- **Arrow head.** The head is the text from `(` through `=>`, plus ` ({` or ` [` before a literal
+  body. When the head's line ends past column 100 and there is at least one parameter, the
+  parameters break: `(`, one `name: Type,` per line one level deeper, then `): Returns =>` at the
+  arrow's indent. The body then follows the arrow rule from the end of that line, flat when it
+  fits. This holds wherever the arrow starts, including as a broken call argument (measured, D1:
+  `(input: EmailsListReceivingAttachmentsInput): Serialize.Request =>` after `export const`). A
+  hugged last argument never breaks its head; it is broken with the other arguments instead.
 - **Member chain.** The subset allows `Head.member(args)` with at most one more call group, normally
   `.pipe(args)`, where `Head` is a capitalized namespace identifier such as `Flag`, `Effect` or
   `Command`. A call group is `.name` with the call parentheses after it, curried calls included, as
