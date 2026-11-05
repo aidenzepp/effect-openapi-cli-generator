@@ -79,6 +79,50 @@ const dag = (levels: number) => {
   };
 };
 
+// One $id appears per round (D(i) reaches D(i + 1) by pointer) while `waiting` sites wait on an $id
+// that never appears, so a resolver that retries every waiting site each round does rounds * waiting
+// lookups.
+const deferredFlood = (rounds: number, waiting: number) => {
+  const revealed = Array.from({ length: rounds }, (_, index): [string, Json] => [
+    `D${index}`,
+    {
+      $id: `https://example.com/d${index}.json`,
+      allOf: [{ $ref: `${entry}#/x-defs/D${index + 1}` }],
+    },
+  ]);
+  const stuck = Array.from({ length: waiting }, (_, index): [string, Json] => [
+    `W${index}`,
+    { $ref: "https://example.com/never.json" },
+  ]);
+
+  return {
+    components: {
+      schemas: Object.fromEntries([...stuck, ["Start", { $ref: "#/x-defs/D0" }]]),
+    },
+    "x-defs": Object.fromEntries([...revealed, [`D${rounds}`, { type: "string" }]]),
+  };
+};
+
+// One $anchor appears in the document resource per round while `waiting` sites wait on an anchor of
+// that resource that never appears, so every round retries every waiting site.
+const anchorFlood = (rounds: number, waiting: number) => {
+  const revealed = Array.from({ length: rounds }, (_, index): [string, Json] => [
+    `A${index}`,
+    { $anchor: `a${index}`, allOf: [{ $ref: `#/x-defs/A${index + 1}` }] },
+  ]);
+  const stuck = Array.from({ length: waiting }, (_, index): [string, Json] => [
+    `W${index}`,
+    { $ref: "#never" },
+  ]);
+
+  return {
+    components: {
+      schemas: Object.fromEntries([...stuck, ["Start", { $ref: "#/x-defs/A0" }]]),
+    },
+    "x-defs": Object.fromEntries([...revealed, [`A${rounds}`, { type: "string" }]]),
+  };
+};
+
 const siblingSchemas = (inner: string): Json =>
   spec("3.1", {
     components: {
@@ -392,6 +436,18 @@ describe("I5 hop and node budgets", () => {
 
     expect(resolution.defs.size).toBe(30);
     expect(resolution.references.size).toBe(60);
+  });
+
+  test("REF-18 deferred retries are charged to the node budget", () => {
+    const value = spec("3.1", anchorFlood(2000, 2000));
+
+    expect(refusal("3.1", value, { maxNodes: 50_000 }).code).toBe("REF-18/node-budget");
+  });
+
+  test("deferred sites retry only when their resource gains an $id or $anchor", () => {
+    const value = spec("3.1", deferredFlood(2000, 2000));
+
+    expect(refusal("3.1", value, { maxNodes: 50_000 }).code).toBe("REF-16/outside-set");
   });
 
   test("REF-18 a walk past the node budget is refused", () => {

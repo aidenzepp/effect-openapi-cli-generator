@@ -1,4 +1,4 @@
-import { Data, Effect, Exit, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { Line } from "../validate/index.ts";
@@ -506,9 +506,17 @@ interface Located {
   readonly pointer: string;
 }
 
+// `waitOn` names the resource whose later $id or $anchor could still resolve the reference.
 type Missing =
-  | { readonly missing: "outside" }
-  | { readonly missing: "unresolvable"; readonly pointer?: string };
+  | { readonly missing: "outside"; readonly waitOn?: string }
+  | { readonly missing: "unresolvable"; readonly pointer?: string; readonly waitOn?: string };
+
+interface Waiting {
+  readonly order: number;
+  readonly site: Site;
+}
+
+const byOrder = Order.mapInput(Order.Number, (entry: Waiting) => entry.order);
 
 type Lookup = { readonly found: Located } | Missing;
 
@@ -516,6 +524,8 @@ type Lookup = { readonly found: Located } | Missing;
  * The resolver's working state for one run.
  */
 class Resolver {
+  // Resources that gained an $id or $anchor since the last round.
+  readonly added = new Set<string>();
   readonly anchors = new Map<string, string>();
   readonly base: string;
   readonly defs = new Map<string, string>();
@@ -623,6 +633,7 @@ class Resolver {
       }
 
       this.ids.set(own, pointer);
+      this.added.add(own);
     }
 
     const anchor = stringMember(node, "$anchor");
@@ -633,6 +644,7 @@ class Resolver {
       }
 
       this.anchors.set(name, pointer);
+      this.added.add(own);
     }
 
     if (stringMember(node, "$dynamicRef") !== undefined) {
@@ -730,13 +742,19 @@ class Resolver {
     const resolved = uriPart === "" ? base : resolveUri(uriPart, base);
     const resource = resolved === undefined ? undefined : stripFragment(resolved);
     const root = resource === undefined ? undefined : this.resourceRoot(resource, isSchema);
-    if (resource === undefined || root === undefined) {
+    if (resource === undefined) {
       return { missing: "outside" };
     }
 
+    if (root === undefined) {
+      return isSchema ? { missing: "outside", waitOn: resource } : { missing: "outside" };
+    }
+
     const pointer = this.fragmentTarget(resource, root, fragment, isSchema);
+    const byAnchor =
+      isSchema && this.line !== "3.0" && fragment !== "" && !fragment.startsWith("/");
     if (pointer === undefined) {
-      return { missing: "unresolvable" };
+      return byAnchor ? { missing: "unresolvable", waitOn: resource } : { missing: "unresolvable" };
     }
 
     const node = nodeAt(this.input.value, pointer);
@@ -786,11 +804,19 @@ class Resolver {
     );
   }
 
-  // Resolves one schema reference; "deferred" when it must wait for more of the walk.
-  schemaSite(site: Site): Failure | "deferred" | undefined {
+  // Resolves one schema reference, or names the resource it waits on. Every attempt, retries
+  // included, is charged to the node budget.
+  schemaSite(site: Site): Failure | { readonly waitOn: string } | undefined {
+    const spent = this.spend();
+    if (spent !== undefined) {
+      return spent;
+    }
+
     const outcome = this.lookup(site.ref, site.base, true);
     if (!("found" in outcome)) {
-      return "deferred";
+      return outcome.waitOn === undefined
+        ? this.lookupFailure(site, outcome)
+        : { waitOn: outcome.waitOn };
     }
 
     const { found } = outcome;
@@ -811,7 +837,7 @@ class Resolver {
       pointer: found.pointer,
     });
 
-    return this.spend();
+    return undefined;
   }
 
   // Follows a non-schema chain to its end, at most `maxHops` references.
@@ -934,13 +960,16 @@ class Resolver {
     return undefined;
   }
 
-  // Walks to a fixed point: a schema reference may wait for an $id or $anchor found later.
+  // Walks to a fixed point: a schema reference may wait for an $id or $anchor found later. A
+  // waiting site is retried only when its resource gains one, and only while the walk progresses.
   run(): Failure | undefined {
     const retrieval = resolveUri(this.input.document, this.input.document) ?? this.input.document;
     this.documents.set(stripFragment(retrieval), "");
     this.documents.set(this.base, "");
     this.stack.push({ base: this.base, kind: "root", node: this.input.value, pointer: "" });
-    let waiting: Site[] = [];
+
+    const waiting = new Map<string, Waiting[]>();
+    let order = 0;
     for (;;) {
       const found: Site[] = [];
       const walked = this.drain(found);
@@ -948,32 +977,57 @@ class Resolver {
         return walked;
       }
 
-      const pending = [...waiting, ...found];
-      waiting = [];
-      for (const site of pending) {
-        const outcome = site.kind === "schema" ? this.schemaSite(site) : this.chainSite(site);
-        if (outcome === "deferred") {
-          waiting.push(site);
+      const retried = [...this.added].flatMap((resource) => waiting.get(resource) ?? []);
+      for (const resource of this.added) {
+        waiting.delete(resource);
+      }
+
+      this.added.clear();
+
+      const offset = order;
+      order += found.length;
+      const pending = [
+        ...Arr.sort(retried, byOrder),
+        ...found.map((site, index) => ({ order: offset + index, site })),
+      ];
+      for (const entry of pending) {
+        const outcome =
+          entry.site.kind === "schema" ? this.schemaSite(entry.site) : this.chainSite(entry.site);
+        if (outcome !== undefined && "waitOn" in outcome) {
+          waiting.set(outcome.waitOn, [...(waiting.get(outcome.waitOn) ?? []), entry]);
         } else if (outcome !== undefined) {
           return outcome;
         }
       }
 
       // Nothing new to walk, so every waiting reference is final.
-      if (this.stack.length === 0) {
-        const [first] = waiting;
-        if (first === undefined) {
-          return this.containment();
-        }
-
-        const outcome = this.lookup(first.ref, first.base, true);
-
-        return this.lookupFailure(
-          first,
-          "found" in outcome ? { missing: "unresolvable" } : outcome,
-        );
+      if (this.stack.length === 0 && this.added.size === 0) {
+        return this.finalWaiting(waiting) ?? this.containment();
       }
     }
+  }
+
+  // Refuses the earliest-found site still waiting, if any.
+  finalWaiting(waiting: ReadonlyMap<string, readonly Waiting[]>): Failure | undefined {
+    let first: Waiting | undefined;
+    for (const entries of waiting.values()) {
+      for (const entry of entries) {
+        if (first === undefined || entry.order < first.order) {
+          first = entry;
+        }
+      }
+    }
+
+    if (first === undefined) {
+      return undefined;
+    }
+
+    const outcome = this.lookup(first.site.ref, first.site.base, true);
+
+    return this.lookupFailure(
+      first.site,
+      "found" in outcome ? { missing: "unresolvable" } : outcome,
+    );
   }
 }
 
