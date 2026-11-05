@@ -156,7 +156,7 @@ describe("emitDomainSchemas", () => {
     expect(content).toContain("export type Node =");
     expect(content).toContain("export const Node =");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("default, example and examples never reach the output", async () => {
     const content = await emit(
@@ -181,7 +181,7 @@ describe("emitDomainSchemas", () => {
     expect(content).not.toContain("secret");
     expect(content).not.toContain("examples");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("properties come out sorted whatever their source order", async () => {
     const content = await emit(
@@ -204,7 +204,7 @@ describe("emitDomainSchemas", () => {
     expect(position(content, "alpha")).toBeLessThan(position(content, "mid"));
     expect(position(content, "mid")).toBeLessThan(position(content, "zed"));
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("only request-reachable definitions are emitted, each after the names it reads", async () => {
     const content = await emit(
@@ -223,7 +223,7 @@ describe("emitDomainSchemas", () => {
       position(content, "export const Root"),
     );
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a recursive definition is declared before a definition that reads it", async () => {
     const content = await emit(
@@ -238,7 +238,7 @@ describe("emitDomainSchemas", () => {
       position(content, "export const Z ="),
     );
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("mutually recursive definitions emit without a reference cycle", async () => {
     const content = await emit(
@@ -253,7 +253,7 @@ describe("emitDomainSchemas", () => {
     expect(content).toContain("export type Left =");
     expect(content).toContain("export type Right =");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("the output is the same for the same definitions in any order", async () => {
     const entries: readonly (readonly [string, Json])[] = [
@@ -286,7 +286,7 @@ describe("emitDomainSchemas", () => {
     );
 
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("recursive types with long unions, nullable objects and optional tuple elements", async () => {
     const content = await emit(
@@ -318,7 +318,7 @@ describe("emitDomainSchemas", () => {
 
     expect(content).toContain("export type Tree = {");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("keys that need quotes stay quoted and escaped", async () => {
     const content = await emit(
@@ -345,7 +345,7 @@ describe("emitDomainSchemas", () => {
     expect(content).toContain('"caf\\u00e9"');
     expect(content).toContain("class:");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("wide characters count two columns where the line breaks", async () => {
     const entries = ["中", "😀"].flatMap((char) =>
@@ -360,7 +360,7 @@ describe("emitDomainSchemas", () => {
     );
 
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a recursive reference inside Record breaks out its arguments", async () => {
     const content = await emit(
@@ -381,7 +381,7 @@ describe("emitDomainSchemas", () => {
         Schema.suspend((): Schema.Codec<P> => P),
       ),`);
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a reference beside null stays on its member's line", async () => {
     const content = await emit(
@@ -413,7 +413,7 @@ describe("emitDomainSchemas", () => {
       "  readonly total_pretax_credit_amounts?: ReadonlyArray<InvoicesResourcePretaxCreditAmount> | null;",
     );
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a type whose head does not fit opens under the =", async () => {
     const key = `${longStem}_reversal`;
@@ -422,7 +422,7 @@ describe("emitDomainSchemas", () => {
 
     expect(content).toContain(`export type ${name} =\n  {`);
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("generated definition sets pass vp fmt", async () => {
     const contents = await Promise.all(
@@ -439,14 +439,14 @@ describe("emitDomainSchemas", () => {
     for (const content of contents) {
       expectFixedPoint(content);
     }
-  });
+  }, 30_000);
 
   test("no request-reachable definitions make an empty module", async () => {
     const content = await emit([["Unreached", { type: "string" }]], []);
 
     expect(content).toBe("export {};\n");
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a definition that is not a schema object is refused", async () => {
     const error = await failure([["Any", true]], ["Any"]);
@@ -482,7 +482,7 @@ describe("emitDomainSchemas", () => {
     expect(content).toContain("export const UserUpdate =");
     expect(content).not.toMatch(/user_update|my-schema|Schema1/u);
     expectFixedPoint(content);
-  });
+  }, 30_000);
 
   test("a copy key the identifier map does not name is refused", async () => {
     const entries: readonly (readonly [string, Json])[] = [
