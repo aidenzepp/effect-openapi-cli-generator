@@ -1,6 +1,7 @@
 import type { PlatformError } from "effect";
 import {
   Cause,
+  Console,
   Context,
   Data,
   Effect,
@@ -553,6 +554,59 @@ export const finalCatch =
         Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
       ),
     );
+
+/**
+ * Where help, version and invalid-invocation output go. Requested help and the
+ * version are the answer, so they go to stdout; implicit help (a group run without a
+ * subcommand) and an invalid invocation explain a run that did nothing, so they go to stderr.
+ * The text comes from the `CliOutput.Formatter` in context and is sanitized before it is printed.
+ */
+export const presenter: CliOutput.Presenter = {
+  present: (event) =>
+    Effect.gen(function* present() {
+      const format = yield* CliOutput.Formatter;
+
+      if (event._tag === "Version") {
+        yield* Console.log(sanitize(format.formatVersion(event.name, event.version)));
+
+        return;
+      }
+
+      const help = sanitize(format.formatHelpDoc(event.helpDoc));
+
+      if (event._tag === "InvalidInvocation") {
+        yield* Console.error(help);
+        yield* Console.error(sanitize(format.formatErrors(event.errors)));
+
+        return;
+      }
+
+      yield* event.reason === "Requested" ? Console.log(help) : Console.error(help);
+    }),
+};
+
+/**
+ * Exit code of an invocation that does not parse.
+ */
+const invalidInvocationExitCode = 2;
+
+const isShowHelp = (error: unknown): error is CliError.ShowHelp =>
+  CliError.isCliError(error) && error._tag === "ShowHelp";
+
+/**
+ * Maps `CliError.ShowHelp` to the entry's exit status. Help with parse errors fails again as
+ * itself with exit 2, so `finalCatch` renders its errors once; help without errors (already
+ * presented) succeeds, exit 0. Other failures pass through. Apply it inside `finalCatch`.
+ */
+export const exitForHelp = <E, R>(effect: Effect.Effect<void, E, R>): Effect.Effect<void, E, R> =>
+  Effect.catchIf(
+    effect,
+    (error): error is E & CliError.ShowHelp => isShowHelp(error),
+    (help) =>
+      help.errors.length === 0
+        ? Effect.void
+        : Effect.fail(Object.assign(help, { [Runtime.errorExitCode]: invalidInvocationExitCode })),
+  );
 
 /**
  * The notes a generated command adds to its help (design 4.6): a note per argument and per flag,
