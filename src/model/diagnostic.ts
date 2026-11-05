@@ -1,9 +1,9 @@
 import { Array as Arr, Order, Schema } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
 
-const codePattern = /^(?<row>[A-Z]+-[0-9]+)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const codePattern = /^(?<row>[A-Z][A-Z0-9]*-[0-9]+)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
-const rowPattern = /^[A-Z]+-[0-9]+$/u;
+const rowPattern = /^[A-Z][A-Z0-9]*-[0-9]+$/u;
 
 const Code = Schema.String.pipe(Schema.check(Schema.isPattern(codePattern)));
 

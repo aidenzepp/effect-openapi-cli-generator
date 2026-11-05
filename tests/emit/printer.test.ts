@@ -814,7 +814,8 @@ describe("display width", () => {
 
 const HostileCase = Schema.Struct({
   expected: Schema.Struct({
-    kind: Schema.Literals(["jsdoc-text", "object-key", "string-literal"]),
+    kind: Schema.Literals(["object-key", "string-literal"]),
+    source: Schema.String,
   }),
   id: Schema.String,
   input: Schema.Union([Schema.String, Schema.Struct({ codeUnits: Schema.Array(Schema.Number) })]),
@@ -846,12 +847,30 @@ describe("hostile seeds", () => {
     expectFixedPoint(printed, "ts");
   });
 
-  test("jsdoc-text seeds never decode to JSDoc text", () => {
-    const texts = byKind("jsdoc-text");
-    expect(texts.length).toBeGreaterThan(0);
-    expect(texts.every((text) => Exit.isFailure(Schema.decodeUnknownExit(JsDocText)(text)))).toBe(
+  test("JSDoc text rejects hostile seed input", () => {
+    const unsafe = hostileCases
+      .map((seed) => seedText(seed.input))
+      .filter((text) => /[\p{Cc}\p{Zl}\p{Zp}]|\*\/|^\s*@/mu.test(text));
+    expect(unsafe.length).toBeGreaterThan(0);
+    expect(unsafe.every((text) => Exit.isFailure(Schema.decodeUnknownExit(JsDocText)(text)))).toBe(
       true,
     );
+  });
+
+  test("every hostile case prints exactly its expected source", () => {
+    expect(hostileCases.length).toBeGreaterThan(0);
+    for (const seed of hostileCases) {
+      const text = seedText(seed.input);
+      const printed =
+        seed.expected.kind === "string-literal"
+          ? print({ imports: [], statements: [constant("x", str(text))] })
+          : print({ imports: [], statements: [constant("x", obj([[text, num(1)]]))] });
+      const expected =
+        seed.expected.kind === "string-literal"
+          ? `export const x = ${seed.expected.source};\n`
+          : `export const x = { ${seed.expected.source}: 1 };\n`;
+      expect({ id: seed.id, printed }).toEqual({ id: seed.id, printed: expected });
+    }
   });
 
   test("object-key seeds print as own-property keys", () => {
