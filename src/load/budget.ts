@@ -95,25 +95,6 @@ export const refuse = (
   );
 };
 
-/**
- * Checks the size with `FileSystem.stat` before reading the file.
- */
-export const readFileBounded = (
-  path: string,
-  limits: LoadLimits,
-  document: Document,
-): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* readBounded() {
-    const fs = yield* FileSystem.FileSystem;
-    const info = yield* fs.stat(path);
-
-    if (ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)) {
-      return yield* refuse(document, "DOC-14/too-large");
-    }
-
-    return yield* fs.readFile(path);
-  }).pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
-
 const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
   const total = Arr.reduce(chunks, 0, (sum, chunk) => sum + chunk.length);
   const bytes = new Uint8Array(total);
@@ -144,3 +125,29 @@ export const readStreamBounded = (
     Effect.map(concat),
     Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")),
   );
+
+/**
+ * Reads a regular file through `FileSystem.stream`, so `maxBytes` bounds the bytes actually read,
+ * not the size `stat` reported. Anything that is not a regular file is refused unread.
+ */
+export const readFileBounded = (
+  path: string,
+  limits: LoadLimits,
+  document: Document,
+): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* readBounded() {
+    const fs = yield* FileSystem.FileSystem;
+    const info = yield* fs
+      .stat(path)
+      .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
+
+    if (info.type !== "File") {
+      return yield* refuse(document, "DOC-14/unreadable");
+    }
+
+    if (ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)) {
+      return yield* refuse(document, "DOC-14/too-large");
+    }
+
+    return yield* readStreamBounded(fs.stream(path), limits, document);
+  });

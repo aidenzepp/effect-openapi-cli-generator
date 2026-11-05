@@ -1,6 +1,9 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema, Stream } from "effect";
+import { ByteSize, Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { loadBytes, loadFile, loadStream } from "../../src/load/index.ts";
@@ -110,6 +113,39 @@ describe("load: strict JSON", () => {
     expect(inConst.diagnostic.code).toBe("DOC-14/unsafe-integer");
   });
 
+  test("exponent and fractional forms beyond 2^53 are refused under default, enum and const", async () => {
+    const tokens = ["1e20", "9007199254740993.0", "9.007199254740993e15", "-1E16"];
+
+    const cases = ["default", "enum", "const"].flatMap((key) =>
+      tokens.map((literal) => ({ key, literal, value: key === "enum" ? `[${literal}]` : literal })),
+    );
+    const errors = await Promise.all(
+      cases.map(({ key, value }) => refusal(loadBytes(encode(`{"${key}":${value}}`), options()))),
+    );
+
+    for (const [index, error] of errors.entries()) {
+      expect(`${cases[index]?.literal} ${error.diagnostic.code}`).toBe(
+        `${cases[index]?.literal} DOC-14/unsafe-integer`,
+      );
+    }
+  });
+
+  test("1.5, 1e2, 42 and exactly representable large values load under default", async () => {
+    const literals = ["1.5", "1e2", "42", "0.1", "9007199254740992", "2251799813685248.5"];
+    const loaded = await Promise.all(
+      literals.map((literal) =>
+        Effect.runPromise(loadBytes(encode(`{"default":${literal}}`), options())),
+      ),
+    );
+
+    expect(loaded.map((item) => item.format)).toEqual(literals.map(() => "json"));
+  });
+
+  test("a number outside default, enum and const keeps any precision", async () => {
+    const loaded = await Effect.runPromise(loadBytes(encode('{"minimum":1e20}'), options()));
+    expect(loaded.format).toBe("json");
+  });
+
   test("malformed JSON is refused", async () => {
     const error = await refusal(loadBytes(encode('{"a":'), options()));
     expect(error.diagnostic.code).toBe("DOC-14/invalid-json");
@@ -128,5 +164,85 @@ describe("load: strict JSON", () => {
   test("a missing file is refused as unreadable", async () => {
     const error = await refusal(file("missing.json"));
     expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+  });
+});
+
+const withFs = (overrides: Partial<FileSystem.FileSystem>) =>
+  loadFile("/virtual/spec.json", options({ maxBytes: 1024, maxDepth: 256, maxNodes: 10_000 })).pipe(
+    Effect.provide(FileSystem.layerNoop(overrides)),
+  );
+
+const info = (size: number, type: FileSystem.File.Type): FileSystem.File.Info => ({
+  atime: Option.none(),
+  birthtime: Option.none(),
+  blksize: Option.none(),
+  blocks: Option.none(),
+  dev: 0n,
+  gid: Option.none(),
+  ino: Option.none(),
+  mode: 0,
+  mtime: Option.none(),
+  nlink: Option.none(),
+  rdev: Option.none(),
+  size: ByteSize.bytes(size),
+  type,
+  uid: Option.none(),
+});
+
+describe("load: bytes actually read", () => {
+  test("a file that reports a small size but streams past the cap is refused at the cap", async () => {
+    let served = 0;
+    const chunk = new Uint8Array(512).fill(0x20);
+    const endless = Stream.iterate(chunk, (c) => c).pipe(
+      Stream.tap((c) =>
+        Effect.sync(() => {
+          served += c.length;
+        }),
+      ),
+    );
+    const error = await refusal(
+      withFs({ stat: () => Effect.succeed(info(10, "File")), stream: () => endless }),
+    );
+    expect(error.diagnostic.code).toBe("DOC-14/too-large");
+    expect(served).toBeLessThanOrEqual(1024 + 512 * 2);
+  });
+
+  test("a non-regular file is refused without being opened", async () => {
+    let opened = false;
+    const error = await refusal(
+      withFs({
+        readFile: () =>
+          Effect.sync(() => {
+            opened = true;
+
+            return new Uint8Array();
+          }),
+        stat: () => Effect.succeed(info(0, "CharacterDevice")),
+        stream: () =>
+          Stream.sync(() => {
+            opened = true;
+
+            return new Uint8Array();
+          }),
+      }),
+    );
+    expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+    expect(opened).toBe(false);
+  });
+
+  test("a real FIFO is refused", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "load-fifo-"));
+    const fifo = path.join(dir, "spec.json");
+
+    try {
+      execFileSync("mkfifo", [fifo]);
+
+      const error = await refusal(
+        loadFile(fifo, options()).pipe(Effect.provide(BunFileSystem.layer)),
+      );
+      expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 });

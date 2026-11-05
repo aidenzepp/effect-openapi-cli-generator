@@ -31,7 +31,7 @@ const dataKeys: ReadonlySet<string> = new Set(["const", "default", "enum"]);
 
 const opaqueKeys: ReadonlySet<string> = new Set(["example", "examples"]);
 
-const largestSafe = "9007199254740992";
+const largestSafeValue = 2 ** 53;
 
 const simpleEscapes: ReadonlyMap<string, string> = new Map([
   ["b", "\b"],
@@ -50,16 +50,53 @@ const unescapeKey = (raw: string): string =>
         : String.fromCodePoint(Number.parseInt(hex, 16)),
   );
 
-const isUnsafeInteger = (token: string): boolean => {
-  if (!/^-?[0-9]+$/u.test(token)) {
+const numberToken = /^-?(?<int>[0-9]+)(?:\.(?<frac>[0-9]+))?(?:[eE](?<exp>[+-]?[0-9]+))?$/u;
+
+interface Decimal {
+  readonly digits: string;
+  readonly exponent: number;
+}
+
+/**
+ * The value as `digits * 10^exponent` with no leading or trailing zeros in `digits`; sign ignored.
+ */
+const decimalOf = (token: string): Decimal | undefined => {
+  const groups = numberToken.exec(token)?.groups;
+
+  if (groups === undefined) {
+    return undefined;
+  }
+
+  const fraction = groups["frac"] ?? "";
+  const all = `${groups["int"] ?? ""}${fraction}`.replace(/^0+/u, "");
+  const digits = all.replace(/0+$/u, "");
+  const exponent = Number(groups["exp"] ?? "0") - fraction.length + (all.length - digits.length);
+
+  return digits === "" ? { digits: "", exponent: 0 } : { digits, exponent };
+};
+
+const sameDecimal = (left: Decimal, right: Decimal): boolean =>
+  left.digits === right.digits && left.exponent === right.exponent;
+
+/**
+ * A number literal that does not survive `JSON.parse`: not finite, an integer beyond 2^53,
+ * or a decimal whose digits differ from the shortest decimal of the double it parses to.
+ */
+const isUnsafeNumber = (token: string): boolean => {
+  const written = decimalOf(token);
+
+  if (written === undefined) {
     return false;
   }
 
-  const digits = token.startsWith("-") ? token.slice(1) : token;
+  const value = Math.abs(Number(token));
+  const parsed = decimalOf(String(value));
 
   return (
-    digits.length > largestSafe.length ||
-    (digits.length === largestSafe.length && digits > largestSafe)
+    !Number.isFinite(value) ||
+    value > largestSafeValue ||
+    parsed === undefined ||
+    !sameDecimal(written, parsed)
   );
 };
 
@@ -215,7 +252,7 @@ const token = (state: State): void => {
 
   if (
     valueContext(state.frames.at(-1)).data &&
-    isUnsafeInteger(state.text.slice(state.cursor, end))
+    isUnsafeNumber(state.text.slice(state.cursor, end))
   ) {
     record(state, "DOC-14/unsafe-integer", state.cursor);
   }
