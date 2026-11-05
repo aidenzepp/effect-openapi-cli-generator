@@ -67,10 +67,10 @@ const decimalOf = (token: string): Decimal | undefined => {
     return undefined;
   }
 
-  const fraction = groups["frac"] ?? "";
-  const all = `${groups["int"] ?? ""}${fraction}`.replace(/^0+/u, "");
+  const fraction = groups.frac ?? "";
+  const all = `${groups.int ?? ""}${fraction}`.replace(/^0+/u, "");
   const digits = all.replace(/0+$/u, "");
-  const exponent = Number(groups["exp"] ?? "0") - fraction.length + (all.length - digits.length);
+  const exponent = Number(groups.exp ?? "0") - fraction.length + (all.length - digits.length);
 
   return digits === "" ? { digits: "", exponent: 0 } : { digits, exponent };
 };
