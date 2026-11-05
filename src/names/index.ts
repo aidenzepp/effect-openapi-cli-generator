@@ -3,7 +3,7 @@ import type { AuthorConfig } from "../model/author-config.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
-import { domainIdentifiers, fixedNamespaces } from "./domain.ts";
+import { domainIdentifiers, fixedNamespaces, rootModuleNames } from "./domain.ts";
 import { SafeIdentifier, foldFileSegment, foldIdentifier, foldKebab } from "./fold.ts";
 import type { FoldNote, SafeFileSegmentValue, SafeIdentifierValue } from "./fold.ts";
 import {
@@ -115,6 +115,10 @@ const push = <K, V>(map: Map<K, V[]>, key: K, value: V): void => {
     list.push(value);
   }
 };
+
+// File segments the package always owns: `api/root.ts` for untagged commands, `api/servers.ts`
+// and `api/security.ts`.
+const reservedSegments: ReadonlySet<string> = new Set(["root", "security", "servers"]);
 
 const specVersion = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
@@ -391,7 +395,8 @@ const makeFirstSite = (candidates: readonly Candidate[]) => {
   };
 };
 
-// Group names: two tags folding to one name or file segment, and reserved names.
+// Group names: two tags folding to one name or file segment, reserved names, and the file
+// segments the package reserves.
 const checkGroups = (
   candidates: readonly Candidate[],
   authorCommands: ReadonlySet<string>,
@@ -441,6 +446,16 @@ const checkGroups = (
           hint,
           pointer: tagPointer,
         });
+      }
+
+      if (reservedSegments.has(node.segment)) {
+        collector.report(
+          operation,
+          "TAG-02/reserved-segment",
+          "Tag",
+          `The group ${JSON.stringify(node.tag)} folds to the file segment ${JSON.stringify(node.segment)}, which api/${node.segment}.ts reserves.`,
+          { hint, pointer: tagPointer },
+        );
       }
     }
   }
@@ -893,7 +908,11 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     const domain = domainIdentifiers(Object.keys(context.defs));
     const finals = named.filter((entry) => !collector.refused.has(entry.operation));
     const rootEntries = finals.filter((entry) => entry.container === root);
-    const rootReserved = new Set([...fixedNamespaces, ...domainNames(rootEntries, domain)]);
+    const rootReserved = new Set([
+      ...fixedNamespaces,
+      ...rootModuleNames,
+      ...domainNames(rootEntries, domain),
+    ]);
     const rootCommands = planModule(rootEntries, rootReserved, drafts, collector);
     const byContainer = new Map<string, Named[]>();
     for (const entry of finals) {

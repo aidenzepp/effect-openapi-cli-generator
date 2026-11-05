@@ -296,6 +296,40 @@ describe("planNames: groups and commands", () => {
     expect(result.diagnostics[0]?.operation?.operationId).toBe("things");
   });
 
+  test("a group whose file segment is root, servers or security is refused with its tag and key", () => {
+    const result = plan({
+      operations: [
+        { method: "GET", operationId: "a", path: "/a", tags: ["Root"] },
+        { method: "GET", operationId: "b", path: "/b", tags: ["servers"] },
+        { method: "GET", operationId: "c", path: "/c", tags: ["SECURITY"] },
+        { method: "GET", operationId: "d", path: "/d", tags: ["roots"] },
+      ],
+    });
+
+    expect(result.groups.map((group) => String(group.segment))).toEqual(["roots"]);
+    expect(
+      result.diagnostics.map(({ code, hint, message, scope, severity }) => ({
+        code,
+        hint,
+        message,
+        scope,
+        severity,
+      })),
+    ).toEqual(
+      [
+        ["a", "Root", "root"],
+        ["b", "servers", "servers"],
+        ["c", "SECURITY", "security"],
+      ].map(([id, tag, segment]) => ({
+        code: "TAG-02/reserved-segment",
+        hint: `naming.operations[${JSON.stringify(id)}].group`,
+        message: `The group ${JSON.stringify(tag)} folds to the file segment ${JSON.stringify(segment)}, which api/${segment}.ts reserves.`,
+        scope: "operation",
+        severity: "refusal",
+      })),
+    );
+  });
+
   test("an all-punctuation operationId is OPR-06/empty-name with no route fallback", () => {
     const result = plan({ operations: [{ method: "GET", operationId: "!!!", path: "/plain" }] });
 
@@ -576,6 +610,32 @@ describe("planNames: module identifier reservations", () => {
       { code: "OPR-06/renamed", scope: "element", severity: "notice" },
       { code: "OPR-06/renamed", scope: "element", severity: "notice" },
     ]);
+  });
+});
+
+describe("planNames: root module reservations", () => {
+  test("root commands named after cli/root.ts's fixed names rename by suffix", () => {
+    const result = plan({
+      operations: ["services", "servers", "security", "status"].map((operationId) => ({
+        method: "GET",
+        operationId,
+        path: `/${operationId}`,
+      })),
+    });
+
+    expect(result.root.map((command) => [command.name, String(command.identifier)])).toEqual([
+      ["services", "services2"],
+      ["servers", "servers2"],
+      ["security", "security2"],
+      ["status", "status"],
+    ]);
+    expect(codes(result)).toEqual(
+      Array.from({ length: 3 }, () => ({
+        code: "OPR-06/renamed",
+        scope: "element",
+        severity: "notice",
+      })),
+    );
   });
 });
 
@@ -901,9 +961,20 @@ describe("planNames: the golden users-update fixture", () => {
       _tag: "Body",
       kind: "string",
       media: ["application/json"],
+      pointer: "/components/schemas/UserUpdate/properties/address/properties/city",
       repeated: false,
       wireName: "/address/city",
     });
+    expect(
+      setAvatar?.flags.map((flag) => [
+        flag.name,
+        flag.source._tag === "Body" && flag.source.pointer,
+      ]),
+    ).toEqual([
+      ["body", "/paths/~1users~1{id}~1avatar/put/requestBody"],
+      ["body-file", "/paths/~1users~1{id}~1avatar/put/requestBody"],
+      ["url", "/components/schemas/Avatar/properties/url"],
+    ]);
     expect(update?.positionals.map((positional) => positional.name)).toEqual(["id"]);
     expect(
       setAvatar?.flags.map((flag) => [

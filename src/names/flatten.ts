@@ -1,4 +1,5 @@
-import { Array as Arr, Data, Option, Order, Predicate, Result, Schema } from "effect";
+import { Array as Arr, Data, Option, Order, Predicate, Result } from "effect";
+import type { Schema } from "effect";
 import type { MediaAlternative } from "../model/entities.ts";
 import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
@@ -21,6 +22,10 @@ export type BodyFlagKind =
  * One flag descriptor: the dotted kebab name without `--`, the RFC 6901 pointer of the wire
  * path inside the body (`""` for the whole-body flags), the kind, and whether the flag repeats.
  * A boolean is three-state (`--x`, `--no-x`, absent); a repeated flag is a scalar array.
+ * `schemaPointer` is the source-document pointer of the property schema that declares the field
+ * (`--describe` reports it; `""` for the whole-body flags): `/components/schemas/<name>/...` for a
+ * component, the inline schema's own pointer otherwise, and for a schema in another document its
+ * pointer there.
  */
 export interface BodyFlag {
   readonly kind: BodyFlagKind;
@@ -28,6 +33,7 @@ export interface BodyFlag {
   readonly notes: readonly FoldNote[];
   readonly pointer: string;
   readonly repeated: boolean;
+  readonly schemaPointer: string;
 }
 
 /**
@@ -83,6 +89,8 @@ interface JsonObject {
 const isObject = (json: Schema.Json | undefined): json is JsonObject =>
   Predicate.isObject(json) && !Arr.isArray(json);
 
+const isJsonArray = (json: Schema.Json): json is readonly Schema.Json[] => Arr.isArray(json);
+
 interface SchemaNode {
   readonly $ref?: string;
   readonly additionalProperties?: Schema.Json;
@@ -119,8 +127,24 @@ const decodeNode = (json: Schema.Json): Option.Option<SchemaNode> => {
 
 type Scalar = "boolean" | "integer" | "number" | "string";
 
+/**
+ * Where a schema node sits: its `$defs` key and the tokens below that definition.
+ */
+interface Site {
+  readonly key: string;
+  readonly tokens: readonly string[];
+}
+
+/**
+ * A property schema and the site of the `properties` entry that declares it.
+ */
+interface Property {
+  readonly schema: Schema.Json;
+  readonly site: Site;
+}
+
 type Classified =
-  | { readonly _tag: "Object"; readonly properties: Readonly<Record<string, Schema.Json>> }
+  | { readonly _tag: "Object"; readonly properties: ReadonlyMap<string, Property> }
   | { readonly _tag: "Opaque" }
   | { readonly _tag: "Scalar"; readonly kind: Scalar; readonly repeated: boolean };
 
@@ -142,30 +166,136 @@ interface Ctx {
 
 const newCtx = (defs: Defs): Ctx => ({ defs, memo: new Map(), visits: 0 });
 
-const jsonEqual = Schema.toEquivalence(Schema.Json);
+const below = (site: Site, ...tokens: readonly string[]): Site => ({
+  key: site.key,
+  tokens: [...site.tokens, ...tokens],
+});
+
+const propertiesAt = (
+  properties: Readonly<Record<string, Schema.Json>>,
+  site: Site,
+): ReadonlyMap<string, Property> =>
+  new Map(
+    Object.entries(properties).map(([key, schema]) => [
+      key,
+      { schema, site: below(site, "properties", key) },
+    ]),
+  );
+
+/**
+ * The source-document pointer of a site, from the `$defs` key rule (design 2.2): a pointer key is
+ * the entry document's pointer, a `<document>#<pointer>` key another document's, and any other
+ * key a component under `/components/schemas`.
+ */
+const sourcePointer = ({ key, tokens }: Site): string => {
+  const rest = formatPointer(tokens);
+  if (key.startsWith("/")) {
+    return `${key}${rest}`;
+  }
+
+  const hash = key.indexOf("#");
+
+  return hash === -1
+    ? `${formatPointer(["components", "schemas", key])}${rest}`
+    : `${key.slice(hash + 1)}${rest}`;
+};
+
+const exceeded = (): Result.Result<never, BodyBudgetExceeded> =>
+  Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+
+/**
+ * Deep JSON equality that spends one visit per node pair and one per child it queues, from the
+ * call's shared budget. Identical references are equal for free.
+ */
+const equalWithin = (
+  ctx: Ctx,
+  left: Schema.Json,
+  right: Schema.Json,
+): Result.Result<boolean, BodyBudgetExceeded> => {
+  const pending: [Schema.Json, Schema.Json][] = [[left, right]];
+  for (let pair = pending.pop(); pair !== undefined; pair = pending.pop()) {
+    const [one, two] = pair;
+    if (one === two) {
+      continue;
+    }
+
+    ctx.visits += 1;
+    if (ctx.visits > maxVisits) {
+      return exceeded();
+    }
+
+    if (isJsonArray(one) && isJsonArray(two) && one.length === two.length) {
+      ctx.visits += one.length;
+      if (ctx.visits > maxVisits) {
+        return exceeded();
+      }
+
+      for (let index = 0; index < one.length; index += 1) {
+        pending.push([one[index] ?? null, two[index] ?? null]);
+      }
+
+      continue;
+    }
+
+    if (!isObject(one) || !isObject(two)) {
+      return Result.succeed(false);
+    }
+
+    const keys = Object.keys(one);
+    if (keys.length !== Object.keys(two).length || !keys.every((key) => Object.hasOwn(two, key))) {
+      return Result.succeed(false);
+    }
+
+    ctx.visits += keys.length;
+    if (ctx.visits > maxVisits) {
+      return exceeded();
+    }
+
+    for (const key of keys) {
+      pending.push([one[key] ?? null, two[key] ?? null]);
+    }
+  }
+
+  return Result.succeed(true);
+};
 
 const scalarKinds: ReadonlySet<string> = new Set(["boolean", "integer", "number", "string"]);
 
 const isScalar = (value: string): value is Scalar => scalarKinds.has(value);
 
-const mergeObjects = (members: readonly Classified[]): Classified => {
-  const merged = new Map<string, Schema.Json>();
+/**
+ * The `allOf` merge: every member an object, and a key two members declare equal in both (its
+ * first declaration kept). The equality checks spend from the call's budget.
+ */
+const mergeObjects = (
+  ctx: Ctx,
+  members: readonly Classified[],
+): Result.Result<Classified, BodyBudgetExceeded> => {
+  const merged = new Map<string, Property>();
   for (const member of members) {
     if (member._tag !== "Object") {
-      return opaque;
+      return Result.succeed(opaque);
     }
 
-    for (const [key, value] of Object.entries(member.properties)) {
+    for (const [key, property] of member.properties) {
       const existing = merged.get(key);
-      if (existing !== undefined && !jsonEqual(existing, value)) {
-        return opaque;
+      if (existing === undefined) {
+        merged.set(key, property);
+        continue;
       }
 
-      merged.set(key, value);
+      const equal = equalWithin(ctx, existing.schema, property.schema);
+      if (Result.isFailure(equal)) {
+        return Result.fail(equal.failure);
+      }
+
+      if (!equal.success) {
+        return Result.succeed(opaque);
+      }
     }
   }
 
-  return { _tag: "Object", properties: Object.fromEntries(merged) };
+  return Result.succeed({ _tag: "Object", properties: merged });
 };
 
 type RefLookup =
@@ -194,6 +324,7 @@ const lookupRef = (
 const classify = (
   ctx: Ctx,
   json: Schema.Json,
+  site: Site,
   hops: number,
 ): Result.Result<Classified, FlattenError> => {
   ctx.visits += 1;
@@ -220,7 +351,7 @@ const classify = (
     const { name, target } = found.success;
     ctx.memo.set(name, inProgress);
 
-    const resolved = classify(ctx, target, hops + 1);
+    const resolved = classify(ctx, target, { key: name, tokens: [] }, hops + 1);
     ctx.memo.set(name, resolved);
 
     return resolved;
@@ -232,11 +363,15 @@ const classify = (
 
   if (schema.allOf !== undefined) {
     const own: readonly Classified[] =
-      schema.properties === undefined ? [] : [{ _tag: "Object", properties: schema.properties }];
+      schema.properties === undefined
+        ? []
+        : [{ _tag: "Object", properties: propertiesAt(schema.properties, site) }];
 
-    return Result.all(schema.allOf.map((member) => classify(ctx, member, hops + 1))).pipe(
-      Result.map((members) => mergeObjects([...own, ...members])),
-    );
+    return Result.all(
+      schema.allOf.map((member, index) =>
+        classify(ctx, member, below(site, "allOf", String(index)), hops + 1),
+      ),
+    ).pipe(Result.flatMap((members) => mergeObjects(ctx, [...own, ...members])));
   }
 
   const type = schema.type ?? (schema.properties === undefined ? undefined : "object");
@@ -245,12 +380,14 @@ const classify = (
       schema.additionalProperties === undefined || Predicate.isBoolean(schema.additionalProperties);
 
     return Result.succeed(
-      closedOrFree ? { _tag: "Object", properties: schema.properties ?? {} } : opaque,
+      closedOrFree
+        ? { _tag: "Object", properties: propertiesAt(schema.properties ?? {}, site) }
+        : opaque,
     );
   }
 
   if (type === "array" && schema.items !== undefined) {
-    return Result.map(classify(ctx, schema.items, hops + 1), (item) =>
+    return Result.map(classify(ctx, schema.items, below(site, "items"), hops + 1), (item) =>
       item._tag === "Scalar" && !item.repeated ? { ...item, repeated: true } : opaque,
     );
   }
@@ -269,7 +406,7 @@ interface Walk {
 
 const walkProperties = (
   ctx: Ctx,
-  properties: Readonly<Record<string, Schema.Json>>,
+  properties: ReadonlyMap<string, Property>,
   at: {
     readonly depth: number;
     readonly names: readonly string[];
@@ -278,7 +415,7 @@ const walkProperties = (
 ): Result.Result<Walk, FlattenError> => {
   const flags: BodyFlag[] = [];
   const skipped: SkippedProperty[] = [];
-  for (const [key, child] of Object.entries(properties)) {
+  for (const [key, { schema: child, site }] of properties) {
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
@@ -293,17 +430,13 @@ const walkProperties = (
     }
 
     const names = [...at.names, folded.success.name];
-    const classified = classify(ctx, child, 0);
+    const classified = classify(ctx, child, site, 0);
     if (Result.isFailure(classified)) {
       return Result.fail(classified.failure);
     }
 
     const nested = classified.success;
-    if (
-      nested._tag === "Object" &&
-      at.depth < maxDepth &&
-      Object.keys(nested.properties).length > 0
-    ) {
+    if (nested._tag === "Object" && at.depth < maxDepth && nested.properties.size > 0) {
       const inner = walkProperties(ctx, nested.properties, { depth: at.depth + 1, names, tokens });
       if (Result.isFailure(inner)) {
         return Result.fail(inner.failure);
@@ -325,6 +458,7 @@ const walkProperties = (
       notes: folded.success.notes,
       pointer,
       repeated: nested._tag === "Scalar" && nested.repeated,
+      schemaPointer: sourcePointer(site),
     });
   }
 
@@ -337,6 +471,7 @@ const wholeBody = (kind: "body" | "body-file"): BodyFlag => ({
   notes: [],
   pointer: "",
   repeated: false,
+  schemaPointer: "",
 });
 
 const flagOrder = Order.combine(
@@ -389,7 +524,7 @@ export const flattenBody = (
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));
   }
 
-  const classified = classify(ctx, root, 0);
+  const classified = classify(ctx, root, { key, tokens: [] }, 0);
   if (Result.isFailure(classified)) {
     return Result.fail(classified.failure);
   }
