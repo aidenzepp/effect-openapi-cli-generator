@@ -1,0 +1,1294 @@
+{
+  "corpusVersion": 1,
+  "counts": {
+    "informational": 58,
+    "notices": 251,
+    "operations": {
+      "generated": 142,
+      "refused": 0,
+      "total": 142
+    },
+    "refusals": {
+      "document": 0,
+      "element": 0,
+      "operation": 0
+    }
+  },
+  "coverage": {
+    "checked": true,
+    "missing": []
+  },
+  "generator": {
+    "config": "corpus/config/resend.json",
+    "configSha256": "e337f170369f516b7d9494f3b6ff0705ca061f5be0ee857fdc1d57f3672b3edc",
+    "version": "0.0.0"
+  },
+  "notices": [
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AddInboxThreadLabelsOptions/properties/labels/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactDeletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactEventData/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactImport/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactTopicsUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContactUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateContactImportResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateEventResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateInboxDraftOptions/properties/reply_to_email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateInboxDraftOptions/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateInboxDraftResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/CreateInboxLabelOptions/properties/color/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateInboxLabelResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateInboxResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateWebhookResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DeleteWebhookResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DomainCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DomainDeletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DomainEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DomainUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailBouncedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailClickedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailComplainedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailDeliveredEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailDeliveryDelayedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailFailedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-13/not-asserted",
+      "pointer": "/components/schemas/EmailMetricsDataRow",
+      "row": "SCH-13"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailMetricsDataRow/properties/broadcast_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailMetricsDataRow/properties/domain_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailMetricsDataRow/properties/email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailOpenedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailReceivedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailReceivedEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailScheduledEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailSentEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EmailSuppressedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Event/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EventSummary/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ForwardInboxThreadEmailResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetReceivedEmailResponse/properties/attachments/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetReceivedEmailResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetReceivedEmailResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetWebhookEventResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetWebhookEventResponse/properties/next_attempt_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GetWebhookResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Inbox/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Inbox/properties/domain_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Inbox/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Inbox/properties/last_received/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Inbox/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDeletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDeletedEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/reply_to_email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraft/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftAttachment/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftDeletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftEventData/properties/draft_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftListItem/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftListItem/properties/reply_to_email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftListItem/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftListItem/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftSentEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftSentEventData/properties/draft_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftSentEventData/properties/email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftSentEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftSentEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxDraftUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEmailReceivedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEmailSentEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/reply_to_email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventDraft/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventEmail/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxEventEmail/properties/received_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/InboxLabel/properties/color/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxLabel/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxLabel/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThread/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThread/properties/received_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadAssignedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadAssignedEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadAssignedEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadEmail/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadEmail/properties/received_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadEmailEventData/properties/email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadEmailEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadEmailEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadFolderUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadFolderUpdatedEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadFolderUpdatedEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/InboxThreadLabel/properties/color/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadLabel/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadLabelsUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadLabelsUpdatedEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadLabelsUpdatedEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadSearchResult/allOf/1/properties/matched_email_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadSummary/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadUnassignedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadUnassignedEventData/properties/inbox_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxThreadUnassignedEventData/properties/thread_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InboxUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListAttachmentsResponse/properties/data/items/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListAttachmentsResponse/properties/data/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListInboxesResponseSuccess/properties/data/items/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListInboxesResponseSuccess/properties/data/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListInboxesResponseSuccess/properties/data/items/properties/last_received/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListInboxesResponseSuccess/properties/data/items/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListReceivedEmailsResponse/properties/data/items/properties/attachments/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListReceivedEmailsResponse/properties/data/items/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListReceivedEmailsResponse/properties/data/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListWebhookEventAttemptsResponse/properties/data/items/properties/sent_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListWebhookEventsResponse/properties/data/items/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ListWebhooksResponse/properties/data/items/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Log/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LogSummary/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OutboundEmailEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RemoveEventResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RemoveInboxDraftResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RemoveInboxLabelResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RemoveInboxResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RemoveInboxThreadResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/ReplyInboxThreadEmailOptions/anyOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ReplyInboxThreadEmailResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RetrievedAttachment/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RetrievedAttachment/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RevokeOAuthGrantResponse/properties/revoked_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RotateWebhookSigningSecretResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SendEventRequest/properties/contact_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SendEventRequest/properties/email/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SendInboxDraftResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SetInboxThreadLabelsOptions/properties/labels/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SuppressionAddedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SuppressionEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SuppressionRemovedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TopicCreatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TopicDeletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TopicEventData/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TopicEventData/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TopicUpdatedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateEventResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/UpdateInboxAgentOptions/anyOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateInboxAgentResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/UpdateInboxDraftOptions/anyOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateInboxDraftResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/UpdateInboxLabelOptions/properties/color/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateInboxLabelResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateInboxResponseSuccess/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateWebhookResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEventClick/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1audiences~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}/delete/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1automations~1{automation_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}/patch/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}~1duplicate/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}~1runs/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}~1runs~1{run_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}~1runs~1{run_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1automations~1{automation_id}~1stop/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1broadcasts/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1broadcasts~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1broadcasts~1{id}/patch/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1broadcasts~1{id}~1cancel/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1broadcasts~1{id}~1clicked-links/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1broadcasts~1{id}~1duplicate/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1broadcasts~1{id}~1recipients/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1broadcasts~1{id}~1recipients/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1contact-properties/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1contact-properties~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1contacts~1imports~1{id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1contacts~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1domains~1{domain_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1emails/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1metrics/get/parameters/6/schema/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1metrics/get/parameters/7/schema/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1metrics/get/parameters/8/schema/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}~1attachments/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}~1attachments/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}~1attachments/get/parameters/3/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}~1attachments~1{attachment_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1receiving~1{email_id}~1attachments~1{attachment_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1emails~1{email_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1{email_id}~1attachments/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1{email_id}~1attachments/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1{email_id}~1attachments/get/parameters/3/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1{email_id}~1attachments~1{attachment_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1emails~1{email_id}~1attachments~1{attachment_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1events~1{identifier}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1inboxes~1{inbox_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1drafts~1{draft_id}/delete/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1drafts~1{draft_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1drafts~1{draft_id}/patch/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1drafts~1{draft_id}~1send/post/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1labels~1{label_id}/delete/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1labels~1{label_id}/patch/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads/get/parameters/2/schema/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1search/get/parameters/2",
+      "row": "PRM-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1search/get/parameters/10/schema/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}/delete/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}/patch/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}~1forward/post/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}~1forward/post/parameters/3/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}~1reply/post/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1emails~1{email_id}~1reply/post/parameters/3/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1labels/post/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1labels/put/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1labels~1{label_id}/delete/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1inboxes~1{inbox_id}~1threads~1{thread_id}~1labels~1{label_id}/delete/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1logs~1{log_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1logs~1{log_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1segments~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1segments~1{id}~1contacts/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1suppressions~1{suppression}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1templates/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1templates~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1templates~1{id}/patch/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1topics~1{id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1usage/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}/delete/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "OPR-06/folded",
+      "pointer": "/paths/~1webhooks~1{webhook_id}/get",
+      "row": "OPR-06"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}/patch/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1events/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1events~1{event_id}/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1events~1{event_id}~1attempts/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1events~1{event_id}~1replay/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1signing-secret~1rotate/post/parameters/0/schema/format",
+      "row": "SCH-54"
+    }
+  ],
+  "refusals": [],
+  "spec": {
+    "id": "resend",
+    "openapi": "3.1.2",
+    "sha256": "aa33334c3686b64a1dc11e556da0407473bb0b9a5a4f873d69cd9aa06b606915"
+  },
+  "twinEquality": {
+    "checked": true,
+    "equal": true
+  },
+  "verdict": "accepted"
+}
