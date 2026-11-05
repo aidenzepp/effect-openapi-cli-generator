@@ -32,6 +32,7 @@ import type {
 } from "./plan.ts";
 import { reservedCliNames, reservedEnvSuffixes } from "./reserved.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { escapeToken } from "../model/pointer.ts";
 
 export { domainIdentifiers } from "./domain.ts";
 
@@ -131,8 +132,6 @@ const fixedFlagIdentifiers: ReadonlySet<string> = new Set([
 const decodeDefs = Schema.decodeUnknownOption(
   Schema.Struct({ $defs: Schema.Record(Schema.String, Schema.Json) }),
 );
-
-const escapeToken = (token: string): string => token.replaceAll("~", "~0").replaceAll("/", "~1");
 
 const toIdentifier = (value: string): SafeIdentifierValue =>
   Schema.decodeSync(SafeIdentifier)(value);

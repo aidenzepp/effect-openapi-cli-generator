@@ -14,6 +14,7 @@ import type {
 } from "./fold.ts";
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
+import { escapeToken } from "../model/pointer.ts";
 
 /**
  * A path parameter as a positional argument; `name` is its metavar.
@@ -107,8 +108,6 @@ export interface OverrideSite {
   readonly configPointer: string;
   readonly override: OperationOverride | undefined;
 }
-
-const escapeToken = (token: string): string => token.replaceAll("~", "~0").replaceAll("/", "~1");
 
 // Keys come from untrusted documents: read own members only, never the prototype chain.
 const own = <Value>(

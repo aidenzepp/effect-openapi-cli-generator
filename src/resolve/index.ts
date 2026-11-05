@@ -5,7 +5,13 @@ import type { Line } from "../validate/index.ts";
 import { documentBase, resolveUri, schemaBase, stringMember, stripFragment } from "./base-uri.ts";
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
-import { escapeToken, evaluateTokens, parseFragment, parsePointer } from "../model/pointer.ts";
+import {
+  escapeToken,
+  evaluateTokens,
+  parseFragment,
+  parsePointer,
+  formatPointer,
+} from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 
@@ -375,9 +381,6 @@ const uriSyntax = /[:/?#]/u;
 
 const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
 
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${escapeToken(token)}`).join("");
-
 const tokensOf = (pointer: string): readonly string[] => {
   const exit = Effect.runSyncExit(parsePointer(pointer));
 
@@ -393,7 +396,7 @@ const nodeAt = (root: Json, pointer: string): Json | undefined => {
 const fragmentPointer = (fragment: string): string | undefined => {
   const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
 
-  return Exit.isSuccess(exit) ? pointerOf(exit.value) : undefined;
+  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
 };
 
 const memberOf = (node: Json, token: string): Json | undefined => {
@@ -1144,7 +1147,7 @@ export const implicitComponent = (
   section: ComponentSection,
   name: string,
 ): Option.Option<CanonicalKey> => {
-  const pointer = pointerOf(["components", section, name]);
+  const pointer = formatPointer(["components", section, name]);
   if (nodeAt(resolution.value, pointer) !== undefined) {
     return Option.some({ document: resolution.document, pointer });
   }

@@ -4,7 +4,7 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, unescapeToken } from "../model/pointer.ts";
+import { escapeToken, evaluatePointer, unescapeToken, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 
@@ -86,9 +86,6 @@ const stagedRules = new Map([
   ["oauth2Token", { code: "SSC-18/not-implemented", what: "oauth2 token pass-through" }],
   ["oidcToken", { code: "SSC-19/not-implemented", what: "openIdConnect token pass-through" }],
 ]);
-
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${escapeToken(token)}`).join("");
 
 const acquisitionHint = (permanent: boolean): string =>
   permanent
@@ -311,7 +308,7 @@ export const normalizeSecuritySchemes = (
         .map((diagnostic) => diagnostic.pointer),
     );
     const built = names.map((name): Built => {
-      const pointer = pointerOf(["components", "securitySchemes", name]);
+      const pointer = formatPointer(["components", "securitySchemes", name]);
 
       // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
       return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
@@ -433,7 +430,7 @@ const judge = (
               element: "Security Requirement Object",
               message: "The requirement names a security scheme that is refused.",
               pointer: `${pointer}/${escapeToken(name)}`,
-              related: pointerOf(["components", "securitySchemes", resolved]),
+              related: formatPointer(["components", "securitySchemes", resolved]),
             }
           : {
               anchor: "security-requirements-name",
