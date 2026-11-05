@@ -4,8 +4,23 @@
   "private": true,
   "description": "Generate Effect-native CLIs from OpenAPI specifications and Effect HttpApi definitions.",
   "license": "MIT",
+  "bin": {
+    "effect-openapi-cli-generator": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bun test",
     "format": "vp fmt --check",
     "lint": "vp lint --type-aware",
     "typecheck": "tsc --noEmit",
@@ -29,6 +44,9 @@
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0"
+  },
+  "engines": {
+    "bun": ">=1.4.3"
   },
   "packageManager": "bun@1.4.3"
 }

@@ -25,7 +25,7 @@ export default defineConfig({
   },
   lint: {
     extends: [core, antiSlop],
-    ignorePatterns: ["dist/**"],
+    ignorePatterns: ["dist/**", "tests/fixtures/golden/**"],
     jsPlugins: ["./tools/lint-plugin.mjs", "@stylistic/eslint-plugin"],
     rules: {
       "@stylistic/padding-line-between-statements": [
