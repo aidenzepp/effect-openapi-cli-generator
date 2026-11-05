@@ -18,6 +18,7 @@ import { matchDisagreement, noticeFor, refusalFor, knownDisagreements } from "./
 import type { Refusal } from "./disagreements.ts";
 import { lineOf, schemaUri } from "./dispatch.ts";
 import { groupErrors } from "./locations.ts";
+import { surrogateRefusal, surrogateSites } from "./surrogates.ts";
 import type { InvalidInstanceLocation } from "./locations.ts";
 import type { Line, UnsupportedOpenApiVersion } from "./dispatch.ts";
 import type { Json } from "../model/pointer.ts";
@@ -189,6 +190,14 @@ export const diagnoseDocument = (
       Option.getOrElse(() => line),
     );
     const where = { document: uri, line, openapi };
+    const lone = surrogateSites(document);
+
+    if (lone.length > 0) {
+      const refusals = yield* Effect.all(lone.map((pointer) => surrogateRefusal(where, pointer)));
+
+      return { notices: [], refusals };
+    }
+
     const rewritten = yield* rewriteDialect(document);
     const result = yield* validateDocument(rewritten.copy);
     const groups = yield* groupErrors(result.errors);

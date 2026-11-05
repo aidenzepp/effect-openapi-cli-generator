@@ -244,3 +244,36 @@ describe("error grouping", () => {
     expect(failure._tag).toBe("InvalidInstanceLocation");
   });
 });
+
+const withKey = (key: string): Json =>
+  document("3.1.0", {
+    components: { schemas: { One: { properties: { [key]: { type: "string" } }, type: "object" } } },
+  });
+
+describe("lone surrogates in property names", () => {
+  test.each([
+    ["high", "\uD800", "\\uD800"],
+    ["low", "\uDC00", "\\uDC00"],
+    ["high before a letter", "a\uD83Dz", "a\\uD83Dz"],
+  ])("a lone %s surrogate is refused with the escaped pointer", async (_name, key, escaped) => {
+    const result = await diagnose(withKey(key));
+
+    expect(result.notices).toEqual([]);
+    expect(result.refusals).toHaveLength(1);
+
+    const found = result.refusals[0]?.diagnostic;
+
+    expect(found?.code).toBe("DOC-14/invalid-encoding");
+    expect(found?.scope).toBe("document");
+    expect(found?.severity).toBe("refusal");
+    expect<string | undefined>(found?.pointer).toBe(
+      `/components/schemas/One/properties/${escaped}`,
+    );
+    expect(found?.message).toContain(escaped);
+    expect(found?.message).not.toContain(key);
+  });
+
+  test("a valid surrogate pair is accepted", async () => {
+    expect(await diagnose(withKey("\u{1F600}"))).toEqual({ notices: [], refusals: [] });
+  });
+});
