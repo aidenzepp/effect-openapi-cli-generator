@@ -74,14 +74,16 @@ const response = (key: Schema.Json, types: readonly string[]) => ({
   rows,
 });
 
-const scheme = Schema.decodeUnknownSync(SecurityScheme)({
+const schemePlain = {
   credentialSources: ["flag", "env"],
   deprecated: false,
   kind: { scheme: "bearer", type: "http" },
   name: "bearerAuth",
   origin,
   rows,
-});
+};
+
+const scheme = Schema.decodeUnknownSync(SecurityScheme)(schemePlain);
 
 const operationPlain = {
   body: {
@@ -372,4 +374,33 @@ describe("operationHelp", () => {
 
     expect(sectionText(none, "REQUEST")).toBe("PATCH /users/{id}");
   });
+  test("renders a 50k-name alternative in linear time", () => {
+    const count = 50_000;
+    const names = Array.from({ length: count }, (_, index) => `scheme${index}`);
+    const uses = names.map((name) => ({ scheme: name, scopes: [] }));
+    const big = Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      security: { ...operationPlain.security, alternatives: [{ uses }] },
+    });
+
+    const started = performance.now();
+    const help = operationHelp({
+      ...input,
+      credentials: names.map((name) => ({
+        env: `ENV_${name}`,
+        flag: `${name}-file`,
+        scheme: name,
+      })),
+      operation: big,
+      schemes: names.map((name) =>
+        Schema.decodeUnknownSync(SecurityScheme)({ ...schemePlain, name }),
+      ),
+    });
+    const elapsed = performance.now() - started;
+
+    expect(sectionText(help, "AUTH")?.startsWith("scheme0 (http bearer): --scheme0-file")).toBe(
+      true,
+    );
+    expect(elapsed).toBeLessThan(1000);
+  }, 10_000);
 });

@@ -130,9 +130,27 @@ const kindNote = (scheme: SecurityScheme): string => {
   return kind.type === "oidcToken" ? "oidc token" : "mutualTls";
 };
 
-const useLine = (input: HelpInput, name: string): string => {
-  const scheme = input.schemes.find((candidate) => candidate.name === name);
-  const credential = input.credentials.find((candidate) => candidate.scheme === name);
+// The first entry per key, as a linear search would find it; built once per command.
+const firstByKey = <T>(items: readonly T[], keyOf: (item: T) => string): ReadonlyMap<string, T> => {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const key = keyOf(item);
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  }
+
+  return map;
+};
+
+interface UseLookup {
+  readonly credentials: ReadonlyMap<string, HelpCredential>;
+  readonly schemes: ReadonlyMap<string, SecurityScheme>;
+}
+
+const useLine = (lookup: UseLookup, name: string): string => {
+  const scheme = lookup.schemes.get(name);
+  const credential = lookup.credentials.get(name);
   const head = scheme === undefined ? line(name) : `${line(name)} (${kindNote(scheme)})`;
   if (credential === undefined) {
     return head;
@@ -147,8 +165,13 @@ const authLine = (input: HelpInput): string | undefined => {
     return undefined;
   }
 
+  const lookup: UseLookup = {
+    credentials: firstByKey(input.credentials, (credential) => credential.scheme),
+    schemes: firstByKey(input.schemes, (scheme) => scheme.name),
+  };
+
   return alternatives
-    .map((alternative) => alternative.uses.map((use) => useLine(input, use.scheme)).join(" and "))
+    .map((alternative) => alternative.uses.map((use) => useLine(lookup, use.scheme)).join(" and "))
     .join(" or ");
 };
 
