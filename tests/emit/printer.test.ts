@@ -1366,6 +1366,106 @@ describe("entry-module constructs", () => {
 
 const reason = (value: Expr) => failureOf({ imports: [], statements: [constant("x", value)] });
 
+// The printer output must be what `vp fmt` makes of a deliberately unformatted spelling of the
+// same module: the two agree even where the line stays past column 100.
+const expectVpFmt = (printed: string, unformatted: string) => {
+  const formatted = format(unformatted, "ts");
+  expect(formatted.exitCode).toBe(0);
+  expect(printed).toBe(formatted.stdout);
+};
+
+const constWith = (name: string, annotation: TypeExpr, value: Expr): Module => ({
+  imports: [],
+  statements: [{ ...constant(name, value), type: annotation }],
+});
+
+const aliasOf = (name: string, aliased: TypeExpr): Module => ({
+  imports: [],
+  statements: [{ _tag: "TypeAlias", name: I(name), type: aliased }],
+});
+
+// A long identifier is a single token that cannot break. For each form that once failed with
+// `unbreakable-line`, the printer must print what `vp fmt` prints for the same fixture. Capture:
+// printf '%s\n' "$FIXTURE" | node_modules/.bin/vp fmt --stdin-filepath=tests/emit/printed.ts
+describe("over-width identifiers", () => {
+  const wide = "a".repeat(95);
+  const wideType = "B".repeat(95);
+  test("a typed const whose head is past column 100 moves its value to the next line", () => {
+    const cases: readonly (readonly [Expr, string])[] = [
+      [obj([["a", num(1)]]), "{a:1}"],
+      [obj([]), "{}"],
+      [fn("Foo.make", obj([["a", num(1)]])), "Foo.make({a:1})"],
+      [str("s"), '"s"'],
+      [path("Foo.bar"), "Foo.bar"],
+      [arr([num(1), num(2)]), "[1,2]"],
+      [num(-1), "-1"],
+      [num(1), "1"],
+      [bool(true), "true"],
+      [conditional(path("a"), num(1), num(2)), "a?1:2"],
+    ];
+    for (const [value, source] of cases) {
+      expectVpFmt(
+        print(constWith(wide, ref("Reader"), value)),
+        `export const ${wide}: Reader = ${source};\n`,
+      );
+    }
+  }, 60_000);
+
+  test("a typed const keeps a long type name on the head line", () => {
+    expectVpFmt(
+      print(constWith("x", ref("Reader", [ref(wideType)]), obj([["a", num(1)]]))),
+      `export const x: Reader<${wideType}> = {a:1};\n`,
+    );
+  }, 30_000);
+
+  test("an interface keeps a long key or type name on its line", () => {
+    const printed = print({
+      imports: [],
+      statements: [
+        {
+          _tag: "Interface",
+          fields: [
+            { key: wide, optional: false, type: typeKeyword("string") },
+            { key: "named", optional: false, type: ref(wideType) },
+            { key: "wrapped", optional: true, type: ref("Foo", [ref(wideType)]) },
+          ],
+          name: I("Wide"),
+        },
+      ],
+    });
+    expectVpFmt(
+      printed,
+      `export interface Wide {\n  readonly ${wide}: string;\n  readonly named: ${wideType};\n  readonly wrapped?: Foo<${wideType}>;\n}\n`,
+    );
+  }, 30_000);
+
+  test("a type alias moves a type that fits no line to its own line", () => {
+    expectVpFmt(
+      print(aliasOf(wide, ref("Foo", [typeKeyword("string")]))),
+      `export type ${wide} = Foo<string>;\n`,
+    );
+    expectVpFmt(
+      print(aliasOf("A", typeReadonlyArray(ref(wideType)))),
+      `export type A = readonly ${wideType}[];\n`,
+    );
+    expectVpFmt(print(aliasOf(wide, typeLiteral("lit"))), `export type ${wide} = "lit";\n`);
+  }, 30_000);
+
+  test("a type vp fmt breaks across lines is still refused", () => {
+    const failure = failureOf({
+      imports: [],
+      statements: [
+        {
+          _tag: "TypeAlias",
+          name: I("A"),
+          type: typeUnion([ref(wideType), typeKeyword("string")]),
+        },
+      ],
+    });
+    expect(failure).toMatchObject({ _tag: "PrinterError", reason: "unbreakable-line" });
+  });
+});
+
 describe("unsupported constructs", () => {
   test("fail with a typed reason", () => {
     expect(
