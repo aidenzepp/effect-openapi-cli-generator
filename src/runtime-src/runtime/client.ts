@@ -244,6 +244,16 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
   }
 }
 
+const assertMethod = (
+  allowed: ReadonlySet<string>,
+  request: HttpClientRequest.HttpClientRequest,
+) =>
+  allowed.has(request.method)
+    ? Effect.void
+    : Effect.die(
+        new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
+      );
+
 /**
  * The runtime-owned redirect loop (design 6.5 Redirect loop; settled: spike S2), an
  * `HttpClient.transform` over the provided client. Each hop runs the attach step, then is sent
@@ -254,9 +264,15 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
  * scope closes, whichever comes first. The send and the decision are one uninterruptible step
  * around the interruptible attach and send, so a discarded 3xx cannot escape its scope. Native
  * `followRedirects` is used nowhere.
+ *
+ * `allowed` is the method allowlist `bin.ts` provides with the client layer (design 6.7), required
+ * like `direct`. It is asserted on every attached hop before it is sent, including one a redirect
+ * turned into `GET`: a miss is a defect (exit 70) and nothing is sent, because Bun's `fetch` sends
+ * any token outside its own table as `GET`. The token is compared as given, with no case folding,
+ * and the defect carries only the JSON-quoted token, never the URL.
  */
 export const redirectLoop =
-  (attach: Attach, direct: DirectRoute) =>
+  (attach: Attach, direct: DirectRoute, allowed: ReadonlySet<string>) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
   ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R | Scope.Scope> => {
@@ -265,6 +281,8 @@ export const redirectLoop =
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* sendHop() {
           const attached = yield* restore(attach(request));
+          yield* assertMethod(allowed, attached);
+
           const scope = yield* Scope.fork(yield* Scope.Scope);
           const response = yield* restore(
             routeHop(attached, direct, scoped.postprocess(Effect.succeed(attached))),
@@ -298,24 +316,6 @@ export const redirectLoop =
 
     return HttpClient.transform(client, (_unsent, request) => loop(request, 0));
   };
-
-/**
- * Asserts the request method against the allowlist `bin.ts` provides with the client layer
- * (design 6.7). Bun's `fetch` sends any token outside its own table as `GET`, so the generator
- * never emits one and a miss is a defect (exit 70): the request is never sent. The token is
- * compared as given, with no case folding. Apply it inside `redirectLoop`, so it sees every hop,
- * including one a redirect turned into `GET`.
- */
-export const assertMethod =
-  (allowed: ReadonlySet<string>) =>
-  <E, R>(client: HttpClient.HttpClient.With<E, R>): HttpClient.HttpClient.With<E, R> =>
-    HttpClient.transform(client, (send, request) =>
-      allowed.has(request.method)
-        ? send
-        : Effect.die(
-            new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
-          ),
-    );
 
 /**
  * Sets `User-Agent: <binName>/<version>` (design 6.2) in place of Bun's implicit `Bun/<v>`. It
