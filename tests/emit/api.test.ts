@@ -307,16 +307,16 @@ const arrayParameters = withPaths({
 });
 
 describe("emitApi: array parameters", () => {
-  test("an array of scalar items is a ReadonlyArray<string> input, required or optional", async () => {
+  test("an array of scalar items is a readonly string[] input, required or optional", async () => {
     const users = contentOf(await emit(arrayParameters))("src/api/users.ts") ?? "";
 
     expect(users).toContain(
       [
         "export interface MetricsInput {",
-        "  readonly ids: ReadonlyArray<string>;",
-        "  readonly metrics?: ReadonlyArray<string> | undefined;",
-        "  readonly tag: ReadonlyArray<string>;",
-        "  readonly xTrace?: ReadonlyArray<string> | undefined;",
+        "  readonly ids: readonly string[];",
+        "  readonly metrics?: readonly string[] | undefined;",
+        "  readonly tag: readonly string[];",
+        "  readonly xTrace?: readonly string[] | undefined;",
         "}",
       ].join("\n"),
     );
