@@ -11,3 +11,4 @@ docs/goals/
 docs/campaigns/
 docs/research/
 .claude/worktrees/
+src/emit/runtime-files.generated.ts
