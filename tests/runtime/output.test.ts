@@ -39,11 +39,11 @@ import {
   readExcerpt,
   renderError,
   sanitize,
-  scrub,
   valueFreeFormatter,
   writeBody,
 } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
+import { scrub } from "../../src/runtime-src/runtime/redact.ts";
 
 type Env =
   | FileSystem.FileSystem
