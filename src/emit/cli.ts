@@ -10,7 +10,8 @@ import type {
   PlannedPositional,
 } from "../names/index.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { inputKeys, isScalarArraySchema } from "./api.ts";
+import { formParts, inputKeys, isScalarArraySchema } from "./api.ts";
+import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
@@ -42,9 +43,10 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text, form and
- * multipart request bodies are `unsupported-body` until their merge exists (follow-up em4c); an XML
- * body is opaque `--body-file` bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
+ * The plan, model or author config holds something the `cli/` layer cannot express. Text and form
+ * request bodies are `unsupported-body` until their merge exists, and so is a multipart body the
+ * runtime writer cannot send exactly (`formParts` names why); an XML body is opaque `--body-file`
+ * bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
  * with no call-expression form today: an integer field whose width the walk cannot settle, and a
  * required boolean parameter (absent would send `false`). `unsupported-parameter` is a boolean path
  * parameter, or a path array before another positional (a repeated argument would take the later
@@ -422,7 +424,10 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): E
     return fn("Input.int64Flag", str(flag.name));
   }
 
-  return kind === "string" ? fn("Flag.String", str(flag.name)) : flagConstructor(flag, kind);
+  // A multipart `file` part flag carries a path, or `-` for stdin.
+  return kind === "string" || kind === "file"
+    ? fn("Flag.String", str(flag.name))
+    : flagConstructor(flag, kind);
 };
 
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
@@ -555,6 +560,60 @@ const alternativeBody = (
     };
   });
 
+// A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
+// file part opens each path, or stdin for `-` under the invocation's one stdin claim.
+const partValues = (part: FormPart) =>
+  Effect.gen(function* values() {
+    const { flag } = part;
+    const repeated = flag.source._tag === "Body" && flag.source.repeated;
+    const value = yield* flagValue(flag.identifier);
+    const list = repeated ? value : fn("Option.toArray", value);
+    if (flag.source._tag !== "Body" || flag.source.kind !== "file") {
+      return fn("Effect.succeed", list);
+    }
+
+    const source = ident(I("source"));
+    const file = obj([
+      ["filename", fn("Multipart.partFilename", source, str(part.name))],
+      ["stream", ident(I("bytes"))],
+    ]);
+
+    return fn(
+      "Effect.forEach",
+      list,
+      arrow(
+        [{ name: I("source") }],
+        fn(
+          "Effect.map",
+          fn("Multipart.fileBody", str(flag.name), source),
+          arrow([{ name: I("bytes") }], file),
+        ),
+      ),
+    );
+  });
+
+// A `multipart/form-data` body: the part values, which the `api/` builder streams through the
+// runtime writer (design 6.3). There is no whole-body flag (D-ENC1 a).
+const formBody = (command: PlannedCommand, context: CommandContext) =>
+  Effect.gen(function* form() {
+    const parts = formParts(command, context.defs);
+    if (Result.isFailure(parts)) {
+      return yield* refuse("unsupported-body", parts.failure);
+    }
+
+    const entries: Entry[] = [];
+    for (const part of parts.success) {
+      entries.push([part.name, yield* partValues(part)]);
+    }
+
+    return {
+      args: [["body", ident(I("parts"))]],
+      domain: [],
+      head: fn("Effect.all", obj(entries)),
+      parameter: "parts",
+    } satisfies BodyPlan;
+  });
+
 const bodyPlan = (
   command: PlannedCommand,
   meta: Expr,
@@ -566,6 +625,10 @@ const bodyPlan = (
     const [first] = body?.alternatives ?? [];
     if (body === undefined || first === undefined) {
       return Option.none();
+    }
+
+    if (body.alternatives.some((alternative) => alternative.codec === "multipart")) {
+      return Option.some(yield* formBody(command, context));
     }
 
     if (!choosesType) {
@@ -896,6 +959,7 @@ const runtimeNamespaces: readonly (readonly [string, string])[] = [
   ["BaseUrl", "../runtime/base-url.ts"],
   ["Describe", "../runtime/describe.ts"],
   ["Input", "../runtime/input.ts"],
+  ["Multipart", "../runtime/multipart.ts"],
   ["Negotiate", "../runtime/negotiate.ts"],
   ["Output", "../runtime/output.ts"],
 ];

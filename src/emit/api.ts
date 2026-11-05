@@ -8,8 +8,9 @@ import type {
   SecurityScheme,
   Server,
 } from "../model/entities.ts";
+import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
-import type { NamePlan, PlannedCommand, PlannedGroup } from "../names/index.ts";
+import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
 import { JsDocText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
@@ -109,6 +110,8 @@ const own = (record: JsonNode, key: string): Schema.Json | undefined =>
 const isNode = (json: Schema.Json | undefined): json is JsonNode =>
   Predicate.isObject(json) && !Array.isArray(json);
 
+const unescape = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
+
 // The node a schema reaches after its `$ref` chain through the store, or the key that does not
 // resolve. A chain stops at 64 hops, as `isBooleanSchema` does (design 3.3).
 const settle = (
@@ -132,7 +135,7 @@ const settle = (
       return Result.fail(key);
     }
 
-    key = ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~");
+    key = unescape(ref.slice(refPrefix.length));
     current = own(defs, key);
   }
 
@@ -333,6 +336,208 @@ const parameterParts = (
     return yield* refuse("unsupported-parameter", subject);
   });
 
+/**
+ * One `multipart/form-data` part a command sends: its part flag, its part name and its Encoding
+ * `contentType`.
+ */
+export interface FormPart {
+  readonly contentType: string;
+  readonly flag: PlannedFlag;
+  readonly name: string;
+}
+
+interface PartSchemas {
+  readonly properties: ReadonlyMap<string, Schema.Json>;
+  readonly required: ReadonlySet<string>;
+}
+
+const maxPartNodes = 1024;
+
+// The properties and `required` names of a multipart root: its own, and those of its `allOf`
+// members, each node read once.
+const partSchemas = (defs: Defs, key: string): PartSchemas => {
+  const properties = new Map<string, Schema.Json>();
+  const required = new Set<string>();
+  const seen = new Set<JsonNode>();
+  const pending: (Schema.Json | undefined)[] = [own(defs, key)];
+  while (pending.length > 0 && seen.size < maxPartNodes) {
+    const node = settle(defs, pending.pop(), key);
+    if (Result.isFailure(node) || seen.has(node.success)) {
+      continue;
+    }
+
+    seen.add(node.success);
+
+    const declared = own(node.success, "properties");
+    for (const [name, schema] of isNode(declared) ? Object.entries(declared) : []) {
+      if (!properties.has(name)) {
+        properties.set(name, schema);
+      }
+    }
+
+    const names = own(node.success, "required");
+    for (const name of Array.isArray(names) ? names.filter(Predicate.isString) : []) {
+      required.add(name);
+    }
+
+    const members: Schema.Json | undefined = own(node.success, "allOf");
+    if (Array.isArray(members)) {
+      pending.push(...members.filter(isNode));
+    }
+  }
+
+  return { properties, required };
+};
+
+// Whether a part's schema, or its array's `items`, declares `contentEncoding`.
+const isEncoded = (defs: Defs, schema: Schema.Json | undefined, key: string): boolean => {
+  const node = settle(defs, schema, key);
+  if (Result.isFailure(node)) {
+    return false;
+  }
+
+  const items = own(node.success, "items");
+  const item = items === undefined ? undefined : settle(defs, items, key);
+
+  return (
+    own(node.success, "contentEncoding") !== undefined ||
+    (item !== undefined &&
+      Result.isSuccess(item) &&
+      own(item.success, "contentEncoding") !== undefined)
+  );
+};
+
+const isPartFlag = (flag: PlannedFlag, mediaType: string): boolean =>
+  flag.source._tag === "Body" &&
+  flag.source.kind !== "body" &&
+  flag.source.kind !== "body-file" &&
+  flag.source.media.includes(mediaType);
+
+interface OrderedPart extends FormPart {
+  readonly order: number;
+}
+
+interface PartContext {
+  readonly alternative: MediaAlternative;
+  readonly defs: Defs;
+  readonly key: string;
+  readonly schemas: PartSchemas;
+}
+
+// The reason a body's multipart alternative is not one the writer sends, or `undefined`.
+const alternativeProblem = (
+  alternatives: readonly MediaAlternative[],
+  alternative: MediaAlternative,
+): string | undefined => {
+  const { mediaType } = alternative;
+  if (alternatives.length > 1) {
+    return `${mediaType} beside other request media`;
+  }
+
+  if (isRange(mediaType) || essence(mediaType) !== "multipart/form-data") {
+    return `a ${mediaType} request body`;
+  }
+
+  const positional =
+    alternative.itemSchema !== undefined ||
+    alternative.itemEncoding !== undefined ||
+    alternative.prefixEncoding.length > 0 ||
+    alternative.encoding.some((rule) => rule.target.kind === "position");
+
+  return positional ? `positional parts of ${mediaType}` : undefined;
+};
+
+// One part flag's part, with the index of its Encoding rule, or the reason it is refused.
+const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedPart, string> => {
+  const { alternative } = context;
+  const pointer = flag.source.wireName;
+  const [name, ...rest] = pointer.split("/").slice(1).map(unescape);
+  if (name === undefined || rest.length > 0) {
+    return Result.fail(`the nested multipart part ${pointer}`);
+  }
+
+  const order = alternative.encoding.findIndex(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === name,
+  );
+  const rule = alternative.encoding[order];
+  if (rule === undefined) {
+    return Result.fail(`an encoding for multipart part ${pointer}`);
+  }
+
+  if (rule.nested !== undefined) {
+    return Result.fail(`nested parts in multipart part ${pointer}`);
+  }
+
+  if (rule.headers.length > 0) {
+    return Result.fail(`part headers for multipart part ${pointer}`);
+  }
+
+  if (rule.serialization !== undefined) {
+    return Result.fail(`a style for multipart part ${pointer}`);
+  }
+
+  const [contentType] = rule.contentType;
+  if (contentType === undefined || rule.contentType.length > 1 || contentType.includes("*")) {
+    return Result.fail(`one content type for multipart part ${pointer}`);
+  }
+
+  if (isEncoded(context.defs, context.schemas.properties.get(name), context.key)) {
+    return Result.fail(`the contentEncoding of multipart part ${pointer}`);
+  }
+
+  return Result.succeed({ contentType, flag, name, order });
+};
+
+const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
+
+/**
+ * The parts a `multipart/form-data` command sends, in Encoding order, or the reason the runtime
+ * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). Refused, not guessed: a
+ * multipart alternative beside other request media or under a range key, another multipart
+ * subtype, 3.2 positional parts, a nested part, part headers, a part style, a part whose
+ * `contentType` is not one concrete media type, a `contentEncoding` part, and a required part the
+ * names plan gave no flag.
+ */
+export const formParts = (
+  command: PlannedCommand,
+  defs: Defs,
+): Result.Result<readonly FormPart[], string> => {
+  const alternatives = command.operation.body?.alternatives ?? [];
+  const alternative = alternatives.find((candidate) => candidate.codec === "multipart");
+  if (alternative === undefined) {
+    return Result.fail("a multipart request body");
+  }
+
+  const problem = alternativeProblem(alternatives, alternative);
+  if (problem !== undefined) {
+    return Result.fail(problem);
+  }
+
+  const key = alternative.schema?.key ?? "";
+  const context: PartContext = { alternative, defs, key, schemas: partSchemas(defs, key) };
+  const parts: OrderedPart[] = [];
+  for (const flag of command.flags) {
+    if (isPartFlag(flag, alternative.mediaType)) {
+      const part = partOf(flag, context);
+      if (Result.isFailure(part)) {
+        return Result.fail(part.failure);
+      }
+
+      parts.push(part.success);
+    }
+  }
+
+  const sent = new Set(parts.map((part) => part.name));
+  const missing = [...context.schemas.required].find((name) => !sent.has(name));
+  if (missing !== undefined) {
+    return Result.fail(`a flag for multipart part ${formatPointer([missing])}`);
+  }
+
+  return Result.succeed(
+    Arr.sort(parts, byOrder).map(({ contentType, flag, name }) => ({ contentType, flag, name })),
+  );
+};
+
 interface BodyParts {
   readonly entry?: readonly [string, Expr];
   readonly fields: readonly Field[];
@@ -341,7 +546,9 @@ interface BodyParts {
 // The body is always present in `Input` when the operation declares one: an optional body with
 // no input is `HttpBody.empty`, which `Serialize.request` sends without `Content-Type`. The
 // content type is an input when the operator chooses it: several alternatives, or a range key.
-const bodyParts = (operation: Operation): BodyParts => {
+// A multipart body the writer can send is its part values, streamed by `Serialize.formData`.
+const bodyParts = (command: PlannedCommand, defs: Defs): BodyParts => {
+  const { operation } = command;
   const alternatives = operation.body?.alternatives ?? [];
   const [first] = alternatives;
   if (first === undefined) {
@@ -350,6 +557,19 @@ const bodyParts = (operation: Operation): BodyParts => {
 
   const input = ident(I("input"));
   const value = member(input, M("body"));
+  const form = first.codec === "multipart" ? formParts(command, defs) : undefined;
+  if (form !== undefined && Result.isSuccess(form)) {
+    const options = obj([
+      ["parts", arr(form.success.map((part) => arr([str(part.name), str(part.contentType)])))],
+      ["required", bool(operation.body?.required ?? false)],
+    ]);
+
+    return {
+      entry: ["body", fn("formData", [value, options])],
+      fields: [{ key: "body", optional: false, type: typeRef(I("Serialize"), [M("FormFields")]) }],
+    };
+  }
+
   const body: Field = { key: "body", optional: false, type: typeRef(I("Serialize"), [M("Body")]) };
   const types = mediaTypes(alternatives);
   if (alternatives.length === 1 && !isRange(first.mediaType)) {
@@ -442,7 +662,7 @@ const commandStatements = (
     const parameters = yield* Effect.forEach(inputKeys(operation), (entry) =>
       parameterParts(entry, context.defs, context.memo),
     );
-    const body = bodyParts(operation);
+    const body = bodyParts(command, context.defs);
     const parts: (readonly [string, Expr])[] = [
       [
         "headers",

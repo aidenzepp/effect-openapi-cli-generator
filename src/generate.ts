@@ -127,7 +127,8 @@ const reportPath = "generation-report.json";
 const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
 const emitHints: Readonly<Record<CliRefusal["reason"], string | undefined>> = {
-  "unsupported-body": "Text, XML, form and multipart request bodies are not emitted yet.",
+  "unsupported-body":
+    "Text and form request bodies, and multipart bodies the runtime writer cannot send exactly, are not emitted yet.",
   "unsupported-flag": undefined,
   "unsupported-parameter": undefined,
 };

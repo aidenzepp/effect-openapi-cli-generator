@@ -694,3 +694,145 @@ describe("emitCli: array parameters", () => {
     ]);
   });
 });
+
+const importSchema = {
+  properties: {
+    count: { format: "int64", type: "integer" },
+    file: { description: "The CSV.", format: "binary", type: "string" },
+    tags: { items: { type: "string" }, type: "array" },
+    title: { type: "string" },
+  },
+  required: ["file"],
+  type: "object",
+};
+
+const importsOperation = (content: Readonly<Record<string, Schema.Json>>): Schema.Json => ({
+  post: {
+    operationId: "imports-create",
+    requestBody: { content, required: true },
+    responses: ok,
+    tags: ["imports"],
+  },
+});
+
+const multipart = (schema: Schema.Json, encoding?: Schema.Json) => ({
+  "multipart/form-data": encoding === undefined ? { schema } : { encoding, schema },
+});
+
+const multipartRefusals = async (content: Readonly<Record<string, Schema.Json>>) => {
+  const output = await emit(withPaths({ ...paths, "/imports": importsOperation(content) }));
+
+  expect(contentOf(output, "src/cli/imports.ts")).toBeUndefined();
+  expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
+
+  return output.refusals.map((refusal) => ({ reason: refusal.reason, subject: refusal.subject }));
+};
+
+describe("emitCli: multipart request bodies", () => {
+  test("part flags feed the builder: scalars as lists, file parts opened from a path or -", async () => {
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(importSchema)) }),
+    );
+    expect(output.refusals).toEqual([]);
+
+    const text = contentOf(output, "src/cli/imports.ts") ?? "";
+    expect(format(text)).toEqual({ exitCode: 0, stdout: text });
+    expect(text).toContain('import * as Multipart from "../runtime/multipart.ts";');
+    expect(text).toContain('count: Input.int64Flag("count").pipe(Flag.optional),');
+    expect(text).toContain(
+      'file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("The CSV.")),',
+    );
+    expect(text).toContain('tags: Flag.String("tags").pipe(Flag.atLeast(0)),');
+    expect(text).toContain('title: Flag.String("title").pipe(Flag.optional),');
+    expect(text).toContain(
+      [
+        "    Effect.all({",
+        "      count: Effect.succeed(Option.toArray(flags.count)),",
+        "      file: Effect.forEach(Option.toArray(flags.file), (source) =>",
+        '        Effect.map(Multipart.fileBody("file", source), (bytes) => ({',
+        '          filename: Multipart.partFilename(source, "file"),',
+        "          stream: bytes,",
+        "        })),",
+        "      ),",
+        "      tags: Effect.succeed(flags.tags),",
+        "      title: Effect.succeed(Option.toArray(flags.title)),",
+        "    }).pipe(",
+        "      Effect.flatMap((parts) => Imports.create({ body: parts })),",
+        "      Effect.flatMap(Output.send(Imports.createMeta)),",
+        "    ),",
+      ].join("\n"),
+    );
+    expect(text).not.toContain("bodyFile");
+    expect(text).not.toContain("Input.mergeBody(");
+    expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
+  });
+
+  test("a multipart alternative beside other request media refuses its operation", async () => {
+    expect(
+      await multipartRefusals({
+        "application/json": { schema: { properties: { url: { type: "string" } }, type: "object" } },
+        ...multipart(importSchema),
+      }),
+    ).toEqual([
+      { reason: "unsupported-body", subject: "multipart/form-data beside other request media" },
+    ]);
+  });
+
+  test("a required part the names plan skipped refuses its operation", async () => {
+    const schema = {
+      properties: { meta: { properties: { a: { type: "string" } }, type: "object" } },
+      required: ["meta"],
+      type: "object",
+    };
+
+    expect(await multipartRefusals(multipart(schema))).toEqual([
+      { reason: "unsupported-body", subject: "a flag for multipart part /meta" },
+    ]);
+  });
+
+  test("an optional skipped part leaves the other parts emitted", async () => {
+    const schema = {
+      ...importSchema,
+      properties: {
+        ...importSchema.properties,
+        meta: { properties: { a: { type: "string" } }, type: "object" },
+      },
+    };
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(schema)) }),
+    );
+
+    expect(output.refusals).toEqual([]);
+    expect(contentOf(output, "src/cli/imports.ts")).not.toContain("meta");
+  });
+
+  test("part headers, contentEncoding and several part content types are refused, not guessed", async () => {
+    const headers = {
+      file: { headers: { "X-Rate": { schema: { type: "integer" } } } },
+    };
+    const encoded = {
+      ...importSchema,
+      properties: {
+        ...importSchema.properties,
+        title: { contentEncoding: "base64", type: "string" },
+      },
+    };
+    const types = { file: { contentType: "text/csv, application/json" } };
+
+    expect(await multipartRefusals(multipart(importSchema, headers))).toEqual([
+      { reason: "unsupported-body", subject: "part headers for multipart part /file" },
+    ]);
+    expect(await multipartRefusals(multipart(encoded))).toEqual([
+      { reason: "unsupported-body", subject: "the contentEncoding of multipart part /title" },
+    ]);
+    expect(await multipartRefusals(multipart(importSchema, types))).toEqual([
+      { reason: "unsupported-body", subject: "one content type for multipart part /file" },
+    ]);
+  });
+
+  test("a multipart/mixed body is refused", async () => {
+    expect(await multipartRefusals({ "multipart/mixed": { schema: importSchema } })).toEqual([
+      { reason: "unsupported-body", subject: "a multipart/mixed request body" },
+    ]);
+  });
+});

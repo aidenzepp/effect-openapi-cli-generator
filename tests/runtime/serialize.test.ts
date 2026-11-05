@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Runtime, Stream } from "effect";
+import { Effect, FileSystem, Layer, Runtime, Stdio, Stream } from "effect";
 import { HttpBody, UrlParams } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
+import { stdinClaimLayer } from "../../src/runtime-src/runtime/input.ts";
+import { fileBody, partFilename } from "../../src/runtime-src/runtime/multipart.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 import type { Value } from "../../src/runtime-src/runtime/serialize.ts";
 
@@ -1055,5 +1057,132 @@ describe("request repairs", () => {
         ],
       }),
     );
+  });
+});
+
+const utf8 = new TextEncoder();
+
+const latin1 = (chunks: readonly Uint8Array[]): string =>
+  Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("latin1");
+
+// The bytes a streamed body puts on the wire.
+const streamed = async (built: HttpClientRequest.HttpClientRequest): Promise<string> => {
+  if (built.body._tag !== "Stream") {
+    throw new Error(`expected a stream body, got ${built.body._tag}`);
+  }
+
+  return latin1(await Effect.runPromise(Stream.runCollect(built.body.stream)));
+};
+
+const boundaryOf = (built: HttpClientRequest.HttpClientRequest): string => {
+  const match = /^multipart\/form-data; boundary=(?<boundary>.+)$/u.exec(
+    built.headers["content-type"] ?? "",
+  );
+
+  return match?.groups?.boundary ?? "";
+};
+
+const formRequest = (
+  fields: Serialize.FormFields,
+  parts: readonly (readonly [string, string])[],
+  required = true,
+) =>
+  Serialize.request("POST", {
+    body: Serialize.formData(fields, { parts, required }),
+    headers: [],
+    path: Serialize.path("/imports", []),
+    query: [],
+  });
+
+// Multipart.fileBody as the emitted handler calls it: a path through the file system, `-` through
+// stdin under the invocation's one stdin claim.
+const files = Layer.mergeAll(
+  stdinClaimLayer,
+  FileSystem.layerNoop({ stream: () => Stream.make(utf8.encode("a,b\r\n1,2\r\n")) }),
+  Stdio.layerTest({ stdin: Stream.make(utf8.encode("from stdin")) }),
+);
+
+const fileOf = (flag: string, path: string, part: string) =>
+  Effect.map(fileBody(flag, path), (stream) => ({
+    filename: partFilename(path, part),
+    stream,
+  })).pipe(Effect.provide(files));
+
+describe("formData", () => {
+  test("scalar, repeated scalar and file parts stream under the writer's boundary", async () => {
+    const fromPath = await Effect.runPromise(fileOf("file", "/data/in/contacts.csv", "file"));
+    const fromStdin = await Effect.runPromise(fileOf("note", "-", "note"));
+    const built = await run(
+      formRequest(
+        {
+          count: [{ text: "9007199254740993" }],
+          file: [fromPath],
+          flag: [false],
+          note: [fromStdin],
+          ratio: [1.5],
+          segment: ["a", "b"],
+          title: ["Café"],
+        },
+        [
+          ["file", "application/octet-stream"],
+          ["title", "text/plain"],
+          ["segment", "text/plain"],
+          ["count", "text/plain"],
+          ["ratio", "text/plain"],
+          ["flag", "text/plain"],
+          ["note", "text/csv"],
+        ],
+      ),
+    );
+    const boundary = boundaryOf(built);
+    const part = (head: string, body: string) => `--${boundary}\r\n${head}\r\n\r\n${body}\r\n`;
+    const textPart = (name: string, body: string) =>
+      part(`Content-Disposition: form-data; name="${name}"\r\nContent-Type: text/plain`, body);
+
+    expect(boundary).toMatch(/^----EffectFormBoundary[0-9a-f]{32}$/u);
+    expect(await streamed(built)).toBe(
+      [
+        part(
+          'Content-Disposition: form-data; name="file"; filename="contacts.csv"\r\nContent-Type: application/octet-stream',
+          "a,b\r\n1,2\r\n",
+        ),
+        textPart("title", "Caf\u00C3\u00A9"),
+        textPart("segment", "a"),
+        textPart("segment", "b"),
+        textPart("count", "9007199254740993"),
+        textPart("ratio", "1.5"),
+        textPart("flag", "false"),
+        part(
+          'Content-Disposition: form-data; name="note"; filename="note"\r\nContent-Type: text/csv',
+          "from stdin",
+        ),
+        `--${boundary}--\r\n`,
+      ].join(""),
+    );
+  });
+
+  test("a required body with no parts is the close delimiter alone", async () => {
+    const built = await run(formRequest({ title: [] }, [["title", "text/plain"]]));
+    const boundary = boundaryOf(built);
+
+    expect(boundary).not.toBe("");
+    expect(await streamed(built)).toBe(`--${boundary}--\r\n`);
+  });
+
+  test("an optional body with no parts sends no body and no Content-Type", async () => {
+    const built = await run(formRequest({ title: [] }, [["title", "text/plain"]], false));
+
+    expect(built.body._tag).toBe("Empty");
+    expect(built.headers["content-type"]).toBeUndefined();
+  });
+
+  test("a second stdin part is refused before any read", async () => {
+    await expectUsage(
+      Effect.all([fileBody("file", "-"), fileBody("note", "-")]).pipe(Effect.provide(files)),
+    );
+  });
+
+  test("a lone surrogate in a text part is refused", async () => {
+    await expectUsage(formRequest({ title: ["\uD800"] }, [["title", "text/plain"]]));
   });
 });

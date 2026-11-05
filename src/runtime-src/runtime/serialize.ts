@@ -1,6 +1,8 @@
 import { Effect, Option, Predicate } from "effect";
+import type { Stream } from "effect";
 import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
+import * as Multipart from "./multipart.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -679,11 +681,13 @@ export type Body = Json | HttpBody.HttpBody;
 
 /**
  * A request body and its media type: plain data plus its evaluation, which fails with `UsageError`
- * instead of throwing.
+ * instead of throwing. `ownsContentType` marks a body whose own `Content-Type` is sent instead of
+ * `mediaType`: a multipart body's carries the boundary its writer chose.
  */
 export interface RequestBody {
   readonly expand: Effect.Effect<HttpBody.HttpBody, UsageError>;
   readonly mediaType: string;
+  readonly ownsContentType?: true;
 }
 
 const isJsonMedia = (mediaType: string) => {
@@ -747,6 +751,101 @@ export const body = (mediaType: string, value: Body): RequestBody => ({
 });
 
 /**
+ * A file part's bytes and the filename its `Content-Disposition` carries.
+ */
+export interface FormFile {
+  readonly filename: string;
+  readonly stream: Stream.Stream<Uint8Array, unknown>;
+}
+
+/**
+ * One `multipart/form-data` part value: a scalar sent as its text (an `int64` field as its digit
+ * text), or a file.
+ */
+export type FormValue = string | number | boolean | { readonly text: string } | FormFile;
+
+/**
+ * The part values of a `multipart/form-data` body by part name, each name sent once per value.
+ */
+export type FormFields = Readonly<Record<string, readonly FormValue[]>>;
+
+/**
+ * The declared parts in wire order: the part name and its Encoding `contentType`.
+ */
+export interface FormDataOptions {
+  readonly parts: readonly (readonly [name: string, contentType: string])[];
+  readonly required: boolean;
+}
+
+const isFormFile = (value: FormValue): value is FormFile =>
+  Predicate.isObject(value) && "stream" in value;
+
+const formText = (value: Exclude<FormValue, FormFile>) => {
+  if (Predicate.isObject(value)) {
+    return Effect.succeed(value.text);
+  }
+
+  if (Predicate.isNumber(value) && !Number.isFinite(value)) {
+    return refuse("a multipart part holds a number with no text form");
+  }
+
+  if (Predicate.isString(value) && unpairedSurrogate.test(value)) {
+    return refuse("a multipart part holds an unpaired surrogate, which has no UTF-8 form");
+  }
+
+  return Effect.succeed(String(value));
+};
+
+const utf8 = new TextEncoder();
+
+const formPart = (name: string, contentType: string, value: FormValue) =>
+  isFormFile(value)
+    ? Effect.succeed<Multipart.LeafPart>({
+        body: value.stream,
+        contentType,
+        filename: value.filename,
+        name,
+      })
+    : Effect.map(formText(value), (text): Multipart.LeafPart => ({
+        body: utf8.encode(text),
+        contentType,
+        name,
+      }));
+
+const formDataOf = (fields: FormFields, options: FormDataOptions) =>
+  Effect.gen(function* formDataEvaluation() {
+    const declared = new Set(options.parts.map(([name]) => name));
+    if (Object.keys(fields).some((name) => !declared.has(name))) {
+      return yield* Effect.die(new Error("formData: a field has no declared part"));
+    }
+
+    const leaves: Multipart.LeafPart[] = [];
+    for (const [name, contentType] of options.parts) {
+      for (const value of Object.hasOwn(fields, name) ? (fields[name] ?? []) : []) {
+        leaves.push(yield* formPart(name, contentType, value));
+      }
+    }
+
+    if (leaves.length === 0 && !options.required) {
+      return HttpBody.empty;
+    }
+
+    return yield* Multipart.formData(leaves);
+  });
+
+/**
+ * A `multipart/form-data` body streamed through the multipart writer (design 6.3): one part per
+ * value, in the declared part order, each with its declared `Content-Type`. With no value a
+ * required body is the close delimiter alone and an optional one is empty. `request` sends the
+ * writer's `Content-Type`, which carries its boundary.
+ */
+export const formData = (fields: FormFields, options: FormDataOptions): RequestBody => ({
+  expand: formDataOf(fields, options),
+  mediaType: "multipart/form-data",
+  ownsContentType: true,
+});
+
+/**
  * A request built from descriptors: it fails with `UsageError` on any refusal, before a connection.
  */
 export type Request = Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError>;
@@ -805,7 +904,14 @@ export const request = (method: string, descriptors: RequestParts): Request =>
 
     const withBody = HttpClientRequest.setBody(built, requestBody);
 
-    return requestBody._tag === "Empty"
-      ? withBody
-      : HttpClientRequest.setHeader(withBody, "Content-Type", descriptors.body.mediaType);
+    if (requestBody._tag === "Empty") {
+      return withBody;
+    }
+
+    const contentType =
+      descriptors.body.ownsContentType === true
+        ? (requestBody.contentType ?? descriptors.body.mediaType)
+        : descriptors.body.mediaType;
+
+    return HttpClientRequest.setHeader(withBody, "Content-Type", contentType);
   });
