@@ -493,6 +493,7 @@ interface BodyPlan {
   readonly domain: readonly string[];
   readonly head: Expr;
   readonly parameter: string;
+  readonly steps?: readonly Expr[];
 }
 
 const wholeBody = (
@@ -592,8 +593,45 @@ const partValues = (part: FormPart) =>
     );
   });
 
-// A `multipart/form-data` body: the part values, which the `api/` builder streams through the
-// runtime writer (design 6.3). There is no whole-body flag (D-ENC1 a).
+// The step that asserts the part values against the body's schema before the request (design
+// 4.5, C2), and the domain name it imports; none for a multipart body that declares no schema.
+const formAssertion = (
+  command: PlannedCommand,
+  parts: readonly FormPart[],
+  context: CommandContext,
+) =>
+  Effect.gen(function* assertion() {
+    const { body } = command.operation;
+    const key = body?.alternatives.find((alternative) => alternative.codec === "multipart")?.schema
+      ?.key;
+    if (body === undefined || key === undefined) {
+      return { domain: [], steps: [] };
+    }
+
+    const schemaName = context.domain.get(key);
+    if (schemaName === undefined) {
+      return yield* refuse("unresolved-schema", "multipart/form-data");
+    }
+
+    const repeated = parts.filter(
+      (part) => part.flag.source._tag === "Body" && part.flag.source.repeated,
+    );
+    const options = obj([
+      ["flags", obj(parts.map((part) => [part.name, str(part.flag.name)] as const))],
+      ["repeated", arr(repeated.map((part) => str(part.name)))],
+      ["required", bool(body.required)],
+      ["schema", ident(yield* identifier(schemaName))],
+    ]);
+
+    return {
+      domain: [schemaName],
+      steps: [fn("Effect.flatMap", fn("Serialize.assertFormData", options))],
+    };
+  });
+
+// A `multipart/form-data` body: the part values, asserted against the body's schema and then
+// streamed by the `api/` builder through the runtime writer (design 6.3). There is no whole-body
+// flag (D-ENC1 a).
 const formBody = (command: PlannedCommand, context: CommandContext) =>
   Effect.gen(function* form() {
     const parts = formParts(command, context.defs);
@@ -606,11 +644,14 @@ const formBody = (command: PlannedCommand, context: CommandContext) =>
       entries.push([part.name, yield* partValues(part)]);
     }
 
+    const assertion = yield* formAssertion(command, parts.success, context);
+
     return {
       args: [["body", ident(I("parts"))]],
-      domain: [],
+      domain: assertion.domain,
       head: fn("Effect.all", obj(entries)),
       parameter: "parts",
+      steps: assertion.steps,
     } satisfies BodyPlan;
   });
 
@@ -862,7 +903,11 @@ const commandStatement = (
     const handled = Option.match(body, {
       onNone: () => pipe(built, [send]),
       onSome: (plan) =>
-        pipe(plan.head, [fn("Effect.flatMap", arrow([{ name: I(plan.parameter) }], built)), send]),
+        pipe(plan.head, [
+          ...(plan.steps ?? []),
+          fn("Effect.flatMap", arrow([{ name: I(plan.parameter) }], built)),
+          send,
+        ]),
     });
     const handler = arrow(config.length === 0 ? [] : [{ name: I("flags") }], handled);
     const make = fn("Command.make", str(command.name), obj(config), handler);
@@ -962,6 +1007,7 @@ const runtimeNamespaces: readonly (readonly [string, string])[] = [
   ["Multipart", "../runtime/multipart.ts"],
   ["Negotiate", "../runtime/negotiate.ts"],
   ["Output", "../runtime/output.ts"],
+  ["Serialize", "../runtime/serialize.ts"],
 ];
 
 interface Binding {

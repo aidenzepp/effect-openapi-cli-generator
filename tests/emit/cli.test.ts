@@ -757,11 +757,23 @@ describe("emitCli: multipart request bodies", () => {
         "      tags: Effect.succeed(flags.tags),",
         "      title: Effect.succeed(Option.toArray(flags.title)),",
         "    }).pipe(",
+        "      Effect.flatMap(",
+        "        Serialize.assertFormData({",
+        '          flags: { count: "count", file: "file", tags: "tags", title: "title" },',
+        '          repeated: ["tags"],',
+        "          required: true,",
+        "          schema: Paths1importsPostRequestBodyContentMultipart1formDataSchema,",
+        "        }),",
+        "      ),",
         "      Effect.flatMap((parts) => Imports.create({ body: parts })),",
         "      Effect.flatMap(Output.send(Imports.createMeta)),",
         "    ),",
       ].join("\n"),
     );
+    expect(text).toContain(
+      'import { Paths1importsPostRequestBodyContentMultipart1formDataSchema } from "../domain/schemas.ts";',
+    );
+    expect(text).toContain('import * as Serialize from "../runtime/serialize.ts";');
     expect(text).not.toContain("bodyFile");
     expect(text).not.toContain("Input.mergeBody(");
     expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));

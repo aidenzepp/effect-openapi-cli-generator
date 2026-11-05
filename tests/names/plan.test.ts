@@ -561,6 +561,25 @@ describe("planNames: multipart parts", () => {
       { code: "RQB-03/unnamed-property", scope: "element", severity: "notice" },
     ]);
   });
+
+  test("a part whose name folds to nothing is unreachable: multipart has no whole-body flags", () => {
+    const result = plan({
+      defs: { Body: object({ "!!!": { type: "string" }, ok: { type: "string" } }) },
+      operations: [
+        {
+          body: [{ codec: "multipart", media: "multipart/form-data", schema: "Body" }],
+          method: "POST",
+          operationId: "upload",
+          path: "/u",
+        },
+      ],
+    });
+
+    expect(flagNames(commandOf(result, "upload"))).toEqual(["ok"]);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
+      "The multipart part at /!!! has no flag and is not reachable; a multipart body has no --body or --body-file.",
+    ]);
+  });
 });
 
 describe("planNames: overrides", () => {

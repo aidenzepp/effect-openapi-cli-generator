@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Layer, Runtime, Stdio, Stream } from "effect";
+import {
+  ByteSize,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Runtime,
+  Schema,
+  Stdio,
+  Stream,
+} from "effect";
 import { HttpBody, UrlParams } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
@@ -1096,9 +1106,30 @@ const formRequest = (
 
 // Multipart.fileBody as the emitted handler calls it: a path through the file system, `-` through
 // stdin under the invocation's one stdin claim.
+const regularFile: FileSystem.File.Info = {
+  atime: Option.none(),
+  birthtime: Option.none(),
+  blksize: Option.none(),
+  blocks: Option.none(),
+  dev: 0n,
+  gid: Option.none(),
+  ino: Option.none(),
+  mode: 0o644,
+  mtime: Option.none(),
+  nlink: Option.none(),
+  rdev: Option.none(),
+  size: ByteSize.bytes(10),
+  type: "File",
+  uid: Option.none(),
+};
+
 const files = Layer.mergeAll(
   stdinClaimLayer,
-  FileSystem.layerNoop({ stream: () => Stream.make(utf8.encode("a,b\r\n1,2\r\n")) }),
+  FileSystem.layerNoop({
+    access: () => Effect.void,
+    stat: () => Effect.succeed(regularFile),
+    stream: () => Stream.make(utf8.encode("a,b\r\n1,2\r\n")),
+  }),
   Stdio.layerTest({ stdin: Stream.make(utf8.encode("from stdin")) }),
 );
 
@@ -1184,5 +1215,119 @@ describe("formData", () => {
 
   test("a lone surrogate in a text part is refused", async () => {
     await expectUsage(formRequest({ title: ["\uD800"] }, [["title", "text/plain"]]));
+  });
+});
+
+const importBody = Schema.Struct({
+  code: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Z]{3}$/u))),
+  count: Schema.optionalKey(Schema.Int),
+  file: Schema.String.check(Schema.isMinLength(1)),
+  on_conflict: Schema.optionalKey(Schema.Literals(["skip", "upsert"])),
+  tags: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
+const importOptions: Serialize.FormSchemaOptions = {
+  flags: { code: "code", count: "count", file: "file", on_conflict: "on-conflict", tags: "tags" },
+  repeated: ["tags"],
+  required: true,
+  schema: importBody,
+};
+
+const csvFile: Serialize.FormFile = { filename: "contacts.csv", stream: Stream.empty };
+
+// The assertion as the emitted handler runs it: before the request is built, so a failure leaves
+// the request (and any connection) unmade.
+const assertThenBuild = (fields: Serialize.FormFields, options = importOptions) => {
+  let built = 0;
+  const effect = Serialize.assertFormData(options)(fields).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        built += 1;
+      }),
+    ),
+  );
+
+  return { built: () => built, effect };
+};
+
+const usageOf = async (fields: Serialize.FormFields, options = importOptions) => {
+  const pending = assertThenBuild(fields, options);
+  const error = await Effect.runPromise(Effect.flip(pending.effect));
+
+  expect(error).toBeInstanceOf(UsageError);
+  expect(error[Runtime.errorExitCode]).toBe(2);
+  expect(pending.built()).toBe(0);
+
+  return error;
+};
+
+describe("assertFormData", () => {
+  test("typed part values and a supplied file part pass unchanged", async () => {
+    const fields: Serialize.FormFields = {
+      code: ["ABC"],
+      count: [{ text: "42" }],
+      file: [csvFile],
+      on_conflict: ["upsert"],
+      tags: ["a", "b"],
+    };
+
+    expect(await Effect.runPromise(Serialize.assertFormData(importOptions)(fields))).toBe(fields);
+  });
+
+  test("a required part with no value is a UsageError naming its flag, before any request", async () => {
+    const error = await usageOf({ code: [], count: [], file: [], on_conflict: ["skip"], tags: [] });
+
+    expect(error.flag).toBe("file");
+    expect(error.message).toBe("--file: this request needs it");
+  });
+
+  test("a required body with no input is asserted and fails on its missing required part", async () => {
+    const error = await usageOf({ code: [], count: [], file: [], on_conflict: [], tags: [] });
+
+    expect(error.flag).toBe("file");
+  });
+
+  test("an enum violation on a scalar part names its flag, never the value", async () => {
+    const error = await usageOf({ file: [csvFile], on_conflict: ["replace"] });
+
+    expect(error.flag).toBe("on-conflict");
+    expect(error.message).toBe("--on-conflict: does not match the request body schema");
+    expect(error.message).not.toContain("replace");
+  });
+
+  test("a pattern violation on a scalar part names its flag", async () => {
+    const error = await usageOf({ code: ["abc"], file: [csvFile] });
+
+    expect(error.flag).toBe("code");
+  });
+
+  test("an int64 digit text is asserted as its number", async () => {
+    const error = await usageOf({ count: [{ text: "1.5" }], file: [csvFile] });
+
+    expect(error.flag).toBe("count");
+  });
+
+  test("a file part is asserted for presence only, not content", async () => {
+    const strict = {
+      ...importOptions,
+      schema: importBody.mapFields((fields) => ({ ...fields, file: Schema.Literal("never") })),
+    };
+
+    expect(await Effect.runPromise(Serialize.assertFormData(strict)({ file: [csvFile] }))).toEqual({
+      file: [csvFile],
+    });
+  });
+
+  test("an optional body with no input is not asserted", async () => {
+    const optional = { ...importOptions, required: false };
+    const fields: Serialize.FormFields = { file: [], tags: [] };
+
+    expect(await Effect.runPromise(Serialize.assertFormData(optional)(fields))).toBe(fields);
+  });
+
+  test("the first failing part in declared order is named", async () => {
+    const error = await usageOf({ code: ["abc"], file: [], on_conflict: ["replace"] });
+
+    expect(error.flag).toBe("code");
   });
 });
