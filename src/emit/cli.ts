@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
+import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
   NamePlan,
@@ -997,17 +998,6 @@ const packageImports: readonly (readonly [string, string])[] = [
   ["Argument", "effect/cli"],
   ["Command", "effect/cli"],
   ["Flag", "effect/cli"],
-];
-
-const runtimeNamespaces: readonly (readonly [string, string])[] = [
-  ["Auth", "../runtime/auth.ts"],
-  ["BaseUrl", "../runtime/base-url.ts"],
-  ["Describe", "../runtime/describe.ts"],
-  ["Input", "../runtime/input.ts"],
-  ["Multipart", "../runtime/multipart.ts"],
-  ["Negotiate", "../runtime/negotiate.ts"],
-  ["Output", "../runtime/output.ts"],
-  ["Serialize", "../runtime/serialize.ts"],
 ];
 
 interface Binding {

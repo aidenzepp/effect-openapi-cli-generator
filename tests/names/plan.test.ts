@@ -671,6 +671,26 @@ describe("planNames: module identifier reservations", () => {
   });
 });
 
+describe("planNames: multipart body schema reservations", () => {
+  test("a multipart body schema folding to its tag's namespace is imported, so the namespace renames", () => {
+    const result = plan({
+      defs: { Imports: object({ file: { format: "binary", type: "string" } }) },
+      operations: [
+        {
+          body: [{ codec: "multipart", media: "multipart/form-data", schema: "Imports" }],
+          method: "POST",
+          operationId: "imports-create",
+          path: "/imports",
+          tags: ["imports"],
+        },
+      ],
+    });
+
+    expect(String(result.domain.get("Imports"))).toBe("Imports");
+    expect(String(result.groups[0]?.namespace)).toBe("Imports2");
+  });
+});
+
 describe("planNames: root module reservations", () => {
   test("root commands named after cli/root.ts's fixed names rename by suffix", () => {
     const result = plan({

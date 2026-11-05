@@ -212,6 +212,40 @@ describe("emitCli: shapes beyond the fixture", () => {
     expect(content).toContain("Effect.flatMap(Output.send(Users.updateMeta))");
   });
 
+  test("a schema folding to Multipart or to its tag is renamed for a multipart body too", async () => {
+    const body = {
+      properties: { file: { format: "binary", type: "string" } },
+      type: "object",
+    };
+    const outputs = await Promise.all(
+      ["Imports", "Multipart"].map(async (name) => ({
+        name,
+        output: await emit({
+          ...spec,
+          components: { schemas: { [name]: body } },
+          paths: {
+            "/imports": {
+              post: {
+                operationId: "imports-create",
+                requestBody: {
+                  content: {
+                    "multipart/form-data": { schema: { $ref: `#/components/schemas/${name}` } },
+                  },
+                },
+                responses: ok,
+                tags: ["imports"],
+              },
+            },
+          },
+        }),
+      })),
+    );
+    for (const { name, output } of outputs) {
+      expect(contentOf(output, "src/cli/imports.ts")).toContain("Multipart.");
+      expect(contentOf(output, "src/cli/imports.ts")).toContain(`${name}2`);
+    }
+  });
+
   test("an operation without a body sends the builder's request", async () => {
     const output = await emit(
       withPaths({
