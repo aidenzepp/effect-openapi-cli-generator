@@ -3,7 +3,6 @@ import { Effect, Exit, Schema } from "effect";
 import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { Api } from "../../src/model/entities.ts";
-import type { Operation } from "../../src/model/entities.ts";
 import { planNames } from "../../src/names/index.ts";
 import type { NamePlan, PlannedCommand } from "../../src/names/index.ts";
 
@@ -88,6 +87,7 @@ const operationJson = (input: OperationInput): Json => {
       rows: [],
     },
     servers: [],
+    tags: input.tags ?? [],
   };
   const withId =
     input.operationId === undefined ? base : { ...base, operationId: input.operationId };
@@ -159,21 +159,14 @@ const makeConfig = (extra: Readonly<Record<string, Json>> = {}): AuthorConfig =>
     ...extra,
   });
 
-const tagIndex = (input: ApiInput) =>
-  new Map(input.operations.map((operation) => [operationPointer(operation), operation.tags ?? []]));
-
-const plan = (input: ApiInput, config: AuthorConfig = makeConfig(), strict = false): NamePlan => {
-  const tags = tagIndex(input);
-
-  return Effect.runSync(
+const plan = (input: ApiInput, config: AuthorConfig = makeConfig(), strict = false): NamePlan =>
+  Effect.runSync(
     planNames(makeApi(input), {
       config,
       configDocument,
       strict,
-      tagsOf: (operation: Operation) => tags.get(operation.origin.pointer) ?? [],
     }),
   );
-};
 
 const object = (properties: Record<string, Json>): Json => ({ properties, type: "object" });
 
@@ -260,7 +253,10 @@ describe("planNames: groups and commands", () => {
     });
 
     expect(result.groups[0]?.commands.map((command) => command.name)).toEqual(["get", "get-child"]);
-    expect(result.diagnostics).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "OPR-06/folded", scope: "element", severity: "notice" },
+    ]);
+    expect(result.diagnostics[0]?.operation?.operationId).toBe("things-get");
   });
 
   test("two commands folding equal in one group refuse both operations", () => {
@@ -691,7 +687,6 @@ describe("planNames: bounded schema walks", () => {
         config: makeConfig(),
         configDocument,
         strict: false,
-        tagsOf: () => [],
       }),
     );
 
@@ -714,14 +709,12 @@ const deep = (count: number) =>
 // Plans a prepared Api and times the planner alone.
 const timed = (input: ApiInput) => {
   const api = makeApi(input);
-  const tags = tagIndex(input);
   const start = performance.now();
   const result = Effect.runSync(
     planNames(api, {
       config: makeConfig(),
       configDocument,
       strict: false,
-      tagsOf: (operation: Operation) => tags.get(operation.origin.pointer) ?? [],
     }),
   );
 

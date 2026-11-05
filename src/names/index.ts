@@ -41,14 +41,12 @@ export type {
 } from "./plan.ts";
 
 /**
- * What the plan reads besides the `Api`. `tagsOf` returns an operation's tags in document order:
- * the model's `Operation` does not carry them yet, so the caller supplies them.
+ * What the plan reads besides the `Api`.
  */
 export interface PlanOptions {
   readonly config: AuthorConfig;
   readonly configDocument: typeof DocumentUri.Type;
   readonly strict: boolean;
-  readonly tagsOf: (operation: Operation) => readonly string[];
 }
 
 /**
@@ -344,7 +342,7 @@ const groupOperations = (
       continue;
     }
 
-    const tag = override?.group ?? options.tagsOf(operation)[0];
+    const tag = override?.group ?? operation.tags[0];
     const tagPointer =
       override?.group === undefined
         ? `${operation.origin.pointer}/tags/0`
