@@ -1,0 +1,104 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Example users API", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "https://api.example.com/{version}",
+      "variables": { "version": { "default": "v1" } }
+    }
+  ],
+  "paths": {
+    "/users/{id}": {
+      "patch": {
+        "tags": ["users"],
+        "operationId": "users-update",
+        "description": "Update a user.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "notify",
+            "in": "query",
+            "description": "Send a notification email.",
+            "schema": { "type": "boolean" }
+          },
+          { "name": "If-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UserUpdate" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated user.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/UserUpdate" } }
+            }
+          },
+          "404": { "description": "No such user." },
+          "default": {
+            "description": "Error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": [] }]
+      }
+    },
+    "/users/{id}/avatar": {
+      "put": {
+        "tags": ["users"],
+        "operationId": "users-set-avatar",
+        "description": "Set a user avatar.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Avatar" } },
+            "image/png": { "schema": { "type": "string", "format": "binary" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored avatar.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Avatar" } },
+              "image/png": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": [] }]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "schemas": {
+      "UserUpdate": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Display name." },
+          "address": { "type": "object", "properties": { "city": { "type": "string" } } }
+        }
+      },
+      "Avatar": { "type": "object", "properties": { "url": { "type": "string" } } },
+      "Error": { "type": "object", "properties": { "message": { "type": "string" } } }
+    }
+  }
+}

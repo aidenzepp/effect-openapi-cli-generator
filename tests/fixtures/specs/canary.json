@@ -1,0 +1,150 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Canary request-safety fixture", "version": "1.0.0" },
+  "servers": [{ "url": "http://127.0.0.1:80" }],
+  "paths": {
+    "/simple/{id}": {
+      "get": {
+        "tags": ["values"],
+        "operationId": "values-simple",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Trace", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/label/{id}": {
+      "get": {
+        "tags": ["values"],
+        "operationId": "values-label",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "style": "label",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/matrix/{id}": {
+      "get": {
+        "tags": ["values"],
+        "operationId": "values-matrix",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "style": "matrix",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/query": {
+      "get": {
+        "tags": ["values"],
+        "operationId": "values-query",
+        "parameters": [
+          { "name": "form", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "spaced",
+            "in": "query",
+            "style": "spaceDelimited",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "piped",
+            "in": "query",
+            "style": "pipeDelimited",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string" } }
+          }
+        ],
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/notes": {
+      "post": {
+        "tags": ["values"],
+        "operationId": "values-note",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "meta": { "type": "object" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/cookie": {
+      "get": {
+        "tags": ["values"],
+        "operationId": "values-cookie",
+        "parameters": [{ "name": "flavor", "in": "cookie", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/numbers/{n}": {
+      "post": {
+        "tags": ["numbers"],
+        "operationId": "numbers-send",
+        "parameters": [
+          {
+            "name": "n",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64" }
+          },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "format": "int64" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "count": { "type": "integer", "format": "int64" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/status/{code}": {
+      "get": {
+        "tags": ["status"],
+        "operationId": "status-get",
+        "parameters": [
+          { "name": "code", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Recorded." },
+          "401": { "description": "The canary server echoes the Authorization header." },
+          "500": { "description": "The canary server echoes the Authorization header." }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "canaryAuth": { "type": "http", "scheme": "bearer" },
+      "canaryQuery": { "type": "apiKey", "in": "query", "name": "api_key" },
+      "headerKey": { "type": "apiKey", "in": "header", "name": "X-Api-Key" },
+      "cookieKey": { "type": "apiKey", "in": "cookie", "name": "session" }
+    }
+  },
+  "security": [{ "canaryAuth": [], "canaryQuery": [] }, { "headerKey": [] }, { "cookieKey": [] }]
+}

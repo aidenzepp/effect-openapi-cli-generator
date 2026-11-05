@@ -1,0 +1,24 @@
+{
+  "openapi": "3.1.1",
+  "info": { "title": "base 3.1", "version": "1" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Pet": {
+        "$id": "https://example.com/pet.json",
+        "$defs": { "Tag": { "$anchor": "tag", "type": "string" } },
+        "properties": {
+          "tag": { "$ref": "#/$defs/Tag" },
+          "owner": { "$ref": "owner.json" }
+        }
+      },
+      "ByAnchor": { "$ref": "https://example.com/pet.json#tag" },
+      "ByPointer": { "$ref": "https://example.com/pet.json#/$defs/Tag" },
+      "Owner": { "$id": "https://example.com/owner.json", "type": "object" },
+      "Late": {
+        "allOf": [{ "$ref": "#/x-defs/Late" }, { "$ref": "https://example.com/late.json" }]
+      }
+    }
+  },
+  "x-defs": { "Late": { "$id": "https://example.com/late.json", "type": "string" } }
+}

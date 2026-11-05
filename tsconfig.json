@@ -12,6 +12,6 @@
     "allowImportingTsExtensions": true,
     "types": ["bun", "node"]
   },
-  "include": ["vite.config.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src", "tests", "tools", "corpus", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", "tests/fixtures/golden"]
 }

@@ -1,16 +1,24 @@
 # effect-openapi-cli-generator
 
-Generate standalone, Effect-native command-line applications from Effect HttpApi definitions or OpenAPI 3.x specifications.
+Generate standalone command-line applications from OpenAPI 3.0, 3.1 and 3.2 specifications. Each API operation becomes a command. The generated code uses Effect's CLI, Schema and HTTP libraries and runs on Bun. Reading Effect `HttpApi` definitions is planned for later.
 
-Inspired by [Cloudflare’s Forge](https://github.com/cloudflare/forge) and its [cf CLI](https://github.com/cloudflare/cf): adapt their schema-driven generation, command conventions, and optional overlays to Effect’s libraries and runtime. This is an independent project, unaffiliated with Cloudflare or the Effect maintainers.
+Inspired by [Cloudflare's Forge](https://github.com/cloudflare/forge) and its [cf CLI](https://github.com/cloudflare/cf). This is an independent project, unaffiliated with Cloudflare or the Effect maintainers.
 
-**Status:** tooling and agent foundation only. No generator is implemented. The library will live in `src/core/` and the generator executable in `src/cli/`. npm publishing is deferred until release work.
+**Status:** under construction. The generator is not usable yet, and the package is not published.
 
-Read [the project direction](docs/project.md) for goals, Forge inspiration, code organization, and generated-code quality requirements.
+## What it does
+
+- Keeps HTTP semantics exactly: method, path, parameter locations, serialization, body encoding and security. Command names never imply HTTP verbs.
+- Refuses what it cannot implement with a diagnostic that names the location and the specification section. Nothing is dropped silently.
+- Treats the input specification as untrusted. Nothing from it becomes executable code or a path outside the output directory.
+- Produces the same output for the same input and options.
+- Gives generated CLIs typed errors, stable exit codes, help built from the specification's own prose, and credentials that never appear in source, help or logs.
+
+Read [the project direction](docs/project.md) for the pipeline, the generated package layout, request and error behavior, and the repository layout.
 
 ## Development
 
-Use Bun 1.4.3.
+Use Bun 1.4.3 (the `packageManager` pin).
 
 ```sh
 bun install --frozen-lockfile
@@ -18,16 +26,6 @@ bun run check
 bun run fix
 ```
 
-Vite+ provides Oxlint and Oxfmt with Ultracite core/anti-slop presets. TypeScript is strict. Checks currently cover the root TypeScript configuration; add real implementation checks as code lands.
-
-## Implementation contract
-
-- Use Effect libraries for runtime configuration, schemas, HTTP, files, processes, resources, and CLI behavior.
-- Derive command names from operation metadata, independently of HTTP verbs.
-- Preserve wire schemas and parameter serialization when constructing requests.
-- Support JSON and file inputs; define conventions explicitly before generating them.
-- Report unsupported cases clearly. Full Forge parity and every OpenAPI feature are not promised.
-
-Starting references: [Forge](https://github.com/cloudflare/forge), [cf](https://github.com/cloudflare/cf), and [Effect openapi-generator](https://github.com/Effect-TS/effect/tree/main/packages/tools/openapi-generator).
+Vite+ provides Oxlint and Oxfmt with the Ultracite core and anti-slop presets. TypeScript is strict.
 
 Read [AGENTS.md](AGENTS.md) before contributing.
