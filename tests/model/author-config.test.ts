@@ -32,7 +32,6 @@ const full = {
   ...sample,
   acceptedOrigins: ["https://eu.example.com", "https://us.example.com"],
   allowInsecure: false,
-  assertPatterns: true,
   naming: {
     byPointer: { "/paths/~1health/get": { group: "ops", skip: true } },
     operations: sample.naming.operations,
@@ -101,6 +100,18 @@ describe("decodeAuthorConfig", () => {
 
   test("a binName that is not a string is refused", () => {
     expect(keys({ ...sample, binName: 3 })).toEqual(["/binName|CFG-1/invalid-bin-name"]);
+  });
+
+  test("refuses assertPatterns, true or false, naming the key and not the value", () => {
+    for (const value of [true, false]) {
+      const found = refusals({ ...sample, assertPatterns: value });
+
+      expect(found.map((d) => `${d.pointer}|${d.code}`)).toEqual([
+        "/assertPatterns|CFG-1/unsupported-key",
+      ]);
+      expect(found[0]?.message).toContain("assertPatterns");
+      expect(found[0]?.message).not.toContain(String(value));
+    }
   });
 
   test("an unknown top-level key is refused", () => {

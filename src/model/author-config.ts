@@ -36,7 +36,6 @@ const OperationOverride = Schema.Struct({
 export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
   acceptedOrigins: Schema.optionalKey(Schema.Array(DocumentUri)),
   allowInsecure: Schema.optionalKey(Schema.Boolean),
-  assertPatterns: Schema.optionalKey(Schema.Boolean),
   binName: Schema.String.pipe(Schema.check(Schema.isPattern(binNamePattern))),
   commands: Schema.optionalKey(
     Schema.Struct({
@@ -89,7 +88,8 @@ type Rule =
   | "invalid-value"
   | "missing-bin-name"
   | "missing-key"
-  | "unknown-key";
+  | "unknown-key"
+  | "unsupported-key";
 
 interface Finding {
   readonly kind: Kind;
@@ -125,9 +125,13 @@ const pointerOf = (path: readonly string[]): string =>
 
 const isBinName = (path: readonly string[]): boolean => path.length === 1 && path[0] === "binName";
 
+// Keys the design names but this release does not consume; they are refused, not ignored.
+const isUnsupportedKey = (path: readonly string[]): boolean =>
+  path.length === 1 && path[0] === "assertPatterns";
+
 const ruleOf = ({ kind, path }: Finding): Rule => {
   if (kind === "unknown") {
-    return "unknown-key";
+    return isUnsupportedKey(path) ? "unsupported-key" : "unknown-key";
   }
 
   if (isBinName(path)) {
@@ -143,6 +147,7 @@ const messages: Readonly<Record<Rule, string>> = {
   "missing-bin-name": "The author config has no binName.",
   "missing-key": "A required author config key is missing.",
   "unknown-key": "The author config has a key this generator does not define.",
+  "unsupported-key": "The author config key assertPatterns is not supported in this release.",
 };
 
 const hintOf = (rule: Rule, context: AuthorConfigContext): string | undefined =>
