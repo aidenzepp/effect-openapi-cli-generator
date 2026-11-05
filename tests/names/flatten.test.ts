@@ -31,6 +31,21 @@ const object = (properties: Record<string, Schema.Json>): Schema.Json => ({
   type: "object",
 });
 
+const next = (level: number): Schema.Json => ({ $ref: `#/$defs/D${level}` });
+
+const fanOut = (depth: number) => {
+  const levels = Array.from({ length: depth }, (_, level): [string, Schema.Json] => [
+    `D${level}`,
+    { allOf: [next(level + 1), next(level + 1)] },
+  ]);
+
+  return {
+    ...Object.fromEntries(levels),
+    [`D${depth}`]: object({ leaf: { type: "string" } }),
+    Root: next(0),
+  } satisfies Defs;
+};
+
 describe("flattenBody", () => {
   test("whole-body flags are always offered for a json body", () => {
     const flags = byName({ Root: object({}) });
@@ -194,4 +209,21 @@ describe("flattenBody", () => {
     );
     expect(Result.isFailure(cycle) && cycle.failure._tag).toBe("UnresolvedBodyRef");
   });
+
+  test("a diamond fan-out of shared defs resolves each def once (depth 20)", () => {
+    expect(run(fanOut(20)).flags.map(({ name }) => name)).toEqual(["body", "body-file", "leaf"]);
+  }, 5000);
+
+  test("a diamond fan-out resolves at depth 30 and is a cheap typed failure past the 64-hop cap", () => {
+    expect(Result.isSuccess(flattenBody(fanOut(30), alternative("json", "Root")))).toBe(true);
+
+    const deep = flattenBody(fanOut(64), alternative("json", "Root"));
+    expect(Result.isFailure(deep) && deep.failure._tag).toBe("UnresolvedBodyRef");
+  }, 5000);
+
+  test("a body that exceeds the shared visit budget is a typed BodyBudgetExceeded", () => {
+    const members = Array.from({ length: 20_000 }, () => ({ type: "string" }));
+    const result = flattenBody({ Root: { allOf: members } }, alternative("json", "Root"));
+    expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
+  }, 5000);
 });
