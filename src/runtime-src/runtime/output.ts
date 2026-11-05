@@ -6,10 +6,12 @@ import {
   Data,
   Effect,
   FileSystem,
+  Layer,
   Option,
   Order,
   Path,
   Redacted,
+  Ref,
   Runtime,
   Schema,
   Sink,
@@ -19,6 +21,8 @@ import {
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
 import { Base64 } from "effect/encoding";
+import { Headers, HttpClient, HttpClientRequest } from "effect/http";
+import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
   CredentialMissing,
@@ -28,7 +32,31 @@ import {
   TransportError,
   UsageError,
 } from "../domain/errors.ts";
-import type { Credential } from "./auth.ts";
+import type { Credential, SecurityRequirement } from "./auth.ts";
+import {
+  allowCredentialsForBaseUrl,
+  attach,
+  credentialOrigins,
+  evaluate,
+  redactedNames,
+  Schemes,
+} from "./auth.ts";
+import {
+  baseUrlSetting,
+  requestUrl,
+  resolve,
+  select,
+  serverSetting,
+  Servers,
+  serverVariableSetting,
+} from "./base-url.ts";
+import type { DirectRoute } from "./client.ts";
+import { redirectLoop, withUserAgent } from "./client.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
+import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
+// response.ts imports `scrub` from here; neither module reads the other at load time.
+// oxlint-disable-next-line import/no-cycle
+import { classify, mapClientError, matchResponse, toApiResponseError } from "./response.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -597,47 +625,78 @@ const reportOnce = <E extends object>(
   );
 
 /**
+ * The credentials the run evaluated, so the final catch scrubs what the command handler chose.
+ * `send` records them when this service is provided; `finalCatch` adds them to its own list.
+ */
+export class RunCredentials extends Context.Service<
+  RunCredentials,
+  Ref.Ref<readonly Credential[]>
+>()("openapi-cli/runtime/RunCredentials") {}
+
+export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
+  Ref.make<readonly Credential[]>([]),
+);
+
+const noCredentials: readonly Credential[] = [];
+
+const recordedCredentials: Effect.Effect<readonly Credential[]> = Effect.serviceOption(
+  RunCredentials,
+).pipe(
+  Effect.flatMap(Option.match({ onNone: () => Effect.succeed(noCredentials), onSome: Ref.get })),
+);
+
+const renderCause = <E>(
+  cause: Cause.Cause<E>,
+  credentials: readonly Credential[],
+): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
+  const failure = Cause.findErrorOption(cause);
+
+  if (Cause.hasInterruptsOnly(cause)) {
+    return Effect.failCause(cause);
+  }
+
+  if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
+    const text = renderCliError(failure.value);
+
+    return text === undefined
+      ? Effect.failCause(cause)
+      : reportOnce(sanitize(scrub(text, credentials)), failure.value);
+  }
+
+  if (Option.isSome(failure) && isKnownError(failure.value)) {
+    const error = failure.value;
+
+    return reportOnce(renderError(error, credentials), error);
+  }
+
+  const squashed = Cause.squash(cause);
+  const line = singleLine(
+    isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
+    credentials,
+  ).slice(0, maxDefectLineLength);
+
+  return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
+    Effect.andThen(Effect.fail(new InternalError())),
+  );
+};
+
+/**
  * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
  * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
  * itself, so its exit code stands; a `CliError` parse error is rendered once through
  * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
  * line and "internal error, please report" and fails with `InternalError`, exit 70.
- * `credentials` are the values to scrub; the caller holds them.
+ * `credentials` are the values to scrub that the caller holds; when `RunCredentials` is provided
+ * outside the catch, the credentials the command handler evaluated are scrubbed too.
  */
 export const finalCatch =
   (credentials: readonly Credential[]) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | InternalError, R | Stdio.Stdio> =>
-    Effect.catchCause(effect, (cause): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
-      const failure = Cause.findErrorOption(cause);
-
-      if (Cause.hasInterruptsOnly(cause)) {
-        return Effect.failCause(cause);
-      }
-
-      if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
-        const text = renderCliError(failure.value);
-
-        return text === undefined
-          ? Effect.failCause(cause)
-          : reportOnce(sanitize(scrub(text, credentials)), failure.value);
-      }
-
-      if (Option.isSome(failure) && isKnownError(failure.value)) {
-        const error = failure.value;
-
-        return reportOnce(renderError(error, credentials), error);
-      }
-
-      const squashed = Cause.squash(cause);
-      const line = singleLine(
-        isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
-        credentials,
-      ).slice(0, maxDefectLineLength);
-
-      return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
-        Effect.andThen(Effect.fail(new InternalError())),
-      );
-    });
+    Effect.catchCause(effect, (cause) =>
+      recordedCredentials.pipe(
+        Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
+      ),
+    );
 
 /**
  * The notes a generated command adds to its help (design 4.6): a note per argument and per flag,
@@ -820,3 +879,174 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
     }),
   formatVersion: valueFreeFormatter.formatVersion,
 });
+
+/**
+ * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path
+ * template (the display name when it has no `operationId`), its declared media, its security
+ * requirement and, when the operation declares one, the request-id header chosen at generation.
+ */
+export interface OperationMeta {
+  readonly media: MediaDeclaration;
+  readonly method: string;
+  readonly operationId?: string | undefined;
+  readonly pathTemplate: string;
+  readonly requestIdHeader?: string | undefined;
+  readonly security: SecurityRequirement;
+}
+
+/**
+ * The client policy inputs `bin.ts` provides: the method allowlist (design 6.7), the request
+ * init a loopback hop executes with (design 6.5 Loopback hosts), and the `User-Agent` name and
+ * version (design 6.2).
+ */
+export class ClientPolicy extends Context.Service<
+  ClientPolicy,
+  {
+    readonly allowed: ReadonlySet<string>;
+    readonly binName: string;
+    readonly direct: DirectRoute;
+    readonly version: string;
+  }
+>()("openapi-cli/runtime/ClientPolicy") {}
+
+/**
+ * The errors `send` fails with.
+ */
+export type SendError =
+  | ApiResponseError
+  | CredentialMissing
+  | OutputError
+  | RedirectRefused
+  | ResponseStreamError
+  | TransportError
+  | UsageError;
+
+const displayName = (meta: OperationMeta): string =>
+  meta.operationId ?? `${meta.method} ${meta.pathTemplate}`;
+
+/**
+ * The builder's URL is its path and serialized query; `requestUrl` takes them apart.
+ */
+const splitTarget = (target: string): readonly [path: string, query: string] => {
+  const at = target.indexOf("?");
+
+  return at === -1 ? [target, ""] : [target.slice(0, at), target.slice(at + 1)];
+};
+
+/**
+ * The one stderr notice of design 6.4 (F:R1): a configured credential is withheld from an unbound
+ * operator-chosen base URL. It names schemes and the flag, never a value.
+ */
+const withheldNotice = (credentials: readonly Credential[]): string => {
+  const schemes = [...new Set(credentials.map((credential) => credential.scheme))].join(", ");
+
+  return sanitize(
+    `Notice: not sending credentials (${schemes}) to an unbound base URL; ` +
+      "--allow-credentials-for-base-url sends them",
+  );
+};
+
+/**
+ * A response body read that fails part-way is a truncated body (exit 5).
+ */
+const bodyOf = (
+  response: HttpClientResponse.HttpClientResponse,
+): Stream.Stream<Uint8Array, ResponseStreamError> =>
+  Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+
+const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
+  const key = matchResponse(meta.media.responses, status);
+
+  return Object.hasOwn(meta.media.responses, key) ? (meta.media.responses[key] ?? []) : [];
+};
+
+/**
+ * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
+ * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
+ * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from `Servers`)
+ * joined to the builder's path and query; `Accept` from the declared response media or
+ * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
+ * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
+ * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
+ * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink; any
+ * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
+ * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
+ */
+export const send =
+  (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
+  (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.gen(function* sendRequest() {
+      const operation = displayName(meta);
+      const selection = yield* select({
+        baseUrl: yield* baseUrlSetting,
+        server: yield* serverSetting,
+        serverVariables: yield* serverVariableSetting,
+      });
+      const baseUrl = yield* resolve(selection);
+      const [path, query] = splitTarget(request.url);
+      const accepted = yield* acceptValue(meta.media, accept);
+      const located = HttpClientRequest.setUrl(request, requestUrl(baseUrl, path, query));
+      const built = Option.match(accepted, {
+        onNone: () => located,
+        onSome: (value) => HttpClientRequest.setHeader(located, "accept", value),
+      });
+
+      const credentials = yield* evaluate(operation, meta.security);
+      const recorder = yield* Effect.serviceOption(RunCredentials);
+
+      if (Option.isSome(recorder)) {
+        yield* Ref.set(recorder.value, credentials);
+      }
+
+      const { table: security } = yield* Schemes;
+      const { table: servers } = yield* Servers;
+      const baseOrigin = new URL(baseUrl).origin;
+      const origins = credentialOrigins({
+        allowUnboundBase: yield* allowCredentialsForBaseUrl,
+        baseOrigin,
+        boundOrigins: servers.boundOrigins,
+        provenance: selection.provenance,
+      });
+
+      if (credentials.length > 0 && !origins.includes(baseOrigin)) {
+        yield* printStderr(withheldNotice(credentials));
+      }
+
+      const policy = yield* ClientPolicy;
+      const client = (yield* HttpClient.HttpClient).pipe(
+        redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        withUserAgent(policy.binName, policy.version),
+      );
+      const table = {
+        operation,
+        requestIdHeader: meta.requestIdHeader,
+        responses: meta.media.responses,
+      };
+
+      yield* client.execute(built).pipe(
+        Effect.catchTag("HttpClientError", mapClientError),
+        Effect.flatMap((response) =>
+          classify(table, response, credentials).pipe(
+            Effect.matchEffect({
+              onFailure: () =>
+                readExcerpt(bodyOf(response), credentials).pipe(
+                  Effect.orElseSucceed(() => ""),
+                  Effect.flatMap((excerpt) =>
+                    Effect.fail(toApiResponseError(table, response, excerpt, credentials)),
+                  ),
+                ),
+              onSuccess: (ok) =>
+                writeBody({
+                  bytes: bodyOf(ok),
+                  mediaType: dispatchResponse(
+                    declaredMedia(meta, ok.status),
+                    Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
+                  ),
+                }),
+            }),
+          ),
+        ),
+        Effect.scoped,
+        Effect.provide(redactedNames(security)),
+      );
+    });
