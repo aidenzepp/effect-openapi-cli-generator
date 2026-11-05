@@ -1,6 +1,5 @@
-import { Effect, Predicate } from "effect";
-import { HttpBody, HttpClientRequest } from "effect/http";
-import type { HttpMethod } from "effect/http";
+import { Effect, Option, Predicate } from "effect";
+import { Headers, HttpBody, HttpClientRequest } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 
 /**
@@ -441,6 +440,15 @@ const queryDelimiter = (
   return style === "form" && options.allowReserved ? "," : undefined;
 };
 
+/**
+ * Under `allowReserved` a percent triplet passes unchanged, so one that spells the joiner is
+ * byte-identical to it.
+ */
+const encodedDelimiters: Partial<Record<QueryStyle, string>> = {
+  pipeDelimited: "%7C",
+  spaceDelimited: "%20",
+};
+
 const checkQueryDelimiter = (
   name: string,
   style: QueryStyle,
@@ -448,7 +456,13 @@ const checkQueryDelimiter = (
   options: QueryOptions,
 ) => {
   const banned = queryDelimiter(style, text, options);
-  const clash = banned !== undefined && parts(text).some((part) => part.includes(banned));
+  const encoded = options.allowReserved ? encodedDelimiters[style] : undefined;
+  const clash =
+    banned !== undefined &&
+    parts(text).some(
+      (part) =>
+        part.includes(banned) || (encoded !== undefined && part.toUpperCase().includes(encoded)),
+    );
 
   return clash
     ? refuse(`parameter ${name} holds a character its ${style} expansion would leave ambiguous`)
@@ -581,11 +595,19 @@ const headerLineBreak = /[\n\r]/u;
 const edgeSpace = /^[\t ]|[\t ]$/u;
 
 /**
+ * Any code point above U+00FF: a header field carries one byte per character, so it has no form.
+ */
+const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
+
+/**
  * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
- * 5.5): CR, LF, NUL and leading or trailing whitespace.
+ * 5.5): CR, LF, NUL, leading or trailing whitespace and a code point above U+00FF.
  */
 const unsafeHeaderText = (text: string) =>
-  headerLineBreak.test(text) || text.includes("\u0000") || edgeSpace.test(text);
+  headerLineBreak.test(text) ||
+  text.includes("\u0000") ||
+  edgeSpace.test(text) ||
+  wideCodePoint.test(text);
 
 const headerTexts = (text: Text): readonly string[] =>
   text.kind === "primitive" ? [text.text] : parts(text);
@@ -740,7 +762,7 @@ export interface RequestParts {
  * Evaluate the descriptors into a request whose URL is the expanded path plus the query pairs
  * joined by `&`, with no origin (the caller prefixes the base) and no `urlParams`.
  */
-export const request = (method: HttpMethod.HttpMethod, descriptors: RequestParts): Request =>
+export const request = (method: string, descriptors: RequestParts): Request =>
   Effect.gen(function* requestEvaluation() {
     const expandedPath = yield* descriptors.path.expand;
     const pairs = yield* Effect.all(descriptors.query.map((parameter) => parameter.expand));
@@ -757,7 +779,10 @@ export const request = (method: HttpMethod.HttpMethod, descriptors: RequestParts
       ),
     );
     const url = query === "" ? expandedPath : `${expandedPath}?${query}`;
-    let built = HttpClientRequest.setUrl(HttpClientRequest.make(method)(""), url);
+    let built = HttpClientRequest.setUrl(
+      HttpClientRequest.makeWith(method, "", [], Option.none(), Headers.empty, HttpBody.empty),
+      url,
+    );
 
     for (const [name, text] of values) {
       if (text !== undefined) {
@@ -771,9 +796,9 @@ export const request = (method: HttpMethod.HttpMethod, descriptors: RequestParts
 
     const requestBody = yield* descriptors.body.expand;
 
-    return HttpClientRequest.setHeader(
-      HttpClientRequest.setBody(built, requestBody),
-      "Content-Type",
-      descriptors.body.mediaType,
-    );
+    const withBody = HttpClientRequest.setBody(built, requestBody);
+
+    return requestBody._tag === "Empty"
+      ? withBody
+      : HttpClientRequest.setHeader(withBody, "Content-Type", descriptors.body.mediaType);
   });

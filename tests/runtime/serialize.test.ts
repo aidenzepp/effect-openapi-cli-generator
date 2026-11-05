@@ -986,3 +986,68 @@ describe("body", () => {
     expect(built.headers["content-type"]).toBeUndefined();
   });
 });
+
+describe("request repairs", () => {
+  test("an empty body sends no Content-Type", async () => {
+    const built = await withBody("application/json", HttpBody.empty);
+
+    expect(built.body._tag).toBe("Empty");
+    expect(built.headers["content-type"]).toBeUndefined();
+  });
+
+  test("a header value or media type above U+00FF is refused without naming the value", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        describeRequest({ headers: [Serialize.header("X-Name", "cafā-secret", headerOptions())] }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toContain("X-Name");
+    expect(error.message).not.toContain("secret");
+    await expectUsage(
+      describeRequest({ headers: [Serialize.header("X-Name", "\u{1F600}", headerOptions())] }),
+    );
+    await expectUsage(describeRequest({ body: Serialize.body("text/plain; x=Ā", "v") }));
+  });
+
+  test("header code points U+0080 through U+00FF pass", async () => {
+    const built = await run(
+      describeRequest({
+        headers: [Serialize.header("X-Name", "café\u0080ÿ", headerOptions())],
+      }),
+    );
+
+    expect(built.headers["x-name"]).toBe("café\u0080ÿ");
+  });
+
+  test("an allowlisted extension method token is kept", async () => {
+    const built = await run(
+      Serialize.request("PURGE", { headers: [], path: Serialize.path("/c", []), query: [] }),
+    );
+
+    expect(built.method).toBe("PURGE");
+    expect(built.url).toBe("/c");
+  });
+
+  test("under allowReserved a percent-encoded delimiter in a delimited item is refused", async () => {
+    const options = { allowReserved: true, explode: false, required: false };
+
+    await expectUsage(Serialize.spaceDelimited("c", ["a%20b", "c"], options).expand);
+    await expectUsage(Serialize.pipeDelimited("c", ["a%7Cb"], options).expand);
+    await expectUsage(Serialize.pipeDelimited("c", ["a%7cb"], options).expand);
+    await expectUsage(Serialize.spaceDelimited("c", { k: "a%20b" }, options).expand);
+    expect(await query(Serialize.spaceDelimited("c", ["a%7Cb", "c"], options))).toBe("c=a%7Cb%20c");
+  });
+
+  test("two header parameters differing only in case are refused", async () => {
+    await expectUsage(
+      describeRequest({
+        headers: [
+          Serialize.header("X-Id", "1", headerOptions()),
+          Serialize.header("x-id", "2", headerOptions()),
+        ],
+      }),
+    );
+  });
+});
