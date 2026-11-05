@@ -102,6 +102,26 @@ describe("decodeAuthorConfig", () => {
     expect(keys({ ...sample, binName: 3 })).toEqual(["/binName|CFG-1/invalid-bin-name"]);
   });
 
+  test("a commands module outside the package is a value-free document refusal", () => {
+    for (const module of [
+      "/abs/commands.ts",
+      "../outside.ts",
+      "./a/../x.ts",
+      ".\\x.ts",
+      "./a//x.ts",
+      "./",
+      ".",
+    ]) {
+      const found = refusals({ ...sample, commands: { module, names: ["login"] } });
+      expect(found.map((d) => `${d.pointer}|${d.code}|${d.scope}`)).toEqual([
+        "/commands/module|CFG-1/unsafe-commands-module|document",
+      ]);
+      if (module.length > 3) {
+        expect(JSON.stringify(found)).not.toContain(module);
+      }
+    }
+  });
+
   test("refuses assertPatterns, true or false, naming the key and not the value", () => {
     for (const value of [true, false]) {
       const found = refusals({ ...sample, assertPatterns: value });

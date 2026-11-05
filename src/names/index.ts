@@ -334,6 +334,7 @@ const groupOperations = (
     const { override } = site;
     if (override?.skip === true) {
       collector.report(operation, "OPR-06/skipped", "Operation", "The author config skips it.", {
+        scope: "element",
         severity: "notice",
       });
       continue;

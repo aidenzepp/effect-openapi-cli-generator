@@ -463,6 +463,18 @@ describe("planNames: positionals and flags", () => {
     ]);
   });
 
+  test("an operation the author config skips is an element-scope notice", () => {
+    const result = plan(
+      { operations: [{ method: "GET", operationId: "talk", path: "/talk" }] },
+      makeConfig({ naming: { operations: { talk: { skip: true } } } }),
+    );
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "OPR-06/skipped", scope: "element", severity: "notice" },
+    ]);
+  });
+
   test("a body field equal to a reserved name is refused at operation scope", () => {
     const result = plan({
       defs: { Body: object({ verbose: { type: "string" } }) },

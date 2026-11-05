@@ -16,6 +16,23 @@ const rowId = "CFG-1";
 const semverPattern =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/u;
 
+// `commands.module` is relative to the package root and stays inside it: `./` then plain segments,
+// no `.`, `..` or empty segment, no absolute path, no backslash.
+const commandsModule = Schema.NonEmptyString.pipe(
+  Schema.check(
+    Schema.makeFilter((module: string) => {
+      const [lead, ...rest] = module.split("/");
+
+      return (
+        lead === "." &&
+        rest.length > 0 &&
+        !module.includes("\\") &&
+        rest.every((part) => part !== "" && part !== "." && part !== "..")
+      );
+    }),
+  ),
+);
+
 const environmentName = Schema.String.pipe(Schema.check(Schema.isPattern(environmentNamePattern)));
 
 const nonNegative = Schema.Finite.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
@@ -44,7 +61,7 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
   binName: Schema.String.pipe(Schema.check(Schema.isPattern(binNamePattern))),
   commands: Schema.optionalKey(
     Schema.Struct({
-      module: Schema.NonEmptyString,
+      module: commandsModule,
       names: Schema.Array(Schema.NonEmptyString),
     }),
   ),
@@ -98,6 +115,7 @@ type Rule =
   | "missing-bin-name"
   | "missing-key"
   | "unknown-key"
+  | "unsafe-commands-module"
   | "unsupported-key";
 
 interface Finding {
@@ -141,6 +159,9 @@ const isBinName = (path: readonly string[]): boolean => path.length === 1 && pat
 const isUnsupportedKey = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "assertPatterns";
 
+const isCommandsModule = (path: readonly string[]): boolean =>
+  path.length === 2 && path[0] === "commands" && path[1] === "module";
+
 const ruleOf = ({ kind, path }: Finding): Rule => {
   if (kind === "unknown") {
     return isUnsupportedKey(path) ? "unsupported-key" : "unknown-key";
@@ -148,6 +169,10 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
 
   if (isBinName(path)) {
     return kind === "missing" ? "missing-bin-name" : "invalid-bin-name";
+  }
+
+  if (isCommandsModule(path) && kind === "invalid") {
+    return "unsafe-commands-module";
   }
 
   if (isVersion(path) && kind === "invalid") {
@@ -164,6 +189,8 @@ const messages: Readonly<Record<Rule, string>> = {
   "missing-bin-name": "The author config has no binName.",
   "missing-key": "A required author config key is missing.",
   "unknown-key": "The author config has a key this generator does not define.",
+  "unsafe-commands-module":
+    "commands.module must be ./ followed by plain path segments inside the package.",
   "unsupported-key": "The author config key assertPatterns is not supported in this release.",
 };
 
