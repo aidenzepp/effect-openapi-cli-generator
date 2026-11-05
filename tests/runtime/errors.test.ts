@@ -111,8 +111,21 @@ describe("error schemas", () => {
     expect(decode(ApiResponseError)({ ...valid, requestId: "x".repeat(257) })).toBe("Failure");
   });
 
-  test("rejects an undeclared reason or matched literal", () => {
-    expect(decode(ApiResponseError)({ ...valid, matched: "5XX" })).toBe("Failure");
+  test.each(["404", "500", "401", "201", "4XX", "5XX", "1XX", "default", "undeclared"])(
+    "accepts the declared response key %s",
+    (matched) => {
+      expect(decode(ApiResponseError)({ ...valid, matched })).toBe("Success");
+    },
+  );
+
+  test.each(["6XX", "0XX", "abc", "50", "5000", "6000", "99", "5xx", "Default", ""])(
+    "rejects the malformed response key %p",
+    (matched) => {
+      expect(decode(ApiResponseError)({ ...valid, matched })).toBe("Failure");
+    },
+  );
+
+  test("rejects an undeclared reason", () => {
     expect(decode(ResponseStreamError)({ _tag: "ResponseStreamError", reason: "other" })).toBe(
       "Failure",
     );

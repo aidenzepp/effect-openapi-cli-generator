@@ -12,6 +12,13 @@ const maxBodyExcerptLength = 65_536;
  */
 const maxRequestIdLength = 256;
 
+/**
+ * An OpenAPI response key (a status code 100-599, a range 1XX-5XX, or `default`), or `undeclared`.
+ */
+const MatchedResponse = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^(?:[1-5]\d\d|[1-5]XX|default|undeclared)$/u)),
+);
+
 const BodyExcerpt = Schema.String.pipe(Schema.check(Schema.isMaxLength(maxBodyExcerptLength)));
 
 const RequestId = Schema.String.pipe(Schema.check(Schema.isMaxLength(maxRequestIdLength)));
@@ -53,7 +60,7 @@ export class CredentialMissing extends Schema.TaggedError<CredentialMissing>()(
  */
 export class ApiResponseError extends Schema.TaggedError<ApiResponseError>()("ApiResponseError", {
   bodyExcerpt: BodyExcerpt,
-  matched: Schema.Literals(["404", "4XX", "default", "undeclared"]),
+  matched: MatchedResponse,
   mediaType: Schema.optionalKey(Schema.String),
   operation: Schema.String,
   requestId: Schema.optionalKey(RequestId),
