@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Option, Redacted, Stream } from "effect";
-import { Headers, HttpBody, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { Cause, Effect, Exit, Option, Redacted, Stream } from "effect";
+import {
+  Headers,
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  UrlParams,
+} from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
 
@@ -545,5 +552,78 @@ describe("RT-5: caller credentials do not cross an origin change", () => {
       [true, true, true],
       [true, true, true],
     ]);
+  });
+});
+
+// `make` takes only the closed `HttpMethod` set; a token outside it needs `makeWith`.
+const token = (method: string, url: string) =>
+  HttpClientRequest.makeWith(
+    method,
+    url,
+    UrlParams.empty,
+    Option.none(),
+    Headers.empty,
+    HttpBody.empty,
+  );
+
+describe("RT-5: the method assertion and the User-Agent", () => {
+  const allowed: ReadonlySet<string> = new Set(["GET", "POST", "PURGE"]);
+
+  const policed = (request: HttpClientRequest.HttpClientRequest) => {
+    const { client, seen } = fixture();
+    const exit = Effect.runPromiseExit(
+      client
+        .pipe(
+          Client.redirectLoop(noAttach),
+          Client.assertMethod(allowed),
+          Client.withUserAgent("acme", "1.2.3"),
+        )
+        .execute(request),
+    );
+
+    return exit.then((result) => ({ exit: result, seen }));
+  };
+
+  test("an allowed token passes and is sent as given", async () => {
+    const { exit, seen } = await policed(token("PURGE", `${A}/final`));
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(seen.map((hop) => hop.method)).toEqual(["PURGE"]);
+  });
+
+  test.each(["LINK", "purge", "Purge", "", "BAD TOKEN"])(
+    "the token %p outside the list is a defect and sends nothing",
+    async (name) => {
+      const { exit, seen } = await policed(token(name, `${A}/final`));
+
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
+      expect(seen).toEqual([]);
+    },
+  );
+
+  test("the defect does not carry the URL", async () => {
+    const { exit } = await policed(token("LINK", `${A}/final?api_key=SECRET`));
+
+    expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).not.toContain("SECRET");
+  });
+
+  test("every request carries User-Agent <binName>/<version>", async () => {
+    const { seen } = await policed(HttpClientRequest.make("GET")(`${A}/r/302/B`));
+    const agents = seen.map((hop) => Option.getOrUndefined(Headers.get(hop.headers, "user-agent")));
+
+    expect(agents).toEqual(["acme/1.2.3", "acme/1.2.3"]);
+  });
+
+  test("the runtime's User-Agent replaces one the caller set", async () => {
+    const { seen } = await policed(
+      HttpClientRequest.make("GET")(`${A}/final`).pipe(
+        HttpClientRequest.setHeader("User-Agent", "caller/9"),
+      ),
+    );
+
+    expect(
+      seen.map((hop) => Option.getOrUndefined(Headers.get(hop.headers, "user-agent"))),
+    ).toEqual(["acme/1.2.3"]);
   });
 });

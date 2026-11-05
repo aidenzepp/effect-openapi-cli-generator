@@ -167,3 +167,34 @@ export const redirectLoop =
 
     return HttpClient.transform(client, (_unsent, request) => loop(request, 0));
   };
+
+/**
+ * Asserts the request method against the allowlist `bin.ts` provides with the client layer
+ * (design 6.7). Bun's `fetch` sends any token outside its own table as `GET`, so the generator
+ * never emits one and a miss is a defect (exit 70): the request is never sent. The token is
+ * compared as given, with no case folding. Apply it outermost, so it sees the caller's request;
+ * a redirect only ever changes a method to `GET`.
+ */
+export const assertMethod =
+  (allowed: ReadonlySet<string>) =>
+  <E, R>(client: HttpClient.HttpClient.With<E, R>): HttpClient.HttpClient.With<E, R> =>
+    HttpClient.mapRequestInputEffect(client, (request) =>
+      allowed.has(request.method)
+        ? Effect.succeed(request)
+        : Effect.die(
+            new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
+          ),
+    );
+
+/**
+ * Sets `User-Agent: <binName>/<version>` (design 6.2) in place of Bun's implicit `Bun/<v>`. It
+ * replaces a caller-set value. Apply it outermost: every redirect hop starts from the caller's
+ * headers, so the value reaches each hop.
+ */
+export const withUserAgent =
+  (binName: string, version: string) =>
+  <E, R>(client: HttpClient.HttpClient.With<E, R>): HttpClient.HttpClient.With<E, R> =>
+    HttpClient.mapRequestInput(
+      client,
+      HttpClientRequest.setHeader("user-agent", `${binName}/${version}`),
+    );
