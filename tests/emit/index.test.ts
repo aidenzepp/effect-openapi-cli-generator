@@ -39,17 +39,17 @@ const scaffoldInput = Effect.gen(function* prepare() {
     document: configDocument,
   });
   const resolution = yield* resolve({ document, line: "3.1", value: read("openapi.json") });
-  const { api } = yield* normalize(resolution, { config, configDocument });
+  const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
   const plan = yield* planNames(api, { config, configDocument, strict: false });
   const input: ScaffoldInput = {
     api,
     config,
+    diagnostics: [...diagnostics, ...plan.diagnostics],
     generator: {
       packageJson: Schema.decodeUnknownSync(Schema.Json)(generatorPackage),
       tsconfig: Schema.decodeUnknownSync(Schema.Json)(generatorTsconfig),
     },
     plan,
-    refused: api.operations.slice(0, 1).map((operation) => operation.key),
   };
 
   return input;

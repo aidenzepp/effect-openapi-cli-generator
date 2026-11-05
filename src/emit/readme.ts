@@ -1,20 +1,22 @@
 import { Array as Arr, Order } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import type { Api, Operation } from "../model/entities.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
+import type { Api } from "../model/entities.ts";
 import type { NamePlan } from "../names/index.ts";
+import { reservedCliNames } from "../names/reserved.ts";
 import { stringLiteral } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 
 /**
  * What the README is written from: the model (webhooks), the author config (bin name), the name
- * plan (credential names and refusals), and the operations refused after planning, such as the
- * `cli/` layer's operation refusals, which the caller collects.
+ * plan (credential names), and the diagnostics of every stage (check, normalize, names and emit),
+ * which the caller collects. The refusal summary counts the refusals among them.
  */
 export interface ReadmeInput {
   readonly api: Api;
   readonly config: AuthorConfig;
   readonly plan: NamePlan;
-  readonly refused: readonly Operation["key"][];
+  readonly diagnostics: readonly Diagnostic[];
 }
 
 interface OperationKey {
@@ -55,11 +57,16 @@ const exitCodes: readonly (readonly [number, string])[] = [
   [130, "interrupted"],
 ];
 
+const reserved = Arr.sort([...reservedCliNames], Order.String)
+  .map((name) => `\`${name}\``)
+  .join(", ");
+
 const usage = (bin: string): string =>
   [
     "## Usage",
     `\`\`\`sh\n${bin} --help\n${bin} <command> --help\n\`\`\``,
     "Every command's `--help` shows its flags, request body fields, credentials and responses.",
+    `These names belong to the CLI, so no command or flag of the description may claim them: ${reserved}. Each credential's \`<scheme>-file\` flag is reserved as well.`,
   ].join("\n\n");
 
 const credentials = (plan: NamePlan): string => {
@@ -85,17 +92,17 @@ const exits = (): string =>
   ].join("\n\n");
 
 const refusals = (input: ReadmeInput): string => {
-  const refusedDiagnostics = input.plan.diagnostics.filter(
+  const refusedDiagnostics = input.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "refusal",
   );
-  const planned = refusedDiagnostics.flatMap((diagnostic) =>
+  const refusedOperations = refusedDiagnostics.flatMap((diagnostic) =>
     diagnostic.scope === "operation" && diagnostic.operation !== undefined
       ? [{ method: diagnostic.operation.method, path: diagnostic.operation.path }]
       : [],
   );
   const operations = Arr.sort(
     Arr.dedupeWith(
-      [...planned, ...input.refused],
+      refusedOperations,
       (left, right) => left.method === right.method && left.path === right.path,
     ),
     byKey,
@@ -151,8 +158,9 @@ const webhooks = (api: Api): string | undefined => {
 };
 
 /**
- * Emits the generated package's `README.md` (design 4.1, 4.2): usage, the credential environment
- * variables and file flags from the name plan, the exit codes (design 4.6), a refusal summary,
+ * Emits the generated package's `README.md` (design 4.1, 4.2): usage with the reserved CLI names
+ * (design 4.4), the credential environment variables and file flags from the name plan, the exit
+ * codes (design 4.6), a refusal summary of every stage's refusals,
  * and the webhooks, listed as informational. The bin name and credential names are ASCII by
  * their grammars; every spec string is an escaped literal in a `text` fence.
  */

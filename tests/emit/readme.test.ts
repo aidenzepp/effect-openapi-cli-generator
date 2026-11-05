@@ -6,6 +6,7 @@ import { emitReadme } from "../../src/emit/readme.ts";
 import type { ReadmeInput } from "../../src/emit/readme.ts";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
@@ -40,14 +41,14 @@ const prepared = (value: Schema.Json) =>
   Effect.gen(function* prepare() {
     const config = yield* decodeAuthorConfig(configJson, { document: configDocument });
     const resolution = yield* resolve({ document, line: "3.1", value });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
-    return { api, config, plan };
+    return { api, config, diagnostics: [...diagnostics, ...plan.diagnostics], plan };
   });
 
 const input = (value: Schema.Json = spec): Promise<ReadmeInput> =>
-  Effect.runPromise(prepared(value).pipe(Effect.map((base) => ({ ...base, refused: [] }))));
+  Effect.runPromise(prepared(value));
 
 const withWebhooks = { ...spec, webhooks: { [hostile]: webhook, "new-user": webhook } };
 
@@ -78,6 +79,27 @@ const fenced = (text: string): readonly string[] => {
   const match = /\n(?<marks>`{3,})text\n(?<body>[^]*?)\n\k<marks>\n/u.exec(text);
 
   return match?.groups?.body?.split("\n") ?? [];
+};
+
+const refusing = (
+  scope: "element" | "operation",
+  code: string,
+  operation?: { readonly method: string; readonly path: string },
+): Diagnostic => {
+  const fields = {
+    code,
+    document: "file:///golden/openapi.json",
+    element: "Element",
+    message: "Refused.",
+    openapi: "3.1.0",
+    pointer: "",
+    row: code.split("/")[0],
+    scope,
+    severity: "refusal",
+    specSection: "https://spec.openapis.org/oas/v3.1.0",
+  };
+
+  return Schema.decodeUnknownSync(Diagnostic)(operation ? { ...fields, operation } : fields);
 };
 
 describe("emitReadme", () => {
@@ -122,14 +144,88 @@ describe("emitReadme", () => {
     expect(section(emitReadme(await input()).content, "Webhooks")).toBe("");
   });
 
-  test("summarizes the refused operations without failing", async () => {
+  test("says nothing was refused only when no stage refused anything", async () => {
+    const base = await input();
+    const refusals = section(emitReadme(base).content, "Refusals");
+
+    expect(base.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal")).toEqual([]);
+    expect(refusals).toContain("Nothing in the description was refused.");
+  });
+
+  test("lists an operation refused at normalize, which is absent from the model", async () => {
+    const components = Schema.decodeUnknownSync(JsonRecord)(spec.components);
+    const schemes = Schema.decodeUnknownSync(JsonRecord)(components.securitySchemes);
+    const oauthOnly = {
+      ...spec,
+      components: {
+        ...components,
+        securitySchemes: {
+          ...schemes,
+          oauth: {
+            flows: { implicit: { authorizationUrl: "https://example.com/auth", scopes: {} } },
+            type: "oauth2",
+          },
+        },
+      },
+      paths: {
+        ...Schema.decodeUnknownSync(JsonRecord)(spec.paths),
+        "/oauth-only": {
+          get: { responses: { "200": { description: "ok" } }, security: [{ oauth: [] }] },
+        },
+      },
+    };
+    const base = await input(oauthOnly);
+    const refusals = section(emitReadme(base).content, "Refusals");
+
+    expect(base.api.operations.map((operation) => operation.key.path)).not.toContain("/oauth-only");
+    expect(base.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "SEC-06/no-satisfiable-alternative",
+    );
+    expect(refusals).not.toContain("Nothing in the description was refused.");
+    expect(fenced(refusals)).toEqual(['GET "/oauth-only"']);
+  });
+
+  test("lists an operation refused at the plan once, with other stages' refusals", async () => {
     const base = await input();
     const [first] = base.api.operations;
-    expect(first).toBeDefined();
+    const operation = { method: first?.key.method ?? "", path: first?.key.path ?? "" };
+    const refusal = (scope: "element" | "operation", code: string) =>
+      refusing(scope, code, operation);
+    const diagnostics = [
+      ...base.diagnostics,
+      refusal("operation", "NAM-01/plan"),
+      refusal("operation", "EMT-01/emit"),
+    ];
+    const refusals = section(emitReadme({ ...base, diagnostics }).content, "Refusals");
 
-    const refused = first === undefined ? [] : [first.key, first.key];
-    const refusals = section(emitReadme({ ...base, refused }).content, "Refusals");
+    expect(fenced(refusals)).toEqual([`${operation.method} "${operation.path}"`]);
+    expect(refusals).toContain("Generation refused 1 operation,");
+    expect(refusals).not.toContain("element");
+  });
 
-    expect(fenced(refusals)).toEqual([`${first?.key.method} "${first?.key.path}"`]);
+  test("counts element refusals of commands that still exist, not of refused operations", async () => {
+    const base = await input();
+    const [first] = base.api.operations;
+    const operation = { method: first?.key.method ?? "", path: first?.key.path ?? "" };
+    const gone = { method: "GET", path: "/gone" };
+    const diagnostics = [
+      ...base.diagnostics,
+      refusing("element", "OPR-01/one", operation),
+      refusing("element", "OPR-02/two"),
+      refusing("operation", "OPR-08/gone", gone),
+      refusing("element", "OPR-03/three", gone),
+    ];
+    const refusals = section(emitReadme({ ...base, diagnostics }).content, "Refusals");
+
+    expect(refusals).toContain("Generation refused 2 elements of generated commands;");
+    expect(fenced(refusals)).toEqual(['GET "/gone"']);
+  });
+
+  test("publishes the reserved CLI names in the usage section", async () => {
+    const usage = section(emitReadme(await input()).content, "Usage");
+
+    for (const name of ["help", "dry-run", "no-dry-run", "log-level", "base-url"]) {
+      expect(usage).toContain(`\`${name}\``);
+    }
   });
 });

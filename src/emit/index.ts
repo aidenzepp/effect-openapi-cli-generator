@@ -25,8 +25,8 @@ const runtime: readonly EmittedFile[] = Object.entries(runtimeFiles).map(([key, 
 
 /**
  * Emits the package scaffold (design 4.1, 4.2, 4.3): `package.json` and both tsconfigs,
- * `src/bin.ts` and `src/main.ts`, `README.md`, and the embedded runtime, sorted by path. Refused
- * operations only shape the README's summary; they never fail the scaffold. The `domain/`,
+ * `src/bin.ts` and `src/main.ts`, `README.md`, and the embedded runtime, sorted by path. Refusal
+ * diagnostics only shape the README's summary; they never fail the scaffold. The `domain/`,
  * `api/` and `cli/` layers are emitted by their own emitters.
  */
 export const emitScaffold = (
