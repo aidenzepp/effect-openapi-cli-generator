@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
 import type { ReadSchema } from "../../src/validate/index.ts";
+import type { Json } from "../../src/resolve/pointer.ts";
 import valid30 from "../fixtures/validate/valid-3.0.json" with { type: "json" };
 import invalid30 from "../fixtures/validate/invalid-3.0.json" with { type: "json" };
 import valid31 from "../fixtures/validate/valid-3.1.json" with { type: "json" };
@@ -15,6 +16,18 @@ const fixtures = {
   "3.0": { invalid: invalid30, valid: valid30 },
   "3.1": { invalid: invalid31, valid: valid31 },
   "3.2": { invalid: invalid32, valid: valid32 },
+};
+
+const deepFreeze = (value: Json): Json => {
+  if (Predicate.isObject(value)) {
+    for (const member of Object.values(value)) {
+      deepFreeze(member);
+    }
+
+    Object.freeze(value);
+  }
+
+  return value;
 };
 
 const vendored: ReadSchema = (file) =>
@@ -43,6 +56,20 @@ const failureTag = <A, E extends { readonly _tag: string }>(
   );
 
 describe("validateDocument", () => {
+  test.each(Object.entries(fixtures))(
+    "line %s: a deep-frozen document validates without being written",
+    async (_line, { invalid, valid }) => {
+      const frozenValid = deepFreeze(structuredClone(valid));
+      const frozenInvalid = deepFreeze(structuredClone(invalid));
+
+      const validResult = await Effect.runPromise(validateDocument(frozenValid));
+      const invalidResult = await Effect.runPromise(validateDocument(frozenInvalid));
+
+      expect(validResult.valid).toBe(true);
+      expect(invalidResult.valid).toBe(false);
+    },
+  );
+
   test.each([
     ["3.0", "https://spec.openapis.org/oas/3.0/schema/2024-10-18", "/parameters/0/in"],
     [

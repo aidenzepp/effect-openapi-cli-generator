@@ -19,6 +19,7 @@ import { lineOf, schemaUri } from "./dispatch.ts";
 import { groupErrors } from "./locations.ts";
 import type { InvalidInstanceLocation } from "./locations.ts";
 import type { Line, UnsupportedOpenApiVersion, ValidatorInput } from "./dispatch.ts";
+import type { Json } from "../resolve/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { manifest } from "./schemas/manifest.ts";
@@ -115,7 +116,7 @@ const registered = Effect.runSync(Effect.cached(register));
  * output, format assertion off, no result cache. The only Promise boundary is `compile` (R7).
  */
 export const validateDocument = (
-  document: ValidatorInput,
+  document: Json,
 ): Effect.Effect<
   ValidationResult,
   SchemaManifestError | UnsupportedOpenApiVersion | ValidatorError
@@ -130,7 +131,9 @@ export const validateDocument = (
       catch: (cause) => new ValidatorError({ cause }),
       try: () => compile(schema),
     });
-    const output = validator(document, "BASIC");
+    // SAFETY: hyperjump's Instance.fromJs only reads its input; the readonly document is never written (a deep-frozen document is tested).
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- readonly Json to the library's mutable input type, read-only use
+    const output = validator(document as ValidatorInput, "BASIC");
 
     return {
       errors: output.valid
