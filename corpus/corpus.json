@@ -1,0 +1,142 @@
+{
+  "specs": [
+    {
+      "bytes": 27721693,
+      "format": "json",
+      "id": "cloudflare",
+      "infoLicense": "BSD-3-Clause",
+      "license": "BSD-3-Clause",
+      "pinnedRef": "cloudflare/api-schemas@e7ff350143858818dc6ea0711f9c72bd2f732f38",
+      "sha256": "5885d8cab5e321b2231393c848153171086af02fba8b7672b744a9945f4e4b1a",
+      "sourceUrl": "https://raw.githubusercontent.com/cloudflare/api-schemas/e7ff350143858818dc6ea0711f9c72bd2f732f38/openapi.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "eab877859c6be9fb3adc3b7b771d3522abee7d95adcf39ed94aa3526d7381e2a",
+        "sourceUrl": "https://raw.githubusercontent.com/cloudflare/api-schemas/e7ff350143858818dc6ea0711f9c72bd2f732f38/openapi.yaml"
+      }
+    },
+    {
+      "bytes": 1204742,
+      "format": "json",
+      "id": "discord",
+      "infoLicense": "MIT",
+      "license": "MIT",
+      "pinnedRef": "discord/discord-api-spec@4e75626a4cedfbc397d66f5491c79a9a62a71fd5",
+      "sha256": "281a2bff563d77a19e51fc3bf8bbe3ebcef28e3dc86684ae395b06ac51ba7484",
+      "sourceUrl": "https://raw.githubusercontent.com/discord/discord-api-spec/4e75626a4cedfbc397d66f5491c79a9a62a71fd5/specs/openapi.json",
+      "tier": "ci"
+    },
+    {
+      "bytes": 14139669,
+      "format": "json",
+      "id": "github-3.0",
+      "infoLicense": "MIT",
+      "license": "MIT",
+      "pinnedRef": "github/rest-api-description@87267030f4b1cb33c3b076e4999f3da2e1290450",
+      "sha256": "2dc97f59b32478bce29f5ccbb3d7066043476f11b5e416ecdd119f6eda48e74b",
+      "sourceUrl": "https://raw.githubusercontent.com/github/rest-api-description/87267030f4b1cb33c3b076e4999f3da2e1290450/descriptions/api.github.com/api.github.com.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "b9e7f117b98697ef4ed9431997e9aba7279f664617448c0d62789f33cb80500d",
+        "sourceUrl": "https://raw.githubusercontent.com/github/rest-api-description/87267030f4b1cb33c3b076e4999f3da2e1290450/descriptions/api.github.com/api.github.com.yaml"
+      }
+    },
+    {
+      "bytes": 14256483,
+      "format": "json",
+      "id": "github-3.1",
+      "infoLicense": "MIT",
+      "license": "MIT",
+      "pinnedRef": "github/rest-api-description@87267030f4b1cb33c3b076e4999f3da2e1290450",
+      "sha256": "84bcc6fe11602d88d744ab9eb77ecf767d5f002065f1af7627395504c59164d2",
+      "sourceUrl": "https://raw.githubusercontent.com/github/rest-api-description/87267030f4b1cb33c3b076e4999f3da2e1290450/descriptions-next/api.github.com/api.github.com.json",
+      "tier": "ci"
+    },
+    {
+      "bytes": 2146414,
+      "format": "json",
+      "id": "kubernetes-core-v1",
+      "license": "Apache-2.0",
+      "pinnedRef": "kubernetes/kubernetes@2af1ee8d0b379c06efa5357d2e9c3c25546d96e5",
+      "sha256": "73f8ea69ee8e4c9140d4a5f042873cfd3b3a4db22a26b94a3802605d15cde673",
+      "sourceUrl": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+      "tier": "ci"
+    },
+    {
+      "bytes": 5120012,
+      "format": "json",
+      "id": "openai",
+      "infoLicense": "MIT",
+      "license": "MIT",
+      "pinnedRef": "openai/openai-openapi@fd8abc654c421ac450c7c2181a43d85d2b66ea89",
+      "sha256": "529e2175e6ec7d49cb02ca69aeb67f40ef34de2547a6acb91f42c5105c10f5bb",
+      "sourceUrl": "https://raw.githubusercontent.com/openai/openai-openapi/fd8abc654c421ac450c7c2181a43d85d2b66ea89/openapi.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "34767c581d1b2d42ebc118d6f064e85674b25288756f44052c54b526389747f6",
+        "sourceUrl": "https://raw.githubusercontent.com/openai/openai-openapi/fd8abc654c421ac450c7c2181a43d85d2b66ea89/openapi.yaml"
+      }
+    },
+    {
+      "bytes": 504378,
+      "format": "json",
+      "id": "resend",
+      "license": "MIT",
+      "pinnedRef": "resend/resend-openapi@0b2a456ec468f07eb2e6fac73f0a76fb5463823c",
+      "sha256": "aa33334c3686b64a1dc11e556da0407473bb0b9a5a4f873d69cd9aa06b606915",
+      "sourceUrl": "https://raw.githubusercontent.com/resend/resend-openapi/0b2a456ec468f07eb2e6fac73f0a76fb5463823c/resend.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "e706637116ab3cf6b3ca99854c4cab4933a193c607b2b18b9d79c0cb16c68dd8",
+        "sourceUrl": "https://raw.githubusercontent.com/resend/resend-openapi/0b2a456ec468f07eb2e6fac73f0a76fb5463823c/resend.yaml"
+      }
+    },
+    {
+      "bytes": 5070331,
+      "format": "json",
+      "id": "stripe",
+      "license": "MIT",
+      "pinnedRef": "stripe/openapi@3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2",
+      "sha256": "27e7f9681bfe4423708023338fd14096600581718fc2e15efd0d946d6a522c25",
+      "sourceUrl": "https://raw.githubusercontent.com/stripe/openapi/3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2/latest/openapi.spec3.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "9f4af6778fa1e9a868da5a14c643a05de8528dfc3205645e2438955761c2680c",
+        "sourceUrl": "https://raw.githubusercontent.com/stripe/openapi/3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2/latest/openapi.spec3.yaml"
+      }
+    },
+    {
+      "bytes": 4366745,
+      "format": "yaml",
+      "id": "digitalocean",
+      "infoLicense": "Apache 2.0",
+      "license": "Apache-2.0",
+      "pinnedRef": "unpinned",
+      "sha256": "d8ae5a5f0b5c57797caad17ab542fea7057899af368a68ae7c1b441eb284e1b5",
+      "sourceUrl": "https://api-engineering.nyc3.digitaloceanspaces.com/spec-ci/DigitalOcean-public.v2.yaml",
+      "tier": "extended"
+    },
+    {
+      "bytes": 3342111,
+      "format": "yaml",
+      "id": "plaid",
+      "license": "NOASSERTION",
+      "pinnedRef": "plaid/plaid-openapi@0bc54f7d31203226e4c7b9ade2eb13c613f8ae60",
+      "sha256": "0914d09677392d647dd4c37740ea1b30bfdd33ac71a254c20c89822c9566c4be",
+      "sourceUrl": "https://raw.githubusercontent.com/plaid/plaid-openapi/0bc54f7d31203226e4c7b9ade2eb13c613f8ae60/2020-09-14.yml",
+      "tier": "extended"
+    },
+    {
+      "bytes": 1878657,
+      "format": "json",
+      "id": "twilio",
+      "infoLicense": "Apache 2.0",
+      "license": "MIT",
+      "pinnedRef": "twilio/twilio-oai@d9775142962ea67d5f3d50c5021a23ae6d330c5b",
+      "sha256": "bfdf249a129819af274d6bdc7672156ea3416ad48670a6f0544def6ef386ba87",
+      "sourceUrl": "https://raw.githubusercontent.com/twilio/twilio-oai/d9775142962ea67d5f3d50c5021a23ae6d330c5b/spec/json/twilio_api_v2010.json",
+      "tier": "extended"
+    }
+  ],
+  "version": 1
+}

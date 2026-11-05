@@ -1,0 +1,11 @@
+{
+  "binName": "resend",
+  "envPrefix": "RESEND",
+  "package": {
+    "name": "resend-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": ["https://api.resend.com"]
+  }
+}
