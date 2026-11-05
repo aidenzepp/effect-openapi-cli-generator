@@ -10,29 +10,15 @@ import type {
   YAMLSeq,
 } from "yaml";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
 import { escapeToken } from "../resolve/pointer.ts";
 import type { Json } from "../resolve/pointer.ts";
-import { LoadRefusal, refuse } from "./budget.ts";
-import type { LoadLimits, Position } from "./budget.ts";
+import { refuse } from "./budget.ts";
+import type { LoadCode, LoadLimits, LoadRefusal, Position } from "./budget.ts";
 
 type Document = typeof DocumentUri.Type;
 
-const yamlMessages = {
-  "DOC-14/invalid-yaml": "The document is not valid YAML 1.2.",
-  "DOC-14/yaml-alias-cycle": "A YAML alias refers to a node that contains it.",
-  "DOC-14/yaml-multi-document": "The YAML stream holds more than one document.",
-  "DOC-14/yaml-non-finite": "A YAML number is not finite (.inf or .nan).",
-  "DOC-14/yaml-non-json-tag": "A YAML tag has no JSON value.",
-  "DOC-14/yaml-non-string-key": "A YAML mapping key is not a scalar.",
-} as const;
-
-type YamlCode = keyof typeof yamlMessages;
-
-type SharedCode = "DOC-14/depth-limit" | "DOC-14/duplicate-key" | "DOC-14/node-budget";
-
 interface Failure {
-  readonly code: YamlCode | SharedCode;
+  readonly code: LoadCode;
   /**
    * Character index into the decoded text, when the failure has a place.
    */
@@ -76,7 +62,7 @@ interface Walk {
 const pointerOf = (path: readonly string[]): string =>
   path.map((token) => `/${escapeToken(token)}`).join("");
 
-const fail = (walk: Walk, code: Failure["code"], node: ParsedNode | null): void => {
+const fail = (walk: Walk, code: LoadCode, node: ParsedNode | null): void => {
   const index = node?.range[0];
   const pointer = pointerOf(walk.path);
 
@@ -241,7 +227,7 @@ const build = (walk: Walk, node: ParsedNode | null, depth: number): Built => {
   return built;
 };
 
-const errorCodes = new Map<string, Failure["code"]>([
+const errorCodes = new Map<string, LoadCode>([
   ["DUPLICATE_KEY", "DOC-14/duplicate-key"],
   ["NON_STRING_KEY", "DOC-14/yaml-non-string-key"],
   ["TAG_RESOLVE_FAILED", "DOC-14/yaml-non-json-tag"],
@@ -305,52 +291,13 @@ const locate = (
   };
 };
 
-const diagnosticInput = (
-  document: Document,
-  code: YamlCode,
-  pointer: string,
-  position: Position | undefined,
-) => {
-  const fields = {
-    code,
-    document,
-    element: "document",
-    message: yamlMessages[code],
-    openapi: "unknown",
-    pointer,
-    row: "DOC-14",
-    scope: "document",
-    severity: "refusal",
-    specSection: "https://spec.openapis.org/oas/v3.1.2.html#format",
-  };
-
-  return position === undefined
-    ? fields
-    : { ...fields, column: position.column, line: position.line };
-};
-
-const isYamlCode = (code: Failure["code"]): code is YamlCode => code in yamlMessages;
-
 const refuseYaml = (
   document: Document,
-  code: Failure["code"],
+  code: LoadCode,
   pointer: string,
   position?: Position,
 ): Effect.Effect<never, LoadRefusal> =>
-  isYamlCode(code)
-    ? Schema.decodeUnknownEffect(Diagnostic)(
-        diagnosticInput(document, code, pointer, position),
-      ).pipe(
-        Effect.orDie,
-        Effect.flatMap((diagnostic) =>
-          Effect.fail(
-            new LoadRefusal(
-              position === undefined ? { diagnostic } : { diagnostic, offset: position.offset },
-            ),
-          ),
-        ),
-      )
-    : refuse(document, code, position === undefined ? { pointer } : { pointer, position });
+  refuse(document, code, position === undefined ? { pointer } : { pointer, position });
 
 /**
  * Strict YAML 1.2 (design 3.1): `yaml`'s core schema with unique, string keys and no merge, then a
