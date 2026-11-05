@@ -33,13 +33,17 @@ const HostileCases = Schema.Struct({
   cases: Schema.Array(
     Schema.Struct({
       id: Schema.String,
-      input: Schema.Union([Schema.String, Schema.Struct({ codeUnits: Schema.Array(Schema.Number) })]),
+      input: Schema.Union([
+        Schema.String,
+        Schema.Struct({ codeUnits: Schema.Array(Schema.Number) }),
+      ]),
     }),
   ),
 });
 
 const hostileStrings: readonly string[] = Schema.decodeUnknownSync(HostileCases)(hostile).cases.map(
-  ({ input }) => (Schema.is(Schema.String)(input) ? input : String.fromCodePoint(...input.codeUnits)),
+  ({ input }) =>
+    Schema.is(Schema.String)(input) ? input : String.fromCodePoint(...input.codeUnits),
 );
 
 const brands = [
@@ -87,7 +91,12 @@ describe("branded codecs", () => {
     expect(issueTag(JsonLiteral, Number.NaN)).toBe("rejected");
     expect(issueTag(JsonLiteral, Number.POSITIVE_INFINITY)).toBe("rejected");
     expect(issueTag(JsonLiteral, "x".repeat(2 ** 20 + 1))).toBe("rejected");
-    expect(issueTag(JsonLiteral, Array.from({ length: 70_000 }, () => 0))).toBe("rejected");
+    expect(
+      issueTag(
+        JsonLiteral,
+        Array.from({ length: 70_000 }, () => 0),
+      ),
+    ).toBe("rejected");
   });
 
   test("hostile strings never throw and the token brands reject all syntax-bearing ones", () => {
@@ -114,7 +123,13 @@ describe("branded codecs", () => {
     for (const bad of ["\uD800", "\uDC00", "a\rb"]) {
       expect(issueTag(WireName, bad)).toBe("rejected");
     }
-    for (const good of [["a", "{b}c"].join("$"), "`\\", "text */ more", "first line\n  @deprecated forged tag", "😀"]) {
+    for (const good of [
+      ["a", "{b}c"].join("$"),
+      "`\\",
+      "text */ more",
+      "first line\n  @deprecated forged tag",
+      "😀",
+    ]) {
       expect(issueTag(SafeText, good)).toBe("accepted");
     }
     for (const good of ["__proto__", "constructor", "prototype", ["a", "{b}c"].join("$"), "😀"]) {
