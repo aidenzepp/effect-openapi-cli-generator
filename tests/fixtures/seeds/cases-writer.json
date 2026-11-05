@@ -1,0 +1,764 @@
+{
+  "cases": [
+    {
+      "id": "writer-nested-files-new-directory",
+      "source": "E44 tests/write.test.ts writes nested files",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "files": ["src/main.ts", "<manifest>"],
+        "manifestWrittenLast": true,
+        "lockRemovedAfter": true,
+        "newPathsCreatedWith": "wx"
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-existing-output-directory-allowed",
+      "source": "E44 tests/write.test.ts refuses existing targets (flips: output directory also holds files the generator does not own)",
+      "input": {
+        "output": "directory-exists-with-author-files",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "authorFiles": ["dist/x.js", "node_modules/.keep", "src/commands.ts"]
+      },
+      "expected": {
+        "outcome": "written",
+        "priorOutcome": "rejected",
+        "authorFilesUntouched": true,
+        "generatedFilesReplacedAtomically": true,
+        "rename": "temp-sibling-then-rename"
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-regeneration-overwrites-generated-file",
+      "source": "E44 tests/write.test.ts refuses existing targets (flips: generated files are overwritten on regeneration)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "handEditedGeneratedFile": "src/main.ts"
+      },
+      "expected": {
+        "outcome": "written",
+        "priorOutcome": "rejected",
+        "replacedBy": "rename-of-temp-sibling",
+        "noPartialContentVisible": true
+      },
+      "designSection": "§3.6 Hand edits"
+    },
+    {
+      "id": "writer-output-is-regular-file",
+      "source": "E44 tests/write.test.ts refuses existing targets (existing file)",
+      "input": {
+        "output": "regular-file",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "fileUnchanged": true,
+        "noLockCreated": true,
+        "exitCode": 1,
+        "scope": "document"
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-output-is-dangling-symlink",
+      "source": "E44 tests/write.test.ts refuses existing targets (dangling symlink)",
+      "input": {
+        "output": "symlink-to-missing-target",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "symlinkUnchanged": true,
+        "targetNotCreated": true,
+        "exitCode": 1,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-output-is-symlink-to-directory",
+      "source": "E44 tests/write.test.ts refuses existing targets (symlink, new case)",
+      "input": {
+        "output": "symlink-to-existing-directory",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "nothingWrittenThroughLink": true,
+        "exitCode": 1,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-symlink-inside-output-directory",
+      "source": "E44 tests/write.test.ts (symlink refusal applies to every path, design I7)",
+      "input": {
+        "output": "directory-exists",
+        "preexisting": {
+          "src": "symlink-to-outside-directory"
+        },
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "nothingWrittenOutsideOutputDirectory": true,
+        "exitCode": 1
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-two-concurrent-claimants",
+      "source": "E44 tests/write.test.ts one concurrent claimant wins",
+      "input": {
+        "output": "absent",
+        "claimants": 2,
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "exactly-one-succeeds",
+        "lockFile": ".openapi-cli-manifest.lock",
+        "lockCreatedWith": "wx",
+        "loser": {
+          "exitCode": 1,
+          "namesLockPath": true
+        },
+        "loserWroteNothing": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-many-concurrent-claimants",
+      "source": "E44 tests/write.test.ts one concurrent claimant wins (generalized to N)",
+      "input": {
+        "output": "absent",
+        "claimants": 8,
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "exactly-one-succeeds",
+        "losers": 7,
+        "loserExitCode": 1,
+        "treeEqualsSingleRun": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-concurrent-claimants-existing-directory",
+      "source": "E44 tests/write.test.ts one concurrent claimant wins (regeneration race; per-file renames alone do not serialize runs)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "claimants": 2,
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "exactly-one-succeeds",
+        "loser": {
+          "exitCode": 1,
+          "namesLockPath": true
+        },
+        "noInterleavedFiles": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-lock-released-after-success",
+      "source": "E44 tests/write.test.ts (lock finalizer, design adds lock)",
+      "input": {
+        "output": "absent",
+        "runs": ["write", "write"],
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "second-run-proceeds",
+        "lockAbsentBetweenRuns": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-lock-released-after-write-failure",
+      "source": "E44 tests/write.test.ts write failures clean only owned output",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a",
+              "content": "x"
+            },
+            {
+              "path": "a/b",
+              "content": "x"
+            }
+          ]
+        },
+        "then": "write valid application"
+      },
+      "expected": {
+        "outcome": "first-run-refused",
+        "lockAbsentAfterFailure": true,
+        "secondRun": "written"
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-unsafe-path-parent-escape",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "../escape",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-unsafe-path-absolute",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "/absolute",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-unsafe-path-inner-dot-dot",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a/../b",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-unsafe-path-backslash",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a\\b",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-unsafe-path-empty",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-unsafe-path-empty-segment",
+      "source": "E44 tests/write.test.ts unsafe paths fail before claiming",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a//b",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "checkedWith": "Path.resolveWithin",
+        "beforeLockClaim": true,
+        "outputDirectoryNotCreated": true,
+        "lockNotCreated": true,
+        "scope": "document"
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-file-directory-conflict",
+      "source": "E44 tests/write.test.ts write failures clean only owned output (a and a/b)",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a",
+              "content": "x"
+            },
+            {
+              "path": "a/b",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "temporarySiblingsRemoved": true,
+        "manifestNotWritten": true,
+        "outputDirectoryAbsentWhenCreatedByThisRun": true
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-file-directory-conflict-existing-directory",
+      "source": "E44 tests/write.test.ts write failures clean only owned output (existing directory, new case)",
+      "input": {
+        "output": "directory-with-previous-manifest-and-author-files",
+        "application": {
+          "files": [
+            {
+              "path": "a",
+              "content": "x"
+            },
+            {
+              "path": "a/b",
+              "content": "x"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "refused",
+        "authorFilesUntouched": true,
+        "previousGeneratedFilesIntact": true,
+        "previousManifestIntact": true,
+        "temporarySiblingsRemoved": true
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-missing-parent-directory",
+      "source": "E44 tests/write.test.ts (missing/out)",
+      "input": {
+        "output": "missing-parent/out",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "unsettled",
+        "question": "the design does not say whether the writer creates missing parents of the output directory or refuses; prior behavior refused",
+        "priorOutcome": "rejected",
+        "mustHold": {
+          "noFilesOutsideOutputDirectory": true
+        }
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-interrupt-after-first-temp-sibling",
+      "source": "E44 tests/write.test.ts interrupted writes remove the claimed directory (flips: design removes temp siblings and lock, not the directory)",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "interruptAt": "write of temp sibling never completes"
+      },
+      "expected": {
+        "outcome": "interrupted",
+        "lockRemoved": true,
+        "temporarySiblingsRemoved": true,
+        "manifestNotWritten": true,
+        "scope": "finalizer on exit or interrupt"
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-interrupt-regeneration-keeps-previous-files",
+      "source": "E44 tests/write.test.ts interrupted writes (previous manifest case)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "previousFiles": ["src/main.ts", "src/old.ts"],
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "interruptAt": "after src/main.ts renamed, before manifest"
+      },
+      "expected": {
+        "outcome": "interrupted",
+        "lockRemoved": true,
+        "temporarySiblingsRemoved": true,
+        "filesPreviousManifestListedAndRunDidNotRewriteStayInPlace": ["src/old.ts"],
+        "reportedAsNotice": true,
+        "manifestIsPreviousOrNew": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-interrupt-before-claim",
+      "source": "E44 tests/write.test.ts interruption (new boundary)",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "interruptAt": "before lock creation"
+      },
+      "expected": {
+        "outcome": "interrupted",
+        "nothingCreated": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-interrupt-after-lock-before-files",
+      "source": "E44 tests/write.test.ts interruption (new boundary)",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        },
+        "interruptAt": "after lock creation, before first file"
+      },
+      "expected": {
+        "outcome": "interrupted",
+        "lockRemoved": true,
+        "outputDirectoryHoldsNoGeneratedFiles": true
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-stale-lock-after-killed-run",
+      "source": "E44 tests/write.test.ts (R12, R13; finalizer cannot run on SIGKILL)",
+      "input": {
+        "output": "directory-with-leftover-lock",
+        "lockFile": ".openapi-cli-manifest.lock",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "unsettled",
+        "question": "the design defines no recovery for a lock left by a killed run; a second claimant fails with exit 1 and the lock path, and nothing says whether the operator deletes it by hand",
+        "mustHold": {
+          "exitCode": 1,
+          "namesLockPath": true,
+          "nothingWritten": true
+        }
+      },
+      "designSection": "§3.6 Run lock"
+    },
+    {
+      "id": "writer-manifest-written-last",
+      "source": "E44 tests/write.test.ts (design: manifest is the commit record)",
+      "input": {
+        "output": "absent",
+        "application": {
+          "files": [
+            {
+              "path": "a.ts",
+              "content": "1"
+            },
+            {
+              "path": "b.ts",
+              "content": "2"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "manifestRenamedAfterEveryOtherFile": true,
+        "manifestListsPathAndSha256ForEveryFile": true
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-stale-file-removed-when-sha-matches",
+      "source": "E44 tests/write.test.ts (design: deletion only of manifest-listed paths)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "previousFiles": {
+          "src/old.ts": "unmodified"
+        },
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "removed": ["src/old.ts"]
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-stale-file-kept-when-sha-differs",
+      "source": "E44 tests/write.test.ts (design: hand-edited stale file left in place)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "previousFiles": {
+          "src/old.ts": "edited-after-generation"
+        },
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "kept": ["src/old.ts"],
+        "reportedAsNotice": true
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-previous-manifest-path-outside-output",
+      "source": "E44 tests/write.test.ts (design: removal only inside the output directory)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "previousManifestLists": ["../outside.ts"],
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "outsideFileNotRemoved": true,
+        "reportedAsNotice": true
+      },
+      "designSection": "§9 I7"
+    },
+    {
+      "id": "writer-author-owned-files-never-removed",
+      "source": "E44 tests/write.test.ts (D-AD11 author-owned command module)",
+      "input": {
+        "output": "directory-with-previous-manifest",
+        "authorFiles": ["src/commands.ts"],
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "authorFilesUntouched": true
+      },
+      "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-no-whole-directory-swap",
+      "source": "E44 tests/write.test.ts (design: rename onto non-empty directory fails, so no swap)",
+      "input": {
+        "output": "directory-with-dist-and-node-modules",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "distAndNodeModulesIntact": true,
+        "directoryInodeUnchanged": true
+      },
+      "designSection": "§3.6 Write"
+    }
+  ]
+}
