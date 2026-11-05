@@ -4,26 +4,26 @@ import { DocumentUri } from "../../src/model/brands.ts";
 import { rewriteDialect } from "../../src/validate/dialect.ts";
 import { groupErrors } from "../../src/validate/locations.ts";
 import { diagnoseDocument } from "../../src/validate/index.ts";
-import type { ValidatorInput } from "../../src/validate/index.ts";
+import type { Json } from "../../src/resolve/pointer.ts";
 
 const uri = Schema.decodeUnknownSync(DocumentUri)("https://example.com/openapi.json");
 
 const dialectBase = "https://spec.openapis.org/oas/3.1/dialect/base";
 
-const diagnose = (document: ValidatorInput) => Effect.runPromise(diagnoseDocument(document, uri));
+const diagnose = (document: Json) => Effect.runPromise(diagnoseDocument(document, uri));
 
 const ok = { "200": { description: "ok" } };
 
-const document = (openapi: string, extra: Record<string, ValidatorInput> = {}): ValidatorInput => ({
+const document = (openapi: string, extra: Record<string, Json> = {}): Json => ({
   info: { title: "t", version: "1" },
   openapi,
   paths: {},
   ...extra,
 });
 
-const operation = (get: ValidatorInput): ValidatorInput => ({ "/a{b}": { get } });
+const operation = (get: Json): Json => ({ "/a{b}": { get } });
 
-const pathParameter: ValidatorInput = {
+const pathParameter: Json = {
   allowReserved: true,
   in: "path",
   name: "b",
@@ -31,14 +31,14 @@ const pathParameter: ValidatorInput = {
   schema: { type: "string" },
 };
 
-const link = (parameters: ValidatorInput): ValidatorInput =>
+const link = (parameters: Json): Json =>
   operation({
     responses: { "200": { description: "ok", links: { l: { operationId: "x", parameters } } } },
   });
 
 const classes: {
   readonly code: string;
-  readonly document: ValidatorInput;
+  readonly document: Json;
   readonly pointer: string;
 }[] = [
   { code: "DOC-02/patch-digits", document: document("3.0.10"), pointer: "/openapi" },
@@ -133,7 +133,7 @@ describe("refusals", () => {
   });
 });
 
-const schemaDocument = (type: string): ValidatorInput =>
+const schemaDocument = (type: string): Json =>
   document("3.1.0", {
     components: {
       schemas: {
@@ -188,15 +188,22 @@ describe("dialect id rewrite", () => {
     const rewritten = await Effect.runPromise(rewriteDialect(input));
 
     expect(rewritten.occurrences).toEqual([]);
-    expect(rewritten.copy).toBe(input);
+
+    const copy: Json = rewritten.copy;
+
+    expect(copy).toEqual(input);
   });
 
-  test("builds no copy when no site exists", async () => {
+  test("copies the input even when no site exists", async () => {
     const input = document("3.1.0");
     const rewritten = await Effect.runPromise(rewriteDialect(input));
 
     expect(rewritten.occurrences).toEqual([]);
-    expect(rewritten.copy).toBe(input);
+
+    const copy: Json = rewritten.copy;
+
+    expect(copy).toEqual(input);
+    expect(Object.is(copy, input)).toBe(false);
   });
 });
 

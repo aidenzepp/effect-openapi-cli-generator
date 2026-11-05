@@ -1,11 +1,5 @@
 import { Data, Effect, Option, Schema } from "effect";
-import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
 import type { Json } from "../resolve/pointer.ts";
-
-/**
- * A parsed JSON document in the validator library's own (mutable) JSON type.
- */
-export type ValidatorInput = Parameters<Validator>[0];
 
 /**
  * The OpenAPI line a document declares.

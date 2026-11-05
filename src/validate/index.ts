@@ -5,6 +5,7 @@ import {
   registerSchema,
   setShouldValidateFormat,
 } from "@hyperjump/json-schema/draft-2020-12";
+import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
 import "@hyperjump/json-schema/draft-04";
 // The vendored 3.1 and 3.2 meta-schemas require the OAS base vocabulary; these modules define it
 // (design 3.2). They also register the library's own undated OAS ids, which are never validated
@@ -18,15 +19,17 @@ import type { Refusal } from "./disagreements.ts";
 import { lineOf, schemaUri } from "./dispatch.ts";
 import { groupErrors } from "./locations.ts";
 import type { InvalidInstanceLocation } from "./locations.ts";
-import type { Line, UnsupportedOpenApiVersion, ValidatorInput } from "./dispatch.ts";
+import type { Line, UnsupportedOpenApiVersion } from "./dispatch.ts";
 import type { Json } from "../resolve/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { manifest } from "./schemas/manifest.ts";
 
+type ValidatorInput = Parameters<Validator>[0];
+
 export { UnsupportedOpenApiVersion } from "./dispatch.ts";
 
-export type { Line, ValidatorInput } from "./dispatch.ts";
+export type { Line } from "./dispatch.ts";
 
 /**
  * A vendored schema file cannot be read or differs from the manifest.
@@ -169,7 +172,7 @@ const sch01 = Option.fromNullishOr(knownDisagreements.find((entry) => entry.row 
  * is validated as a deep copy with the text's dialect id rewritten; the input is never changed.
  */
 export const diagnoseDocument = (
-  document: ValidatorInput,
+  document: Json,
   uri: typeof DocumentUri.Type,
 ): Effect.Effect<
   Diagnosis,
