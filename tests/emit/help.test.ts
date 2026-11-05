@@ -260,6 +260,12 @@ const timeAlternative = (count: number) => {
   return elapsed;
 };
 
+const minTime = (count: number) => {
+  timeAlternative(count);
+
+  return Math.min(...Array.from({ length: 5 }, () => timeAlternative(count)));
+};
+
 describe("operationHelp", () => {
   test("description is the source description, else the summary, an empty one staying empty", () => {
     expect<string>(withDocs({ description: "Update a user." })).toBe("Update a user.");
@@ -448,10 +454,12 @@ describe("operationHelp", () => {
   });
   test("renders a 50k-name alternative in linear time", () => {
     // Compare growth rather than an absolute time so the test tolerates a loaded machine.
-    // Linear rendering grows about 10x from 5k to 50k names; quadratic rendering about 100x.
-    const small = timeAlternative(5000);
-    const large = timeAlternative(50_000);
-    expect(large / Math.max(small, 1)).toBeLessThan(30);
+    // Each size is the minimum of five runs after one warm-up, so a slow run does not decide the ratio.
+    // Linear rendering grows about 5x from 10k to 50k names; quadratic rendering about 25x.
+    const small = minTime(10_000);
+    const large = minTime(50_000);
+
+    expect(large / Math.max(small, 1)).toBeLessThan(15);
   }, 10_000);
 });
 
