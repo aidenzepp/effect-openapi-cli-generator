@@ -46,6 +46,12 @@ const fanOut = (depth: number) => {
   } satisfies Defs;
 };
 
+// A string schema with a 5000-member enum: about 5000 nodes to compare.
+const bigEnum = (): Schema.Json => ({
+  enum: Array.from({ length: 5000 }, (_, index) => `v${index}`),
+  type: "string",
+});
+
 describe("flattenBody", () => {
   test("whole-body flags are always offered for a json body", () => {
     const flags = byName({ Root: object({}) });
@@ -219,6 +225,79 @@ describe("flattenBody", () => {
 
     const deep = flattenBody(fanOut(64), alternative("json", "Root"));
     expect(Result.isFailure(deep) && deep.failure._tag).toBe("UnresolvedBodyRef");
+  }, 5000);
+
+  test("each field flag names the source pointer of the property that declares it", () => {
+    const inline = "/paths/~1x/post/requestBody/content/application~1json/schema";
+    const other = "file:///spec/other.json#/defs/Remote";
+    const defs = {
+      Base: object({ address: object({ city: { type: "string" } }) }),
+      Root: {
+        allOf: [
+          { $ref: "#/$defs/Base" },
+          object({
+            remote: { $ref: `#/$defs/${other.replaceAll("~", "~0").replaceAll("/", "~1")}` },
+          }),
+        ],
+        properties: { own: { type: "string" } },
+      },
+      [inline]: object({ tags: { items: { type: "string" }, type: "array" } }),
+      [other]: object({ id: { type: "integer" } }),
+    } satisfies Defs;
+    const pointers = (key: string) =>
+      Object.fromEntries(
+        run(defs, "json", key).flags.map(({ name, schemaPointer }) => [name, schemaPointer]),
+      );
+
+    expect(pointers("Root")).toEqual({
+      "address.city": "/components/schemas/Base/properties/address/properties/city",
+      body: "",
+      "body-file": "",
+      own: "/components/schemas/Root/properties/own",
+      "remote.id": "/defs/Remote/properties/id",
+    });
+    expect(pointers(inline)).toEqual({
+      body: "",
+      "body-file": "",
+      tags: `${inline}/properties/tags`,
+    });
+  });
+
+  test("a property declared equal in two allOf members keeps the first declaration", () => {
+    const { flags } = run({
+      A: object({ x: { type: "string" } }),
+      B: object({ x: { type: "string" } }),
+      Root: { allOf: [{ $ref: "#/$defs/A" }, { $ref: "#/$defs/B" }] },
+    });
+
+    expect(flags.find(({ name }) => name === "x")?.schemaPointer).toBe(
+      "/components/schemas/A/properties/x",
+    );
+  });
+
+  test("duplicate allOf keys over large equal subtrees charge their equality to the budget", () => {
+    const members = Array.from({ length: 4 }, (_, index): [string, Schema.Json] => [
+      `M${index}`,
+      object({ big: bigEnum() }),
+    ]);
+    const result = flattenBody(
+      {
+        ...Object.fromEntries(members),
+        Root: { allOf: members.map(([key]) => ({ $ref: `#/$defs/${key}` })) },
+      },
+      alternative("json", "Root"),
+    );
+    expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
+
+    const small = flattenBody(
+      {
+        M0: object({ big: bigEnum() }),
+        M1: object({ big: bigEnum() }),
+        Root: { allOf: [{ $ref: "#/$defs/M0" }, { $ref: "#/$defs/M1" }] },
+      },
+      alternative("json", "Root"),
+    );
+    expect(Result.isSuccess(small)).toBe(true);
   }, 5000);
 
   test("a body that exceeds the shared visit budget is a typed BodyBudgetExceeded", () => {

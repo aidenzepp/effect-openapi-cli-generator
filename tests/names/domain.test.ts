@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Array as Arr } from "effect";
-import { domainIdentifiers, fixedNamespaces } from "../../src/names/domain.ts";
+import { domainIdentifiers, fixedNamespaces, rootModuleNames } from "../../src/names/domain.ts";
+import { reservedIdentifiers } from "../../src/names/reserved.ts";
 
 const inline = "/paths/~1users/post/requestBody/content/application~1json/schema";
 
@@ -23,6 +24,41 @@ describe("domainIdentifiers", () => {
     expect(result).toMatchObject({ Command: "Command2", Option: "Option2", Schema: "Schema2" });
     for (const name of Object.values(result)) {
       expect(name === "Schema" || fixedNamespaces.has(name)).toBe(false);
+    }
+  });
+
+  test("TypeScript keywords, predefined types and globals are never a domain name", () => {
+    const result = names([
+      "Error",
+      "string",
+      "Date",
+      "Map",
+      "Array",
+      "Boolean",
+      "record",
+      "Error_",
+    ]);
+
+    expect(result).toEqual({
+      Array: "Array_",
+      Boolean: "Boolean_",
+      Date: "Date_",
+      Error: "Error_",
+      Error_: "Error_2",
+      Map: "Map_",
+      record: "Record_",
+      string: "String_",
+    });
+    for (const name of Object.values(result)) {
+      expect(reservedIdentifiers.has(name)).toBe(false);
+    }
+  });
+
+  test("the names cli/root.ts imports are never a domain name", () => {
+    const result = names([...rootModuleNames]);
+
+    for (const name of Object.values(result)) {
+      expect(rootModuleNames.has(name)).toBe(false);
     }
   });
 

@@ -28,6 +28,9 @@ export interface PlannedPositional {
 /**
  * Where a flag's value goes: a parameter by location and wire name, or a body field by its RFC 6901
  * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media.
+ * `pointer` is what `--describe` reports: the parameter's source pointer, a body field's declaring
+ * property schema (`BodyFlag.schemaPointer`, from the first media alternative that has the flag),
+ * or the request body for `--body` and `--body-file`.
  */
 export type FlagSource =
   | {
@@ -40,6 +43,7 @@ export type FlagSource =
       readonly _tag: "Body";
       readonly kind: BodyFlagKind;
       readonly media: readonly string[];
+      readonly pointer: string;
       readonly repeated: boolean;
       readonly wireName: string;
     };
@@ -746,6 +750,9 @@ const draftBody = (
         _tag: "Body",
         kind: flag.kind,
         media,
+        pointer: isWholeBody(flag.kind)
+          ? (operation.body?.origin.pointer ?? pointer)
+          : flag.schemaPointer,
         repeated: flag.repeated,
         wireName: flag.pointer,
       };
