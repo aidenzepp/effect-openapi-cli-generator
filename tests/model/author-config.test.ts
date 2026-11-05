@@ -119,7 +119,7 @@ describe("decodeAuthorConfig", () => {
   });
 
   test("an unknown nested key is refused at its pointer", () => {
-    expect(keys({ ...sample, package: { extra: 1, name: "x", version: "1" } })).toEqual([
+    expect(keys({ ...sample, package: { extra: 1, name: "x", version: "1.0.0" } })).toEqual([
       "/package/extra|CFG-1/unknown-key",
     ]);
   });
@@ -128,6 +128,43 @@ describe("decodeAuthorConfig", () => {
     expect(keys({ ...sample, package: { name: "x" } })).toEqual([
       "/package/version|CFG-1/missing-key",
     ]);
+  });
+
+  test("a package version that is not semver 2.0.0 is refused without echoing the value", () => {
+    const bad = [
+      "1",
+      "1.0",
+      "01.0.0",
+      "1.0.0-",
+      "1.0.0 ",
+      " 1.0.0",
+      "1.0.0-'rc'\u2028",
+      "v1.0.0",
+      "1.0.0\n",
+      "",
+    ];
+    for (const version of bad) {
+      const found = refusals({ ...sample, package: { name: "x", version } }, { document });
+      expect(found.map((d) => `${d.pointer}|${d.code}`)).toEqual([
+        "/package/version|CFG-1/invalid-version",
+      ]);
+      expect(found[0]?.message).not.toContain("rc");
+    }
+  });
+
+  test("semver 2.0.0 versions with prerelease and build metadata are accepted", () => {
+    for (const version of [
+      "0.0.0",
+      "1.2.3",
+      "1.0.0-rc.1",
+      "1.0.0+build.5",
+      "1.0.0-alpha-1+sha.abc",
+    ]) {
+      const exit = Effect.runSyncExit(
+        decodeAuthorConfig({ ...sample, package: { name: "x", version } }, { document }),
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+    }
   });
 
   test("a wrongly typed value is refused", () => {

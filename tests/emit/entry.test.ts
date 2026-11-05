@@ -134,18 +134,13 @@ describe("emitEntryFiles", () => {
     ).toBe(true);
   });
 
-  test("string values from the config print as escaped literals", () => {
-    const hostile = Schema.decodeUnknownSync(AuthorConfig)({
+  test("a hostile package version is refused before emit", () => {
+    const decoded = Schema.decodeUnknownEffect(AuthorConfig)({
       binName: "example-cli",
       package: { name: "example-cli", version: "1.0.0-'rc'\u2028" },
     });
-    const files = Effect.runSync(emitEntryFiles(hostile));
-    const literal = "\"1.0.0-'rc'\\u2028\"";
 
-    expect(files).toHaveLength(2);
-    for (const file of files) {
-      expect(file.content).toContain(literal);
-    }
+    expect(Effect.runSyncExit(decoded)._tag).toBe("Failure");
   });
 
   test(
