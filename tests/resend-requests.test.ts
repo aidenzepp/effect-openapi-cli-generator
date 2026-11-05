@@ -175,33 +175,26 @@ describe("Resend witness: requests on the wire", () => {
     });
   }, 60_000);
 
-  // Known gap: the emitter types an array query parameter as one string flag (`Flag.String`,
-  // `Flag.optional`), so a repeated `--metrics` is a usage error (exit 2) and no request is sent.
-  // `test.failing` passes while that holds and fails once the gap closes; then drop `.failing`.
-  test.failing(
-    "a list call joins an explode:false form array with unencoded commas",
-    async () => {
-      const observed = await exchange([
-        "emails",
-        "metrics",
-        "--metrics",
-        "sent",
-        "--metrics",
-        "opened",
-      ]);
+  test("a list call joins an explode:false form array with unencoded commas", async () => {
+    const observed = await exchange([
+      "emails",
+      "metrics",
+      "--metrics",
+      "sent",
+      "--metrics",
+      "opened",
+    ]);
 
-      expect(observed.run.exitCode).toBe(0);
-      expect(observed.requests).toEqual([
-        {
-          body: "",
-          headers: getHeaders,
-          method: "GET",
-          target: "/emails/metrics?metrics=sent,opened",
-        },
-      ]);
-    },
-    60_000,
-  );
+    expect(observed.run.exitCode).toBe(0);
+    expect(observed.requests).toEqual([
+      {
+        body: "",
+        headers: getHeaders,
+        method: "GET",
+        target: "/emails/metrics?metrics=sent,opened",
+      },
+    ]);
+  }, 60_000);
 
   test("a POST sends Idempotency-Key and a JSON body built from field flags", async () => {
     const body = '{"from":"a@example.test","subject":"Hi","text":"Hello","to":["b@example.test"]}';
