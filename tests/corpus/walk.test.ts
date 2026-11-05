@@ -201,6 +201,48 @@ describe("outline walk", () => {
     expect(lines({ ...base, paths: {}, servers: [{ url: "/" }] })).toEqual(["server /servers/0 /"]);
   });
 
+  test("each operation records the path-item and root elements it inherits", () => {
+    const value: Json = {
+      ...base,
+      components: { securitySchemes: { key: { in: "header", name: "x-key", type: "apiKey" } } },
+      paths: {
+        "/f": {
+          delete: { responses: ok, security: [], servers: [{ url: "https://own.example" }] },
+          get: { parameters: [{ in: "header", name: "x-id" }], responses: ok },
+          parameters: [
+            { in: "query", name: "q" },
+            { in: "header", name: "X-Id" },
+          ],
+          post: { parameters: [{ in: "query", name: "Q" }], responses: ok },
+        },
+        "/g": { get: { responses: ok }, servers: [{ url: "https://path.example" }] },
+      },
+      security: [{ key: [] }, {}],
+      servers: [{ url: "https://api.example" }],
+    };
+
+    expect(
+      walked(value).flatMap((element) =>
+        element.kind === "operation"
+          ? [`${element.pointer} ${element.inherits.join(" ")} default:${element.defaultServer}`]
+          : [],
+      ),
+    ).toEqual([
+      "/paths/~1f/delete /paths/~1f/parameters/0 /paths/~1f/parameters/1 default:false",
+      "/paths/~1f/get /paths/~1f/parameters/0 /security/0 /security/1 /servers/0 default:false",
+      "/paths/~1f/post /paths/~1f/parameters/0 /paths/~1f/parameters/1 /security/0 /security/1 /servers/0 default:false",
+      "/paths/~1g/get /paths/~1g/servers/0 /security/0 /security/1 default:false",
+    ]);
+  });
+
+  test("an operation with no servers at any level takes the default server", () => {
+    expect(
+      walked({ ...base, paths: { "/h": { get: { responses: ok } } } }).flatMap((element) =>
+        element.kind === "operation" ? [element.defaultServer] : [],
+      ),
+    ).toEqual([true]);
+  });
+
   test("webhooks and callbacks are not request elements", () => {
     const value: Json = {
       ...base,
