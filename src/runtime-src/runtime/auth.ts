@@ -10,7 +10,9 @@ import {
   Stream,
 } from "effect";
 import { Flag, GlobalFlag } from "effect/cli";
+import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
+import type { Provenance } from "./base-url.ts";
 
 /**
  * A scheme's security requirement list: alternatives in document order, each the scheme names that
@@ -283,3 +285,247 @@ export const evaluate = (
       operation,
     });
   });
+
+/**
+ * `--allow-credentials-for-base-url` lets credentials reach an operator-chosen base URL whose
+ * origin is not bound (design 6.5, D-SEC2). It never extends to a server-table base.
+ */
+export const allowCredentialsForBaseUrl = GlobalFlag.Setting("allow-credentials-for-base-url")({
+  flag: Flag.Boolean("allow-credentials-for-base-url").pipe(
+    Flag.withDescription("Send credentials to an unbound --base-url or <PREFIX>_BASE_URL origin"),
+    Flag.withDefault(false),
+  ),
+});
+
+/**
+ * What the credential gate reads: the bound origin set, the chosen base's origin and provenance,
+ * and the flag.
+ */
+export interface CredentialGate {
+  readonly allowUnboundBase: boolean;
+  readonly baseOrigin: string;
+  readonly boundOrigins: readonly string[];
+  readonly provenance: Provenance;
+}
+
+const originOf = (raw: string): Option.Option<string> => {
+  if (!URL.canParse(raw)) {
+    return Option.none();
+  }
+
+  const { origin } = new URL(raw);
+
+  return origin === "null" ? Option.none() : Option.some(origin);
+};
+
+/**
+ * The origins that may carry credentials for one run (design 6.5, D-SEC2): the bound origin set,
+ * plus the chosen base's origin only when the operator chose it (`--base-url`,
+ * `<PREFIX>_BASE_URL`) and gave `--allow-credentials-for-base-url`. A server-table base adds
+ * nothing, and the flag never widens to a redirect target. Entries that do not parse are dropped,
+ * so a malformed origin can only withhold a credential.
+ */
+export const credentialOrigins = (gate: CredentialGate): readonly string[] => {
+  const base = gate.provenance === "operator" && gate.allowUnboundBase ? [gate.baseOrigin] : [];
+
+  return [
+    ...new Set([...gate.boundOrigins, ...base].flatMap((raw) => Option.toArray(originOf(raw)))),
+  ];
+};
+
+/**
+ * The credentials to attach and the origins that may carry them (`credentialOrigins`).
+ */
+export interface Attachment {
+  readonly credentials: readonly Credential[];
+  readonly origins: readonly string[];
+}
+
+const apiKeyNames = (table: SecurityTable, place: "cookie" | "header" | "query"): Set<string> =>
+  new Set(
+    Object.values(table.schemes).flatMap((definition) =>
+      definition.kind === "apiKey" && definition.in === place ? [definition.name] : [],
+    ),
+  );
+
+const hasHttpScheme = (table: SecurityTable): boolean =>
+  Object.values(table.schemes).some((definition) => definition.kind === "http");
+
+const cookiePairs = (cookie: string): readonly string[] =>
+  cookie
+    .split(";")
+    .map((pair) => pair.trim())
+    .filter((pair) => pair !== "");
+
+const cookieName = (pair: string): string => pair.split("=", 1)[0] ?? "";
+
+const stripUrlQuery = (url: string, names: ReadonlySet<string>): string => {
+  const mark = url.indexOf("?");
+  if (mark === -1) {
+    return url;
+  }
+
+  const hash = url.indexOf("#", mark);
+  const end = hash === -1 ? url.length : hash;
+  const kept = url
+    .slice(mark + 1, end)
+    .split("&")
+    .filter((pair) => !names.has(new URLSearchParams(pair).keys().next().value ?? ""));
+
+  return `${url.slice(0, mark)}${kept.length === 0 ? "" : `?${kept.join("&")}`}${url.slice(end)}`;
+};
+
+/**
+ * Remove every managed credential the table can name: `Authorization` when any `http` scheme is
+ * declared, each `apiKey` header, query name and cookie name.
+ */
+const strip = (
+  table: SecurityTable,
+  request: HttpClientRequest.HttpClientRequest,
+): HttpClientRequest.HttpClientRequest => {
+  const queryNames = apiKeyNames(table, "query");
+  const cookieNames = apiKeyNames(table, "cookie");
+  const headerNames = [
+    ...apiKeyNames(table, "header"),
+    ...(hasHttpScheme(table) ? ["authorization"] : []),
+  ];
+  let { headers } = request;
+  for (const name of headerNames) {
+    headers = Headers.remove(headers, name);
+  }
+
+  const cookies = Option.match(Headers.get(headers, "cookie"), {
+    onNone: () => headers,
+    onSome: (cookie) => {
+      const kept = cookiePairs(cookie).filter((pair) => !cookieNames.has(cookieName(pair)));
+
+      return kept.length === 0
+        ? Headers.remove(headers, "cookie")
+        : Headers.set(headers, "cookie", kept.join("; "));
+    },
+  });
+
+  return HttpClientRequest.makeWith(
+    request.method,
+    stripUrlQuery(request.url, queryNames),
+    UrlParams.transform(UrlParams.fromInput(request.urlParams), (params) =>
+      params.filter(([name]) => !queryNames.has(name)),
+    ),
+    request.hash,
+    cookies,
+    request.body,
+  );
+};
+
+const unsafeHeaderValue = (value: string): boolean =>
+  value.includes("\r") ||
+  value.includes("\n") ||
+  value.includes("\u0000") ||
+  value !== value.trim();
+
+const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
+
+const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> =>
+  Effect.fail(usage(scheme, `the credential for ${scheme} ${rule}`));
+
+const headerValue = (scheme: string, value: string): Effect.Effect<string, UsageError> =>
+  unsafeHeaderValue(value)
+    ? refuse(scheme, "has a CR, LF, NUL or leading or trailing whitespace")
+    : Effect.succeed(value);
+
+const basicParts = (
+  scheme: string,
+  value: string,
+): Effect.Effect<readonly [string, string], UsageError> => {
+  const colon = value.indexOf(":");
+  if (colon === -1) {
+    return refuse(scheme, "must be <user-id>:<password>");
+  }
+
+  if (/\p{Cs}/u.test(value)) {
+    return refuse(scheme, "has a lone surrogate");
+  }
+
+  if (/\p{Cc}/u.test(value)) {
+    return refuse(scheme, "has a control character");
+  }
+
+  return Effect.succeed([value.slice(0, colon), value.slice(colon + 1)]);
+};
+
+const attachOne = (
+  request: HttpClientRequest.HttpClientRequest,
+  { definition, scheme, value }: Credential,
+): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
+  const secret = Redacted.value(value);
+  if (definition.kind === "http") {
+    return definition.scheme === "bearer"
+      ? Effect.map(headerValue(scheme, secret), (token) =>
+          HttpClientRequest.bearerToken(request, token),
+        )
+      : Effect.map(basicParts(scheme, secret), ([user, password]) =>
+          HttpClientRequest.basicAuth(request, user, password),
+        );
+  }
+
+  if (definition.in === "header") {
+    return Effect.map(headerValue(scheme, secret), (text) =>
+      HttpClientRequest.setHeader(request, definition.name, text),
+    );
+  }
+
+  if (definition.in === "query") {
+    return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, value));
+  }
+
+  if (!cookieOctets.test(secret)) {
+    return refuse(scheme, "is not a valid cookie value");
+  }
+
+  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
+  const pairs = [...cookiePairs(existing), `${definition.name}=${secret}`];
+
+  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+};
+
+/**
+ * The one attach transform (design 6.5 Origin binding). It strips every managed credential from
+ * the request, then attaches the configured credentials only when the request's origin is in
+ * `origins`. The redirect loop runs it on every hop, so no hop inherits a credential. A credential
+ * value that cannot be sent safely is a `UsageError` naming the scheme, raised only when it would
+ * be attached. A basic credential is `<user-id>:<password>`, split at the first colon.
+ */
+export const attach =
+  (table: SecurityTable, attachment: Attachment) =>
+  (
+    request: HttpClientRequest.HttpClientRequest,
+  ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
+    const clean = strip(table, request);
+    const origin = originOf(clean.url);
+    const allowed = new Set(attachment.origins.flatMap((raw) => Option.toArray(originOf(raw))));
+
+    return Option.isSome(origin) && allowed.has(origin.value)
+      ? Effect.reduce(attachment.credentials, () => clean, attachOne)
+      : Effect.succeed(clean);
+  };
+
+/**
+ * Extend `Headers.CurrentRedactedNames` with every `apiKey` header name and
+ * `UrlParams.CurrentRedactedNames` with every `apiKey` query name, keeping Effect's defaults
+ * (design 7.5). A cookie name needs no entry: the whole `Cookie` header is redacted by default.
+ */
+export const redactedNames = (table: SecurityTable) =>
+  Layer.mergeAll(
+    Layer.effect(Headers.CurrentRedactedNames)(
+      Effect.map(Effect.service(Headers.CurrentRedactedNames), (current) => [
+        ...current,
+        ...apiKeyNames(table, "header"),
+      ]),
+    ),
+    Layer.effect(UrlParams.CurrentRedactedNames)(
+      Effect.map(Effect.service(UrlParams.CurrentRedactedNames), (current) => [
+        ...current,
+        ...apiKeyNames(table, "query"),
+      ]),
+    ),
+  );
