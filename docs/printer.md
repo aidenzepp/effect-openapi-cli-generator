@@ -28,6 +28,10 @@ the same commit.
 - Exactly one blank line separates top-level statements, and one follows the import block. No other
   blank lines appear. A JSDoc block belongs to the statement after it, so the blank line goes above
   the JSDoc. The lint rule `@stylistic/padding-line-between-statements` requires these blank lines.
+- An executable module starts with one shebang line, `#!` and an absolute interpreter path with its
+  arguments, such as `#!/usr/bin/env bun`. One blank line follows it. The `Shebang` brand admits
+  printable ASCII that starts with `/`, with single spaces between words. The formatter keeps the
+  line and the blank line as written (measured).
 
 ## Imports
 
@@ -128,12 +132,25 @@ per line, indented one level, each followed by `,`. Flat lists have no trailing 
   An `as const` value moves when a number or boolean before it does not fit.
 - **Binary `+`.** Only two operands, and only as a call argument. Broken: `left +` ends the line and
   the right operand starts the next, one level deeper than `left`.
+- **Conditional.** Flat: `test ? consequent : alternate`. Broken: the test stays on its line, then
+  `? consequent` and `: alternate` each start a line one level deeper. A branch that does not fit
+  is laid out two columns past its `? ` or `: ` line's indent, so a broken call's arguments sit
+  three levels deeper and its `)` two levels deeper. As a `const` value, or a property value whose
+  printed key is 5 columns or more, the conditional stays on the `=` or `:` line when its test fits
+  there; otherwise it moves to the next line, indented one level, and is laid out there (flat when
+  it fits). As a call argument it is one of the broken arguments. Operands are never conditionals
+  or arrow functions, and an arrow body is never a conditional: the formatter parenthesizes those.
+- **New expression.** `new Path(args)` for a constructor path such as `Set`, `Map` or `Foo.Bar`.
+  The arguments follow the call rule, hugging included: `new Set([` opens a broken array. No
+  arguments print as `new Path()`. A regular expression is the new expression of Strings.
+- **Top-level call statement.** A call alone as a statement, such as `BunRuntime.runMain(program);`,
+  laid out by the call rule from column 0. No other expression is a statement.
 
 The subset is exactly the forms above plus: `export const`, unexported `const`, `export interface`,
-`export type` with a flat type, `as const`, property access, string, number, boolean and `undefined`
-literals, and `new RegExp`. Not in the subset: template literals, comments other than generator
-JSDoc, block bodies, `if` and other statements, ternaries, classes, member chains longer than the
-rule above, and type annotations that need breaking.
+`export type` with a flat type, `as const`, property access, and string, number, boolean and
+`undefined` literals. Not in the subset: template literals, comments other than generator JSDoc,
+block bodies, `if` and statements other than the ones above, nested conditionals, classes, member
+chains longer than the rule above, and type annotations that need breaking.
 
 ## Domain module
 
