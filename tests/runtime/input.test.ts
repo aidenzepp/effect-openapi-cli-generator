@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import nodePath from "node:path";
 import { BunFileSystem, BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
 import { CliError, Command } from "effect/cli";
@@ -1065,4 +1067,59 @@ describe("Input.mergeBody nesting", () => {
 
     expect(text.startsWith('{"y":[[')).toBe(true);
   });
+});
+
+describe("declaration emit over the runtime input module", () => {
+  // A generated cli module re-exports values whose types come from input.ts. Declaration emit
+  // needs every type those values reach to be nameable, else TS4023.
+  test("a module that re-exports flag and body-option types emits declarations", () => {
+    const root = nodePath.resolve(import.meta.dir, "../..");
+    const work = nodePath.resolve(root, "work");
+
+    mkdirSync(work, { recursive: true });
+
+    const dir = mkdtempSync(nodePath.join(work, "decl-emit-"));
+
+    try {
+      writeFileSync(
+        nodePath.join(dir, "module.ts"),
+        [
+          `import * as Input from ${JSON.stringify(nodePath.join(root, "src/runtime-src/runtime/input.ts"))};`,
+          'export const json = Input.jsonFlag("payload");',
+          'export const options = (fields: Parameters<typeof Input.mergeBody>[0]["fields"]) => fields;',
+          "",
+        ].join("\n"),
+      );
+
+      const result = Bun.spawnSync(
+        [
+          "bunx",
+          "tsc",
+          nodePath.join(dir, "module.ts"),
+          "--declaration",
+          "--emitDeclarationOnly",
+          "--outDir",
+          nodePath.join(dir, "out"),
+          "--target",
+          "ES2022",
+          "--module",
+          "ESNext",
+          "--moduleResolution",
+          "Bundler",
+          "--strict",
+          "--skipLibCheck",
+          "--ignoreConfig",
+          "--allowImportingTsExtensions",
+          "--types",
+          "node",
+        ],
+        { cwd: root },
+      );
+
+      expect(result.stdout.toString()).toBe("");
+      expect(result.exitCode).toBe(0);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 60_000);
 });
