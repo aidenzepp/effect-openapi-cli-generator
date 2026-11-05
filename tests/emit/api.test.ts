@@ -271,3 +271,75 @@ describe("emitApi: document labels carry no credentials", () => {
     expect(text).not.toContain("token");
   });
 });
+
+// An operation with array parameters of scalar items (design 6.1): a non-exploded form query
+// array, an exploded required one, a header array, and a path array.
+const arrayParameters = withPaths({
+  "/emails/{ids}/metrics": {
+    get: {
+      operationId: "metrics",
+      parameters: [
+        {
+          in: "path",
+          name: "ids",
+          required: true,
+          schema: { items: { type: "string" }, type: "array" },
+        },
+        {
+          explode: false,
+          in: "query",
+          name: "metrics",
+          schema: { items: { enum: ["sent", "opened"], type: "string" }, type: "array" },
+          style: "form",
+        },
+        {
+          in: "query",
+          name: "tag",
+          required: true,
+          schema: { items: { type: "integer" }, type: "array" },
+        },
+        { in: "header", name: "X-Trace", schema: { items: { type: "string" }, type: "array" } },
+      ],
+      responses: ok,
+      tags: ["users"],
+    },
+  },
+});
+
+describe("emitApi: array parameters", () => {
+  test("an array of scalar items is a ReadonlyArray<string> input, required or optional", async () => {
+    const users = contentOf(await emit(arrayParameters))("src/api/users.ts") ?? "";
+
+    expect(users).toContain(
+      [
+        "export interface MetricsInput {",
+        "  readonly ids: ReadonlyArray<string>;",
+        "  readonly metrics?: ReadonlyArray<string> | undefined;",
+        "  readonly tag: ReadonlyArray<string>;",
+        "  readonly xTrace?: ReadonlyArray<string> | undefined;",
+        "}",
+      ].join("\n"),
+    );
+  });
+
+  test("each array is serialized by its location's style with its explode setting", async () => {
+    const users = contentOf(await emit(arrayParameters))("src/api/users.ts") ?? "";
+
+    expect(users).toContain(
+      'Serialize.header("X-Trace", input.xTrace, { explode: false, required: false })',
+    );
+    expect(users).toContain(
+      'Serialize.simple("ids", input.ids, { allowReserved: false, explode: false })',
+    );
+    expect(users).toContain(
+      [
+        '      Serialize.form("metrics", input.metrics, {',
+        "        allowReserved: false,",
+        "        explode: false,",
+        "        required: false,",
+        "      }),",
+        '      Serialize.form("tag", input.tag, { allowReserved: false, explode: true, required: true }),',
+      ].join("\n"),
+    );
+  });
+});
