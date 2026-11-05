@@ -289,7 +289,10 @@ const zeroWidthPattern = /^[\p{Mn}\p{Me}\p{Cf}]/u;
 
 const emojiPattern = /^\p{Emoji_Presentation}/u;
 
-const charWidth = (char: string): number => {
+/**
+ * The display columns of one code point, as `vp fmt` counts them.
+ */
+export const charWidth = (char: string): number => {
   const point = char.codePointAt(0) ?? 0;
   if (point < 0x7f) {
     return 1;
@@ -305,8 +308,10 @@ const charWidth = (char: string): number => {
   return wide ? 2 : 1;
 };
 
-// Display columns, as vp fmt counts them (docs/printer.md Layout).
-const textWidth = (text: string): number => {
+/**
+ * Display columns, as `vp fmt` counts them (docs/printer.md Layout).
+ */
+export const textWidth = (text: string): number => {
   let total = 0;
   for (const char of text) {
     total += charWidth(char);

@@ -135,6 +135,31 @@ literals, and `new RegExp`. Not in the subset: template literals, comments other
 JSDoc, block bodies, `if` and other statements, ternaries, classes, member chains longer than the
 rule above, and type annotations that need breaking.
 
+## Domain module
+
+`domain/schemas.ts` is the one emitted file outside the subset above. `src/emit/domain.ts` parses
+the one-line code `SchemaRepresentation.toCodeDocument` writes and prints it with its own document
+printer: groups, indents and fills in the formatter's model, with Prettier's rules for member
+chains, union and intersection types, and assignment layouts. It shares the width rules of Layout
+through `textWidth` in `src/emit/printer.ts`. Code outside the grammar it parses is refused as
+`unprintable-code`, never printed unformatted.
+
+- Its conformance check is `vp fmt --check` over two inputs: the seeded definition fuzz in
+  `tests/emit/domain.test.ts`, and the corpus domain probe (normalize a cached spec's schemas, emit
+  every validation key as a root, diff against `vp fmt`). Both must show no change.
+- Measured rules it follows beyond the subset:
+  - Two or more call arguments where one is a call taking an arrow function, as in
+    `Schema.Record(Schema.String, Schema.suspend(() => X))`, are always broken.
+  - A union of one object type or type reference with only `null` beside it hugs:
+    `ReadonlyArray<X> | null` stays on its line whatever its width. A keyword, literal or tuple
+    beside `null` does not hug.
+  - An `export type` whose type is not a union opens on the `=` line only when the text up to the
+    type's first line break fits. Otherwise the type starts on the next line, indented one level.
+  - An index signature parameter breaks as `[`, `x: string`, `]` when the member does not fit.
+- `effect` is pinned at an exact version, and the printer depends on the text format of
+  `toCodeDocument`. An `effect` pin bump is a printer change, like a `vite-plus` pin bump (R9):
+  rerun both conformance inputs in the same commit.
+
 ## JSDoc
 
 - Form: `/**`, then per text line a space, `*`, a space and the text, then a space and `*/`, each at
