@@ -29,6 +29,7 @@ const GeneratorPackage = Schema.Struct({
   dependencies: Schema.Struct({ "@effect/platform-bun": Schema.String, effect: Schema.String }),
   devDependencies: Schema.Struct({ "@types/bun": Schema.String, typescript: Schema.String }),
   engines: Schema.Struct({ bun: Schema.String }),
+  packageManager: Schema.String,
 });
 
 const GeneratorTsconfig = Schema.Struct({
@@ -77,6 +78,7 @@ export const emitPackageFiles = (
       engines: pins.engines,
       files: ["dist", "README.md"],
       name: config.package.name,
+      packageManager: pins.packageManager,
       scripts: { build: "tsc -p tsconfig.build.json", typecheck: "tsc --noEmit" },
       type: "module",
       version: config.package.version,
