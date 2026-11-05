@@ -19,11 +19,11 @@ the same commit.
 
 ## Lines
 
-- Output is ASCII only (see Strings), LF line endings, one final newline, no trailing whitespace, no
-  tabs, no byte-order mark.
+- Output is UTF-8 with LF line endings, one final newline, no trailing whitespace, no tabs and no
+  byte-order mark. Non-ASCII appears only inside string literals (see Strings).
 - Indent is 2 spaces per level.
-- Width is 100 columns. A line may not end past column 100 unless it holds a single token that
-  cannot break, such as a long string literal.
+- Width is 100 display columns (see Layout). A line may not end past column 100 unless it holds a
+  single token that cannot break, such as a long string literal.
 - Statements end with `;`.
 - Exactly one blank line separates top-level statements, and one follows the import block. No other
   blank lines appear. A JSDoc block belongs to the statement after it, so the blank line goes above
@@ -53,15 +53,21 @@ the same commit.
   time, so mixed objects are expected: `{ "200": [], default: [] }`.
 - The key `__proto__` is always the computed key `["__proto__"]`, which defines an own property. A
   bare or quoted `__proto__` sets the prototype instead. It sorts by its name, `__proto__`.
+- A quoted key escapes every non-ASCII code unit as `\u` and four lowercase hex digits. The formatter
+  unquotes a quoted key whose text is a Unicode identifier name, so `"café"` would become `café`, but
+  it keeps a key that holds an escape quoted (measured). Escaping keeps every quoted key quoted.
 - Interface members follow the same key rules and are also sorted.
 
 ## Strings
 
-- A string literal is `JSON.stringify(value)`, then every UTF-16 code unit above U+007E is replaced
-  by `\u` and four lowercase hex digits. A code point outside the BMP becomes two escapes, one per
-  surrogate. `JSON.stringify` already escapes controls below U+0020 and lone surrogates. The source
-  is therefore ASCII. `vp fmt` keeps every `\uXXXX` escape as written (measured on samples from
-  U+007F to U+FFFF, including U+2028, U+2029, bidi controls and lone surrogates).
+- A string literal is `JSON.stringify(value)`, then every UTF-16 code unit of a code point in the
+  escape set is replaced by `\u` and four lowercase hex digits. The escape set is Unicode Cc
+  (controls), Cf (format characters, which include the bidi controls), U+2028, U+2029 and lone
+  surrogates. A Cf code point outside the BMP becomes two escapes, one per surrogate.
+  `JSON.stringify` already escapes controls below U+0020 and lone surrogates.
+- Printable non-ASCII stays literal, so non-ASCII help text reads as written (R10). `vp fmt` keeps
+  every `\uXXXX` escape and every literal character as written (measured on samples from U+007F to
+  U+FFFF, including U+2028, U+2029, bidi controls and lone surrogates).
 - Quote choice follows the formatter: double quotes, unless the value contains more `"` than `'`.
   Then the literal is single-quoted, each `'` is written `\'`, each `"` is written bare, and every
   other escape is the same as above. On a tie, double quotes are used.
@@ -71,6 +77,16 @@ the same commit.
   `require-unicode-regexp`).
 
 ## Layout
+
+Columns are display columns, counted the way `vp fmt` counts them: a code point that is East Asian
+Wide or Fullwidth (CJK ideographs, kana, Hangul syllables, fullwidth forms) or an emoji with default
+emoji presentation counts two columns, a combining mark (Unicode Mn or Me) counts zero, and every
+other code point counts one, whatever its UTF-16 length. Measured on U+4E2D, U+FF21 and U+1F600 (two
+columns), U+0301 (zero), and U+00E9, U+00A0, U+E000 and U+0378 (one). So `中` is one code unit and two
+columns, `😀` is two code units and two columns, and `e` followed by U+0301 is two code units and one
+column. The printer's table of wide code points covers the Wide and Fullwidth blocks and the emoji
+presentation property; a rare code point it classifies differently shows up as a `vp fmt --check`
+failure.
 
 A form is printed flat when its whole line, printed with the form flat, ends at or before
 column 100. The line runs to the next line break the layout emits, so closing brackets, `,`, `;` and
@@ -91,7 +107,11 @@ per line, indented one level, each followed by `,`. Flat lists have no trailing 
   or an arrow function, the other arguments are flat, and the text up to that argument's opening
   (`{`, `[` or `=>`) fits, the last argument hugs: it opens on the call's line and is printed
   broken, and `)` follows its close. Otherwise all arguments are broken. A hugged arrow whose body
-  moved to the next line ends with `,` and puts `)` on its own line.
+  moved to the next line ends with `,` and puts `)` on its own line. Measured details: an object or
+  array literal hugs only when it is not empty; an arrow hugs only when its body is an object
+  literal, an array literal or a call, and then its opening runs to the body's `({` or `[` when the
+  body is a literal; the last argument does not hug when the argument before it is the same kind of
+  form, or when it is an array of number literals and other arguments precede it.
 - **Arrow function.** Parameters are always parenthesized: `(flags) =>`, `() =>`. Bodies are
   expressions, never blocks. An object or array literal body stays on the `=>` line (an object body
   in parentheses). Any other body stays on the `=>` line only when it fits flat; otherwise it starts
@@ -102,7 +122,10 @@ per line, indented one level, each followed by `,`. Flat lists have no trailing 
   in `HttpClientRequest.make("PATCH")(url)`. `.pipe(` never starts a line. Each argument list breaks
   by the call rule, so `).pipe(` appears when the head breaks.
 - **Assignment and property values.** The value starts on the same line as `=` or `:`. A string,
-  number, identifier or member access that does not fit moves to the next line, indented one level.
+  identifier, member access, `undefined` or negative number that does not fit moves to the next
+  line, indented one level, even when it still does not fit there. A property whose printed key is
+  under 5 columns never moves its value, and a positive number or boolean never moves (measured).
+  An `as const` value moves when a number or boolean before it does not fit.
 - **Binary `+`.** Only two operands, and only as a call argument. Broken: `left +` ends the line and
   the right operand starts the next, one level deeper than `left`.
 
@@ -124,6 +147,10 @@ rule above, and type annotations that need breaking.
   into them are folded names. Text is printable ASCII, starts with an uppercase letter, separates
   words with one space, contains none of ``* _ ` # < > [ ] { } | \ @ ~``, and has no word that
   starts with `-`, `+` or a digit, so no wrapped line can begin as a list item.
+- The printer takes JSDoc text only as the `JsDocText` brand (`src/emit/escape.ts`), which decodes
+  exactly this alphabet. Text outside it, such as `*/`, a line-leading `@`, a lone surrogate or
+  non-ASCII, fails to decode, so it is refused as a generator defect and never escaped into a
+  comment.
 - Spec prose never enters JSDoc. The formatter's JSDoc pass treats the text as Markdown and rewrites
   it: it capitalizes the first word, turns `*a*` into `_a_`, drops a backslash before `_` and `*`,
   collapses runs of whitespace, inserts blank lines around list items and headings, and capitalizes
@@ -152,16 +179,16 @@ Every JSON file the generator or the corpus tools write uses this layout. `vp fm
   plus a final newline, with top-level keys in this order: `name`, `version`, `private`,
   `description`, `license`, `bin`, `files`, `type`, `exports`, `scripts`, `dependencies`,
   `devDependencies`, `engines`, `packageManager`. Dependency maps are sorted by package name. Other
-  maps keep the generator's order.
+  maps keep the generator's order. A top-level key outside this list is refused.
 
 ## Decisions for the Mind
 
-- **R10, ASCII escaping.** The Strings rule escapes every code point above U+007E, so non-ASCII help
-  text is unreadable in source. The alternative keeps printable non-ASCII after sanitization and
-  escapes only controls, U+2028, U+2029, bidi controls and lone surrogates. Both pass
-  `vp fmt --check`, because the formatter keeps escapes and literal characters as written. This is a
-  readability choice, not a conformance one.
-- **JSDoc carries no spec prose.** Design §3.6 says JSDoc goes through one escaper, and the §4.8
-  sample shows `/** Update a user. */` from source prose. The JSDoc rules above instead keep prose
-  out of JSDoc, for the measured reasons given there. The alternative is a Markdown-aware escaper
-  and a fixture of hostile prose run through `vp fmt` twice.
+- **R10, ASCII escaping: decided** (memo `a4543497`). Printable non-ASCII stays literal in string
+  literals, and only the escape set is escaped (see Strings). The ASCII-only alternative escaped
+  every non-ASCII code unit, which made non-ASCII help text unreadable in source. Both pass
+  `vp fmt --check`; this was a readability choice. Quoted object keys still escape non-ASCII, because
+  the formatter would otherwise unquote them (see Object keys).
+- **JSDoc carries no spec prose: decided** (memo `a4543497`). JSDoc text comes only from generator
+  templates and is checked against the JSDoc alphabet (see JSDoc). Design §3.6 once routed source
+  prose through one JSDoc escaper, as in the §4.8 sample `/** Update a user. */`; the measured
+  Markdown rewrites above rule that out, and spec prose stays in string literals.
