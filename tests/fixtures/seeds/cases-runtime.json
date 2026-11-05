@@ -141,6 +141,9 @@
         "path": "private-missing-file"
       },
       "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesFlag": "--document",
         "requestCount": 0,
         "stderrContainsPath": false,
         "stderrContainsRawFilesystemCause": false
@@ -369,6 +372,84 @@
         "url": "https://example.test/api/files/folder%2Freport.json"
       },
       "designSection": "§6.1"
+    },
+    {
+      "id": "auth-basic-password-control-character-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice",
+        "password": "secret\n"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-non-latin-username-utf8",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "josé",
+        "password": "secret"
+      },
+      "expected": {
+        "authorization": "Basic am9zw6k6c2VjcmV0"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-astral-username-utf8",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "😀",
+        "password": "private-secret"
+      },
+      "expected": {
+        "authorization": "Basic 8J+YgDpwcml2YXRlLXNlY3JldA=="
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-lone-surrogate-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "usernameCodeUnits": [55296],
+        "password": "secret"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "multipart-required-empty-body-close-delimiter",
+      "source": "b96c8946 SR:G10",
+      "input": {
+        "requestBodyRequired": true,
+        "flagsGiven": []
+      },
+      "expected": {
+        "requestCount": 1,
+        "contentTypePrefix": "multipart/form-data; boundary=",
+        "bodyIsCloseDelimiterOnly": true
+      },
+      "designSection": "§6.3"
     }
   ]
 }
