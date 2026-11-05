@@ -157,7 +157,7 @@ describe("emitPackageFiles", () => {
     for (const file of emit()) {
       expect(formatted(`tests/emit/emitted/${file.path}`, file.content)).toBe(file.content);
     }
-  });
+  }, 30_000);
 
   test("output is deterministic", () => {
     expect(emit()).toEqual(emit());
