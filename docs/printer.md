@@ -23,7 +23,7 @@ the same commit.
   byte-order mark. Non-ASCII appears only inside string literals (see Strings).
 - Indent is 2 spaces per level.
 - Width is 100 display columns (see Layout). A line may not end past column 100 unless it holds a
-  single token that cannot break, such as a long string literal.
+  single token that cannot break, such as a long string literal or a long identifier.
 - Statements end with `;`.
 - Exactly one blank line separates top-level statements, and one follows the import block. No other
   blank lines appear. A JSDoc block belongs to the statement after it, so the blank line goes above
@@ -101,6 +101,14 @@ A form is printed flat when its whole line, printed with the form flat, ends at 
 column 100. The line runs to the next line break the layout emits, so closing brackets, `,`, `;` and
 `as const` count. Otherwise the form is printed broken, as below. Every broken list puts one element
 per line, indented one level, each followed by `,`. Flat lists have no trailing comma.
+
+A long identifier is an unbreakable token: a name, key or type name whose line is past column 100
+stays on its line, because `vp fmt` leaves it there. Two moves apply, both the ones `vp fmt` makes.
+A `const` whose head (`export const <name>: <Type> =`) is past column 100 puts its value on the next
+line, indented 2, except a non-negative number or boolean, which stays on the head line. A type
+alias whose line is past column 100 puts its type on the next line. A type with several union
+members or type arguments is one `vp fmt` breaks across lines, and the printer does not: a line
+past column 100 holding one is refused with `unbreakable-line`.
 
 - **Object literal.** `{}` when empty. Flat: `{ a: 1, b: 2 }`. Broken: `{`, one property per line,
   `}`. The formatter keeps an object broken whenever its first key starts a new line, so a broken

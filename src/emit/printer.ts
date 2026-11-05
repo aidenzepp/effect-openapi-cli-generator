@@ -939,8 +939,20 @@ const check = (expr: Expr, role: Role): Issue => {
 const withDoc = (doc: JsDocTextType | undefined, text: string): string =>
   doc === undefined ? text : `${jsDoc(doc)}\n${text}`;
 
-const unbreakable = (lines: readonly string[], subject: string): Issue =>
-  lines.some((line) => textWidth(line) > lineWidth)
+// A line past column 100 is allowed when `vp fmt` keeps it there: its only wide parts are
+// identifiers, which cannot break. A type with several union members or type arguments is one
+// `vp fmt` breaks across lines, and the printer does not, so such a line is refused.
+const breaksWhenWide = (type: TypeExpr): boolean =>
+  Match.valueTags(type, {
+    TypeKeyword: () => false,
+    TypeLiteral: () => false,
+    TypeReadonlyArray: (array) => breaksWhenWide(array.element),
+    TypeRef: (reference) => reference.args.length > 1 || reference.args.some(breaksWhenWide),
+    TypeUnion: (union) => union.members.length > 1 || union.members.some(breaksWhenWide),
+  });
+
+const unbreakable = (line: string, type: TypeExpr | undefined, subject: string): Issue =>
+  type !== undefined && breaksWhenWide(type) && textWidth(line) > lineWidth
     ? issue("unbreakable-line", subject)
     : Option.none();
 
@@ -962,6 +974,12 @@ const constBody = (statement: Extract<Statement, { readonly _tag: "Const" }>, he
     return `${head}\n  ${render(value, { column: 2, indent: 2, tail: tail.length })}${tail}`;
   }
 
+  // A head past column 100 moves every value except a non-negative number or boolean onto its own
+  // line, which `vp fmt` does whether or not the value is long.
+  if (textWidth(head) > lineWidth && value._tag !== "Number" && value._tag !== "Boolean") {
+    return `${head}\n  ${render(value, { column: 2, indent: 2, tail: tail.length })}${tail}`;
+  }
+
   const body = moves && !fits(text, place) ? `\n  ${text ?? ""}` : ` ${render(value, place)}`;
 
   return `${head}${body}${tail}`;
@@ -971,7 +989,7 @@ const printConst = (statement: Extract<Statement, { readonly _tag: "Const" }>) =
   const type = statement.type === undefined ? "" : `: ${typeText(statement.type)}`;
   const head = `${statement.exported ? "export " : ""}const ${statement.name}${type} =`;
   const failure = check(statement.value, "value").pipe(
-    Option.orElse(() => (type === "" ? Option.none() : unbreakable([head], statement.name))),
+    Option.orElse(() => unbreakable(head, statement.type, statement.name)),
   );
 
   return succeedUnless(failure, () => withDoc(statement.doc, constBody(statement, head)));
@@ -979,17 +997,18 @@ const printConst = (statement: Extract<Statement, { readonly _tag: "Const" }>) =
 
 const byFieldKey = Order.mapInput(Order.String, (field: Field) => field.key);
 
+const fieldLine = (field: Field): string =>
+  `  readonly ${keyText(field.key)}${field.optional ? "?" : ""}: ${typeText(field.type)};`;
+
 const printInterface = (statement: Extract<Statement, { readonly _tag: "Interface" }>) => {
   const head = `export interface ${statement.name} {`;
   const duplicate = duplicateKey(statement.fields.map((field) => field.key));
-  const lines = Arr.sort(statement.fields, byFieldKey).map(
-    (field) =>
-      `  readonly ${keyText(field.key)}${field.optional ? "?" : ""}: ${typeText(field.type)};`,
+  const lines = Arr.sort(statement.fields, byFieldKey).map(fieldLine);
+  const wide = Option.firstSomeOf(
+    statement.fields.map((field) => unbreakable(fieldLine(field), field.type, statement.name)),
   );
-  const failure =
-    duplicate === undefined
-      ? unbreakable(lines, statement.name)
-      : issue("duplicate-key", duplicate);
+  const duplicated = duplicate === undefined ? Option.none() : issue("duplicate-key", duplicate);
+  const failure = Option.orElse(duplicated, () => wide);
   const text = lines.length === 0 ? `${head}}` : [head, ...lines, "}"].join("\n");
 
   return succeedUnless(failure, () => withDoc(statement.doc, text));
@@ -1012,8 +1031,15 @@ const printStatement = (statement: Statement): Effect.Effect<string, PrinterErro
     Interface: printInterface,
     TypeAlias: (alias) => {
       const line = `export type ${alias.name} = ${typeText(alias.type)};`;
+      // Past column 100 the type moves to its own line, as `vp fmt` moves it.
+      const text =
+        textWidth(line) > lineWidth
+          ? `export type ${alias.name} =\n  ${typeText(alias.type)};`
+          : line;
 
-      return succeedUnless(unbreakable([line], alias.name), () => withDoc(alias.doc, line));
+      return succeedUnless(unbreakable(line, alias.type, alias.name), () =>
+        withDoc(alias.doc, text),
+      );
     },
   });
 
