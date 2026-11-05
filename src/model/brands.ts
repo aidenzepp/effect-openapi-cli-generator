@@ -10,7 +10,8 @@ const quoted = '"(?:[\\t !#-\\[\\]-~]|\\\\[\\t -~])*"';
 
 const parameters = `(?:[ \\t]*;[ \\t]*${token}=(?:${token}|${quoted}))*`;
 
-const pathSegment = "(?:[A-Za-z0-9\\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2}|\\{[^{}/?#\\s]+\\})*";
+const pathSegment =
+  "(?:[A-Za-z0-9\\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2}|\\{[^{}/?#\\s\\p{Cc}\\p{Cs}]+\\})*";
 
 const serverChar = "(?:[A-Za-z0-9\\-._~:/?#[\\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2}|\\{[^{}/?#\\s]+\\})";
 
@@ -26,6 +27,23 @@ const mediaRangePattern = new RegExp(
 );
 
 const pathPattern = new RegExp(`^(?:/${pathSegment})+$`, "u");
+
+const encodedDot = /%2e/giu;
+
+const isDotSegment = (segment: string) => {
+  const decoded = segment.replaceAll(encodedDot, ".");
+
+  return decoded === "." || decoded === "..";
+};
+
+const hasValidSegments = (value: string) => {
+  const segments = value.split("/").slice(1);
+  const last = segments.length - 1;
+
+  return segments.every(
+    (segment, index) => (segment !== "" || index === last) && !isDotSegment(segment),
+  );
+};
 
 const serverPattern = new RegExp(`^${serverChar}+$`, "u");
 
@@ -63,9 +81,13 @@ export const MediaType = pattern(mediaTypePattern).pipe(Schema.brand("MediaType"
 export const MediaRange = pattern(mediaRangePattern).pipe(Schema.brand("MediaRange"));
 
 /**
- * An OpenAPI 3.2.1 path template: absolute, with balanced non-empty expressions.
+ * An OpenAPI 3.2.1 path template: absolute, with balanced non-empty expressions, no dot segments
+ * and no empty segment except the last.
  */
-export const PathTemplate = pattern(pathPattern).pipe(Schema.brand("PathTemplate"));
+export const PathTemplate = pattern(pathPattern).pipe(
+  Schema.check(Schema.makeFilter(hasValidSegments)),
+  Schema.brand("PathTemplate"),
+);
 
 /**
  * A server URL template with balanced non-empty variables.

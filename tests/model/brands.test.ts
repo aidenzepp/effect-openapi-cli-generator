@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Exit, Schema } from "effect";
 import hostile from "../fixtures/seeds/hostile.json" with { type: "json" };
+import paths from "../fixtures/seeds/paths.json" with { type: "json" };
 import {
   CookieName,
   DocumentUri,
@@ -46,6 +47,24 @@ const hostileStrings: readonly string[] = Schema.decodeUnknownSync(HostileCases)
     Schema.is(Schema.String)(input) ? input : String.fromCodePoint(...input.codeUnits),
 );
 
+const PathCases = Schema.Struct({
+  cases: Schema.Array(
+    Schema.Struct({
+      expected: Schema.Struct({
+        outcome: Schema.Literals(["accepted", "refused"]),
+        rows: Schema.optional(Schema.Array(Schema.String)),
+      }),
+      id: Schema.String,
+      input: Schema.Struct({ path: Schema.String }),
+    }),
+  ),
+});
+
+const pathCases = Schema.decodeUnknownSync(PathCases)(paths).cases;
+
+// The once-per-expression rule belongs to the cross-check slice, not the brand.
+const brandAcceptsAnyway = new Set(["path-reject-duplicate-expression"]);
+
 const brands = [
   ["WireName", WireName, "page[size]", ""],
   ["HeaderName", HeaderName, "X-Request-Id", "bad name"],
@@ -84,6 +103,37 @@ describe("branded codecs", () => {
       expect(issueTag(PathTemplate, bad)).toBe("rejected");
     }
     expect(issueTag(PathTemplate, "/")).toBe("accepted");
+  });
+
+  test("PathTemplate agrees with every seeded path case it owns (seeds/paths.json)", () => {
+    expect(pathCases.length).toBeGreaterThan(100);
+    for (const { id, input, expected } of pathCases) {
+      const owned =
+        expected.outcome === "accepted" ||
+        (expected.rows ?? []).some((row) => row === "PTH-02" || row === "PTH-07");
+      const want =
+        expected.outcome === "accepted" || brandAcceptsAnyway.has(id) ? "accepted" : "rejected";
+      if (owned) {
+        expect([id, issueTag(PathTemplate, input.path)]).toEqual([id, want]);
+      }
+    }
+  });
+
+  test("PathTemplate refuses dot segments, interior empty segments and control characters in names", () => {
+    for (const bad of [
+      "/a/%2E%2e/b",
+      "/a//b",
+      "//a",
+      "/a/./b",
+      "/a/..",
+      `/a/{b${String.fromCodePoint(1)}}`,
+      "/a/{b\uD800}",
+    ]) {
+      expect([bad, issueTag(PathTemplate, bad)]).toEqual([bad, "rejected"]);
+    }
+    for (const good of ["/", "/a/", "/a/%ff", "/a/{café}", "/a/%2e%2ex", "/a/..a", "/a/.b"]) {
+      expect([good, issueTag(PathTemplate, good)]).toEqual([good, "accepted"]);
+    }
   });
 
   test("JsonLiteral accepts finite JSON and rejects non-finite or oversized values", () => {
