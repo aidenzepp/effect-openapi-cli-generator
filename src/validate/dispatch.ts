@@ -1,10 +1,5 @@
 import { Data, Effect, Option, Schema } from "effect";
-import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
-
-/**
- * A parsed JSON document in the validator library's own (mutable) JSON type.
- */
-export type ValidatorInput = Parameters<Validator>[0];
+import type { Json } from "../resolve/pointer.ts";
 
 /**
  * The OpenAPI line a document declares.
@@ -41,9 +36,7 @@ const lineOfVersion = (openapi: string): Line | undefined => {
 /**
  * Selects the line from the document's `openapi` major.minor.
  */
-export const lineOf = (
-  document: ValidatorInput,
-): Effect.Effect<Line, UnsupportedOpenApiVersion> => {
+export const lineOf = (document: Json): Effect.Effect<Line, UnsupportedOpenApiVersion> => {
   const declared = Schema.decodeUnknownOption(Declared)(document);
   const openapi = declared.pipe(
     Option.map((found) => found.openapi),
