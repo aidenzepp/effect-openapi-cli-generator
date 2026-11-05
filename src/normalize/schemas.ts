@@ -15,8 +15,8 @@ import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
 import { defsKey, keyOf } from "../resolve/canonical.ts";
 import { defaultLimits } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { evaluatePointer, formatPointer, parsePointer } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
 type Document = typeof DocumentUri.Type;

@@ -4,7 +4,7 @@ import { Array as Arr, Effect, Schema } from "effect";
 import { emitDomainSchemas } from "../../src/emit/domain.ts";
 import { domainIdentifiers } from "../../src/names/domain.ts";
 import { SafeIdentifier } from "../../src/names/fold.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 

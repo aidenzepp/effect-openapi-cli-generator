@@ -5,8 +5,8 @@ import type { Line } from "../validate/index.ts";
 import { documentBase, resolveUri, schemaBase, stringMember, stripFragment } from "./base-uri.ts";
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
-import { escapeToken, evaluateTokens, parseFragment, parsePointer } from "./pointer.ts";
-import type { Json } from "./pointer.ts";
+import { escapeToken, evaluateTokens, parseFragment, parsePointer } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
 

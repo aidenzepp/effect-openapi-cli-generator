@@ -4,7 +4,7 @@ import { DocumentUri } from "../../src/model/brands.ts";
 import { rewriteDialect } from "../../src/validate/dialect.ts";
 import { groupErrors } from "../../src/validate/locations.ts";
 import { diagnoseDocument } from "../../src/validate/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 const uri = Schema.decodeUnknownSync(DocumentUri)("https://example.com/openapi.json");
 

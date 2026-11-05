@@ -1,8 +1,8 @@
 import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
 import { Effect, Predicate, Record } from "effect";
-import { escapeToken } from "../resolve/pointer.ts";
+import { escapeToken } from "../model/pointer.ts";
 import { lineOf } from "./dispatch.ts";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import type { UnsupportedOpenApiVersion } from "./dispatch.ts";
 
 // The validator library's own (mutable) JSON type.

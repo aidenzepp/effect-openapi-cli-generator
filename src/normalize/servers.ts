@@ -4,8 +4,8 @@ import { DocumentUri as DocumentUriSchema, SafeText, ServerTemplate } from "../m
 import type { JsonPointer as JsonPointerSchema } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { Server } from "../model/entities.ts";
-import { escapeToken } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { escapeToken } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 /**
  * The `servers` value of one level and where it sits; `value` is `undefined` when the level does

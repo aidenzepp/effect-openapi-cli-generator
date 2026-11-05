@@ -4,8 +4,8 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, unescapeToken } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer, unescapeToken } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
 /**

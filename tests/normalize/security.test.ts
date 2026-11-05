@@ -4,7 +4,7 @@ import { DocumentUri } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import { normalizeSecurityPolicy, normalizeSecuritySchemes } from "../../src/normalize/security.ts";
 import { resolve } from "../../src/resolve/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");

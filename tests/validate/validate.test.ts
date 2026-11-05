@@ -4,7 +4,7 @@ import { Effect, Predicate } from "effect";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
 import type { ReadSchema } from "../../src/validate/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 import valid30 from "../fixtures/validate/valid-3.0.json" with { type: "json" };
 import invalid30 from "../fixtures/validate/invalid-3.0.json" with { type: "json" };
 import valid31 from "../fixtures/validate/valid-3.1.json" with { type: "json" };

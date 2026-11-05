@@ -20,7 +20,7 @@ import { lineOf, schemaUri } from "./dispatch.ts";
 import { groupErrors } from "./locations.ts";
 import type { InvalidInstanceLocation } from "./locations.ts";
 import type { Line, UnsupportedOpenApiVersion } from "./dispatch.ts";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { manifest } from "./schemas/manifest.ts";

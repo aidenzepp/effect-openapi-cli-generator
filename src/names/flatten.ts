@@ -4,7 +4,7 @@ import type { MediaAlternative } from "../model/entities.ts";
 import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
-import { formatPointer } from "../resolve/pointer.ts";
+import { formatPointer } from "../model/pointer.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), or the whole body.

@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { escapeToken } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { escapeToken } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import { refuse } from "./budget.ts";
 import type { LoadLimits, LoadRefusal, Position } from "./budget.ts";
 

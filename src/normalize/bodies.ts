@@ -6,7 +6,7 @@ import { Body } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
 /**

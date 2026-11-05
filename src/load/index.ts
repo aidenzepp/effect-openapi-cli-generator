@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { FileSystem, PlatformError, Stream } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import { defaultLimits, readFileBounded, readStreamBounded, refuse } from "./budget.ts";
 import type { LoadLimits, LoadRefusal } from "./budget.ts";
 import { parseStrictJson } from "./json.ts";
