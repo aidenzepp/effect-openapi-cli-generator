@@ -37,40 +37,63 @@ const safeTextPattern = /^(?:[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]|[\n\t])*$/u;
 
 const pattern = (regExp: RegExp) => Schema.String.pipe(Schema.check(Schema.isPattern(regExp)));
 
-/** A parameter, property or field name exactly as the specification spells it. */
+/**
+ * A parameter, property or field name exactly as the specification spells it.
+ */
 export const WireName = pattern(wireNamePattern).pipe(Schema.brand("WireName"));
 
-/** An RFC 9110 header field name. */
+/**
+ * An RFC 9110 header field name.
+ */
 export const HeaderName = pattern(tokenPattern).pipe(Schema.brand("HeaderName"));
 
-/** An RFC 6265 cookie name. */
+/**
+ * An RFC 6265 cookie name.
+ */
 export const CookieName = pattern(tokenPattern).pipe(Schema.brand("CookieName"));
 
-/** An RFC 9110 8.3.1 media type, parameters allowed, no wildcards. */
+/**
+ * An RFC 9110 8.3.1 media type, parameters allowed, no wildcards.
+ */
 export const MediaType = pattern(mediaTypePattern).pipe(Schema.brand("MediaType"));
 
-/** An RFC 9110 8.3.1 media range, wildcards allowed. */
+/**
+ * An RFC 9110 8.3.1 media range, wildcards allowed.
+ */
 export const MediaRange = pattern(mediaRangePattern).pipe(Schema.brand("MediaRange"));
 
-/** An OpenAPI 3.2.1 path template: absolute, with balanced non-empty expressions. */
+/**
+ * An OpenAPI 3.2.1 path template: absolute, with balanced non-empty expressions.
+ */
 export const PathTemplate = pattern(pathPattern).pipe(Schema.brand("PathTemplate"));
 
-/** A server URL template with balanced non-empty variables. */
+/**
+ * A server URL template with balanced non-empty variables.
+ */
 export const ServerTemplate = pattern(serverPattern).pipe(Schema.brand("ServerTemplate"));
 
-/** An HTTP method token in the Bun allowlist. */
+/**
+ * An HTTP method token in the Bun allowlist.
+ */
 export const MethodToken = Schema.String.pipe(
   Schema.check(Schema.makeFilter((value: string) => methodTokens.includes(value))),
   Schema.brand("MethodToken"),
 );
 
-/** Help-safe plain text: no controls except LF and TAB, no format, separator or lone surrogate characters. */
+/**
+ * Help-safe plain text: no controls except LF and TAB, no format, separator or lone surrogate
+ * characters.
+ */
 export const SafeText = pattern(safeTextPattern).pipe(Schema.brand("SafeText"));
 
-/** An absolute URI with ASCII characters only. */
+/**
+ * An absolute URI with ASCII characters only.
+ */
 export const DocumentUri = pattern(uriPattern).pipe(Schema.brand("DocumentUri"));
 
-/** An RFC 6901 JSON Pointer. */
+/**
+ * An RFC 6901 JSON Pointer.
+ */
 export const JsonPointer = Schema.String.pipe(
   Schema.check(
     Schema.makeFilter((value: string) => Exit.isSuccess(Effect.runSyncExit(parsePointer(value)))),
@@ -81,6 +104,16 @@ export const JsonPointer = Schema.String.pipe(
 const maxNodes = 65_536;
 
 const maxStringLength = 2 ** 20;
+
+const isJson = Schema.is(Schema.Json);
+
+const childrenOf = (value: Schema.Json): readonly unknown[] => {
+  if (Arr.isArray(value)) {
+    return value;
+  }
+
+  return Predicate.isObject(value) ? Object.values(value) : [];
+};
 
 const withinBounds = (root: Schema.Json): boolean => {
   const pending: Schema.Json[] = [root];
@@ -100,10 +133,11 @@ const withinBounds = (root: Schema.Json): boolean => {
       return false;
     }
 
-    if (Arr.isArray(next)) {
-      pending.push(...Arr.fromIterable(next));
-    } else if (Predicate.isObject(next)) {
-      pending.push(...Object.values(next).filter(Schema.is(Schema.Json)));
+    const children = childrenOf(next);
+    for (const child of children) {
+      if (isJson(child)) {
+        pending.push(child);
+      }
     }
 
     next = pending.pop();
@@ -112,7 +146,9 @@ const withinBounds = (root: Schema.Json): boolean => {
   return true;
 };
 
-/** A finite JSON value of bounded size. */
+/**
+ * A finite JSON value of bounded size.
+ */
 export const JsonLiteral = Schema.Json.pipe(
   Schema.check(Schema.makeFilter(withinBounds)),
   Schema.brand("JsonLiteral"),
