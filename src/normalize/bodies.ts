@@ -4,8 +4,8 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
-import { referenceAt } from "../resolve/index.ts";
-import type { Resolution, ResolvedReference } from "../resolve/index.ts";
+import { defaultLimits, referenceAt } from "../resolve/index.ts";
+import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
@@ -43,6 +43,13 @@ export type BodyOutcome =
 export class BodyNotReadable extends Data.TaggedError("BodyNotReadable")<{
   readonly pointer: string;
   readonly reason: "media-type-not-an-object" | "not-a-request-body";
+}> {}
+
+/**
+ * Schema inspection visited more nodes than the node budget allows.
+ */
+export class BodyNodeBudget extends Data.TaggedError("BodyNodeBudget")<{
+  readonly diagnostic: Diagnostic;
 }> {}
 
 const styleNames = [
@@ -133,8 +140,6 @@ const formUrlencoded = "application/x-www-form-urlencoded";
 const octetStream = "application/octet-stream";
 
 const maxHops = 16;
-
-const maxDepth = 8;
 
 type Codec =
   | "binary"
@@ -261,25 +266,61 @@ const nodeAt = (resolution: Resolution, pointer: string): Effect.Effect<SchemaNo
     Effect.orElseSucceed((): SchemaNodeValue => ({})),
   );
 
-const flatten = (
-  resolution: Resolution,
-  start: string,
-  depth = 0,
-): Effect.Effect<readonly Located[]> =>
-  Effect.gen(function* walk() {
-    const pointer = settle(resolution, start);
-    const node = yield* nodeAt(resolution, pointer);
-    if (depth >= maxDepth) {
-      return [{ node, pointer }];
+// What one body spends on schema inspection: every visit of an `allOf` member is charged to
+// `spent`, against the resolution limits' node budget (design 9 I5).
+interface Walk {
+  readonly maxNodes: number;
+  readonly resolution: Resolution;
+  readonly site: BodySite;
+  spent: number;
+}
+
+const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
+  Schema.decodeUnknownEffect(Diagnostic)({
+    code: "REF-18/node-budget",
+    document: walk.resolution.document,
+    element: "Schema inspection",
+    message: "Inspecting the request body schemas visits more nodes than the node budget allows.",
+    openapi: walk.site.openapi,
+    pointer: walk.site.pointer,
+    row: "REF-18",
+    scope: "document",
+    severity: "refusal",
+    specSection: `https://spec.openapis.org/oas/v${specVersion[walk.resolution.line]}.html#reference-object`,
+  }).pipe(
+    Effect.orDie,
+    Effect.flatMap((diagnostic) => Effect.fail(new BodyNodeBudget({ diagnostic }))),
+  );
+
+// The schema and its `allOf` members in document order, each distinct schema once, so a graph
+// that reuses members costs its size and a cycle ends at the first repeat.
+const flatten = (walk: Walk, start: string): Effect.Effect<readonly Located[], BodyNodeBudget> =>
+  Effect.gen(function* walkMembers() {
+    const seen = new Set<string>();
+    const found: Located[] = [];
+    const pending = [start];
+    let next = pending.pop();
+    while (next !== undefined) {
+      const pointer = settle(walk.resolution, next);
+      walk.spent += 1;
+      if (walk.spent > walk.maxNodes) {
+        return yield* budgetFailure(walk);
+      }
+
+      if (!seen.has(pointer)) {
+        seen.add(pointer);
+
+        const node = yield* nodeAt(walk.resolution, pointer);
+        found.push({ node, pointer });
+
+        const members = (node.allOf ?? []).map((_, index) => `${pointer}/allOf/${index}`);
+        pending.push(...Arr.reverse(members));
+      }
+
+      next = pending.pop();
     }
 
-    const children = yield* Effect.all(
-      (node.allOf ?? []).map((_, index) =>
-        flatten(resolution, `${pointer}/allOf/${index}`, depth + 1),
-      ),
-    );
-
-    return [{ node, pointer }, ...children.flat()];
+    return found;
   });
 
 const firstLocated = <T>(
@@ -305,9 +346,9 @@ interface Members {
 const noMembers: Members = { items: undefined, prefixItems: [], properties: [] };
 
 // The declared properties (document order, first definition wins) and item schemas of a schema.
-const membersOf = (resolution: Resolution, pointer: string): Effect.Effect<Members> =>
+const membersOf = (walk: Walk, pointer: string): Effect.Effect<Members, BodyNodeBudget> =>
   Effect.gen(function* members() {
-    const nodes = yield* flatten(resolution, pointer);
+    const nodes = yield* flatten(walk, pointer);
     const seen = new Set<string>();
     const properties: (readonly [string, string])[] = [];
     for (const located of nodes) {
@@ -352,21 +393,21 @@ const noFacts: Facts = {
 };
 
 const factsOf = (
-  resolution: Resolution,
+  walk: Walk,
   pointer: string | undefined,
   depth = 0,
-): Effect.Effect<Facts> =>
+): Effect.Effect<Facts, BodyNodeBudget> =>
   Effect.gen(function* facts() {
     if (pointer === undefined) {
       return noFacts;
     }
 
-    const nodes = yield* flatten(resolution, pointer);
+    const nodes = yield* flatten(walk, pointer);
     const items = firstLocated(nodes, (node) => node.items);
     const itemFacts =
       items === undefined || depth > 0
         ? undefined
-        : yield* factsOf(resolution, `${items.pointer}/items`, depth + 1);
+        : yield* factsOf(walk, `${items.pointer}/items`, depth + 1);
     const type = firstLocated(nodes, (node) => node.type)?.value;
 
     return {
@@ -501,6 +542,7 @@ interface Context {
   readonly reference: ResolvedReference | undefined;
   readonly resolution: Resolution;
   readonly site: BodySite;
+  readonly walk: Walk;
 }
 
 const targetLabel = (target: Target): string =>
@@ -573,7 +615,11 @@ interface Typing {
 }
 
 // ENC-02, ENC-12, ENC-13 and the ENC-17 to ENC-26 table: how the part's type is decided.
-const typingOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.Effect<Typing> =>
+const typingOf = (
+  ctx: Context,
+  input: RuleInput,
+  node: EncodingNode,
+): Effect.Effect<Typing, BodyNodeBudget> =>
   Effect.gen(function* typing() {
     const given = explicitStyle(node);
     const hasStyle = Object.keys(given).length > 0;
@@ -597,7 +643,7 @@ const typingOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.Ef
     }
 
     if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.resolution, input.schemaPointer));
+      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schemaPointer));
 
       return {
         contentType: [fallback.type],
@@ -744,7 +790,10 @@ interface Batch {
   readonly rules: readonly PlainRule[];
 }
 
-type BuildAll = (ctx: Context, inputs: readonly RuleInput[]) => Effect.Effect<Batch>;
+type BuildAll = (
+  ctx: Context,
+  inputs: readonly RuleInput[],
+) => Effect.Effect<Batch, BodyNodeBudget>;
 
 const nestedRows = (node: EncodingNode): readonly string[] => [
   ...(node.encoding === undefined ? [] : ["ENC-07"]),
@@ -758,7 +807,7 @@ const nestingOf = (
   input: RuleInput,
   node: EncodingNode,
   buildAll: BuildAll,
-): Effect.Effect<Nesting> =>
+): Effect.Effect<Nesting, BodyNodeBudget> =>
   Effect.gen(function* nesting() {
     const entries = nestedEntries(node, input.actual);
     if (input.depth === 1 && (entries.length > 0 || node.itemEncoding !== undefined)) {
@@ -786,7 +835,7 @@ const nestingOf = (
     const children =
       entries.length === 0 || input.schemaPointer === undefined
         ? noMembers
-        : yield* membersOf(ctx.resolution, input.schemaPointer);
+        : yield* membersOf(ctx.walk, input.schemaPointer);
     const built = yield* buildAll(
       ctx,
       entries.map((entry): RuleInput => ({
@@ -808,7 +857,11 @@ const nestingOf = (
   });
 
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
-const buildRule = (ctx: Context, input: RuleInput, buildAll: BuildAll): Effect.Effect<RuleResult> =>
+const buildRule = (
+  ctx: Context,
+  input: RuleInput,
+  buildAll: BuildAll,
+): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
     const typing = yield* typingOf(ctx, input, node);
@@ -996,8 +1049,11 @@ const refusedParts = (findings: readonly Finding[]): Parts => ({
 });
 
 // The schema-valued additionalProperties of a multipart root, found through `$ref` and `allOf`.
-const extraFields = (ctx: Context, schemaPointer: string): Effect.Effect<readonly Finding[]> =>
-  flatten(ctx.resolution, schemaPointer).pipe(
+const extraFields = (
+  ctx: Context,
+  schemaPointer: string,
+): Effect.Effect<readonly Finding[], BodyNodeBudget> =>
+  flatten(ctx.walk, schemaPointer).pipe(
     Effect.map((nodes) => {
       const found = firstLocated(nodes, (node) =>
         Schema.is(ObjectValue)(node.additionalProperties) ? true : undefined,
@@ -1125,9 +1181,13 @@ const partInputs = (
 };
 
 // Multipart part rules: the declared properties by name, then 3.2 positions (design 6.3).
-const multipartParts = (ctx: Context, media: Media, base: string): Effect.Effect<Parts> =>
+const multipartParts = (
+  ctx: Context,
+  media: Media,
+  base: string,
+): Effect.Effect<Parts, BodyNodeBudget> =>
   Effect.gen(function* parts() {
-    const { line, resolution } = ctx;
+    const { line } = ctx;
     const blocker = partsBlocker(line, media);
     if (blocker !== undefined) {
       return refusedParts([blocker]);
@@ -1135,7 +1195,7 @@ const multipartParts = (ctx: Context, media: Media, base: string): Effect.Effect
 
     const schemaPointer = media.node.schema === undefined ? undefined : `${media.home}/schema`;
     const members =
-      schemaPointer === undefined ? noMembers : yield* membersOf(resolution, schemaPointer);
+      schemaPointer === undefined ? noMembers : yield* membersOf(ctx.walk, schemaPointer);
     const extra = schemaPointer === undefined ? [] : yield* extraFields(ctx, schemaPointer);
     const keys = unknownKeys(line, media, members);
     if (keys.refused) {
@@ -1176,7 +1236,7 @@ const normalizeAlternative = (
   ctx: Context,
   bodyPointer: string,
   key: string,
-): Effect.Effect<AlternativeResult, BodyNotReadable> =>
+): Effect.Effect<AlternativeResult, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* alternative() {
     const { line, resolution } = ctx;
     const mediaPointer = `${bodyPointer}/content/${escapeToken(key)}`;
@@ -1327,7 +1387,8 @@ const emptyContent = (line: Line, pointer: string): Finding =>
 export const normalizeBody = (
   resolution: Resolution,
   site: BodySite,
-): Effect.Effect<BodyOutcome, BodyNotReadable> =>
+  limits: ResolveLimits = defaultLimits,
+): Effect.Effect<BodyOutcome, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* normalize() {
     const unreadable = new BodyNotReadable({ pointer: site.pointer, reason: "not-a-request-body" });
     const reference = referenceAt(resolution, site.pointer);
@@ -1340,7 +1401,8 @@ export const normalizeBody = (
       Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
       Effect.mapError(() => unreadable),
     );
-    const ctx: Context = { line: resolution.line, reference, resolution, site };
+    const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
+    const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
     const required = node.required ?? false;
     const keys = Object.keys(node.content);
     if (keys.length === 0) {

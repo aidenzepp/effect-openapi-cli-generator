@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { EncodingRule, MediaAlternative } from "../../src/model/entities.ts";
-import { BodyNotReadable, normalizeBody } from "../../src/normalize/bodies.ts";
+import { BodyNodeBudget, BodyNotReadable, normalizeBody } from "../../src/normalize/bodies.ts";
 import type { BodyOutcome } from "../../src/normalize/bodies.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/resolve/pointer.ts";
@@ -768,6 +768,73 @@ describe("BodyNotReadable a site the earlier stages should have stopped", () => 
 
     expect(failure).toBeInstanceOf(BodyNotReadable);
     expect(failure._tag).toBe("BodyNotReadable");
-    expect(failure.reason).toBe("not-a-request-body");
+    expect(failure instanceof BodyNotReadable ? failure.reason : undefined).toBe(
+      "not-a-request-body",
+    );
+  });
+});
+
+// Level i is an allOf of `width` references to level i + 1, so the unfolded tree has
+// width ** depth nodes while the graph has depth + 1.
+const diamond = (depth: number, width: number): Members => ({
+  schemas: Object.fromEntries(
+    Array.from({ length: depth + 1 }, (_, level): [string, Json] => [
+      `L${level}`,
+      level === depth
+        ? { properties: { leaf: { type: "integer" } }, type: "object" }
+        : {
+            allOf: Array.from({ length: width }, () => ({
+              $ref: `#/components/schemas/L${level + 1}`,
+            })),
+          },
+    ]),
+  ),
+});
+
+describe("REF-18 node-budget: allOf members shared by many parents are expanded once", () => {
+  const body: Json = multipart({ $ref: "#/components/schemas/L0" });
+
+  test("a depth-20 diamond finishes within 2 s and still finds the property", () => {
+    const alternative = only(implemented("3.1", body, diamond(20, 5)).body.alternatives);
+
+    expect(alternative.encoding.map(targetOf)).toEqual(["leaf"]);
+  }, 2000);
+
+  test("a depth-64 diamond is not cut off by a depth limit", () => {
+    const alternative = only(implemented("3.1", body, diamond(64, 8)).body.alternatives);
+
+    expect(alternative.encoding.map(targetOf)).toEqual(["leaf"]);
+  }, 2000);
+
+  test("a schema that lists itself in allOf terminates", () => {
+    const schemas: Members = {
+      Loop: { allOf: [{ $ref: "#/components/schemas/Loop" }], properties: { a: string } },
+    };
+    const outcome = implemented("3.1", multipart({ $ref: "#/components/schemas/Loop" }), {
+      schemas,
+    });
+
+    expect(only(outcome.body.alternatives).encoding.map(targetOf)).toEqual(["a"]);
+  }, 2000);
+
+  test("a spent node budget fails with the shared REF-18 code", () => {
+    const value = documentOf("3.1", body, diamond(20, 5));
+    const resolution = Effect.runSync(resolve({ document: entry, line: "3.1", value }));
+    const failure = Effect.runSync(
+      Effect.flip(
+        normalizeBody(
+          resolution,
+          { openapi: openapi["3.1"], pointer: site },
+          { maxHops: 64, maxNodes: 50 },
+        ),
+      ),
+    );
+
+    expect(failure._tag).toBe("BodyNodeBudget");
+    expect(failure).toBeInstanceOf(BodyNodeBudget);
+    if (failure._tag === "BodyNodeBudget") {
+      expect(failure.diagnostic.code).toBe("REF-18/node-budget");
+      expect(failure.diagnostic.scope).toBe("document");
+    }
   });
 });
