@@ -5,13 +5,30 @@
       "source": "E07 src/core/normalize.ts:295-445,969-1040 (override by (in, name))",
       "input": {
         "path": "/items",
-        "pathItemParameters": [{ "in": "query", "name": "limit", "schemaType": "integer" }],
-        "operationParameters": [{ "in": "query", "name": "limit", "schemaType": "string" }]
+        "pathItemParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
+        ],
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "string"
+          }
+        ]
       },
       "expected": {
         "outcome": "accepted",
         "parameters": [
-          { "in": "query", "name": "limit", "from": "operation", "schemaType": "string" }
+          {
+            "in": "query",
+            "name": "limit",
+            "from": "operation",
+            "schemaType": "string"
+          }
         ]
       },
       "designSection": "§2.2"
@@ -22,15 +39,34 @@
       "input": {
         "path": "/items/{id}",
         "pathItemParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
-        "operationParameters": [{ "in": "query", "name": "id", "schemaType": "string" }]
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schemaType": "string"
+          }
+        ]
       },
       "expected": {
         "outcome": "accepted",
         "parameters": [
-          { "in": "path", "name": "id", "from": "pathItem" },
-          { "in": "query", "name": "id", "from": "operation" }
+          {
+            "in": "path",
+            "name": "id",
+            "from": "pathItem"
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "from": "operation"
+          }
         ]
       },
       "designSection": "§2.2"
@@ -41,13 +77,24 @@
       "input": {
         "path": "/items/{id}",
         "pathItemParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
         "operationParameters": []
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "path", "name": "id", "from": "pathItem" }]
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "from": "pathItem"
+          }
+        ]
       },
       "designSection": "§2.2"
     },
@@ -56,12 +103,24 @@
       "source": "E07 src/core/normalize.ts:969-1040; inventory PTH-27 (operations cannot remove)",
       "input": {
         "path": "/items",
-        "pathItemParameters": [{ "in": "header", "name": "x-trace", "schemaType": "string" }],
+        "pathItemParameters": [
+          {
+            "in": "header",
+            "name": "x-trace",
+            "schemaType": "string"
+          }
+        ],
         "operationParameters": []
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "header", "name": "x-trace", "from": "pathItem" }]
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-trace",
+            "from": "pathItem"
+          }
+        ]
       },
       "designSection": "§2.2"
     },
@@ -71,15 +130,32 @@
       "input": {
         "path": "/items",
         "pathItemParameters": [
-          { "in": "query", "name": "q", "required": true, "schemaType": "string" }
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
         "operationParameters": [
-          { "in": "query", "name": "q", "required": false, "schemaType": "string" }
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schemaType": "string"
+          }
         ]
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "query", "name": "q", "from": "operation", "required": false }]
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "from": "operation",
+            "required": false
+          }
+        ]
       },
       "designSection": "§2.2"
     },
@@ -89,15 +165,32 @@
       "input": {
         "path": "/items/{id}",
         "pathItemParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
         "operationParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "integer" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "integer"
+          }
         ]
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "path", "name": "id", "from": "operation", "schemaType": "integer" }]
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "from": "operation",
+            "schemaType": "integer"
+          }
+        ]
       },
       "designSection": "§2.2"
     },
@@ -106,14 +199,34 @@
       "source": "E07 src/core/normalize.ts:295-445 (identity via JSON.stringify([in, name]))",
       "input": {
         "path": "/items",
-        "pathItemParameters": [{ "in": "query", "name": "Limit", "schemaType": "integer" }],
-        "operationParameters": [{ "in": "query", "name": "limit", "schemaType": "integer" }]
+        "pathItemParameters": [
+          {
+            "in": "query",
+            "name": "Limit",
+            "schemaType": "integer"
+          }
+        ],
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
+        ]
       },
       "expected": {
         "outcome": "accepted",
         "parameters": [
-          { "in": "query", "name": "Limit", "from": "pathItem" },
-          { "in": "query", "name": "limit", "from": "operation" }
+          {
+            "in": "query",
+            "name": "Limit",
+            "from": "pathItem"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "from": "operation"
+          }
         ]
       },
       "designSection": "§2.2"
@@ -123,15 +236,32 @@
       "source": "E07 src/core/normalize.ts:295-445 (prior compared headers exactly)",
       "input": {
         "path": "/items",
-        "pathItemParameters": [{ "in": "header", "name": "X-Trace", "schemaType": "string" }],
-        "operationParameters": [{ "in": "header", "name": "x-trace", "schemaType": "string" }]
+        "pathItemParameters": [
+          {
+            "in": "header",
+            "name": "X-Trace",
+            "schemaType": "string"
+          }
+        ],
+        "operationParameters": [
+          {
+            "in": "header",
+            "name": "x-trace",
+            "schemaType": "string"
+          }
+        ]
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "header", "name": "x-trace", "from": "operation" }]
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-trace",
+            "from": "operation"
+          }
+        ]
       },
-      "designSection": "§2.2",
-      "unsettled": "HTTP header field names are case-insensitive (RFC 9110 §5.1), so a path-item `X-Trace` and an operation `x-trace` plausibly collide; the design states override by name and `in` without fixing header case folding. The prior compared exactly, which would keep both."
+      "designSection": "§2.2"
     },
     {
       "id": "override-path-parameters-ordered-by-template",
@@ -139,15 +269,27 @@
       "input": {
         "path": "/a/{first}/b/{second}",
         "pathItemParameters": [
-          { "in": "path", "name": "second", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "second",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
         "operationParameters": [
-          { "in": "path", "name": "first", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "first",
+            "required": true,
+            "schemaType": "string"
+          }
         ]
       },
-      "expected": { "outcome": "accepted", "pathParameterOrder": ["first", "second"] },
-      "designSection": "§2.2",
-      "unsettled": "Positional order follows the template (design §3.7 key-order note on path-template parameter order); the order of non-path parameters is not fixed."
+      "expected": {
+        "outcome": "accepted",
+        "pathParameterOrder": ["first", "second"]
+      },
+      "designSection": "§2.2"
     },
     {
       "id": "override-duplicate-in-operation-list-refused",
@@ -156,11 +298,22 @@
         "path": "/items",
         "pathItemParameters": [],
         "operationParameters": [
-          { "in": "query", "name": "limit", "schemaType": "integer" },
-          { "in": "query", "name": "limit", "schemaType": "integer" }
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
         ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-28"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-28"]
+      },
       "designSection": "§3.4"
     },
     {
@@ -169,12 +322,23 @@
       "input": {
         "path": "/items",
         "pathItemParameters": [
-          { "in": "query", "name": "limit", "schemaType": "integer" },
-          { "in": "query", "name": "limit", "schemaType": "string" }
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "string"
+          }
         ],
         "operationParameters": []
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-28"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-28"]
+      },
       "designSection": "§3.4"
     },
     {
@@ -183,12 +347,29 @@
       "input": {
         "path": "/items",
         "pathItemParameters": [
-          { "in": "query", "name": "limit", "schemaType": "integer" },
-          { "in": "query", "name": "limit", "schemaType": "integer" }
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
         ],
-        "operationParameters": [{ "in": "query", "name": "limit", "schemaType": "integer" }]
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
+        ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-28"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-28"]
+      },
       "designSection": "§3.4"
     },
     {
@@ -198,14 +379,29 @@
         "path": "/items",
         "pathItemParameters": [],
         "operationParameters": [
-          { "$ref": "#/components/parameters/Limit" },
-          { "in": "query", "name": "limit", "schemaType": "integer" }
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
         ],
         "components": {
-          "parameters": { "Limit": { "in": "query", "name": "limit", "schemaType": "integer" } }
+          "parameters": {
+            "Limit": {
+              "in": "query",
+              "name": "limit",
+              "schemaType": "integer"
+            }
+          }
         }
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-28"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-28"]
+      },
       "designSection": "§3.4"
     },
     {
@@ -213,20 +409,45 @@
       "source": "E07 src/core/normalize.ts:969-1040",
       "input": {
         "path": "/items",
-        "pathItemParameters": [{ "in": "query", "name": "limit", "schemaType": "integer" }],
-        "operationParameters": [{ "in": "query", "name": "limit", "schemaType": "integer" }]
+        "pathItemParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
+        ],
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schemaType": "integer"
+          }
+        ]
       },
       "expected": {
         "outcome": "accepted",
-        "parameters": [{ "in": "query", "name": "limit", "from": "operation" }]
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "from": "operation"
+          }
+        ]
       },
       "designSection": "§2.2"
     },
     {
       "id": "override-path-parameter-missing-refused",
       "source": "E07 src/core/normalize.ts:969-1040 (Missing path parameter)",
-      "input": { "path": "/items/{id}", "pathItemParameters": [], "operationParameters": [] },
-      "expected": { "outcome": "refused", "rows": ["PTH-03"] },
+      "input": {
+        "path": "/items/{id}",
+        "pathItemParameters": [],
+        "operationParameters": []
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-03"]
+      },
       "designSection": "§3.4"
     },
     {
@@ -236,12 +457,19 @@
         "path": "/items",
         "pathItemParameters": [],
         "operationParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-03", "PTH-08"] },
-      "designSection": "§3.4",
-      "unsettled": "The design table lists PTH-03 and PTH-08 together for template and path-parameter correspondence; PTH-08 is the parameter-side rule, PTH-03 the template-side rule, so either row may carry this refusal."
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-08"]
+      },
+      "designSection": "§3.4"
     },
     {
       "id": "override-path-parameter-name-case-mismatch-refused",
@@ -250,10 +478,19 @@
         "path": "/items/{Id}",
         "pathItemParameters": [],
         "operationParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-03", "PTH-08"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-03", "PTH-08"],
+        "diagnosticCount": 2
+      },
       "designSection": "§3.4"
     },
     {
@@ -263,12 +500,22 @@
         "path": "/items/{id}",
         "pathItemParameters": [],
         "operationParameters": [
-          { "in": "path", "name": "id", "required": false, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": false,
+            "schemaType": "string"
+          }
         ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-03", "PTH-08"] },
-      "designSection": "§3.4",
-      "unsettled": "The design table states path parameters must be `required: true` under PTH-03 and PTH-08 without assigning the rule to one row."
+      "expected": {
+        "outcome": "refused",
+        "scope": "document",
+        "stage": "validate",
+        "rows": ["VAL-*"],
+        "rule": "PRM-06"
+      },
+      "designSection": "§3.4"
     },
     {
       "id": "override-path-parameter-required-absent-refused",
@@ -276,11 +523,22 @@
       "input": {
         "path": "/items/{id}",
         "pathItemParameters": [],
-        "operationParameters": [{ "in": "path", "name": "id", "schemaType": "string" }]
+        "operationParameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "schemaType": "string"
+          }
+        ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-03", "PTH-08"] },
-      "designSection": "§3.4",
-      "unsettled": "As path-parameter-not-required-refused: the row is not assigned."
+      "expected": {
+        "outcome": "refused",
+        "scope": "document",
+        "stage": "validate",
+        "rows": ["VAL-*"],
+        "rule": "PRM-06"
+      },
+      "designSection": "§3.4"
     },
     {
       "id": "override-two-path-parameters-one-template-expression-refused",
@@ -288,21 +546,89 @@
       "input": {
         "path": "/items/{id}",
         "pathItemParameters": [
-          { "in": "path", "name": "id", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schemaType": "string"
+          }
         ],
         "operationParameters": [
-          { "in": "path", "name": "other", "required": true, "schemaType": "string" }
+          {
+            "in": "path",
+            "name": "other",
+            "required": true,
+            "schemaType": "string"
+          }
         ]
       },
-      "expected": { "outcome": "refused", "rows": ["PTH-03", "PTH-08"] },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-08"]
+      },
       "designSection": "§3.4"
     },
     {
       "id": "override-template-identical-paths-refused",
       "source": "E07/E06 src/core/normalize.ts:969-975 (Ambiguous duplicate path template)",
-      "input": { "paths": ["/a/{x}", "/a/{y}"] },
-      "expected": { "outcome": "refused", "rows": ["PTH-04"] },
+      "input": {
+        "paths": ["/a/{x}", "/a/{y}"]
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-04"]
+      },
       "designSection": "§3.4"
+    },
+    {
+      "id": "override-non-path-order-inherited-first",
+      "source": "b96c8946 SR:G3",
+      "input": {
+        "path": "/items",
+        "pathItemParameters": [
+          {
+            "in": "query",
+            "name": "a"
+          },
+          {
+            "in": "header",
+            "name": "X-B"
+          }
+        ],
+        "operationParameters": [
+          {
+            "in": "query",
+            "name": "c"
+          },
+          {
+            "in": "query",
+            "name": "a",
+            "schemaType": "string"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "a",
+            "from": "operation",
+            "schemaType": "string"
+          },
+          {
+            "in": "header",
+            "name": "X-B",
+            "from": "pathItem"
+          },
+          {
+            "in": "query",
+            "name": "c",
+            "from": "operation"
+          }
+        ]
+      },
+      "designSection": "§2.2"
     }
   ]
 }
