@@ -1,4 +1,14 @@
-import { Effect, Exit, Inspectable, Option, Pipeable, Result, Scope, Stream } from "effect";
+import {
+  Effect,
+  Exit,
+  Inspectable,
+  Option,
+  Pipeable,
+  Redacted,
+  Result,
+  Scope,
+  Stream,
+} from "effect";
 import {
   FetchHttpClient,
   Headers,
@@ -264,6 +274,56 @@ const assertMethod = (
         new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
       );
 
+const querySeparator = (url: string): string => {
+  if (/[?&]$/u.test(url)) {
+    return "";
+  }
+
+  return url.includes("?") ? "&" : "?";
+};
+
+/**
+ * Fold `urlParams` into the request target. Effect builds the final URL with
+ * `URLSearchParams.append`, which re-serializes the whole query and rewrites the serialized
+ * `%20` as `+`. The target keeps its query bytes exactly as `Serialize` produced them; a param
+ * added after serialization (an `apiKey` query credential) is appended percent-encoded, with no
+ * `+` for a space.
+ */
+const foldUrlParams = (
+  request: HttpClientRequest.HttpClientRequest,
+): HttpClientRequest.HttpClientRequest => {
+  const pairs = UrlParams.fromInput(request.urlParams).params.flatMap(([name, value]) =>
+    value === undefined
+      ? []
+      : [
+          `${encodeURIComponent(name)}=${encodeURIComponent(
+            Redacted.isRedacted(value) ? Redacted.value(value) : value,
+          )}`,
+        ],
+  );
+  if (pairs.length === 0) {
+    return HttpClientRequest.makeWith(
+      request.method,
+      request.url,
+      UrlParams.empty,
+      request.hash,
+      request.headers,
+      request.body,
+    );
+  }
+
+  const joined = `${request.url}${querySeparator(request.url)}${pairs.join("&")}`;
+
+  return HttpClientRequest.makeWith(
+    request.method,
+    joined,
+    UrlParams.empty,
+    request.hash,
+    request.headers,
+    request.body,
+  );
+};
+
 /**
  * The runtime-owned redirect loop (design 6.5 Redirect loop; settled: spike S2), an
  * `HttpClient.transform` over the provided client. Each hop runs the attach step, then is sent
@@ -290,7 +350,7 @@ export const redirectLoop =
     const hop = (request: HttpClientRequest.HttpClientRequest, followed: number) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* sendHop() {
-          const attached = yield* restore(attach(request));
+          const attached = foldUrlParams(yield* restore(attach(request)));
           yield* assertMethod(allowed, attached);
 
           const scope = yield* Scope.fork(yield* Scope.Scope);
