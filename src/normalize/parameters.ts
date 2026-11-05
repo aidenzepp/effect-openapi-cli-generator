@@ -584,15 +584,19 @@ interface DiagnosticFields {
   scope: "element";
   severity: "notice" | "refusal";
   specSection: string;
+  wire?: string;
 }
 
 const toDiagnostics = (
   resolution: Resolution,
   site: ParameterSite,
   related: readonly Related[],
+  wireName: string,
   findings: readonly Finding[],
-): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.all(
+): Effect.Effect<readonly Diagnostic[]> => {
+  const wire = sanitize(wireName);
+
+  return Effect.all(
     findings.map((finding) => {
       const fields: DiagnosticFields = {
         code: finding.code,
@@ -618,9 +622,14 @@ const toDiagnostics = (
         fields.related = related;
       }
 
+      if (wire !== "") {
+        fields.wire = wire;
+      }
+
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
     }),
   ).pipe(Effect.orDie);
+};
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -766,7 +775,7 @@ export const normalizeParameter = (
 
     const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source));
     const diagnostics = (findings: readonly Finding[]) =>
-      toDiagnostics(resolution, site, source.related, findings);
+      toDiagnostics(resolution, site, source.related, source.node.name, findings);
     if (decision._tag === "Ignore") {
       return { _tag: "Ignored", diagnostics: yield* diagnostics(decision.findings) };
     }

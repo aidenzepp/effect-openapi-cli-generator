@@ -206,7 +206,10 @@ const refusedLine = (input: HelpInput): string | undefined => {
   return refused.length === 0
     ? undefined
     : refused
-        .map((diagnostic) => `${line(diagnostic.element)}: ${line(diagnostic.message)}`)
+        .map(
+          (diagnostic) =>
+            `${line(diagnostic.wire ?? diagnostic.element)}: ${line(diagnostic.message)}`,
+        )
         .join("; ");
 };
 

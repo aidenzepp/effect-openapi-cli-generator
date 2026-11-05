@@ -530,6 +530,29 @@ describe("the entity", () => {
   });
 });
 
+describe("diagnostic wire name", () => {
+  test("a refused cookie parameter carries its own name as wire", () => {
+    expect(refused("3.1", cookie({ name: "session" })).diagnostics.map((d) => d.wire)).toEqual([
+      "session",
+    ]);
+  });
+
+  test("the Cookie header refusal carries the name as written", () => {
+    expect(refused("3.1", header({ name: "Cookie" })).diagnostics[0]?.wire).toBe("Cookie");
+  });
+
+  test("an ignored Accept header carries its name", () => {
+    const outcome = normalize("3.1", header({ name: "Accept" }));
+    expect(outcome.diagnostics[0]?.wire).toBe("Accept");
+  });
+
+  test("an invalid name is sanitized in wire", () => {
+    const outcome = refused("3.1", query({ name: "a\u0001b" }));
+    expect(codes(outcome)).toEqual(["PRM-02/invalid-name"]);
+    expect(outcome.diagnostics[0]?.wire).toBe("ab");
+  });
+});
+
 describe("STY-33 in: cookie is refused until Milestone 2", () => {
   const staged: readonly (readonly [string, Line, Json])[] = [
     ["STY-33", "3.0", cookie({})],

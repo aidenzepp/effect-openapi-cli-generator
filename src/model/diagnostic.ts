@@ -50,6 +50,7 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")(
     scope: Schema.Literals(["document", "operation", "element"]),
     severity: Schema.Literals(["refusal", "notice"]),
     specSection: DocumentUri,
+    wire: Schema.optionalKey(Schema.String),
   }).check(
     Schema.makeFilter(
       (fields) => rowOfCode(fields.code) === fields.row || "code must start with its row id",
