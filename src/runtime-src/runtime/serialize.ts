@@ -158,14 +158,20 @@ const encodeUnreserved = (text: string) =>
  */
 const pathReserved = ":[]@!$&'()*+,;=";
 
-const encoder = (allowReserved: boolean) => (text: string) =>
-  allowReserved
-    ? text.replaceAll(/%[0-9A-Fa-f]{2}|[\S\s]/gu, (token) =>
-        percentTriplet.test(token) || pathReserved.includes(token)
-          ? token
-          : encodeUnreserved(token),
-      )
-    : encodeUnreserved(text);
+/**
+ * Reserved characters a query value may pass under `allowReserved`: RFC 3986 reserved less the form
+ * delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded.
+ */
+const queryReserved = ":/?[]@!$'()*,;";
+
+const encoder =
+  (allowReserved: boolean, passed = pathReserved) =>
+  (text: string) =>
+    allowReserved
+      ? text.replaceAll(/%[0-9A-Fa-f]{2}|[\S\s]/gu, (token) =>
+          percentTriplet.test(token) || passed.includes(token) ? token : encodeUnreserved(token),
+        )
+      : encodeUnreserved(text);
 
 type PathStyle = PathParameter["style"];
 
@@ -229,12 +235,12 @@ const encodeText = (text: Text, encode: (text: string) => string): Text => {
 /**
  * The comma-joined form of every non-exploded expansion.
  */
-const flat = (text: Text) => {
+const flat = (text: Text, separator = ",") => {
   if (text.kind === "primitive") {
     return text.text;
   }
 
-  return text.kind === "array" ? text.items.join(",") : text.members.flat().join(",");
+  return text.kind === "array" ? text.items.join(separator) : text.members.flat().join(separator);
 };
 
 const expandMatrix = (name: string, text: Text, explode: boolean) => {
@@ -375,3 +381,163 @@ export const path = (template: string, parameters: readonly PathParameter[]): Pa
   }),
   template,
 });
+
+export interface QueryOptions {
+  readonly allowEmptyValue?: boolean;
+  readonly allowReserved: boolean;
+  readonly explode: boolean;
+  readonly required: boolean;
+}
+
+/**
+ * A query parameter: plain data plus its expansion, which fails with `UsageError` instead of
+ * throwing. The expansion is the encoded pairs joined by `&`, or `undefined` when the parameter
+ * sends nothing.
+ */
+export interface QueryParameter {
+  readonly expand: Effect.Effect<string | undefined, UsageError>;
+  readonly name: string;
+  readonly style: "deepObject" | "form" | "pipeDelimited" | "spaceDelimited";
+}
+
+type QueryStyle = QueryParameter["style"];
+
+/**
+ * Delimiters the style emits as `%20` or `%7C` or leaves unencoded: an item containing one cannot
+ * be told apart from the delimiter after expansion. Exploded values repeat the name, so they have
+ * none.
+ */
+const queryDelimiter = (
+  style: QueryStyle,
+  text: Text,
+  options: QueryOptions,
+): string | undefined => {
+  if (options.explode || text.kind === "primitive") {
+    return undefined;
+  }
+
+  if (style === "spaceDelimited") {
+    return " ";
+  }
+
+  if (style === "pipeDelimited") {
+    return "|";
+  }
+
+  return style === "form" && options.allowReserved ? "," : undefined;
+};
+
+const checkQueryDelimiter = (
+  name: string,
+  style: QueryStyle,
+  text: Text,
+  options: QueryOptions,
+) => {
+  const banned = queryDelimiter(style, text, options);
+  const clash = banned !== undefined && parts(text).some((part) => part.includes(banned));
+
+  return clash
+    ? refuse(`parameter ${name} holds a character its ${style} expansion would leave ambiguous`)
+    : Effect.void;
+};
+
+const joiners = {
+  deepObject: ",",
+  form: ",",
+  pipeDelimited: "%7C",
+  spaceDelimited: "%20",
+} as const;
+
+const composeQuery = (
+  style: QueryStyle,
+  name: string,
+  raw: Text,
+  explode: boolean,
+  encode: (text: string) => string,
+) => {
+  const key = encodeUnreserved(name);
+  const text = encodeText(raw, encode);
+
+  // Keys that become names are always strictly encoded; `allowReserved` is for values only.
+  if (raw.kind === "object" && style === "deepObject") {
+    return raw.members
+      .map(
+        ([member, memberText]) => `${key}%5B${encodeUnreserved(member)}%5D=${encode(memberText)}`,
+      )
+      .join("&");
+  }
+
+  if (explode && text.kind === "array") {
+    return text.items.map((item) => `${key}=${item}`).join("&");
+  }
+
+  if (explode && raw.kind === "object") {
+    return raw.members
+      .map(([member, memberText]) => `${encodeUnreserved(member)}=${encode(memberText)}`)
+      .join("&");
+  }
+
+  return `${key}=${flat(text, joiners[style])}`;
+};
+
+const isEmptyCompound = (value: Value) =>
+  isList(value) ? value.length === 0 : Predicate.isObject(value) && Object.keys(value).length === 0;
+
+const queryStyled =
+  (style: QueryStyle) =>
+  (name: string, value: Value, options: QueryOptions): QueryParameter => ({
+    expand: Effect.gen(function* queryExpansion() {
+      if (unpairedSurrogate.test(name)) {
+        return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
+      }
+
+      const text = yield* toText(name, value, false);
+
+      if (text === undefined) {
+        if (options.allowEmptyValue === true && isEmptyCompound(value)) {
+          return `${encodeUnreserved(name)}=`;
+        }
+
+        return options.required
+          ? yield* refuse(`parameter ${name} is required and has no value`)
+          : undefined;
+      }
+
+      if (style === "deepObject" && text.kind !== "object") {
+        return yield* refuse(`parameter ${name} is not an object, which deepObject requires`);
+      }
+
+      yield* checkQueryDelimiter(name, style, text, options);
+
+      return composeQuery(
+        style,
+        name,
+        text,
+        options.explode,
+        encoder(options.allowReserved, queryReserved),
+      );
+    }),
+    name,
+    style,
+  });
+
+/**
+ * Query `form`: RFC 6570 `{?name}` and `{?name*}`.
+ */
+export const form = queryStyled("form");
+
+/**
+ * Query `spaceDelimited`: a non-exploded list joined by an encoded space.
+ */
+export const spaceDelimited = queryStyled("spaceDelimited");
+
+/**
+ * Query `pipeDelimited`: a non-exploded list joined by an encoded pipe.
+ */
+export const pipeDelimited = queryStyled("pipeDelimited");
+
+/**
+ * Query `deepObject`: an object with scalar members as `name[key]=value`, brackets encoded.
+ * `explode` has no effect.
+ */
+export const deepObject = queryStyled("deepObject");

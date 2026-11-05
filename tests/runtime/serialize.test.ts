@@ -394,3 +394,271 @@ describe("path", () => {
     expect(await pathOf("/f/{a}", Serialize.simple("a", "100%", reserved))).toBe("/f/100%25");
   });
 });
+
+const query = (parameter: Serialize.QueryParameter) => Effect.runPromise(parameter.expand);
+
+const formOptions = (options: Partial<Serialize.QueryOptions> = {}): Serialize.QueryOptions => ({
+  allowReserved: false,
+  explode: true,
+  required: false,
+  ...options,
+});
+
+describe("form", () => {
+  test("a primitive", async () => {
+    expect(await query(Serialize.form("q", "abc", formOptions()))).toBe("q=abc");
+    expect(await query(Serialize.form("q", 5, formOptions({ explode: false })))).toBe("q=5");
+    expect(await query(Serialize.form("q", false, formOptions()))).toBe("q=false");
+  });
+
+  test("an empty string sends the name with no text", async () => {
+    expect(await query(Serialize.form("q", "", formOptions()))).toBe("q=");
+    expect(await query(Serialize.form("q", [""], formOptions({ explode: false })))).toBe("q=");
+  });
+
+  test("an exploded array repeats the name", async () => {
+    expect(await query(Serialize.form("color", array, formOptions()))).toBe(
+      "color=red&color=green&color=blue",
+    );
+  });
+
+  test("an array with explode false joins with commas", async () => {
+    expect(await query(Serialize.form("tags", array, formOptions({ explode: false })))).toBe(
+      "tags=red,green,blue",
+    );
+  });
+
+  test("an exploded object uses its members as names", async () => {
+    expect(await query(Serialize.form("color", object, formOptions()))).toBe("B=150&G=200&R=100");
+  });
+
+  test("an object with explode false joins keys and values with commas", async () => {
+    expect(await query(Serialize.form("color", object, formOptions({ explode: false })))).toBe(
+      "color=B,150,G,200,R,100",
+    );
+  });
+
+  test("values are percent-encoded outside unreserved, delimiters included", async () => {
+    expect(await query(Serialize.form("q", "a b&c=d+e#f/g?h,i", formOptions()))).toBe(
+      "q=a%20b%26c%3Dd%2Be%23f%2Fg%3Fh%2Ci",
+    );
+    expect(await query(Serialize.form("q", "!'()*", formOptions()))).toBe("q=%21%27%28%29%2A");
+    expect(await query(Serialize.form("q", "é\u{1F600}", formOptions()))).toBe(
+      "q=%C3%A9%F0%9F%98%80",
+    );
+  });
+
+  test("names and exploded keys are percent-encoded", async () => {
+    expect(await query(Serialize.form("a b[]", "x", formOptions()))).toBe("a%20b%5B%5D=x");
+    expect(await query(Serialize.form("q", { "a&b": 1 }, formOptions()))).toBe("a%26b=1");
+  });
+
+  test("a comma in a non-exploded item is encoded without allowReserved", async () => {
+    expect(
+      await query(Serialize.form("q", ["private,a", "b"], formOptions({ explode: false }))),
+    ).toBe("q=private%2Ca,b");
+  });
+
+  test("a comma in a non-exploded item or key is refused under allowReserved", async () => {
+    const options = formOptions({ allowReserved: true, explode: false });
+
+    await expectUsage(Serialize.form("q", ["a,b"], options).expand);
+    await expectUsage(Serialize.form("q", { "a,b": 1 }, options).expand);
+    await expectUsage(Serialize.form("q", { a: "b,c" }, options).expand);
+  });
+
+  test("a comma is fine under allowReserved when exploded", async () => {
+    expect(
+      await query(Serialize.form("q", ["a,b", "c"], formOptions({ allowReserved: true }))),
+    ).toBe("q=a,b&q=c");
+  });
+
+  test("an undefined optional value sends nothing", async () => {
+    const values: readonly Value[] = [null, undefined, [], {}, { a: undefined }];
+
+    const results = await Promise.all(
+      values.map((value) => query(Serialize.form("q", value, formOptions()))),
+    );
+
+    expect(results).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  test("an undefined required value is a usage error", async () => {
+    const values: readonly Value[] = [null, undefined, [], {}];
+
+    await Promise.all(
+      values.map((value) =>
+        expectUsage(Serialize.form("q", value, formOptions({ required: true })).expand),
+      ),
+    );
+  });
+
+  test("a nested value is refused", async () => {
+    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parsed JSON is any
+    const nested: Value = JSON.parse('{"a":{"b":1}}');
+
+    await expectUsage(Serialize.form("q", nested, formOptions()).expand);
+  });
+
+  test("a lone surrogate in a value or a name is refused", async () => {
+    await expectUsage(Serialize.form("q", "a\uD800", formOptions()).expand);
+    await expectUsage(Serialize.form("q\uDC00", "a", formOptions()).expand);
+  });
+});
+
+describe("allowReserved in a query", () => {
+  const options = formOptions({ allowReserved: true });
+
+  test("reserved characters pass but the form delimiters are encoded", async () => {
+    expect(await query(Serialize.form("q", ":/?[]@!$'()*,;", options))).toBe("q=:/?[]@!$'()*,;");
+    expect(await query(Serialize.form("q", "a&b=c+d#e", options))).toBe("q=a%26b%3Dc%2Bd%23e");
+  });
+
+  test("everything else is still encoded", async () => {
+    expect(await query(Serialize.form("q", 'a b|c"d<e>f\\g^h`i{j}k~l-m_n.o', options))).toBe(
+      "q=a%20b%7Cc%22d%3Ce%3Ef%5Cg%5Eh%60i%7Bj%7Dk~l-m_n.o",
+    );
+  });
+
+  test("a percent triplet passes and a stray percent is encoded", async () => {
+    expect(await query(Serialize.form("q", "%2F%e9", options))).toBe("q=%2F%e9");
+    expect(await query(Serialize.form("q", "100%", options))).toBe("q=100%25");
+    expect(await query(Serialize.form("q", "%zz%2", options))).toBe("q=%25zz%252");
+  });
+
+  test("without allowReserved the percent is encoded", async () => {
+    expect(await query(Serialize.form("q", "%2F", formOptions()))).toBe("q=%252F");
+  });
+
+  test("the name is encoded as without allowReserved", async () => {
+    expect(await query(Serialize.form("a:b", "x", options))).toBe("a%3Ab=x");
+  });
+});
+
+describe("spaceDelimited and pipeDelimited", () => {
+  test("a non-exploded array uses the encoded delimiter", async () => {
+    const spaced = formOptions({ explode: false });
+
+    expect(await query(Serialize.spaceDelimited("color", array, spaced))).toBe(
+      "color=red%20green%20blue",
+    );
+    expect(await query(Serialize.pipeDelimited("color", ["blue", "black"], spaced))).toBe(
+      "color=blue%7Cblack",
+    );
+  });
+
+  test("a non-exploded object lists keys and values", async () => {
+    const options = formOptions({ explode: false });
+
+    expect(await query(Serialize.spaceDelimited("color", object, options))).toBe(
+      "color=B%20150%20G%20200%20R%20100",
+    );
+    expect(await query(Serialize.pipeDelimited("color", object, options))).toBe(
+      "color=B%7C150%7CG%7C200%7CR%7C100",
+    );
+  });
+
+  test("an exploded value follows form", async () => {
+    expect(await query(Serialize.spaceDelimited("c", ["a", "b"], formOptions()))).toBe("c=a&c=b");
+    expect(await query(Serialize.pipeDelimited("c", { a: 1 }, formOptions()))).toBe("a=1");
+  });
+
+  test("a primitive is a plain pair", async () => {
+    expect(await query(Serialize.pipeDelimited("c", "a|b", formOptions({ explode: false })))).toBe(
+      "c=a%7Cb",
+    );
+  });
+
+  test("an item holding the style's delimiter is refused", async () => {
+    const options = formOptions({ explode: false });
+
+    await expectUsage(Serialize.spaceDelimited("c", ["a b"], options).expand);
+    await expectUsage(Serialize.spaceDelimited("c", { "a b": 1 }, options).expand);
+    await expectUsage(Serialize.pipeDelimited("c", ["a|b"], options).expand);
+    await expectUsage(
+      Serialize.pipeDelimited("c", ["a|b"], { ...options, allowReserved: true }).expand,
+    );
+    expect(await query(Serialize.spaceDelimited("c", ["a|b", "c"], options))).toBe("c=a%7Cb%20c");
+    expect(await query(Serialize.pipeDelimited("c", ["a b", "c"], options))).toBe("c=a%20b%7Cc");
+  });
+
+  test("an undefined value sends nothing or is refused when required", async () => {
+    expect(await query(Serialize.pipeDelimited("c", [], formOptions()))).toBeUndefined();
+    await expectUsage(Serialize.spaceDelimited("c", null, formOptions({ required: true })).expand);
+  });
+});
+
+describe("deepObject", () => {
+  test("members become bracketed names with encoded brackets", async () => {
+    expect(await query(Serialize.deepObject("color", object, formOptions()))).toBe(
+      "color%5BB%5D=150&color%5BG%5D=200&color%5BR%5D=100",
+    );
+  });
+
+  test("explode has no effect", async () => {
+    expect(
+      await query(Serialize.deepObject("c", { a: "x" }, formOptions({ explode: false }))),
+    ).toBe("c%5Ba%5D=x");
+  });
+
+  test("keys and values are encoded and allowReserved applies to values", async () => {
+    expect(await query(Serialize.deepObject("c", { "a b": "x/y" }, formOptions()))).toBe(
+      "c%5Ba%20b%5D=x%2Fy",
+    );
+    expect(
+      await query(
+        Serialize.deepObject("c", { "a/b": "x/y&z" }, formOptions({ allowReserved: true })),
+      ),
+    ).toBe("c%5Ba%2Fb%5D=x/y%26z");
+  });
+
+  test("a nested value is refused", async () => {
+    // oxlint-disable-next-line typescript/no-unsafe-assignment -- parsed JSON is any
+    const nested: Value = JSON.parse('{"a":{"b":1}}');
+
+    await expectUsage(Serialize.deepObject("c", nested, formOptions()).expand);
+  });
+
+  test("an array and a primitive are refused", async () => {
+    await expectUsage(Serialize.deepObject("c", ["a"], formOptions()).expand);
+    await expectUsage(Serialize.deepObject("c", "a", formOptions()).expand);
+  });
+
+  test("an empty object sends nothing or is refused when required", async () => {
+    expect(await query(Serialize.deepObject("c", {}, formOptions()))).toBeUndefined();
+    await expectUsage(Serialize.deepObject("c", {}, formOptions({ required: true })).expand);
+  });
+});
+
+describe("allowEmptyValue", () => {
+  const allowed = formOptions({ allowEmptyValue: true });
+
+  test("an empty array or object sends the name with no text", async () => {
+    expect(await query(Serialize.form("q", [], allowed))).toBe("q=");
+    expect(await query(Serialize.form("q", {}, allowed))).toBe("q=");
+    expect(await query(Serialize.pipeDelimited("q", [], allowed))).toBe("q=");
+    expect(await query(Serialize.deepObject("q", {}, allowed))).toBe("q=");
+  });
+
+  test("an empty value satisfies a required parameter", async () => {
+    expect(await query(Serialize.form("q", [], { ...allowed, required: true }))).toBe("q=");
+  });
+
+  test("null and undefined still send nothing, or are refused when required", async () => {
+    expect(await query(Serialize.form("q", null, allowed))).toBeUndefined();
+    // oxlint-disable-next-line unicorn/no-useless-undefined -- the value under test
+    expect(await query(Serialize.form("q", undefined, allowed))).toBeUndefined();
+    await expectUsage(Serialize.form("q", null, { ...allowed, required: true }).expand);
+  });
+
+  test("without it an empty array sends nothing", async () => {
+    expect(await query(Serialize.form("q", [], formOptions()))).toBeUndefined();
+    expect(
+      await query(Serialize.form("q", [], formOptions({ allowEmptyValue: false }))),
+    ).toBeUndefined();
+  });
+
+  test("a defined value is unchanged", async () => {
+    expect(await query(Serialize.form("q", "a", allowed))).toBe("q=a");
+  });
+});
