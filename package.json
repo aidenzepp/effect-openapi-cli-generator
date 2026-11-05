@@ -26,6 +26,8 @@
     "format": "vp fmt --check",
     "lint": "vp lint --type-aware",
     "typecheck": "tsc --noEmit",
+    "corpus": "tools/memguard.sh 4096 -- bun corpus/tools/run.ts --check",
+    "coverage": "tools/memguard.sh 4096 -- bun corpus/tools/run.ts --check",
     "check": "bun tools/check-bun.ts && bun run prepare:runtime && bun run format && bun run lint && bun run typecheck",
     "fix": "vp fmt && vp lint --fix"
   },
