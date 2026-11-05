@@ -156,17 +156,24 @@ const responseKey = (key: ResponseCase["key"]): string => {
   return "code" in key ? String(key.code) : `${key.range}XX`;
 };
 
-// A document's label relative to the entry document's directory, so no host path is emitted
-// (C8); a document on another scheme or authority keeps its URI.
+/**
+ * The label written for a document URI that does not parse, so the raw text never reaches generated
+ * source.
+ */
+export const documentPlaceholder = "<unparsed-document>";
+
+// A document's label, with no credentials, query or fragment (C8). A document on the entry's
+// origin is labelled by its path relative to the entry's directory, so no host path is emitted;
+// any other parsed document keeps its origin and path; an unparseable one gets the placeholder.
 const documentLabel = (entry: string, document: string): string => {
-  const base = URL.parse(entry);
   const target = URL.parse(document);
-  if (base === null || target === null || base.origin !== target.origin) {
-    return document;
+  if (target === null) {
+    return documentPlaceholder;
   }
 
-  if (base.protocol !== target.protocol) {
-    return document;
+  const base = URL.parse(entry);
+  if (base === null || base.origin !== target.origin || base.protocol !== target.protocol) {
+    return `${target.origin}${target.pathname}`;
   }
 
   const from = base.pathname.split("/").slice(0, -1);

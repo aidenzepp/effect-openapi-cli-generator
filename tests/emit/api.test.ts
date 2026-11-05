@@ -209,3 +209,49 @@ describe("emitApi: shapes beyond the fixture", () => {
     ]);
   });
 });
+
+// The golden API and plan with every operation's origin document replaced. The plan's commands
+// hold the api's own operation objects, so replacing the origin's document in place reaches both.
+const emitFrom = (uri: string) =>
+  Effect.runPromise(
+    pipeline(spec).pipe(
+      Effect.flatMap(({ api, bound, plan }) => {
+        for (const operation of api.operations) {
+          Object.defineProperty(operation.origin, "document", { value: uri });
+        }
+
+        return emitApi({ api, boundOrigins: bound.origins, plan });
+      }),
+    ),
+  );
+
+const emittedText = (files: readonly { readonly content: string }[]): string =>
+  files.map((file) => file.content).join("\n");
+
+describe("emitApi: document labels carry no credentials", () => {
+  test("a cross-origin document keeps only its origin and path", async () => {
+    const text = emittedText(await emitFrom("https://user:pw@other.example/spec.yaml?token=abc#x"));
+
+    expect(text).toContain('document: "https://other.example/spec.yaml"');
+    for (const secret of ["user:pw", "pw@", "token", "abc", "#x", "spec.yaml?"]) {
+      expect(text).not.toContain(secret);
+    }
+    expect(text).not.toContain("user:pw");
+    expect(text).not.toContain("token=abc");
+  });
+
+  test("a same-origin relative path drops its query and fragment", async () => {
+    const text = emittedText(await emitFrom("file:///golden/shared/types.json?token=abc#frag"));
+
+    expect(text).toContain('document: "shared/types.json"');
+    expect(text).not.toContain("token");
+    expect(text).not.toContain("frag");
+  });
+
+  test("an unparseable document yields the fixed placeholder", async () => {
+    const text = emittedText(await emitFrom("not a uri?token=abc"));
+
+    expect(text).toContain('document: "<unparsed-document>"');
+    expect(text).not.toContain("token");
+  });
+});
