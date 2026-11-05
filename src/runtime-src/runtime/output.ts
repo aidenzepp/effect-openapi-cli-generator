@@ -484,7 +484,8 @@ const reportOnce = <E extends object>(
 
 /**
  * The credentials the run evaluated, so the final catch scrubs what the command handler chose.
- * `send` records them when this service is provided; `finalCatch` adds them to its own list.
+ * `send` records them; `finalCatch` adds them to its own list. Both require the service, so an
+ * entry that omits `runCredentialsLayer` does not compile.
  */
 export class RunCredentials extends Context.Service<
   RunCredentials,
@@ -495,13 +496,8 @@ export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(Run
   Ref.make<readonly Credential[]>([]),
 );
 
-const noCredentials: readonly Credential[] = [];
-
-const recordedCredentials: Effect.Effect<readonly Credential[]> = Effect.serviceOption(
-  RunCredentials,
-).pipe(
-  Effect.flatMap(Option.match({ onNone: () => Effect.succeed(noCredentials), onSome: Ref.get })),
-);
+const recordedCredentials: Effect.Effect<readonly Credential[], never, RunCredentials> =
+  Effect.flatMap(Effect.service(RunCredentials), Ref.get);
 
 const renderCause = <E>(
   cause: Cause.Cause<E>,
@@ -544,12 +540,14 @@ const renderCause = <E>(
  * itself, so its exit code stands; a `CliError` parse error is rendered once through
  * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
  * line and "internal error, please report" and fails with `InternalError`, exit 70.
- * `credentials` are the values to scrub that the caller holds; when `RunCredentials` is provided
- * outside the catch, the credentials the command handler evaluated are scrubbed too.
+ * `credentials` are the values to scrub that the caller holds; `RunCredentials`, provided outside
+ * the catch, adds the credentials the command handler evaluated.
  */
 export const finalCatch =
   (credentials: readonly Credential[]) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | InternalError, R | Stdio.Stdio> =>
+  <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | InternalError, R | RunCredentials | Stdio.Stdio> =>
     Effect.catchCause(effect, (cause) =>
       recordedCredentials.pipe(
         Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
@@ -850,11 +848,7 @@ export const send =
       });
 
       const credentials = yield* evaluate(operation, meta.security);
-      const recorder = yield* Effect.serviceOption(RunCredentials);
-
-      if (Option.isSome(recorder)) {
-        yield* Ref.set(recorder.value, credentials);
-      }
+      yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
 
       const { table: security } = yield* Schemes;
       const { table: servers } = yield* Servers;

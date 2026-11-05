@@ -13,7 +13,14 @@ import {
   Sink,
   Stdio,
 } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse,
+  UrlParams,
+} from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import type * as Client from "../../src/runtime-src/runtime/client.ts";
@@ -76,6 +83,9 @@ interface Seen {
 interface Answer {
   readonly body?: string;
   readonly contentType?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  // The body yields `body` (if any) and then errors, as a connection dropped mid-read would.
+  readonly streamFails?: boolean;
   readonly status: number;
 }
 
@@ -84,9 +94,24 @@ interface World {
   readonly allowUnbound?: boolean;
   readonly answer?: Answer | "transport";
   readonly baseUrl?: string;
+  // The client dies with a message carrying the credential, after `send` evaluated it.
+  readonly defect?: boolean;
   readonly env?: Record<string, string>;
   readonly operation?: Output.OperationMeta;
+  // Replace the raw `[]` urlParams Serialize.request builds with a real UrlParams value.
+  readonly realUrlParams?: boolean;
 }
+
+const failingBody = (text: string | undefined): ReadableStream<Uint8Array> =>
+  new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (text !== undefined) {
+        controller.enqueue(new TextEncoder().encode(text));
+      }
+
+      controller.error(new Error("connection reset"));
+    },
+  });
 
 const decode = (chunks: readonly Buffer[]): string => Buffer.concat(chunks).toString("utf-8");
 
@@ -115,6 +140,10 @@ const run = async (world: World = {}) => {
       const init = Option.getOrUndefined(yield* Effect.serviceOption(FetchHttpClient.RequestInit));
       seen.push({ headers: sent.headers, init, method: sent.method, url: url.href });
 
+      if (world.defect === true) {
+        return yield* Effect.die(new Error(`boom ${SECRET}`));
+      }
+
       if (answer === "transport") {
         return yield* new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({
@@ -124,12 +153,18 @@ const run = async (world: World = {}) => {
         });
       }
 
-      const headers: Record<string, string> =
-        answer.contentType === undefined ? {} : { "content-type": answer.contentType };
+      const headers = new Headers(answer.headers);
+
+      if (answer.contentType !== undefined) {
+        headers.set("content-type", answer.contentType);
+      }
 
       return HttpClientResponse.fromWeb(
         sent,
-        new Response(answer.body ?? null, { headers, status: answer.status }),
+        new Response(
+          answer.streamFails === true ? failingBody(answer.body) : (answer.body ?? null),
+          { headers, status: answer.status },
+        ),
       );
     }),
   );
@@ -165,6 +200,18 @@ const run = async (world: World = {}) => {
   );
   const program = Output.finalCatch([])(
     request.pipe(
+      Effect.map((built) =>
+        world.realUrlParams === true
+          ? HttpClientRequest.makeWith(
+              built.method,
+              built.url,
+              UrlParams.empty,
+              built.hash,
+              built.headers,
+              built.body,
+            )
+          : built,
+      ),
       Effect.flatMap(Output.send(world.operation ?? meta, Option.fromNullishOr(world.accept))),
     ),
   );
@@ -256,6 +303,51 @@ describe("Output.send errors", () => {
     const result = await run({ answer: { body: `bad token ${SECRET}`, status: 403 } });
 
     expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("<redacted:bearerAuth>");
+    expect(result.stderr).not.toContain(SECRET);
+  });
+
+  test("the literal that matched is named on stderr", async () => {
+    const result = await run({ answer: { status: 409 } });
+
+    expect(result.stderr).toContain("(matched 4XX)");
+  });
+
+  test("a 2xx body that fails mid-stream exits 5", async () => {
+    const result = await run({
+      answer: { body: "{", contentType: "application/json", status: 200, streamFails: true },
+    });
+
+    expect(result.tag).toBe("ResponseStreamError");
+    expect(result.exitCode).toBe(5);
+  });
+
+  test("an error body that cannot be read leaves the ApiResponseError with an empty excerpt", async () => {
+    const result = await run({ answer: { status: 404, streamFails: true } });
+
+    expect(result.tag).toBe("ApiResponseError");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("(matched 404)");
+    expect(result.stderr).not.toContain("connection reset");
+  });
+
+  test("a redirect from https to http is refused and exits 4", async () => {
+    const result = await run({
+      answer: { headers: { location: "http://api.example.com/users/42" }, status: 302 },
+      realUrlParams: true,
+    });
+
+    expect(result.tag).toBe("RedirectRefused");
+    expect(result.exitCode).toBe(4);
+    expect(result.seen).toHaveLength(1);
+  });
+
+  test("a defect after the credential is evaluated prints no credential and exits 70", async () => {
+    const result = await run({ defect: true });
+
+    expect(result.tag).toBe("InternalError");
+    expect(result.exitCode).toBe(70);
+    expect(result.stderr).toContain("boom");
     expect(result.stderr).toContain("<redacted:bearerAuth>");
     expect(result.stderr).not.toContain(SECRET);
   });
