@@ -29,6 +29,7 @@ import {
   str,
   typeKeyword,
   typeLiteral,
+  typeReadonlyArray,
   typeRef,
   typeUnion,
 } from "./printer.ts";
@@ -290,7 +291,7 @@ const parameterParts = (
     }
 
     const valueType = array.success
-      ? typeRef(I("ReadonlyArray"), [], [typeKeyword("string")])
+      ? typeReadonlyArray(typeKeyword("string"))
       : typeKeyword(boolean.success ? "boolean" : "string");
     const field: Field = {
       key,

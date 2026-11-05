@@ -26,6 +26,7 @@ import {
   regExp,
   str,
   typeKeyword,
+  typeReadonlyArray,
   typeLiteral,
   typeRef,
   typeUnion,
@@ -708,6 +709,24 @@ const literalValue = (literal: string): string => {
 
   return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String))(`"${inner}"`);
 };
+
+const typeAlias = (type: TypeExpr): Module => ({
+  imports: [],
+  statements: [{ _tag: "TypeAlias", name: I("Value"), type }],
+});
+
+describe("readonly array types", () => {
+  test("prints readonly T[] and parenthesizes a union element", () => {
+    expect(print(typeAlias(typeReadonlyArray(typeKeyword("string"))))).toContain(
+      "type Value = readonly string[];",
+    );
+    expect(
+      print(
+        typeAlias(typeReadonlyArray(typeUnion([typeKeyword("string"), typeKeyword("number")]))),
+      ),
+    ).toContain("type Value = readonly (string | number)[];");
+  });
+});
 
 describe("printModule", () => {
   test("prints the golden request module byte for byte", () => {

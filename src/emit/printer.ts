@@ -121,6 +121,7 @@ export type TypeExpr =
         | "unknown";
     }
   | { readonly _tag: "TypeLiteral"; readonly value: boolean | number | string }
+  | { readonly _tag: "TypeReadonlyArray"; readonly element: TypeExpr }
   | { readonly _tag: "TypeUnion"; readonly members: readonly TypeExpr[] };
 
 export interface Param {
@@ -286,6 +287,11 @@ export const typeLiteral = (value: boolean | number | string): TypeExpr => ({
   value,
 });
 
+export const typeReadonlyArray = (element: TypeExpr): TypeExpr => ({
+  _tag: "TypeReadonlyArray",
+  element,
+});
+
 export const typeUnion = (members: readonly TypeExpr[]): TypeExpr => ({
   _tag: "TypeUnion",
   members,
@@ -420,6 +426,10 @@ const typeText = (type: TypeExpr): string =>
   Match.valueTags(type, {
     TypeKeyword: (keyword) => keyword.keyword,
     TypeLiteral: (literal) => literalTypeText(literal.value),
+    TypeReadonlyArray: (array) =>
+      array.element._tag === "TypeUnion"
+        ? `readonly (${typeText(array.element)})[]`
+        : `readonly ${typeText(array.element)}[]`,
     TypeRef: (reference) => {
       const name = [reference.head, ...reference.members].join(".");
       const args = reference.args.map(typeText).join(", ");
