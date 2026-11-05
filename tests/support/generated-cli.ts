@@ -168,8 +168,8 @@ export const preparePackage = (
   );
 
 /**
- * Runs the package's one `bin` entry with Bun. `env` is the bin's whole environment (default
- * empty), so nothing from the test process leaks into the run.
+ * Runs the package's one `bin` entry with Bun, without blocking the event loop. `env` is the bin's
+ * whole environment (default empty), so nothing from the test process leaks into the run.
  */
 export const runBin = (
   generated: GeneratedPackage,
@@ -184,22 +184,31 @@ export const runBin = (
       return yield* Effect.die("the generated package must declare exactly one bin");
     }
 
-    const result = Bun.spawnSync(
-      [process.execPath, nodePath.join(generated.dir, ...entry.split("/")), ...invocation.args],
-      {
-        cwd: generated.dir,
-        env: { ...invocation.env },
-        stderr: "pipe",
-        stdin: invocation.stdin ?? new Uint8Array(),
-        stdout: "pipe",
-        timeout: invocation.timeoutMs,
-      },
-    );
+    // Async, so an in-process server the bin talks to keeps serving while the bin runs.
+    return yield* Effect.promise(async () => {
+      const child = Bun.spawn(
+        [process.execPath, nodePath.join(generated.dir, ...entry.split("/")), ...invocation.args],
+        {
+          cwd: generated.dir,
+          env: { ...invocation.env },
+          stderr: "pipe",
+          stdin: invocation.stdin ?? new Uint8Array(),
+          stdout: "pipe",
+        },
+      );
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, invocation.timeoutMs);
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).bytes(),
+        new Response(child.stderr).bytes(),
+        child.exited,
+      ]).finally(() => {
+        clearTimeout(timer);
+      });
 
-    return {
-      exitCode: result.exitCode,
-      stderr: result.stderr,
-      stdout: result.stdout,
-      timedOut: result.exitedDueToTimeout === true,
-    };
+      return { exitCode: child.signalCode === null ? exitCode : null, stderr, stdout, timedOut };
+    });
   });
