@@ -18,6 +18,7 @@ import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -97,8 +98,6 @@ const rules = {
 } as const satisfies Record<string, Rule>;
 
 type Code = keyof typeof rules;
-
-const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
 const JsonMap = Schema.Record(Schema.String, Schema.Json);
 
@@ -397,7 +396,7 @@ const diagnose = (
     row,
     scope: rule.scope,
     severity: rule.severity,
-    specSection: `https://spec.openapis.org/oas/v${patch[shared.resolution.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(shared.resolution.line, rule.anchor),
   };
   if (rule.hint !== undefined) {
     fields.hint = rule.hint;

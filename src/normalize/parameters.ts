@@ -8,6 +8,7 @@ import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -82,8 +83,6 @@ const ParameterObject = Schema.Struct({
 type ParameterNode = typeof ParameterObject.Type;
 
 const MediaTypeObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknown) });
-
-const specVersion: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
 
 const rules: Record<Line, string> = { "3.0": "oas-3.0", "3.1": "oas-3.1", "3.2": "oas-3.2" };
 
@@ -608,7 +607,7 @@ const toDiagnostics = (
         row: finding.code.slice(0, finding.code.indexOf("/")),
         scope: "element",
         severity: finding.severity,
-        specSection: `https://spec.openapis.org/oas/v${specVersion[resolution.line]}.html#${finding.anchor}`,
+        specSection: specSectionUrl(resolution.line, finding.anchor),
       };
       if (finding.hint !== undefined) {
         fields.hint = finding.hint;

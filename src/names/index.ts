@@ -31,6 +31,7 @@ import type {
   PlannedGroup,
 } from "./plan.ts";
 import { reservedCliNames, reservedEnvSuffixes } from "./reserved.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 export { domainIdentifiers } from "./domain.ts";
 
@@ -120,8 +121,6 @@ const push = <K, V>(map: Map<K, V[]>, key: K, value: V): void => {
 // and `api/security.ts`.
 const reservedSegments: ReadonlySet<string> = new Set(["root", "security", "servers"]);
 
-const specVersion = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
-
 const fixedFlagIdentifiers: ReadonlySet<string> = new Set([
   "accept",
   "body",
@@ -179,10 +178,7 @@ const toDiagnostic = (api: Api, finding: Finding): Effect.Effect<Diagnostic> => 
     row: finding.code.slice(0, finding.code.indexOf("/")),
     scope: finding.scope,
     severity: finding.severity,
-    specSection:
-      anchor === undefined
-        ? finding.document
-        : `https://spec.openapis.org/oas/v${specVersion[api.line]}.html#${anchor}`,
+    specSection: anchor === undefined ? finding.document : specSectionUrl(api.line, anchor),
   };
   if (finding.hint !== undefined) {
     fields.hint = finding.hint;

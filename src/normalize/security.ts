@@ -6,7 +6,7 @@ import type { Resolution } from "../resolve/index.ts";
 import { implicitComponent, referenceAt } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer, unescapeToken } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import type { Line } from "../validate/index.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -42,8 +42,6 @@ interface Built {
   readonly findings: readonly Finding[];
   readonly scheme?: SecurityScheme;
 }
-
-const patch: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
 
 const SchemeNode = Schema.Struct({
   deprecated: Schema.optionalKey(Schema.Boolean),
@@ -113,7 +111,7 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     row,
     scope: "element",
     severity: "refusal",
-    specSection: `https://spec.openapis.org/oas/v${patch[resolution.line]}.html#${finding.anchor}`,
+    specSection: specSectionUrl(resolution.line, finding.anchor),
   };
   const withHint = finding.hint === undefined ? base : { ...base, hint: finding.hint };
   const related = [{ document: resolution.document, pointer: finding.related }];

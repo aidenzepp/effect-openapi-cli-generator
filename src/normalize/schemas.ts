@@ -18,6 +18,7 @@ import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -1299,8 +1300,6 @@ const rules = new Map<string, Rule>([
   ],
 ]);
 
-const patch: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
-
 const Declared = Schema.Struct({ openapi: Schema.String });
 
 // The deepest existing node of the source document on the edit's path, as an RFC 6901 pointer.
@@ -1362,7 +1361,7 @@ const diagnosticsOf = (
         row,
         scope: "element",
         severity: rule.severity,
-        specSection: `https://spec.openapis.org/oas/v${patch[resolution.line]}.html#${rule.anchor}`,
+        specSection: specSectionUrl(resolution.line, rule.anchor),
       });
       pending.push(Effect.orDie(decoded));
     }

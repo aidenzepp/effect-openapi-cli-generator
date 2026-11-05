@@ -44,6 +44,7 @@ import { writeFiles } from "./write/index.ts";
 import type { WriteNotice, WriteRefused } from "./write/index.ts";
 import type { RunLockHeld, RunLockUnavailable } from "./write/lock.ts";
 import { sha256Hex } from "./write/manifest.ts";
+import { specSectionUrl } from "./model/spec-section.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -123,8 +124,6 @@ export type GenerateError =
   | WriteRefused;
 
 const reportPath = "generation-report.json";
-
-const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
 const emitHints: Readonly<Record<CliRefusal["reason"], string | undefined>> = {
   "unsupported-body":
@@ -249,7 +248,7 @@ const emitRefusal = (api: Api, refusal: CliRefusal): Effect.Effect<Diagnostic> =
       row: "EMT-1",
       scope: refusal.scope,
       severity: "refusal",
-      specSection: `https://spec.openapis.org/oas/v${patch[api.line]}.html#operation-object`,
+      specSection: specSectionUrl(api.line, "operation-object"),
     };
     const hint = emitHints[refusal.reason];
     const fields = hint === undefined ? base : { ...base, hint };

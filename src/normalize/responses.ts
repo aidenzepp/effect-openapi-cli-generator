@@ -8,6 +8,7 @@ import { defsKey } from "../resolve/canonical.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.
@@ -36,8 +37,6 @@ const MediaObject = Schema.Struct({
 const isHeaderName = Schema.is(HeaderName);
 
 const isMediaRange = Schema.is(MediaRange);
-
-const specVersion = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
 interface Rule {
   readonly anchor: string;
@@ -318,7 +317,7 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     row,
     scope: "element",
     severity: rule.severity,
-    specSection: `https://spec.openapis.org/oas/v${specVersion[resolution.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(resolution.line, rule.anchor),
   };
   if (rule.hint !== undefined) {
     fields.hint = rule.hint;

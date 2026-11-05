@@ -3,6 +3,7 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Line } from "./dispatch.ts";
 import type { ErrorGroup, ErrorUnit } from "./locations.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 type Uri = typeof DocumentUri.Type;
 
@@ -99,11 +100,6 @@ export const knownDisagreements: readonly Disagreement[] = [
   },
 ];
 
-const specVersion: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
-
-const specUrl = (line: Line, anchor: string): string =>
-  `https://spec.openapis.org/oas/v${specVersion[line]}.html#${anchor}`;
-
 /**
  * Finds the entry that explains every deepest error of a group, or none.
  */
@@ -146,7 +142,7 @@ export const noticeFor = (
     row: entry.row,
     scope: "element",
     severity: "notice",
-    specSection: specUrl(where.line, entry.anchor),
+    specSection: specSectionUrl(where.line, entry.anchor),
   });
 
 /**
@@ -181,7 +177,7 @@ export const refusalFor = (
     row,
     scope: "document",
     severity: "refusal",
-    specSection: specUrl(where.line, anchor),
+    specSection: specSectionUrl(where.line, anchor),
   }).pipe(
     Effect.map((diagnostic) => ({
       context: group.context,

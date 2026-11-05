@@ -7,6 +7,7 @@ import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
 import { escapeToken, evaluateTokens, parseFragment, parsePointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
 
@@ -197,8 +198,6 @@ const elementRefusals: ReadonlySet<Code> = new Set<Code>([
   "SCH-05/dynamic-ref",
   "SEC-10/uri-like-name",
 ]);
-
-const patch: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
 
 interface Finding {
   readonly code: Code;
@@ -1070,7 +1069,7 @@ const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diag
     row,
     scope,
     severity: notices.has(finding.code) ? "notice" : "refusal",
-    specSection: `https://spec.openapis.org/oas/v${patch[input.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(input.line, rule.anchor),
   };
 
   return Schema.decodeUnknownEffect(Diagnostic)(

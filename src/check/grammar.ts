@@ -6,6 +6,7 @@ import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer, formatPointer, parseFragment } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 
 interface JsonObject {
   readonly [key: string]: Json;
@@ -216,8 +217,6 @@ interface Place {
   readonly node: JsonObject;
   readonly pointer: string;
 }
-
-const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
 const statusKey = /^(?:[1-5][0-9]{2}|[1-5]XX|default)$/u;
 
@@ -1063,12 +1062,12 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
     element: rule.element,
     hint: rule.hint,
     message: rule.message,
-    openapi: Predicate.isString(declared) ? declared : patch[resolution.line],
+    openapi: Predicate.isString(declared) ? declared : patchVersion[resolution.line],
     pointer: viaReference ? operation.item.use : finding.pointer,
     row,
     scope: finding.scope ?? rule.scope,
     severity: finding.severity ?? rule.severity,
-    specSection: `https://spec.openapis.org/oas/v${patch[resolution.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(resolution.line, rule.anchor),
   };
   const located = operation === undefined ? base : { ...base, operation: operationOf(operation) };
   const fields = viaReference
