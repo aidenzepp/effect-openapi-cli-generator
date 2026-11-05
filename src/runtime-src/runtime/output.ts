@@ -1,7 +1,32 @@
 import type { PlatformError } from "effect";
-import { Data, Effect, FileSystem, Option, Path, Schema, Sink, Stdio, Stream } from "effect";
-import { Flag, GlobalFlag } from "effect/cli";
-import { OutputError, UsageError } from "../domain/errors.ts";
+import {
+  Array as Arr,
+  Cause,
+  Data,
+  Effect,
+  FileSystem,
+  Option,
+  Order,
+  Path,
+  Redacted,
+  Runtime,
+  Schema,
+  Sink,
+  Stdio,
+  Stream,
+} from "effect";
+import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
+import { Base64 } from "effect/encoding";
+import {
+  ApiResponseError,
+  CredentialMissing,
+  OutputError,
+  RedirectRefused,
+  ResponseStreamError,
+  TransportError,
+  UsageError,
+} from "../domain/errors.ts";
+import type { Credential } from "./auth.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -179,3 +204,435 @@ export const writeBody = <E, R>(
 
     return yield* toStdout(response.bytes);
   });
+
+/**
+ * C0 except LF and TAB, DEL, C1, format characters (bidi controls among them), U+2028, U+2029 and
+ * lone surrogates: the set the help text removes at generation (design 7.4).
+ */
+const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
+
+/**
+ * Remove the characters that can drive a terminal or hide text. LF and TAB stay.
+ */
+export const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
+
+/**
+ * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
+ * token `basicAuth` sends and the password alone; for an apiKey in the query also the
+ * percent-encoded form the URL serializer emits. Empty forms are dropped.
+ */
+const wireForms = (credential: Credential): readonly string[] => {
+  const value: string = Redacted.value(credential.value);
+  const { definition } = credential;
+  const forms = [value];
+
+  if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
+    forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
+  }
+
+  if (definition.kind === "apiKey" && definition.in === "query") {
+    forms.push(new URLSearchParams([["", value]]).toString().slice(1));
+  }
+
+  return forms.filter((form) => form !== "");
+};
+
+interface Covered {
+  readonly start: number;
+  readonly end: number;
+  readonly placeholder: string;
+}
+
+const byStartThenLongest = Order.combine(
+  Order.mapInput(Order.Number, (range: Covered) => range.start),
+  Order.mapInput(Order.flip(Order.Number), (range: Covered) => range.end),
+);
+
+/**
+ * Every occurrence of every wire form of every credential as a character range, overlapping
+ * occurrences included.
+ */
+const occurrences = (text: string, credentials: readonly Credential[]): readonly Covered[] =>
+  credentials.flatMap((credential) =>
+    wireForms(credential).flatMap((form) => {
+      const placeholder = `<redacted:${credential.scheme}>`;
+      const found: Covered[] = [];
+
+      for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
+        found.push({ end: at + form.length, placeholder, start: at });
+      }
+
+      return found;
+    }),
+  );
+
+/**
+ * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,
+ * longest range.
+ */
+const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
+  const runs: Covered[] = [];
+
+  for (const range of Arr.sort(ranges, byStartThenLongest)) {
+    const last = runs.at(-1);
+
+    if (last !== undefined && range.start <= last.end) {
+      runs[runs.length - 1] = { ...last, end: Math.max(last.end, range.end) };
+    } else {
+      runs.push(range);
+    }
+  }
+
+  return runs;
+};
+
+/**
+ * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
+ * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
+ * character of any form survives (recheck N1), and placeholders are never rescanned.
+ */
+export const scrub = (text: string, credentials: readonly Credential[]): string => {
+  const runs = mergeRuns(occurrences(text, credentials));
+  let scrubbed = "";
+  let at = 0;
+
+  for (const run of runs) {
+    scrubbed += text.slice(at, run.start) + run.placeholder;
+    at = run.end;
+  }
+
+  return scrubbed + text.slice(at);
+};
+
+// The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
+const oneByteLimit = 128;
+
+const twoByteLimit = 2048;
+
+const threeByteLimit = 65_536;
+
+const utf8Width = (character: string): number => {
+  const point = character.codePointAt(0) ?? 0;
+
+  if (point < oneByteLimit) {
+    return 1;
+  }
+
+  if (point < twoByteLimit) {
+    return 2;
+  }
+
+  return point < threeByteLimit ? 3 : 4;
+};
+
+/**
+ * The longest prefix of `text` that fits `maxBytes` of UTF-8, never splitting a character.
+ */
+const truncateUtf8 = (text: string, maxBytes: number): string => {
+  let used = 0;
+  let end = 0;
+
+  for (const character of text) {
+    used += utf8Width(character);
+
+    if (used > maxBytes) {
+      break;
+    }
+
+    end += character.length;
+  }
+
+  return text.slice(0, end);
+};
+
+/**
+ * The excerpt of an error body: credential values scrubbed, then sanitized, then bounded to
+ * `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
+ * `ApiResponseError` refuses an excerpt over 64 KiB (audit F6).
+ */
+export const boundedExcerpt = (
+  text: string,
+  maxBytes: number,
+  credentials: readonly Credential[],
+): string => truncateUtf8(sanitize(scrub(text, credentials)), maxBytes);
+
+const encoder = new TextEncoder();
+
+const longestFormBytes = (credentials: readonly Credential[]): number =>
+  Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));
+
+/**
+ * The length of the longest proper prefix of `form` that `text` ends with (Knuth-Morris-Pratt, so
+ * a long credential costs linear time).
+ */
+const trailingPrefixLength = (text: string, form: string): number => {
+  const fallback = [0];
+
+  for (let at = 1, matched = 0; at < form.length; at += 1) {
+    while (matched > 0 && form[at] !== form[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+
+    matched += form[at] === form[matched] ? 1 : 0;
+    fallback.push(matched);
+  }
+
+  // Only the last form.length - 1 characters can hold a proper prefix, so a full match never forms.
+  let matched = 0;
+
+  for (let at = Math.max(0, text.length - form.length + 1); at < text.length; at += 1) {
+    while (matched > 0 && text[at] !== form[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+
+    matched += text[at] === form[matched] ? 1 : 0;
+  }
+
+  return matched;
+};
+
+/**
+ * Drop the trailing partial match of any credential form (audit F1). A read cut at its budget can
+ * end inside a credential; that fragment never matches, so scrubbing would leave it, and a shorter
+ * placeholder earlier in the text would pull it into the visible window.
+ */
+const dropTrailingFragment = (text: string, credentials: readonly Credential[]): string => {
+  const cut = Math.max(
+    0,
+    ...credentials.flatMap(wireForms).map((form) => trailingPrefixLength(text, form)),
+  );
+
+  return text.slice(0, text.length - cut);
+};
+
+// Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
+// larger than the limit, so each chunk is cut at the remaining budget instead.
+const takeBytes = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+  budget: number,
+): Stream.Stream<Uint8Array, E, R> =>
+  body.pipe(
+    Stream.mapAccum(
+      () => budget,
+      (remaining, chunk: Uint8Array) =>
+        [remaining - Math.min(remaining, chunk.length), [chunk.subarray(0, remaining)]] as const,
+    ),
+    Stream.takeWhile((chunk) => chunk.length > 0),
+  );
+
+const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
+  const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let at = 0;
+
+  for (const chunk of chunks) {
+    joined.set(chunk, at);
+    at += chunk.length;
+  }
+
+  return joined;
+};
+
+/**
+ * Read the excerpt of an error response body for `ApiResponseError.bodyExcerpt`, bounded by
+ * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
+ * form, so a credential cut by the limit is still found and scrubbed. When the read stops at that
+ * budget, an incomplete character and any trailing partial credential are dropped first; then the
+ * text is scrubbed, sanitized and bounded.
+ */
+export const readExcerpt = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+  credentials: readonly Credential[],
+): Effect.Effect<string, E, R | GlobalFlag.Setting.Identifier<"max-error-bytes">> =>
+  Effect.gen(function* step5() {
+    const maxBytes = yield* MaxErrorBytes;
+
+    if (maxBytes === 0) {
+      return "";
+    }
+
+    const budget = maxBytes + longestFormBytes(credentials);
+    const read = concatBytes(yield* Stream.runCollect(takeBytes(body, budget)));
+    const text =
+      read.length < budget
+        ? new TextDecoder().decode(read)
+        : dropTrailingFragment(new TextDecoder().decode(read, { stream: true }), credentials);
+
+    return boundedExcerpt(text, maxBytes, credentials);
+  });
+
+/**
+ * The errors the runtime raises by design (design 7.1), each rendered through `renderError`.
+ */
+export type KnownError =
+  | ApiResponseError
+  | CredentialMissing
+  | OutputError
+  | RedirectRefused
+  | ResponseStreamError
+  | TransportError
+  | UsageError;
+
+const isKnownError = (error: unknown): error is KnownError =>
+  error instanceof ApiResponseError ||
+  error instanceof CredentialMissing ||
+  error instanceof OutputError ||
+  error instanceof RedirectRefused ||
+  error instanceof ResponseStreamError ||
+  error instanceof TransportError ||
+  error instanceof UsageError;
+
+const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
+
+const singleLine = (text: string, credentials: readonly Credential[]): string =>
+  oneLine(sanitize(scrub(text, credentials)));
+
+/**
+ * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
+ * `ApiResponseError` then `Request ID: <id>` when set, then the excerpt (omitted when empty).
+ * Every part is scrubbed and sanitized again here, because the error may come from anywhere.
+ */
+export const renderError = (error: KnownError, credentials: readonly Credential[]): string => {
+  const lines = [`Error: ${singleLine(error[CliError.userMessage], credentials)}`];
+
+  if (error instanceof ApiResponseError) {
+    if (error.requestId !== undefined) {
+      lines.push(`Request ID: ${singleLine(error.requestId, credentials)}`);
+    }
+
+    const excerpt = boundedExcerpt(error.bodyExcerpt, maxErrorBytesCeiling, credentials);
+
+    if (excerpt !== "") {
+      lines.push(excerpt);
+    }
+  }
+
+  return lines.join("\n");
+};
+
+const base = CliOutput.defaultFormatter({ colors: false });
+
+const valueFreeMessage = (error: CliError.CliError): string => {
+  if (error._tag !== "InvalidValue") {
+    return base.formatCliError(error);
+  }
+
+  const subject = error.kind === "flag" ? `flag --${error.option}` : `argument <${error.option}>`;
+
+  return `Invalid value for ${subject}. Run with --help for usage.`;
+};
+
+/**
+ * Renders a `CliError.InvalidValue` by `kind` and `option` only: its `value` is the raw flag text
+ * and its `expected` can quote it (design 7.5, SM-3). Everything else renders as the default
+ * formatter does, without colors.
+ */
+export const valueFreeFormatter: CliOutput.Formatter = {
+  formatCliError: valueFreeMessage,
+  formatError: (error) => `\nERROR\n  ${valueFreeMessage(error)}`,
+  formatErrors: (errors) =>
+    errors.length === 0
+      ? ""
+      : `\nERROR${errors.length === 1 ? "" : "S"}\n${errors
+          .map((error) => `  ${valueFreeMessage(error)}`)
+          .join("\n")}`,
+  formatHelpDoc: base.formatHelpDoc,
+  formatVersion: base.formatVersion,
+};
+
+/**
+ * Exit 70: a failure no error class names, a defect in the program. It is already printed.
+ */
+export class InternalError extends Data.TaggedError("InternalError") {
+  readonly [Runtime.errorExitCode] = 70;
+
+  readonly [Runtime.errorReported] = false;
+}
+
+/**
+ * Longest message a defect line may carry. A runtime choice: the design says only "one line".
+ */
+const maxDefectLineLength = 512;
+
+const Described = Schema.Union([Schema.String, Schema.Struct({ message: Schema.String })]);
+
+const isString = Schema.is(Schema.String);
+
+const isDescribed = Schema.is(Described);
+
+const defectMessage = (defect: typeof Described.Type): string =>
+  isString(defect) ? defect : defect.message;
+
+const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* step6() {
+    const stdio = yield* Stdio.Stdio;
+
+    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
+  }).pipe(Effect.ignore);
+
+/**
+ * The text printed on stderr for a `CliError`, or `undefined` when there is nothing to print:
+ * help with no parse errors, which `Command.run` has already presented. Parse errors go through
+ * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value.
+ */
+const renderCliError = (error: CliError.CliError): string | undefined => {
+  if (error._tag !== "ShowHelp") {
+    return valueFreeFormatter.formatError(error);
+  }
+
+  return error.errors.length === 0 ? undefined : valueFreeFormatter.formatErrors(error.errors);
+};
+
+/**
+ * Print already scrubbed text, then fail again with `error` marked reported, so its exit code
+ * stands and nothing renders it a second time.
+ */
+const reportOnce = <E extends object>(
+  text: string,
+  error: E,
+): Effect.Effect<never, E, Stdio.Stdio> =>
+  printStderr(text).pipe(
+    Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
+  );
+
+/**
+ * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
+ * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
+ * itself, so its exit code stands; a `CliError` parse error is rendered once through
+ * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
+ * line and "internal error, please report" and fails with `InternalError`, exit 70.
+ * `credentials` are the values to scrub; the caller holds them.
+ */
+export const finalCatch =
+  (credentials: readonly Credential[]) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | InternalError, R | Stdio.Stdio> =>
+    Effect.catchCause(effect, (cause): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
+      const failure = Cause.findErrorOption(cause);
+
+      if (Cause.hasInterruptsOnly(cause)) {
+        return Effect.failCause(cause);
+      }
+
+      if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
+        const text = renderCliError(failure.value);
+
+        return text === undefined
+          ? Effect.failCause(cause)
+          : reportOnce(sanitize(scrub(text, credentials)), failure.value);
+      }
+
+      if (Option.isSome(failure) && isKnownError(failure.value)) {
+        const error = failure.value;
+
+        return reportOnce(renderError(error, credentials), error);
+      }
+
+      const squashed = Cause.squash(cause);
+      const line = singleLine(
+        isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
+        credentials,
+      ).slice(0, maxDefectLineLength);
+
+      return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
+        Effect.andThen(Effect.fail(new InternalError())),
+      );
+    });

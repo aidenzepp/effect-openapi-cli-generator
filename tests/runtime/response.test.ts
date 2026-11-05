@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Effect, Exit, Runtime } from "effect";
+import { Cause, Effect, Exit, Redacted, Runtime } from "effect";
 import { HttpClientError, HttpClientRequest, HttpClientResponse, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../../src/runtime-src/domain/errors.ts";
+import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import { renderError } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseTable } from "../../src/runtime-src/runtime/response.ts";
 import {
   classify,
@@ -25,7 +27,7 @@ const redacting = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.provideService(effect, UrlParams.CurrentRedactedNames, ["access_token", "api_key"]);
 
 const apiError = (response: HttpClientResponse.HttpClientResponse, using = table) =>
-  Effect.runPromise(Effect.flip(redacting(classify(using, response))));
+  Effect.runPromise(Effect.flip(redacting(classify(using, response, []))));
 
 const transport = (cause?: unknown) =>
   new HttpClientError.HttpClientError({
@@ -65,8 +67,8 @@ describe("classify", () => {
     const onlyDefault: ResponseTable = { operation: "op", responses: { default: [] } };
     const response = respond(204);
 
-    expect(await Effect.runPromise(classify(onlyDefault, response))).toBe(response);
-    expect(await Effect.runPromise(classify(table, respond(200)))).toBeDefined();
+    expect(await Effect.runPromise(classify(onlyDefault, response, []))).toBe(response);
+    expect(await Effect.runPromise(classify(table, respond(200), []))).toBeDefined();
   });
 
   test("a non-2xx status fails with the matched key and exit 1", async () => {
@@ -122,6 +124,23 @@ describe("classify", () => {
     expect(undeclared).not.toHaveProperty("requestId");
   });
 
+  test("the request id is scrubbed before it is bounded (audit F6)", () => {
+    const secret = "SECRETTOKEN-abcdefghijklmnopqrstuvwxyz01";
+    const credential: Credential = {
+      definition: { kind: "http", scheme: "bearer" },
+      scheme: "bearer",
+      value: Redacted.make(secret),
+    };
+    const header = `${"r".repeat(230)}${secret}`;
+    const error = toApiResponseError(table, respond(404, { "x-request-id": header }), "", [
+      credential,
+    ]);
+    const rendered = renderError(error, [credential]);
+
+    expect(error.requestId).toBe(`${"r".repeat(230)}<redacted:bearer>`);
+    expect(rendered).not.toContain("SECRETTOKEN");
+  });
+
   test("an unfollowed 3xx carries the Location with query credentials redacted, exit 1", async () => {
     const error = await apiError(
       respond(302, { location: "https://login.example.com/next?access_token=SECRET&state=ok" }),
@@ -149,13 +168,13 @@ describe("classify", () => {
       responses: { "401": [], "500": [], "5XX": [] },
     };
 
-    expect(toApiResponseError(declared, respond(500)).matched).toBe("500");
-    expect(toApiResponseError(declared, respond(503)).matched).toBe("5XX");
-    expect(toApiResponseError(declared, respond(401)).matched).toBe("401");
+    expect(toApiResponseError(declared, respond(500), "", []).matched).toBe("500");
+    expect(toApiResponseError(declared, respond(503), "", []).matched).toBe("5XX");
+    expect(toApiResponseError(declared, respond(401), "", []).matched).toBe("401");
   });
 
   test("toApiResponseError keeps the excerpt it is given", () => {
-    expect(toApiResponseError(table, respond(404), "not found").bodyExcerpt).toBe("not found");
+    expect(toApiResponseError(table, respond(404), "not found", []).bodyExcerpt).toBe("not found");
   });
 });
 
