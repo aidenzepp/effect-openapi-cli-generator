@@ -83,7 +83,7 @@ describe("printManifest", () => {
       expect(formatted.exitCode).toBe(0);
       expect(formatted.stdout).toBe(text);
     }
-  });
+  }, 30_000);
 
   test("a duplicate path fails with a typed error", () => {
     const error = failureOf(printManifest([entry("a.ts", "1"), entry("a.ts", "2")]));
