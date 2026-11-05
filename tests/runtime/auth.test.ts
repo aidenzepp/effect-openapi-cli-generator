@@ -432,6 +432,32 @@ describe("Auth.attach", () => {
     expect(JSON.stringify(error)).not.toContain(secret);
   });
 
+  test("a code point above U+00FF in an apiKey header value or bearer token is refused", async () => {
+    const wide = `k\u20ACy-${secret}`;
+    const results = await Promise.all([
+      attachTo(`${bound}/v1`, [credential("apiKey", wide)], [bound]),
+      attachTo(`${bound}/v1`, [credential("bearerAuth", wide)], [bound]),
+    ]);
+
+    for (const [index, result] of results.entries()) {
+      const error = Result.isFailure(result) ? result.failure : undefined;
+
+      expect(error).toMatchObject({
+        _tag: "UsageError",
+        flag: index === 0 ? "api-key-file" : "bearer-auth-file",
+      });
+      expect(error instanceof UsageError && error[Runtime.errorExitCode]).toBe(2);
+      expect(JSON.stringify(error)).not.toContain(secret);
+      expect(JSON.stringify(error)).not.toContain("\u20AC");
+    }
+  });
+
+  test("U+00E9 in an apiKey header value is attached", async () => {
+    const result = sent(await attachTo(`${bound}/v1`, [credential("apiKey", "k\u00E9y")], [bound]));
+
+    expect(header(result, "x-key")).toBe("k\u00E9y");
+  });
+
   test("a bad value is not checked when the origin gets no credential", async () => {
     const result = await attachTo(`${unbound}/v1`, [credential("apiKey", ` ${secret}`)], [bound]);
 

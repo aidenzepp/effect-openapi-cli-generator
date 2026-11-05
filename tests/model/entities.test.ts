@@ -234,7 +234,7 @@ describe("model entities", () => {
     ).toBe(false);
   });
 
-  test("a cookie apiKey name must be a token", () => {
+  test("a cookie or header apiKey name must be a token", () => {
     const cookie = (name: string) => ({
       ...securityScheme,
       kind: { in: "cookie", name, type: "apiKey" },
@@ -243,6 +243,9 @@ describe("model entities", () => {
 
     expect(decodes(SecurityScheme, cookie("sid"))).toBe(true);
     expect(decodes(SecurityScheme, cookie("a; admin=1"))).toBe(false);
-    expect(decodes(SecurityScheme, header)).toBe(true);
+    expect(decodes(SecurityScheme, header)).toBe(false);
+    expect(
+      decodes(SecurityScheme, { ...header, kind: { in: "header", name: "X-Key", type: "apiKey" } }),
+    ).toBe(true);
   });
 });

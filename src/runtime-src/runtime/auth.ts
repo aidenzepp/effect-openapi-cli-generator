@@ -417,11 +417,15 @@ const strip = (
   );
 };
 
+// A header field carries one byte per character, so a code point above U+00FF has no form.
+const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
+
 const unsafeHeaderValue = (value: string): boolean =>
   value.includes("\r") ||
   value.includes("\n") ||
   value.includes("\u0000") ||
-  value !== value.trim();
+  value !== value.trim() ||
+  wideCodePoint.test(value);
 
 // An RFC 6265 cookie-name is an RFC 9110 token.
 const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
@@ -433,7 +437,10 @@ const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> 
 
 const headerValue = (scheme: string, value: string): Effect.Effect<string, UsageError> =>
   unsafeHeaderValue(value)
-    ? refuse(scheme, "has a CR, LF, NUL or leading or trailing whitespace")
+    ? refuse(
+        scheme,
+        "has a CR, LF, NUL, leading or trailing whitespace or a code point above U+00FF",
+      )
     : Effect.succeed(value);
 
 const basicParts = (
