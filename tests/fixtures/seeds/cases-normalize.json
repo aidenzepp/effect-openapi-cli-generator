@@ -559,9 +559,11 @@
         ]
       },
       "expected": {
-        "outcome": "refusal",
-        "row": "PTH-08",
-        "scope": "operation"
+        "outcome": "refused",
+        "scope": "document",
+        "stage": "validate",
+        "rows": ["VAL-*"],
+        "rule": "PRM-06"
       },
       "designSection": "§3.4"
     },
