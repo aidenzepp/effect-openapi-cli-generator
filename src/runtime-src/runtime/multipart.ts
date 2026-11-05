@@ -1,6 +1,7 @@
-import { Effect, Stream } from "effect";
+import { Effect, FileSystem, Stdio, Stream } from "effect";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
+import { StdinClaim } from "./input.ts";
 
 /**
  * Per-part encoding facts from an OpenAPI Encoding Object, already resolved by the caller.
@@ -259,3 +260,23 @@ export const positionalParts = (
     ...(encodings.prefixEncoding?.[index] ?? encodings.itemEncoding),
     body,
   }));
+
+/**
+ * The bytes of a file part named by `--<flag> <path|->`. `-` takes the invocation's one stdin
+ * claim before any read, so a second claimant is refused with a `UsageError` naming both flags.
+ */
+export const fileBody = (
+  flag: string,
+  path: string,
+): Effect.Effect<
+  Stream.Stream<Uint8Array, unknown>,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(flag)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.map((stdio) => stdio.stdin),
+      )
+    : Effect.map(Effect.service(FileSystem.FileSystem), (fs) => fs.stream(path));
