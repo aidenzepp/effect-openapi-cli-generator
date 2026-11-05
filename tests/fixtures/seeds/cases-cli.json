@@ -1,0 +1,182 @@
+{
+  "cases": [
+    {
+      "id": "cli-help-exits-zero-lists-commands",
+      "source": "E47 tests/cli.test.ts:29-34",
+      "input": {
+        "args": ["--help"]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdoutListsCommands": ["generate", "validate", "verdict"]
+      },
+      "designSection": "§4.7"
+    },
+    {
+      "id": "cli-malformed-json-refused-nothing-written",
+      "source": "E47 tests/cli.test.ts:36-62",
+      "input": {
+        "command": "generate",
+        "specText": "{"
+      },
+      "expected": {
+        "exitCode": 1,
+        "outputDirectoryCreated": false
+      },
+      "designSection": "§8"
+    },
+    {
+      "id": "cli-empty-object-refused-nothing-written",
+      "source": "E47 tests/cli.test.ts:36-62",
+      "input": {
+        "command": "generate",
+        "specText": "{}"
+      },
+      "expected": {
+        "exitCode": 1,
+        "outputDirectoryCreated": false
+      },
+      "designSection": "§8"
+    },
+    {
+      "id": "cli-missing-binname-refuses-never-derives-from-title",
+      "source": "E47 tests/cli.test.ts:64-94 (prior title default contradicts design §4.2)",
+      "input": {
+        "command": "generate",
+        "title": "Tiny API",
+        "config": {
+          "package": { "name": "tiny-api-cli", "version": "1.0.0" }
+        }
+      },
+      "expected": {
+        "refused": true,
+        "outputDirectoryCreated": false,
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": "tiny-api"
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-binname-grammar-uppercase-underscore-refused",
+      "source": "E47 design §4.2 (replaces the prior title-default test)",
+      "input": {
+        "command": "generate",
+        "binName": "Tiny_API"
+      },
+      "expected": {
+        "refused": true,
+        "outputDirectoryCreated": false
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-binname-grammar-leading-digit-refused",
+      "source": "E47 design §4.2 (replaces the prior title-default test)",
+      "input": {
+        "command": "generate",
+        "binName": "1tiny"
+      },
+      "expected": {
+        "refused": true,
+        "outputDirectoryCreated": false
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-binname-grammar-empty-refused",
+      "source": "E47 design §4.2 (replaces the prior title-default test)",
+      "input": {
+        "command": "generate",
+        "binName": ""
+      },
+      "expected": {
+        "refused": true,
+        "outputDirectoryCreated": false
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-binname-accepted-becomes-bin-key",
+      "source": "E47 tests/cli.test.ts:96-154",
+      "input": {
+        "command": "generate",
+        "title": "Symlink API",
+        "binName": "symlink-api"
+      },
+      "expected": {
+        "exitCode": 0,
+        "packageJsonBin": { "symlink-api": "dist/bin.js" }
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-symlink-entry-help-runs",
+      "source": "E47 tests/cli.test.ts:96-154 (R22)",
+      "input": {
+        "entry": "symlink to the installed bin",
+        "args": ["--help"]
+      },
+      "expected": {
+        "exitCode": 0
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-symlink-entry-generates",
+      "source": "E47 tests/cli.test.ts:96-154 (R22)",
+      "input": {
+        "entry": "symlink to the installed bin",
+        "command": "generate",
+        "binName": "symlink-api"
+      },
+      "expected": {
+        "exitCode": 0,
+        "outputWritten": true
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-library-entry-import-is-inert",
+      "source": "E47 tests/cli.test.ts:96-154 (R22)",
+      "input": {
+        "import": "src/index.ts"
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": "",
+        "stderr": "",
+        "runsNothing": true
+      },
+      "designSection": "§4.2"
+    },
+    {
+      "id": "cli-partial-refusal-exits-zero-and-writes-output",
+      "source": "E47 design §8 (generator CLI exit codes)",
+      "input": {
+        "command": "generate",
+        "binName": "tiny-api",
+        "spec": "one supported operation and one operation refused at operation scope"
+      },
+      "expected": {
+        "exitCode": 0,
+        "outputWritten": true,
+        "refusalListedInGenerationReport": true
+      },
+      "designSection": "§8"
+    },
+    {
+      "id": "cli-partial-refusal-strict-exits-one",
+      "source": "E47 design §8 (generator CLI exit codes)",
+      "input": {
+        "command": "generate",
+        "binName": "tiny-api",
+        "strict": true,
+        "spec": "one supported operation and one operation refused at operation scope"
+      },
+      "expected": {
+        "exitCode": 1
+      },
+      "designSection": "§8"
+    }
+  ]
+}
