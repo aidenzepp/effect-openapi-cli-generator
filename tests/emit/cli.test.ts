@@ -4,7 +4,7 @@ import nodePath from "node:path";
 import { Array as Arr, Effect, Exit, Order, Schema } from "effect";
 import { CliEmitError, emitCli } from "../../src/emit/cli.ts";
 import type { CliEmitInput, CliEmitOutput } from "../../src/emit/cli.ts";
-import { decodeAuthorConfig } from "../../src/model/author-config.ts";
+import { AuthorConfig, decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri, JsonLiteral } from "../../src/model/brands.ts";
 import { Api, SchemaStore } from "../../src/model/entities.ts";
 import { SafeFileSegment } from "../../src/names/fold.ts";
@@ -554,8 +554,20 @@ describe("emitCli: the body field walk", () => {
 describe("emitCli: package-scope refusals", () => {
   for (const module of ["../outside.ts", "/abs/commands.ts", "./a/../x.ts"]) {
     test(`an author commands module ${module} is refused`, async () => {
+      // Config decoding refuses these first; this feeds emitCli an already-built config to keep
+      // its own check as defense in depth.
       const exit = await Effect.runPromiseExit(
-        emitted(spec, { ...configJson, commands: { module, names: ["login"] } }),
+        prepared(spec).pipe(
+          Effect.flatMap(({ config: { commands: _declared, ...rest }, ...built }) =>
+            emitCli({
+              ...built,
+              config: new AuthorConfig(
+                { ...rest, commands: { module, names: ["login"] } },
+                { disableChecks: true },
+              ),
+            }),
+          ),
+        ),
       );
       expect(failureReason(exit)).toBe("unsafe-commands-module");
     });
