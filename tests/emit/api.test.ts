@@ -362,3 +362,97 @@ describe("emitApi: array parameters", () => {
     );
   });
 });
+
+const importsPath = (content: Schema.Json, required: boolean) => ({
+  "/imports": {
+    post: {
+      operationId: "imports-create",
+      requestBody: { content, required },
+      responses: ok,
+      tags: ["imports"],
+    },
+  },
+});
+
+// Declared out of name order, so the Encoding order is visible in the builder.
+const importSchema = {
+  properties: Object.fromEntries([
+    ["title", { type: "string" }],
+    ["file", { contentMediaType: "text/csv", type: "string" }],
+    ["tags", { items: { type: "string" }, type: "array" }],
+  ]),
+  type: "object",
+};
+
+describe("emitApi: multipart request bodies", () => {
+  test("the builder streams the part values through Serialize.formData in Encoding order", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "multipart/form-data": {
+                encoding: { file: { contentType: "text/csv" } },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+
+    expect(content("src/api/imports.ts")).toContain(
+      [
+        "export interface CreateInput {",
+        "  readonly body: Serialize.FormFields;",
+        "}",
+        "",
+        "/**",
+        " * Request builder for imports create, not an HttpApi definition.",
+        " */",
+        "export const create = (input: CreateInput): Serialize.Request =>",
+        '  Serialize.request("POST", {',
+        "    body: Serialize.formData(input.body, {",
+        "      parts: [",
+        '        ["title", "text/plain"],',
+        '        ["file", "text/csv"],',
+        '        ["tags", "text/plain"],',
+        "      ],",
+        "      required: true,",
+        "    }),",
+      ].join("\n"),
+    );
+  });
+
+  test("an optional multipart body is marked optional", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(importsPath({ "multipart/form-data": { schema: importSchema } }, false)),
+      ),
+    );
+
+    expect(content("src/api/imports.ts")).toContain("required: false,");
+  });
+
+  test("a multipart alternative beside other request media keeps the generic body builder", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "application/json": { schema: { type: "object" } },
+              "multipart/form-data": { schema: importSchema },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+
+    expect(content("src/api/imports.ts")).toContain(
+      "Serialize.body(input.contentType, input.body)",
+    );
+    expect(content("src/api/imports.ts")).not.toContain("formData");
+  });
+});

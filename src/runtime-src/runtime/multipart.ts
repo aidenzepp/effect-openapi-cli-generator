@@ -261,9 +261,34 @@ export const positionalParts = (
     body,
   }));
 
+const partUsage = (flag: string, cause: string) =>
+  new UsageError({ flag, message: `--${flag}: ${cause}` });
+
+// A file part's path is checked before any request, as `--body-file`'s is: it exists, is a
+// regular file and is readable. A pipe or device has no size to trust and goes through `-`.
+// Failures name the flag, never the path or the file-system cause.
+const checkedPath = (
+  fs: FileSystem.FileSystem,
+  flag: string,
+  path: string,
+): Effect.Effect<void, UsageError> => {
+  const unreadable = () => partUsage(flag, "cannot read the file");
+
+  return fs.stat(path).pipe(
+    Effect.mapError(unreadable),
+    Effect.filterOrFail(
+      (info) => info.type === "File",
+      () => partUsage(flag, `is not a regular file; for a pipe use --${flag} -`),
+    ),
+    Effect.andThen(fs.access(path, { readable: true }).pipe(Effect.mapError(unreadable))),
+  );
+};
+
 /**
  * The bytes of a file part named by `--<flag> <path|->`. `-` takes the invocation's one stdin
  * claim before any read, so a second claimant is refused with a `UsageError` naming both flags.
+ * A path is checked first (it exists, is a regular file, is readable), so a bad one is a
+ * `UsageError` naming the flag before any request.
  */
 export const fileBody = (
   flag: string,
@@ -279,4 +304,6 @@ export const fileBody = (
         Effect.flatMap(() => Effect.service(Stdio.Stdio)),
         Effect.map((stdio) => stdio.stdin),
       )
-    : Effect.map(Effect.service(FileSystem.FileSystem), (fs) => fs.stream(path));
+    : Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
+        Effect.as(checkedPath(fs, flag, path), fs.stream(path)),
+      );

@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
+import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
   NamePlan,
@@ -10,7 +11,8 @@ import type {
   PlannedPositional,
 } from "../names/index.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { inputKeys, isScalarArraySchema } from "./api.ts";
+import { formParts, inputKeys, isScalarArraySchema } from "./api.ts";
+import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
@@ -42,9 +44,10 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text, form and
- * multipart request bodies are `unsupported-body` until their merge exists (follow-up em4c); an XML
- * body is opaque `--body-file` bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
+ * The plan, model or author config holds something the `cli/` layer cannot express. Text and form
+ * request bodies are `unsupported-body` until their merge exists, and so is a multipart body the
+ * runtime writer cannot send exactly (`formParts` names why); an XML body is opaque `--body-file`
+ * bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
  * with no call-expression form today: an integer field whose width the walk cannot settle, and a
  * required boolean parameter (absent would send `false`). `unsupported-parameter` is a boolean path
  * parameter, or a path array before another positional (a repeated argument would take the later
@@ -422,7 +425,10 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): E
     return fn("Input.int64Flag", str(flag.name));
   }
 
-  return kind === "string" ? fn("Flag.String", str(flag.name)) : flagConstructor(flag, kind);
+  // A multipart `file` part flag carries a path, or `-` for stdin.
+  return kind === "string" || kind === "file"
+    ? fn("Flag.String", str(flag.name))
+    : flagConstructor(flag, kind);
 };
 
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
@@ -488,6 +494,7 @@ interface BodyPlan {
   readonly domain: readonly string[];
   readonly head: Expr;
   readonly parameter: string;
+  readonly steps?: readonly Expr[];
 }
 
 const wholeBody = (
@@ -555,6 +562,100 @@ const alternativeBody = (
     };
   });
 
+// A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
+// file part opens each path, or stdin for `-` under the invocation's one stdin claim.
+const partValues = (part: FormPart) =>
+  Effect.gen(function* values() {
+    const { flag } = part;
+    const repeated = flag.source._tag === "Body" && flag.source.repeated;
+    const value = yield* flagValue(flag.identifier);
+    const list = repeated ? value : fn("Option.toArray", value);
+    if (flag.source._tag !== "Body" || flag.source.kind !== "file") {
+      return fn("Effect.succeed", list);
+    }
+
+    const source = ident(I("source"));
+    const file = obj([
+      ["filename", fn("Multipart.partFilename", source, str(part.name))],
+      ["stream", ident(I("bytes"))],
+    ]);
+
+    return fn(
+      "Effect.forEach",
+      list,
+      arrow(
+        [{ name: I("source") }],
+        fn(
+          "Effect.map",
+          fn("Multipart.fileBody", str(flag.name), source),
+          arrow([{ name: I("bytes") }], file),
+        ),
+      ),
+    );
+  });
+
+// The step that asserts the part values against the body's schema before the request (design
+// 4.5, C2), and the domain name it imports; none for a multipart body that declares no schema.
+const formAssertion = (
+  command: PlannedCommand,
+  parts: readonly FormPart[],
+  context: CommandContext,
+) =>
+  Effect.gen(function* assertion() {
+    const { body } = command.operation;
+    const key = body?.alternatives.find((alternative) => alternative.codec === "multipart")?.schema
+      ?.key;
+    if (body === undefined || key === undefined) {
+      return { domain: [], steps: [] };
+    }
+
+    const schemaName = context.domain.get(key);
+    if (schemaName === undefined) {
+      return yield* refuse("unresolved-schema", "multipart/form-data");
+    }
+
+    const repeated = parts.filter(
+      (part) => part.flag.source._tag === "Body" && part.flag.source.repeated,
+    );
+    const options = obj([
+      ["flags", obj(parts.map((part) => [part.name, str(part.flag.name)] as const))],
+      ["repeated", arr(repeated.map((part) => str(part.name)))],
+      ["required", bool(body.required)],
+      ["schema", ident(yield* identifier(schemaName))],
+    ]);
+
+    return {
+      domain: [schemaName],
+      steps: [fn("Effect.flatMap", fn("Serialize.assertFormData", options))],
+    };
+  });
+
+// A `multipart/form-data` body: the part values, asserted against the body's schema and then
+// streamed by the `api/` builder through the runtime writer (design 6.3). There is no whole-body
+// flag (D-ENC1 a).
+const formBody = (command: PlannedCommand, context: CommandContext) =>
+  Effect.gen(function* form() {
+    const parts = formParts(command, context.defs);
+    if (Result.isFailure(parts)) {
+      return yield* refuse("unsupported-body", parts.failure);
+    }
+
+    const entries: Entry[] = [];
+    for (const part of parts.success) {
+      entries.push([part.name, yield* partValues(part)]);
+    }
+
+    const assertion = yield* formAssertion(command, parts.success, context);
+
+    return {
+      args: [["body", ident(I("parts"))]],
+      domain: assertion.domain,
+      head: fn("Effect.all", obj(entries)),
+      parameter: "parts",
+      steps: assertion.steps,
+    } satisfies BodyPlan;
+  });
+
 const bodyPlan = (
   command: PlannedCommand,
   meta: Expr,
@@ -566,6 +667,10 @@ const bodyPlan = (
     const [first] = body?.alternatives ?? [];
     if (body === undefined || first === undefined) {
       return Option.none();
+    }
+
+    if (body.alternatives.some((alternative) => alternative.codec === "multipart")) {
+      return Option.some(yield* formBody(command, context));
     }
 
     if (!choosesType) {
@@ -799,7 +904,11 @@ const commandStatement = (
     const handled = Option.match(body, {
       onNone: () => pipe(built, [send]),
       onSome: (plan) =>
-        pipe(plan.head, [fn("Effect.flatMap", arrow([{ name: I(plan.parameter) }], built)), send]),
+        pipe(plan.head, [
+          ...(plan.steps ?? []),
+          fn("Effect.flatMap", arrow([{ name: I(plan.parameter) }], built)),
+          send,
+        ]),
     });
     const handler = arrow(config.length === 0 ? [] : [{ name: I("flags") }], handled);
     const make = fn("Command.make", str(command.name), obj(config), handler);
@@ -889,15 +998,6 @@ const packageImports: readonly (readonly [string, string])[] = [
   ["Argument", "effect/cli"],
   ["Command", "effect/cli"],
   ["Flag", "effect/cli"],
-];
-
-const runtimeNamespaces: readonly (readonly [string, string])[] = [
-  ["Auth", "../runtime/auth.ts"],
-  ["BaseUrl", "../runtime/base-url.ts"],
-  ["Describe", "../runtime/describe.ts"],
-  ["Input", "../runtime/input.ts"],
-  ["Negotiate", "../runtime/negotiate.ts"],
-  ["Output", "../runtime/output.ts"],
 ];
 
 interface Binding {

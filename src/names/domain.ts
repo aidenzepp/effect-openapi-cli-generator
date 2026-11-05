@@ -4,19 +4,31 @@ import type { SafeIdentifierValue } from "./fold.ts";
 import { suffixed } from "./plan.ts";
 
 /**
- * The names every cli module imports besides its domain schemas.
+ * The runtime namespaces a cli module imports, as [name, module path]: the one list the cli
+ * emitter writes its imports from and the names plan reserves from.
+ */
+export const runtimeNamespaces: readonly (readonly [string, string])[] = [
+  ["Auth", "../runtime/auth.ts"],
+  ["BaseUrl", "../runtime/base-url.ts"],
+  ["Describe", "../runtime/describe.ts"],
+  ["Input", "../runtime/input.ts"],
+  ["Multipart", "../runtime/multipart.ts"],
+  ["Negotiate", "../runtime/negotiate.ts"],
+  ["Output", "../runtime/output.ts"],
+  ["Serialize", "../runtime/serialize.ts"],
+];
+
+/**
+ * The names every cli module imports besides its domain schemas: the package namespaces and
+ * every runtime namespace.
  */
 export const fixedNamespaces: ReadonlySet<string> = new Set([
   "Argument",
   "Command",
-  "Describe",
   "Effect",
   "Flag",
-  "Input",
-  "Negotiate",
   "Option",
-  "Output",
-  "Serialize",
+  ...runtimeNamespaces.map(([name]) => name),
 ]);
 
 /**

@@ -674,7 +674,8 @@ const planCredentials = (
   return { flags, names, usesOf };
 };
 
-// The domain names a module's commands import: the `domain` names of their json and form bodies.
+// The domain names a module's commands import: the `domain` names of their json, form and
+// multipart bodies.
 const domainNames = (
   entries: readonly Named[],
   domain: ReadonlyMap<string, SafeIdentifierValue>,
@@ -683,7 +684,12 @@ const domainNames = (
     entries.flatMap((entry) =>
       (entry.operation.body?.alternatives ?? []).flatMap((alternative) => {
         const key = alternative.schema?.key;
-        if (key === undefined || (alternative.codec !== "json" && alternative.codec !== "form")) {
+        if (
+          key === undefined ||
+          (alternative.codec !== "json" &&
+            alternative.codec !== "form" &&
+            alternative.codec !== "multipart")
+        ) {
           return [];
         }
 

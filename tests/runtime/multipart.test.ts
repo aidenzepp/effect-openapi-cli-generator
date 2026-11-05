@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Layer, Stdio, Stream } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { ByteSize, Effect, FileSystem, Layer, Option, Stdio, Stream } from "effect";
 import type { HttpBody } from "effect/http";
 import { stdinClaimLayer, StdinClaim } from "../../src/runtime-src/runtime/input.ts";
 import {
@@ -325,10 +326,31 @@ const read = (body: Stream.Stream<Uint8Array, unknown>) =>
     chunks.map((chunk) => new TextDecoder().decode(chunk)).join(""),
   );
 
+const fileInfo = (type: FileSystem.File.Type): FileSystem.File.Info => ({
+  atime: Option.none(),
+  birthtime: Option.none(),
+  blksize: Option.none(),
+  blocks: Option.none(),
+  dev: 0n,
+  gid: Option.none(),
+  ino: Option.none(),
+  mode: 0o644,
+  mtime: Option.none(),
+  nlink: Option.none(),
+  rdev: Option.none(),
+  size: ByteSize.bytes(9),
+  type,
+  uid: Option.none(),
+});
+
 describe("fileBody", () => {
   const layers = Layer.mergeAll(
     stdinClaimLayer,
-    FileSystem.layerNoop({ stream: () => Stream.make(bytes("from-file")) }),
+    FileSystem.layerNoop({
+      access: () => Effect.void,
+      stat: () => Effect.succeed(fileInfo("File")),
+      stream: () => Stream.make(bytes("from-file")),
+    }),
     Stdio.layerTest({ stdin: Stream.make(bytes("from-stdin")) }),
   );
 
@@ -381,5 +403,68 @@ describe("fileBody", () => {
     );
 
     expect(error).toMatchObject({ _tag: "UsageError", flag: "b-file" });
+  });
+});
+
+describe("fileBody path checks", () => {
+  // Real paths, no writes: the test file itself, its directory, and a sibling that does not exist.
+  const real = Layer.mergeAll(
+    stdinClaimLayer,
+    BunFileSystem.layer,
+    Stdio.layerTest({ stdin: Stream.make(bytes("from-stdin")) }),
+  );
+  const checked = (path: string, layer = real) =>
+    Effect.runPromise(Effect.flip(fileBody("x-file", path)).pipe(Effect.provide(layer)));
+
+  test("a regular readable file passes the check", async () => {
+    const text = await Effect.runPromise(
+      Effect.flatMap(fileBody("x-file", import.meta.path), read).pipe(Effect.provide(real)),
+    );
+
+    expect(text).toContain("fileBody path checks");
+  });
+
+  test("a missing path is a UsageError naming the flag before any byte, never the path", async () => {
+    const error = await checked(`${import.meta.dir}/no-such-file.csv`);
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "x-file" });
+    expect(error.message).toStartWith("--x-file: ");
+    expect(error.message).not.toContain("no-such-file");
+  });
+
+  test("a directory is a UsageError naming the flag that points to -", async () => {
+    const error = await checked(import.meta.dir);
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "x-file" });
+    expect(error.message).toContain("--x-file -");
+    expect(error.message).not.toContain("/");
+  });
+
+  test("an unreadable file is a UsageError naming the flag", async () => {
+    const locked = Layer.mergeAll(
+      stdinClaimLayer,
+      FileSystem.layerNoop({ stat: () => Effect.succeed(fileInfo("File")) }),
+      Stdio.layerTest({ stdin: Stream.empty }),
+    );
+    const error = await checked("locked.csv", locked);
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "x-file" });
+    expect(error.message).not.toContain("locked");
+  });
+
+  test("- is exempt: no file-system check", async () => {
+    const text = await Effect.runPromise(
+      Effect.flatMap(fileBody("x-file", "-"), read).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stdinClaimLayer,
+            FileSystem.layerNoop({}),
+            Stdio.layerTest({ stdin: Stream.make(bytes("from-stdin")) }),
+          ),
+        ),
+      ),
+    );
+
+    expect(text).toBe("from-stdin");
   });
 });

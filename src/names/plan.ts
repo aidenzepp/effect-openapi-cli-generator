@@ -4,7 +4,7 @@ import type { Operation, Parameter, SecurityScheme } from "../model/entities.ts"
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
 import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
-import type { BodyFlag, BodyFlagKind } from "./flatten.ts";
+import type { BodyFlag, BodyFlagKind, SkippedProperty } from "./flatten.ts";
 import type {
   EmptyFold,
   FoldNote,
@@ -686,6 +686,18 @@ const sameFlag = (left: BodyFlag, right: BodyFlag): boolean =>
 
 const isWholeBody = (kind: BodyFlagKind): boolean => kind === "body" || kind === "body-file";
 
+// A skipped property's notice. A multipart body has no whole-body flag, so a part whose name
+// folds to nothing is not reachable at all.
+const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => {
+  if (skipped.reason === "UnsupportedPart") {
+    return `The multipart part at ${skipped.pointer} has no flag; its shape is not supported.`;
+  }
+
+  return multipart
+    ? `The multipart part at ${skipped.pointer} has no flag and is not reachable; a multipart body has no --body or --body-file.`
+    : `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`;
+};
+
 const draftBody = (
   subject: Subject,
   context: DraftContext,
@@ -719,9 +731,7 @@ const draftBody = (
           operation,
           "RQB-03/unnamed-property",
           "Request body",
-          skipped.reason === "EmptyFold"
-            ? `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`
-            : `The multipart part at ${skipped.pointer} has no flag; its shape is not supported.`,
+          skippedNotice(skipped, alternative.codec === "multipart"),
           { pointer, scope: "element", severity: "notice" },
         );
       }

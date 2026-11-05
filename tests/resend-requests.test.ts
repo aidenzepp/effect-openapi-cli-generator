@@ -241,13 +241,54 @@ describe("Resend witness: requests on the wire", () => {
     expect(observed.run.exitCode).toBe(0);
   }, 60_000);
 
-  // Known gap: `contacts/create-import` is refused at generation (`EMT-1/unsupported-body`,
-  // multipart request bodies are not emitted yet), so there is no command to send it.
-  test.todo("the multipart POST /contacts/imports streams its parts", async () => {
-    const observed = await exchange(["contacts", "create-import", "--help"]);
+  test("the multipart POST /contacts/imports streams a file part and a text part", async () => {
+    const prepared = await ready.promise;
+    const csv = "email,first_name\r\na@example.test,Ada\r\n\u00E9\u0000\u00FF";
+    const csvPath = nodePath.join(prepared.generated.root, "imports", "contacts.csv");
+    await Bun.write(csvPath, Buffer.from(csv, "latin1"));
+    server.script("/contacts/imports", { status: 201, ...json('{"id":"imp_1"}') });
 
-    expect(observed.run.exitCode).toBe(0);
-  });
+    const observed = await exchange([
+      "contacts",
+      "create-import",
+      "--file",
+      csvPath,
+      "--on-conflict",
+      "upsert",
+    ]);
+    const [request] = observed.requests;
+    const contentType = request?.headers.find(([name]) => name === "Content-Type")?.[1] ?? "";
+    const boundary =
+      /^multipart\/form-data; boundary=(?<boundary>.+)$/u.exec(contentType)?.groups?.boundary ?? "";
+    const part = (disposition: string, body: string) =>
+      `--${boundary}\r\nContent-Disposition: form-data; ${disposition}\r\nContent-Type: text/plain\r\n\r\n${body}\r\n`;
+
+    expect(boundary).toMatch(/^----EffectFormBoundary[0-9a-f]{32}$/u);
+    expect(observed).toEqual({
+      requests: [
+        {
+          body: [
+            part('name="file"; filename="contacts.csv"', csv),
+            part('name="on_conflict"', "upsert"),
+            `--${boundary}--\r\n`,
+          ].join(""),
+          headers: [
+            ["Accept", "application/json"],
+            ["Authorization", `Bearer ${token}`],
+            ["Content-Type", `multipart/form-data; boundary=${boundary}`],
+            ["User-Agent", "resend/0.1.0"],
+            ["Connection", "keep-alive"],
+            ["Host", host],
+            ["Accept-Encoding", "gzip, deflate, br, zstd"],
+            ["Transfer-Encoding", "chunked"],
+          ],
+          method: "POST",
+          target: "/contacts/imports",
+        },
+      ],
+      run: { exitCode: 0, stderr: "", stdout: '{"id":"imp_1"}' },
+    });
+  }, 60_000);
 
   test("an undeclared 4xx is rendered on stderr with exit 1 after one request", async () => {
     server.script("/emails/em_missing", { status: 422, ...json('{"name":"validation_error"}') });

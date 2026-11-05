@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Array as Arr } from "effect";
-import { domainIdentifiers, fixedNamespaces, rootModuleNames } from "../../src/names/domain.ts";
+import {
+  domainIdentifiers,
+  fixedNamespaces,
+  rootModuleNames,
+  runtimeNamespaces,
+} from "../../src/names/domain.ts";
 import { reservedIdentifiers } from "../../src/names/reserved.ts";
 
 const inline = "/paths/~1users/post/requestBody/content/application~1json/schema";
@@ -24,6 +29,15 @@ describe("domainIdentifiers", () => {
     expect(result).toMatchObject({ Command: "Command2", Option: "Option2", Schema: "Schema2" });
     for (const name of Object.values(result)) {
       expect(name === "Schema" || fixedNamespaces.has(name)).toBe(false);
+    }
+  });
+
+  test("every runtime namespace the cli emitter imports is never a domain name", () => {
+    const result = names(runtimeNamespaces.map(([name]) => name));
+
+    expect(result.Multipart).toBe("Multipart2");
+    for (const [name] of runtimeNamespaces) {
+      expect(Object.values(result)).not.toContain(name);
     }
   });
 
