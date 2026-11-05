@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Schema } from "effect";
+import { Array as Arr, Effect, Exit, Order, Schema } from "effect";
+import { emitDomainSchemas } from "../../src/emit/domain.ts";
 import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { Api } from "../../src/model/entities.ts";
 import { planNames } from "../../src/names/index.ts";
 import type { NamePlan, PlannedCommand } from "../../src/names/index.ts";
+import { fixedNamespaces } from "../../src/names/domain.ts";
 
 type Json = Schema.Json;
 
@@ -574,6 +576,63 @@ describe("planNames: module identifier reservations", () => {
       { code: "OPR-06/renamed", scope: "element", severity: "notice" },
       { code: "OPR-06/renamed", scope: "element", severity: "notice" },
     ]);
+  });
+});
+
+const imports = (commands: readonly PlannedCommand[], domain: NamePlan["domain"]) =>
+  commands.flatMap((command) =>
+    (command.operation.body?.alternatives ?? []).flatMap((alternative) => {
+      const name =
+        alternative.schema === undefined ? undefined : domain.get(alternative.schema.key);
+
+      return name === undefined ? [] : [String(name)];
+    }),
+  );
+
+describe("planNames: domain names", () => {
+  const inline = "/paths/~1inline/post/requestBody/content/application~1json/schema";
+  const bodyKeys = ["user_update", "my-schema", "Schema", "Command", "User", "user", inline];
+  const defs = Object.fromEntries(
+    bodyKeys.map((key, index): [string, Json] => [
+      key,
+      object({ [`f${index}`]: { type: "string" } }),
+    ]),
+  );
+  const operations = bodyKeys.map((key, index) => ({
+    body: [{ media: "application/json", schema: key }],
+    method: "POST",
+    operationId: `op-${index}`,
+    path: `/op${index}`,
+    tags: index % 2 === 0 ? ["command"] : [],
+  }));
+
+  test("every imported domain name is exported by domain/schemas.ts and clears the fixed imports", async () => {
+    const result = plan({ defs, operations });
+    const modules = [result.root, ...result.groups.map((group) => group.commands)];
+    const imported = modules.flatMap((commands) => imports(commands, result.domain));
+    const file = await Effect.runPromise(
+      emitDomainSchemas(new Map(Object.entries({ ...defs })), bodyKeys, result.domain),
+    );
+
+    expect(Arr.sort(imported, Order.String)).toEqual([
+      "Command2",
+      "MySchema",
+      "Paths1inlinePostRequestBodyContentApplication1jsonSchema",
+      "Schema2",
+      "User",
+      "User2",
+      "UserUpdate",
+    ]);
+    for (const name of imported) {
+      expect(file.content).toContain(`export const ${name} =`);
+      expect(fixedNamespaces.has(name)).toBe(false);
+    }
+
+    for (const group of result.groups) {
+      expect(imports(group.commands, result.domain)).not.toContain(String(group.namespace));
+    }
+
+    expect(new Set(imported).size).toBe(imported.length);
   });
 });
 

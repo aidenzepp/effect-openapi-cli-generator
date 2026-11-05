@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import nodePath from "node:path";
-import { Array as Arr, Effect } from "effect";
+import { Array as Arr, Effect, Schema } from "effect";
 import { emitDomainSchemas } from "../../src/emit/domain.ts";
+import { domainIdentifiers } from "../../src/names/domain.ts";
+import { SafeIdentifier } from "../../src/names/fold.ts";
 import type { Json } from "../../src/resolve/pointer.ts";
 
 const root = nodePath.resolve(import.meta.dir, "../..");
@@ -28,11 +30,21 @@ const ref = (key: string): Json => ({ $ref: `#/$defs/${key}` });
 const store = (entries: readonly (readonly [string, Json])[]): ReadonlyMap<string, Json> =>
   new Map(entries);
 
-const emit = (entries: readonly (readonly [string, Json])[], roots: readonly string[]) =>
-  Effect.runPromise(emitDomainSchemas(store(entries), roots)).then((file) => file.content);
+const identifier = Schema.decodeSync(SafeIdentifier);
 
-const failure = (entries: readonly (readonly [string, Json])[], roots: readonly string[]) =>
-  Effect.runPromise(emitDomainSchemas(store(entries), roots).pipe(Effect.flip));
+const identifiersOf = (entries: readonly (readonly [string, Json])[]) =>
+  domainIdentifiers(entries.map(([key]) => key));
+
+const emit = (entries: readonly (readonly [string, Json])[], roots: readonly string[]) =>
+  Effect.runPromise(emitDomainSchemas(store(entries), roots, identifiersOf(entries))).then(
+    (file) => file.content,
+  );
+
+const failure = (
+  entries: readonly (readonly [string, Json])[],
+  roots: readonly string[],
+  identifiers = identifiersOf(entries),
+) => Effect.runPromise(emitDomainSchemas(store(entries), roots, identifiers).pipe(Effect.flip));
 
 const expectFixedPoint = (content: string) => {
   const formatted = format(content);
@@ -398,18 +410,15 @@ describe("emitDomainSchemas", () => {
     );
 
     expect(content).toContain(
-      "  readonly total_pretax_credit_amounts?: ReadonlyArray<Invoices_resource_pretax_credit_amount> | null;",
+      "  readonly total_pretax_credit_amounts?: ReadonlyArray<InvoicesResourcePretaxCreditAmount> | null;",
     );
     expectFixedPoint(content);
   });
 
   test("a type whose head does not fit opens under the =", async () => {
-    const name =
-      "Customer_balance_resource_cash_balance_transaction_resource_applied_to_payment_transaction";
-    const content = await emit(
-      [[name, { properties: { self: ref(name) }, type: "object" }]],
-      [name],
-    );
+    const key = `${longStem}_reversal`;
+    const name = identifiersOf([[key, {}]]).get(key);
+    const content = await emit([[key, { properties: { self: ref(key) }, type: "object" }]], [key]);
 
     expect(content).toContain(`export type ${name} =\n  {`);
     expectFixedPoint(content);
@@ -449,6 +458,68 @@ describe("emitDomainSchemas", () => {
     const error = await failure([["Odd", { not: { type: "string" } }]], ["Odd"]);
 
     expect(error).toMatchObject({ _tag: "DomainEmitError", reason: "import-failed" });
+  });
+
+  test("exports, references and identifier annotations carry the folded name", async () => {
+    const content = await emit(
+      [
+        ["user_update", { properties: { avatar: ref("my-schema") }, type: "object" }],
+        ["my-schema", { type: "string" }],
+        ["Schema", { type: "boolean" }],
+        ["Command", { properties: { schema: ref("Schema") }, type: "object" }],
+      ],
+      ["user_update", "Command"],
+    );
+
+    expect(content).toContain(
+      'export const MySchema = Schema.String.annotate({ identifier: "MySchema" });',
+    );
+    expect(content).toContain("avatar: Schema.optionalKey(MySchema)");
+    expect(content).toContain(
+      'export const Schema2 = Schema.Boolean.annotate({ identifier: "Schema2" });',
+    );
+    expect(content).toContain("export const Command2 =");
+    expect(content).toContain("export const UserUpdate =");
+    expect(content).not.toMatch(/user_update|my-schema|Schema1/u);
+    expectFixedPoint(content);
+  });
+
+  test("a copy key the identifier map does not name is refused", async () => {
+    const entries: readonly (readonly [string, Json])[] = [
+      ["Root", { properties: { leaf: ref("Leaf") }, type: "object" }],
+      ["Leaf", { type: "string" }],
+    ];
+    const error = await failure(entries, ["Root"], domainIdentifiers(["Root"]));
+
+    expect(error).toMatchObject({ _tag: "DomainEmitError", reason: "identifier-mismatch" });
+  });
+
+  test("two copy keys with one name are refused", async () => {
+    const entries: readonly (readonly [string, Json])[] = [
+      ["A", { type: "string" }],
+      ["B", { type: "integer" }],
+    ];
+    const error = await failure(
+      entries,
+      ["A", "B"],
+      new Map([
+        ["A", identifier("Shared")],
+        ["B", identifier("Shared")],
+      ]),
+    );
+
+    expect(error).toMatchObject({ _tag: "DomainEmitError", reason: "identifier-mismatch" });
+  });
+
+  test("a name Effect exports differently is refused", async () => {
+    // Effect reserves `Schema` and would export `Schema1`.
+    const error = await failure(
+      [["Root", { type: "string" }]],
+      ["Root"],
+      new Map([["Root", identifier("Schema")]]),
+    );
+
+    expect(error).toMatchObject({ _tag: "DomainEmitError", reason: "identifier-mismatch" });
   });
 
   test("exact bytes of a small module", async () => {

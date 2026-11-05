@@ -12,6 +12,7 @@ import {
 } from "effect";
 import { constVoid } from "effect/Function";
 import type { JsonSchema } from "effect";
+import type { SafeIdentifierValue } from "../names/fold.ts";
 import { codeGenerationCopy } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
 import type { Json } from "../resolve/pointer.ts";
@@ -20,10 +21,13 @@ import type { EmittedFile } from "./package.ts";
 import { textWidth } from "./printer.ts";
 
 /**
- * The code-generation copy cannot become `domain/schemas.ts`.
+ * The code-generation copy cannot become `domain/schemas.ts`. `identifier-mismatch`: a copy key
+ * has no name in the identifier map, two keys share one, or Effect exported a name the map does not
+ * give (the module would not export what cli modules import).
  */
 export class DomainEmitError extends Data.TaggedError("DomainEmitError")<{
   readonly reason:
+    | "identifier-mismatch"
     | "import-failed"
     | "reference-cycle"
     | "unprintable-code"
@@ -1409,20 +1413,155 @@ const importCode = (
     },
   });
 
+// Subschema positions of the code-generation copy (normalize/schemas.ts `copyPositions`).
+const subschemaOne: ReadonlySet<string> = new Set([
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+const subschemaList: ReadonlySet<string> = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+
+const subschemaMap: ReadonlySet<string> = new Set([
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+]);
+
+// The node with every `#/$defs/<key>` reference renamed to `#/$defs/<identifier>`; `undefined`
+// when a reference names a key outside the copy (the importer would have failed on it).
+const rekeyedNode = (node: Json, identifiers: ReadonlyMap<string, string>): Json | undefined => {
+  let dangling = false;
+  const ofRef = (ref: string): string => {
+    const [defs, key, ...rest] = JsonPointer.parseUriFragment(ref) ?? [];
+    const identifier = key === undefined ? undefined : identifiers.get(key);
+    if (defs !== "$defs" || rest.length > 0) {
+      return ref;
+    }
+
+    if (identifier === undefined) {
+      dangling = true;
+
+      return ref;
+    }
+
+    return JsonPointer.formatUriFragment(["$defs", identifier]);
+  };
+  const walk = (current: Json): Json => {
+    if (!Predicate.isObject(current) || Array.isArray(current)) {
+      return current;
+    }
+
+    return Object.fromEntries(
+      Object.entries(current).map(([key, value]): [string, Json] => {
+        if (key === "$ref" && Predicate.isString(value)) {
+          return [key, ofRef(value)];
+        }
+
+        if (subschemaOne.has(key)) {
+          return [key, walk(value)];
+        }
+
+        if (subschemaList.has(key) && Array.isArray(value)) {
+          return [key, value.map(walk)];
+        }
+
+        if (subschemaMap.has(key) && Predicate.isObject(value) && !Array.isArray(value)) {
+          return [
+            key,
+            Object.fromEntries(
+              Object.entries(value).map(([name, item]): [string, Json] => [name, walk(item)]),
+            ),
+          ];
+        }
+
+        return [key, value];
+      }),
+    );
+  };
+  const rekeyed = walk(node);
+
+  return dangling ? undefined : rekeyed;
+};
+
+// The copy under its export names, every reference renamed with it.
+const rekeyedCopy = (
+  copy: ReadonlyMap<string, Json>,
+  identifiers: ReadonlyMap<string, SafeIdentifierValue>,
+): Effect.Effect<ReadonlyMap<string, Json>, DomainEmitError> =>
+  Effect.gen(function* rekey() {
+    const names = new Map<string, string>();
+    for (const key of copy.keys()) {
+      const identifier = identifiers.get(key);
+      if (identifier === undefined) {
+        return yield* new DomainEmitError({ reason: "identifier-mismatch" });
+      }
+
+      names.set(key, identifier);
+    }
+
+    if (new Set(names.values()).size !== names.size) {
+      return yield* new DomainEmitError({ reason: "identifier-mismatch" });
+    }
+
+    const rekeyed = new Map<string, Json>();
+    for (const [key, node] of copy) {
+      const renamed = rekeyedNode(node, names);
+      if (renamed === undefined) {
+        return yield* new DomainEmitError({ reason: "import-failed" });
+      }
+
+      rekeyed.set(names.get(key) ?? key, renamed);
+    }
+
+    return rekeyed;
+  });
+
+// Effect's code names its definitions with `sanitizeJavaScriptIdentifier` and reserves `Schema`;
+// every name it exports must be the map's name, or cli modules import what is not exported.
+const sameNames = (
+  code: SchemaRepresentation.CodeDocument,
+  expected: ReadonlyMap<string, Json>,
+): boolean => {
+  const exported = [
+    ...code.references.nonRecursives.map((entry) => entry.$ref),
+    ...Object.keys(code.references.recursives),
+  ];
+
+  return (
+    exported.length === expected.size &&
+    new Set(exported).size === exported.length &&
+    exported.every((name) => expected.has(name))
+  );
+};
+
 const modulePath = "src/domain/schemas.ts";
 
 const emptyModule = "export {};\n";
 
 /**
- * Emits `domain/schemas.ts` (design 3.5, 3.6, unit EM-2): the code-generation copy of `roots`
- * (examples and defaults removed, properties sorted) imported through
+ * Emits `domain/schemas.ts` (design 3.5, 3.6, units EM-2, S1): the code-generation copy of
+ * `roots` (examples and defaults removed, properties sorted) imported through
  * `SchemaRepresentation.fromJsonSchemaMultiDocument` and printed from `toCodeDocument`, one
  * `export const` per definition after the names it reads, and one `export type` before each
  * recursive definition, whose `Schema.suspend` names it.
+ *
+ * `identifiers` is the names plan's map (`domainIdentifiers`). The copy is rekeyed to it, with its
+ * references, before import, so every export and its `identifier` annotation carry the folded
+ * name, not the schema key; an export Effect names differently fails `identifier-mismatch`.
  */
 export const emitDomainSchemas = (
   validation: ReadonlyMap<string, Json>,
   roots: readonly string[],
+  identifiers: ReadonlyMap<string, SafeIdentifierValue>,
   limits: SchemaLimits = {},
 ): Effect.Effect<EmittedFile, DomainEmitError | SchemaBudgetExceeded> =>
   Effect.gen(function* emit() {
@@ -1431,9 +1570,14 @@ export const emitDomainSchemas = (
       return { content: emptyModule, path: modulePath };
     }
 
-    const code = yield* importCode(yield* multiDocumentOf(copy));
+    const rekeyed = yield* rekeyedCopy(copy, identifiers);
+    const code = yield* importCode(yield* multiDocumentOf(rekeyed));
     if (code.artifacts.length > 0) {
       return yield* new DomainEmitError({ reason: "unsupported-artifact" });
+    }
+
+    if (!sameNames(code, rekeyed)) {
+      return yield* new DomainEmitError({ reason: "identifier-mismatch" });
     }
 
     const parsed = yield* Effect.all([

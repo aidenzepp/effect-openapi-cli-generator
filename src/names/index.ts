@@ -3,6 +3,7 @@ import type { AuthorConfig } from "../model/author-config.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
+import { domainIdentifiers, fixedNamespaces } from "./domain.ts";
 import { SafeIdentifier, foldFileSegment, foldIdentifier, foldKebab } from "./fold.ts";
 import type { FoldNote, SafeFileSegmentValue, SafeIdentifierValue } from "./fold.ts";
 import {
@@ -31,6 +32,8 @@ import type {
 } from "./plan.ts";
 import { reservedCliNames, reservedEnvSuffixes } from "./reserved.ts";
 
+export { domainIdentifiers } from "./domain.ts";
+
 export type {
   FlagSource,
   PlannedCommand,
@@ -52,11 +55,14 @@ export interface PlanOptions {
 /**
  * The name plan: untagged commands at the root, groups in first-use order (parents before
  * children), the credential names of every scheme the planned operations use, and the plan's
- * refusals and notices in diagnostic order. A refused operation is in no group.
+ * refusals and notices in diagnostic order. A refused operation is in no group. `domain` is the
+ * export name of every stored schema key in `domain/schemas.ts` (`domainIdentifiers`); cli modules
+ * import those names and the domain emitter takes the same map.
  */
 export interface NamePlan {
   readonly credentials: readonly PlannedCredential[];
   readonly diagnostics: readonly Diagnostic[];
+  readonly domain: ReadonlyMap<string, SafeIdentifierValue>;
   readonly groups: readonly PlannedGroup[];
   readonly root: readonly PlannedCommand[];
 }
@@ -111,19 +117,6 @@ const push = <K, V>(map: Map<K, V[]>, key: K, value: V): void => {
 };
 
 const specVersion = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
-
-const fixedNamespaces: ReadonlySet<string> = new Set([
-  "Argument",
-  "Command",
-  "Describe",
-  "Effect",
-  "Flag",
-  "Input",
-  "Negotiate",
-  "Option",
-  "Output",
-  "Serialize",
-]);
 
 const fixedFlagIdentifiers: ReadonlySet<string> = new Set([
   "accept",
@@ -665,7 +658,11 @@ const planCredentials = (
   return { flags, names, usesOf };
 };
 
-const domainNames = (entries: readonly Named[]): ReadonlySet<string> =>
+// The domain names a module's commands import: the `domain` names of their json and form bodies.
+const domainNames = (
+  entries: readonly Named[],
+  domain: ReadonlyMap<string, SafeIdentifierValue>,
+): ReadonlySet<string> =>
   new Set(
     entries.flatMap((entry) =>
       (entry.operation.body?.alternatives ?? []).flatMap((alternative) => {
@@ -674,9 +671,9 @@ const domainNames = (entries: readonly Named[]): ReadonlySet<string> =>
           return [];
         }
 
-        const name = foldIdentifier(key, "pascal");
+        const name = domain.get(key);
 
-        return Result.isSuccess(name) ? [name.success.name] : [];
+        return name === undefined ? [] : [name];
       }),
     ),
   );
@@ -813,10 +810,11 @@ const planGroup = (
   node: GroupNode,
   entries: readonly Named[],
   first: Named | undefined,
+  domain: ReadonlyMap<string, SafeIdentifierValue>,
   drafts: ReadonlyMap<Operation, Draft>,
   collector: Collector,
 ): PlannedGroup => {
-  const imported = domainNames(entries);
+  const imported = domainNames(entries, domain);
   const blocked = (candidate: string): boolean =>
     fixedNamespaces.has(candidate) || imported.has(candidate);
   const base = identifierOf(node.name, "pascal");
@@ -892,9 +890,10 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
       drafts.set(entry.operation, yield* draftFlags(entry, context));
     }
 
+    const domain = domainIdentifiers(Object.keys(context.defs));
     const finals = named.filter((entry) => !collector.refused.has(entry.operation));
     const rootEntries = finals.filter((entry) => entry.container === root);
-    const rootReserved = new Set([...fixedNamespaces, ...domainNames(rootEntries)]);
+    const rootReserved = new Set([...fixedNamespaces, ...domainNames(rootEntries, domain)]);
     const rootCommands = planModule(rootEntries, rootReserved, drafts, collector);
     const byContainer = new Map<string, Named[]>();
     for (const entry of finals) {
@@ -902,7 +901,7 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     }
 
     const groups = [...firstUses(finals)].map(([node, first]) =>
-      planGroup(node, byContainer.get(node.tag) ?? [], first, drafts, collector),
+      planGroup(node, byContainer.get(node.tag) ?? [], first, domain, drafts, collector),
     );
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),
@@ -917,6 +916,7 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     return {
       credentials: Arr.sort(plannedCredentials, byScheme),
       diagnostics: sortDiagnostics([...api.documents, configDocument], diagnostics),
+      domain,
       groups,
       root: rootCommands,
     };
