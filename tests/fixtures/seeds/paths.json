@@ -20,7 +20,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -32,7 +32,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -44,7 +44,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -56,7 +56,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -68,7 +68,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -80,7 +80,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -92,7 +92,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -104,7 +104,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -116,7 +116,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -128,7 +128,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -140,7 +140,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -152,7 +152,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -164,7 +164,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -176,7 +176,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -188,7 +188,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -200,10 +200,9 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
-      "designSection": "§3.4",
-      "unsettled": "The design names dot segments and run time refuses any `.`/`..` segment after expansion (design §9 I2, C9); whether the percent-encoded spelling is refused at generation time is not fixed. The prior refused it."
+      "designSection": "§3.4"
     },
     {
       "id": "path-reject-malformed-percent",
@@ -213,7 +212,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -225,7 +224,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -237,7 +236,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -249,7 +248,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -261,7 +260,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -273,7 +272,7 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
       "designSection": "§3.4"
     },
@@ -297,10 +296,9 @@
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
-      "designSection": "§3.4",
-      "unsettled": "`[` and `]` are not pchar in the 3.2.1 ABNF, so a strict ABNF check refuses them. The design names the ABNF without listing them."
+      "designSection": "§3.4"
     },
     {
       "id": "path-accept-colon",
@@ -447,20 +445,19 @@
       "designSection": "§6.4"
     },
     {
-      "id": "path-unsettled-non-ascii-literal",
+      "id": "path-reject-non-ascii-literal",
       "source": "E06 src/core/normalize.ts:468-531 (decodeURIComponent check)",
       "input": {
         "path": "/café"
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
-      "designSection": "§3.4",
-      "unsettled": "Non-ASCII literal characters are not pchar in the 3.2.1 ABNF; whether the generator refuses or percent-encodes them is not fixed by the design."
+      "designSection": "§3.4"
     },
     {
-      "id": "path-unsettled-invalid-utf8-percent",
+      "id": "path-accept-invalid-utf8-percent",
       "source": "E06 src/core/normalize.ts:468-531 (decodeURIComponent check)",
       "input": {
         "path": "/a/%ff"
@@ -469,21 +466,19 @@
         "outcome": "accepted",
         "parameterNames": []
       },
-      "designSection": "§3.4",
-      "unsettled": "`%ff` is a well-formed pct-encoded triplet, so the ABNF accepts it; the prior refused invalid UTF-8 after decoding. The design lists no such check."
+      "designSection": "§3.4"
     },
     {
-      "id": "path-unsettled-slash-in-expression",
+      "id": "path-reject-slash-in-expression",
       "source": "E06 src/core/normalize.ts:468-531 (placeholder pattern [^{}/]+)",
       "input": {
         "path": "/a/{b/c}"
       },
       "expected": {
         "outcome": "refused",
-        "rows": ["PTH-*"]
+        "rows": ["PTH-07"]
       },
-      "designSection": "§3.4",
-      "unsettled": "The 3.2.1 ABNF excludes only `{` and `}` from an expression name; the prior also excluded `/`."
+      "designSection": "§3.4"
     },
     {
       "id": "path-resend-api-keys",
@@ -1550,6 +1545,42 @@
       "expected": {
         "outcome": "accepted",
         "parameterNames": ["webhook_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-percent-dot-upper",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/%2E./b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-control-in-expression",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/{b\u0001}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-accept-non-ascii-expression-name",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/{café}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["café"]
       },
       "designSection": "§3.4"
     }
