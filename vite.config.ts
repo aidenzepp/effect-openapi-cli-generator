@@ -20,7 +20,8 @@ const effectLogStatement = {
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: ["bun.lock"],
+    // Byte-exact YAML hazard inputs: formatting them changes the test.
+    ignorePatterns: ["bun.lock", "tests/fixtures/yaml/**"],
     jsdoc: { commentLineStrategy: "multiline", lineWrappingStyle: "balance" },
   },
   lint: {
