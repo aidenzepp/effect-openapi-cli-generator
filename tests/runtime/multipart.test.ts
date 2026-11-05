@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Stream } from "effect";
+import { Effect, FileSystem, Layer, Stdio, Stream } from "effect";
 import type { HttpBody } from "effect/http";
+import { stdinClaimLayer, StdinClaim } from "../../src/runtime-src/runtime/input.ts";
 import {
+  fileBody,
   formData,
   mixed,
   partFilename,
@@ -315,5 +317,69 @@ describe("helpers", () => {
     expect(partFilename("C:\\u\\report.pdf", "file")).toBe("report.pdf");
     expect(partFilename("report.pdf", "file")).toBe("report.pdf");
     expect(partFilename("-", "file")).toBe("file");
+  });
+});
+
+const read = (body: Stream.Stream<Uint8Array, unknown>) =>
+  Effect.map(Stream.runCollect(body), (chunks) =>
+    chunks.map((chunk) => new TextDecoder().decode(chunk)).join(""),
+  );
+
+describe("fileBody", () => {
+  const layers = Layer.mergeAll(
+    stdinClaimLayer,
+    FileSystem.layerNoop({ stream: () => Stream.make(bytes("from-file")) }),
+    Stdio.layerTest({ stdin: Stream.make(bytes("from-stdin")) }),
+  );
+
+  test("a path reads the file and does not claim stdin", async () => {
+    const text = await Effect.runPromise(
+      Effect.gen(function* file() {
+        const claim = yield* StdinClaim;
+        const content = yield* Effect.flatMap(fileBody("x-file", "report.pdf"), read);
+
+        yield* claim.claim("body-file");
+
+        return content;
+      }).pipe(Effect.provide(layers)),
+    );
+
+    expect(text).toBe("from-file");
+  });
+
+  test("- claims stdin and reads it", async () => {
+    const text = await Effect.runPromise(
+      Effect.flatMap(fileBody("x-file", "-"), read).pipe(Effect.provide(layers)),
+    );
+
+    expect(text).toBe("from-stdin");
+  });
+
+  test("- after --body-file - is a UsageError naming both flags", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* second() {
+        const claim = yield* StdinClaim;
+
+        yield* claim.claim("body-file");
+
+        return yield* Effect.flip(fileBody("x-file", "-"));
+      }).pipe(Effect.provide(layers)),
+    );
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "x-file" });
+    expect(error.message).toContain("--body-file");
+    expect(error.message).toContain("--x-file");
+  });
+
+  test("two - parts: the second is refused", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* twice() {
+        yield* fileBody("a-file", "-");
+
+        return yield* Effect.flip(fileBody("b-file", "-"));
+      }).pipe(Effect.provide(layers)),
+    );
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "b-file" });
   });
 });

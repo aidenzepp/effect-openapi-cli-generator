@@ -13,6 +13,7 @@ import { Flag, GlobalFlag } from "effect/cli";
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
+import { StdinClaim } from "./input.ts";
 
 /**
  * A scheme's security requirement list: alternatives in document order, each the scheme names that
@@ -166,9 +167,13 @@ const readBounded = (
 const fromFile = (
   scheme: string,
   path: string,
-): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio> =>
+): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
   path === "-"
-    ? Effect.flatMap(Effect.service(Stdio.Stdio), (stdio) => readBounded(scheme, stdio.stdin))
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(`${schemeSlug(scheme)}-file`)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.flatMap((stdio) => readBounded(scheme, stdio.stdin)),
+      )
     : Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
         readBounded(scheme, fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
       );
@@ -184,7 +189,11 @@ const credentialOf = (
   scheme: string,
   definition: SecurityScheme,
   envPrefix: string,
-): Effect.Effect<Option.Option<Credential>, UsageError, FileSystem.FileSystem | Stdio.Stdio> =>
+): Effect.Effect<
+  Option.Option<Credential>,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
   Effect.gen(function* readCredential() {
     const file = Option.flatten(yield* Effect.serviceOption(credentialFileSetting(scheme)));
     const value = Option.isSome(file)
@@ -222,10 +231,11 @@ const describeAlternative = (
 
 /**
  * Choose the credentials one operation sends (design 6.5 Run-time choice): the first alternative,
- * in document order, that names a scheme and whose every scheme has a configured credential. A
- * `{}` alternative, or no requirement at all, sends no credentials and is used only when no
- * credentialed alternative qualifies. Otherwise `CredentialMissing`. A scheme the table does not
- * define cannot be configured. Each scheme is resolved once, so stdin is read at most once.
+ * in document order, that names a scheme and whose every scheme has a configured credential. A `{}`
+ * alternative, or no requirement at all, sends no credentials and is used only when no credentialed
+ * alternative qualifies. Otherwise `CredentialMissing`. A scheme the table does not define cannot
+ * be configured. Each scheme is resolved once, so stdin is claimed at most once, shared with the
+ * body flags through `StdinClaim`.
  */
 export const evaluate = (
   operation: string,
@@ -233,7 +243,7 @@ export const evaluate = (
 ): Effect.Effect<
   readonly Credential[],
   CredentialMissing | UsageError,
-  Schemes | FileSystem.FileSystem | Stdio.Stdio
+  Schemes | FileSystem.FileSystem | Stdio.Stdio | StdinClaim
 > =>
   Effect.gen(function* evaluateRequirement() {
     const { envPrefix, table } = yield* Schemes;

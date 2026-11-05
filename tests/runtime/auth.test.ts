@@ -15,6 +15,7 @@ import {
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
+import * as Input from "../../src/runtime-src/runtime/input.ts";
 
 const table: Auth.SecurityTable = {
   schemes: {
@@ -32,6 +33,7 @@ const secret = "s3cr3t-value";
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 interface World {
+  readonly claimedBy?: string;
   readonly env?: Record<string, string>;
   readonly files?: Record<string, string>;
   readonly given?: Record<string, string>;
@@ -53,7 +55,14 @@ const run = (world: World, requirement: Auth.SecurityRequirement) => {
       return Stream.make(chunk);
     }),
   });
-  let provided = Auth.evaluate("users-update", requirement);
+  const { claimedBy } = world;
+  let provided =
+    claimedBy === undefined
+      ? Auth.evaluate("users-update", requirement)
+      : Effect.service(Input.StdinClaim).pipe(
+          Effect.flatMap((claim) => claim.claim(claimedBy)),
+          Effect.flatMap(() => Auth.evaluate("users-update", requirement)),
+        );
   for (const [scheme, path] of Object.entries(world.given ?? {})) {
     provided = provided.pipe(
       Effect.provideService(Auth.credentialFileSetting(scheme), Option.some(path)),
@@ -62,7 +71,9 @@ const run = (world: World, requirement: Auth.SecurityRequirement) => {
 
   return Effect.runPromise(
     provided.pipe(
-      Effect.provide(Layer.mergeAll(Auth.layer(table, "EXAMPLE"), fs, stdio)),
+      Effect.provide(
+        Layer.mergeAll(Auth.layer(table, "EXAMPLE"), fs, stdio, Input.stdinClaimLayer),
+      ),
       Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(world.env ?? {}))),
       Effect.result,
     ),
@@ -167,7 +178,14 @@ describe("credential sources", () => {
     const result = await Effect.runPromise(
       Auth.evaluate("users-update", [["bearerAuth"]]).pipe(
         Effect.provideService(Auth.credentialFileSetting("bearerAuth"), Option.some("/bin")),
-        Effect.provide(Layer.mergeAll(Auth.layer(table, "EXAMPLE"), fs, Stdio.layerTest({}))),
+        Effect.provide(
+          Layer.mergeAll(
+            Auth.layer(table, "EXAMPLE"),
+            fs,
+            Stdio.layerTest({}),
+            Input.stdinClaimLayer,
+          ),
+        ),
         Effect.result,
       ),
     );
@@ -237,12 +255,27 @@ describe("requirement evaluation", () => {
     expect(failure(result)).toMatchObject({ _tag: "CredentialMissing" });
   });
 
-  test("stdin is one-shot: a second scheme reading - finds it empty", async () => {
+  test("--body-file - plus --api-key-file - is a UsageError naming both flags, value-free", async () => {
+    const result = await run({ claimedBy: "body-file", given: { apiKey: "-" }, stdin: secret }, [
+      ["apiKey"],
+    ]);
+    const error = failure(result);
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "api-key-file" });
+    expect(error instanceof UsageError && error.message).toContain("--body-file");
+    expect(error instanceof UsageError && error.message).toContain("--api-key-file");
+    expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
+  test("two schemes reading - is a UsageError naming both flags", async () => {
     const result = await run({ given: { apiKey: "-", bearerAuth: "-" }, stdin: secret }, [
       ["apiKey", "bearerAuth"],
     ]);
+    const error = failure(result);
 
-    expect(failure(result)).toMatchObject({ _tag: "UsageError" });
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "bearer-auth-file" });
+    expect(error instanceof UsageError && error.message).toContain("--api-key-file");
+    expect(error instanceof UsageError && error.message).toContain("--bearer-auth-file");
   });
 });
 
