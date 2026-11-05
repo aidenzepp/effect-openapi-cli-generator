@@ -289,6 +289,10 @@ describe("matrix", () => {
     await expectUsage(Serialize.matrix("id", { "a;b": "v" }, reservedExploded).expand);
   });
 
+  test("allowReserved never lets a semicolon, equals sign or comma in the parameter name reach the wire raw", async () => {
+    expect(await expand(Serialize.matrix("a;b=c,d", "v", reserved))).toBe(";a%3Bb%3Dc%2Cd=v");
+  });
+
   test("without allowReserved the same delimiters are encoded", async () => {
     expect(await expand(Serialize.matrix("id", ["a;b", "c=d", "e,f"], exploded))).toBe(
       ";id=a%3Bb;id=c%3Dd;id=e%2Cf",

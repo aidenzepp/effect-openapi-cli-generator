@@ -275,7 +275,7 @@ const compose = (
   }
 
   if (style === "matrix") {
-    return expandMatrix(encode(name), text, explode);
+    return expandMatrix(encodeUnreserved(name), text, explode);
   }
 
   return explode && text.kind === "object"
