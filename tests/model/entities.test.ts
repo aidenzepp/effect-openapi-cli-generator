@@ -117,6 +117,7 @@ const operation = {
   rows,
   security: securityPolicy,
   servers: [server],
+  tags: ["users", "admin"],
 };
 
 const api = {
@@ -203,6 +204,19 @@ describe("model entities", () => {
     }
 
     expect(decodes(Informational, { ...informational, row: "not a row" })).toBe(false);
+  });
+
+  test("an operation carries its tags in order and requires the field", () => {
+    const decoded: { readonly tags: readonly unknown[] } =
+      Schema.decodeUnknownSync(Operation)(operation);
+
+    expect(decoded.tags).toEqual(["users", "admin"]);
+
+    const { tags: _tags, ...untagged } = operation;
+
+    expect(decodes(Operation, untagged)).toBe(false);
+    expect(decodes(Operation, { ...operation, tags: [1] })).toBe(false);
+    expect(decodes(Operation, { ...operation, tags: ["bad\u0000tag"] })).toBe(false);
   });
 
   test("brands are enforced on entity fields", () => {

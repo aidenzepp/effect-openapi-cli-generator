@@ -101,6 +101,17 @@ describe("operation keys", () => {
     see(operation("3.1", { "/a": { get: ok } }, "GET")?.deprecated).toBe(false);
   });
 
+  test("tags are kept in document order, sanitized, and empty when absent", () => {
+    const { api } = run("3.1", {
+      "/a": { get: { ...ok, tags: ["users", "ad\u0000min"] }, put: ok },
+    });
+    const tagsOf = (method: string) =>
+      api.operations.find((found) => found.key.method === method)?.tags;
+
+    see(tagsOf("GET")).toEqual(["users", "admin"]);
+    see(tagsOf("PUT")).toEqual([]);
+  });
+
   test("a path item reached through $ref yields its operations", () => {
     const { api } = run(
       "3.1",

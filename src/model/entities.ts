@@ -286,6 +286,7 @@ export class Operation extends Schema.Class<Operation>("Operation")({
   rows,
   security: SecurityPolicy,
   servers: Schema.Array(Server),
+  tags: Schema.Array(SafeText),
 }) {}
 
 /**
