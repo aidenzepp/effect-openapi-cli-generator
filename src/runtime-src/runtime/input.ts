@@ -286,6 +286,15 @@ const bunJson: {
 
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
+/**
+ * An `int64` field flag's value as a `JsonNumber`, checked against the same digit pattern a merged
+ * body is. A non-digit text is a `UsageError` naming the flag only, never the text.
+ */
+export const jsonNumber = (digits: string, flag: string): Effect.Effect<JsonNumber, UsageError> =>
+  int64Digits.test(digits)
+    ? Effect.succeed(new JsonNumber(digits))
+    : Effect.fail(usage(flag, "an integer field is not a digit string"));
+
 const isObject = (value: JsonNode | undefined): value is JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value) && !(value instanceof JsonNumber);
 
