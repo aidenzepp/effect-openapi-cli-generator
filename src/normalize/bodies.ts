@@ -9,6 +9,7 @@ import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/in
 import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { docsOf, sanitize } from "./docs.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -132,8 +133,6 @@ const SchemaNode = Schema.Struct({
 
 type SchemaNodeValue = typeof SchemaNode.Type;
 
-const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
-
 const formUrlencoded = "application/x-www-form-urlencoded";
 
 const octetStream = "application/octet-stream";
@@ -227,8 +226,6 @@ const notice = (
   message: string,
   pointer: string,
 ): Finding => ({ anchor, code, element, message, pointer, severity: "notice" });
-
-const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -1348,24 +1345,6 @@ const toDiagnostics = (
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
     }),
   ).pipe(Effect.orDie);
-
-interface Docs {
-  description?: string;
-  summary?: string;
-}
-
-const docsOf = (description: string | undefined, summary: string | undefined): Docs => {
-  const docs: Docs = {};
-  if (description !== undefined) {
-    docs.description = sanitize(description);
-  }
-
-  if (summary !== undefined) {
-    docs.summary = sanitize(summary);
-  }
-
-  return docs;
-};
 
 const emptyContent = (line: Line, pointer: string): Finding =>
   refusal(

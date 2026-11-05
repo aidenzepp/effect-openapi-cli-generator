@@ -9,6 +9,7 @@ import type { Resolution } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { docsOf, sanitize } from "./docs.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -87,8 +88,6 @@ const MediaTypeObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknow
 const rules: Record<Line, string> = { "3.0": "oas-3.0", "3.1": "oas-3.1", "3.2": "oas-3.2" };
 
 const ignoredHeaders: ReadonlySet<string> = new Set(["accept", "authorization", "content-type"]);
-
-const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
 
 const formUrlencoded = /^application\/x-www-form-urlencoded[ \t]*(?:;|$)/iu;
 
@@ -540,8 +539,6 @@ const contractReason = (
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
 
-const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
-
 const schemaKeyAt = (resolution: Resolution, pointer: string): string =>
   referenceAt(resolution, pointer)?.defsKey ??
   defsKey(resolution.document, { document: resolution.document, pointer });
@@ -632,24 +629,6 @@ const toDiagnostics = (
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
-
-interface Docs {
-  description?: string;
-  summary?: string;
-}
-
-const docsOf = (description: string | undefined, summary: string | undefined): Docs => {
-  const docs: Docs = {};
-  if (description !== undefined) {
-    docs.description = sanitize(description);
-  }
-
-  if (summary !== undefined) {
-    docs.summary = sanitize(summary);
-  }
-
-  return docs;
-};
 
 interface Source {
   readonly node: ParameterNode;
