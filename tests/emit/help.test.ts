@@ -232,6 +232,34 @@ const withDocs = (docs: Record<string, string>) =>
     operation: Schema.decodeUnknownSync(Operation)({ ...operationPlain, docs }),
   }).description;
 
+const timeAlternative = (count: number) => {
+  const names = Array.from({ length: count }, (_, index) => `scheme${index}`);
+  const uses = names.map((name) => ({ scheme: name, scopes: [] }));
+  const big = Schema.decodeUnknownSync(Operation)({
+    ...operationPlain,
+    security: { ...operationPlain.security, alternatives: [{ uses }] },
+  });
+
+  const started = performance.now();
+  const help = operationHelp({
+    ...input,
+    credentials: names.map((name) => ({
+      env: `ENV_${name}`,
+      flag: `${name}-file`,
+      scheme: name,
+    })),
+    operation: big,
+    schemes: names.map((name) =>
+      Schema.decodeUnknownSync(SecurityScheme)({ ...schemePlain, name }),
+    ),
+  });
+  const elapsed = performance.now() - started;
+
+  expect(sectionText(help, "AUTH")?.startsWith("scheme0 (http bearer): --scheme0-file")).toBe(true);
+
+  return elapsed;
+};
+
 describe("operationHelp", () => {
   test("description is the source description, else the summary, an empty one staying empty", () => {
     expect<string>(withDocs({ description: "Update a user." })).toBe("Update a user.");
@@ -419,33 +447,11 @@ describe("operationHelp", () => {
     expect(sectionText(none, "REQUEST")).toBe("PATCH /users/{id}");
   });
   test("renders a 50k-name alternative in linear time", () => {
-    const count = 50_000;
-    const names = Array.from({ length: count }, (_, index) => `scheme${index}`);
-    const uses = names.map((name) => ({ scheme: name, scopes: [] }));
-    const big = Schema.decodeUnknownSync(Operation)({
-      ...operationPlain,
-      security: { ...operationPlain.security, alternatives: [{ uses }] },
-    });
-
-    const started = performance.now();
-    const help = operationHelp({
-      ...input,
-      credentials: names.map((name) => ({
-        env: `ENV_${name}`,
-        flag: `${name}-file`,
-        scheme: name,
-      })),
-      operation: big,
-      schemes: names.map((name) =>
-        Schema.decodeUnknownSync(SecurityScheme)({ ...schemePlain, name }),
-      ),
-    });
-    const elapsed = performance.now() - started;
-
-    expect(sectionText(help, "AUTH")?.startsWith("scheme0 (http bearer): --scheme0-file")).toBe(
-      true,
-    );
-    expect(elapsed).toBeLessThan(1000);
+    // Compare growth rather than an absolute time so the test tolerates a loaded machine.
+    // Linear rendering grows about 10x from 5k to 50k names; quadratic rendering about 100x.
+    const small = timeAlternative(5000);
+    const large = timeAlternative(50_000);
+    expect(large / Math.max(small, 1)).toBeLessThan(30);
   }, 10_000);
 });
 
