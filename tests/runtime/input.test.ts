@@ -847,3 +847,29 @@ describe("Input.selectBody", () => {
     expect(image.counter.runs).toBe(1);
   });
 });
+
+describe("Input.jsonNumber", () => {
+  test("a digit string round-trips through a merge with its exact digits", async () => {
+    const number = await run(Input.jsonNumber("9007199254740993", "count"));
+
+    expect(number).toBeInstanceOf(Input.JsonNumber);
+    expect(number.text).toBe("9007199254740993");
+
+    const text = await run(
+      mergedText({
+        fields: { "/count": Option.some(number) },
+        schema: Schema.Struct({ count: Schema.Number }),
+      }),
+    );
+
+    expect(text).toBe('{"count":9007199254740993}');
+  });
+
+  test("a non-digit string is a UsageError naming the flag only, never the value", async () => {
+    const error = await run(Input.jsonNumber("12x-secret", "count").pipe(Effect.flip));
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("count");
+    expect(JSON.stringify(error)).not.toContain("12x-secret");
+  });
+});
