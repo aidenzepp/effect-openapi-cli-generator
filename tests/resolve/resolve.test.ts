@@ -450,6 +450,16 @@ describe("I5 hop and node budgets", () => {
     expect(refusal("3.1", value, { maxNodes: 50_000 }).code).toBe("REF-16/outside-set");
   });
 
+  test("references to one unknown resource cost linear work", () => {
+    const value = spec("3.1", {
+      components: {
+        schemas: { S: { allOf: Array.from({ length: 200_000 }, () => ({ $ref: "x:y" })) } },
+      },
+    });
+
+    expect(refusal("3.1", value).code).toBe("REF-16/outside-set");
+  }, 10_000);
+
   test("REF-18 a walk past the node budget is refused", () => {
     expect(refusal("3.1", spec("3.1", dag(30)), { maxNodes: 20 }).code).toBe("REF-18/node-budget");
   });
@@ -492,6 +502,32 @@ describe("DOC-23 reference cycles", () => {
         },
       },
       paths: { "/a": { $ref: "#/components/pathItems/A" } },
+    });
+
+    expect(refusal("3.1", value).code).toBe("DOC-23/non-schema-cycle");
+  });
+
+  test("a cycle through a target nested inside another target is a document refusal", () => {
+    const value = spec("3.1", {
+      components: {
+        pathItems: {
+          P: {
+            get: {
+              callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/P" } } },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      },
+      paths: {
+        "/a": { $ref: "#/components/pathItems/P" },
+        "/b": {
+          get: {
+            callbacks: { c2: { $ref: "#/components/pathItems/P/get/callbacks/cb" } },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
     });
 
     expect(refusal("3.1", value).code).toBe("DOC-23/non-schema-cycle");

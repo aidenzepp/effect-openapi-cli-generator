@@ -949,6 +949,16 @@ class Resolver {
       edges.set(owner, list);
     }
 
+    // A target also reaches every target nested inside it, so a cycle through nested content shows.
+    for (const target of targets) {
+      const owner = ownerOf(target, targets);
+      if (target !== "" && owner !== "") {
+        const list = edges.get(owner) ?? [];
+        list.push({ site: target, to: target });
+        edges.set(owner, list);
+      }
+    }
+
     const done = new Set<string>();
     for (const start of ["", ...targets]) {
       const closing = cycleFrom(start, edges, done);
@@ -994,7 +1004,12 @@ class Resolver {
         const outcome =
           entry.site.kind === "schema" ? this.schemaSite(entry.site) : this.chainSite(entry.site);
         if (outcome !== undefined && "waitOn" in outcome) {
-          waiting.set(outcome.waitOn, [...(waiting.get(outcome.waitOn) ?? []), entry]);
+          const list = waiting.get(outcome.waitOn);
+          if (list === undefined) {
+            waiting.set(outcome.waitOn, [entry]);
+          } else {
+            list.push(entry);
+          }
         } else if (outcome !== undefined) {
           return outcome;
         }
