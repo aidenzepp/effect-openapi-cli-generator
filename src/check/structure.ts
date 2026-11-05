@@ -4,8 +4,8 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { methodTokens } from "../model/method-tokens.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 interface JsonObject {
   readonly [key: string]: Json;

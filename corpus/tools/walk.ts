@@ -1,8 +1,8 @@
 import { Array as Arr, Effect, Order, Predicate } from "effect";
 import { referenceAt } from "../../src/resolve/index.ts";
 import type { Resolution } from "../../src/resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../../src/resolve/pointer.ts";
-import type { Json, PointerEvalError, PointerSyntaxError } from "../../src/resolve/pointer.ts";
+import { escapeToken, evaluatePointer } from "../../src/model/pointer.ts";
+import type { Json, PointerEvalError, PointerSyntaxError } from "../../src/model/pointer.ts";
 
 type Document = Resolution["document"];
 

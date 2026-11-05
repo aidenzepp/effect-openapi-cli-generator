@@ -1,5 +1,5 @@
 import { Data, Effect, Option, Schema } from "effect";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 /**
  * The OpenAPI line a document declares.

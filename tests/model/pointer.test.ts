@@ -8,8 +8,8 @@ import {
   parseFragment,
   parsePointer,
   unescapeToken,
-} from "../../src/resolve/pointer.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+} from "../../src/model/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 // RFC 6901 section 5 document.
 const doc: Json = {

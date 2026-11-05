@@ -1,5 +1,5 @@
 import { Array as Arr, Effect, Exit, Predicate, Schema } from "effect";
-import { parsePointer } from "../resolve/pointer.ts";
+import { parsePointer } from "./pointer.ts";
 import { methodTokens } from "./method-tokens.ts";
 
 const token = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";

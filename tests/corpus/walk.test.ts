@@ -4,7 +4,7 @@ import { walk } from "../../corpus/tools/walk.ts";
 import type { WalkElement } from "../../corpus/tools/walk.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { resolve } from "../../src/resolve/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
 

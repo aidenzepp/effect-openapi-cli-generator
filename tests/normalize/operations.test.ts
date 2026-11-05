@@ -7,7 +7,7 @@ import { sortDiagnostics } from "../../src/model/diagnostic.ts";
 import type { Operation } from "../../src/model/entities.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 // The subjects are entities with branded fields; `expect`'s own parameter would reject the plain

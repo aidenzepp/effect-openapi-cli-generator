@@ -5,7 +5,7 @@ import type { EncodingRule, MediaAlternative } from "../../src/model/entities.ts
 import { BodyNodeBudget, BodyNotReadable, normalizeBody } from "../../src/normalize/bodies.ts";
 import type { BodyOutcome } from "../../src/normalize/bodies.ts";
 import { resolve } from "../../src/resolve/index.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");

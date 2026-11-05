@@ -8,7 +8,7 @@ import type { Diagnostic } from "../model/diagnostic.ts";
 import { Api } from "../model/entities.ts";
 import { defaultLimits } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import { collectInformational } from "./informational.ts";
 import { assembleOperations, distinctDiagnostics } from "./operations.ts";
 import type { OperationsError } from "./operations.ts";

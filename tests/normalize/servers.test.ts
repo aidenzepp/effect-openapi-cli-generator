@@ -5,7 +5,7 @@ import { DocumentUri, JsonPointer } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import { boundOrigins, effectiveServers } from "../../src/normalize/servers.ts";
 import type { ServerSource, ServersContext } from "../../src/normalize/servers.ts";
-import type { Json } from "../../src/resolve/pointer.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 const uri = Schema.decodeUnknownSync(DocumentUri);
 

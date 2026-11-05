@@ -15,7 +15,7 @@ import type { JsonSchema } from "effect";
 import type { SafeIdentifierValue } from "../names/fold.ts";
 import { codeGenerationCopy } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
-import type { Json } from "../resolve/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import { asciiStringLiteral, stringLiteral } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 import { textWidth } from "./printer.ts";

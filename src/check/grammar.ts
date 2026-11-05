@@ -4,8 +4,8 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
 import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, formatPointer, parseFragment } from "../resolve/pointer.ts";
-import type { Json } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer, formatPointer, parseFragment } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 interface JsonObject {
   readonly [key: string]: Json;

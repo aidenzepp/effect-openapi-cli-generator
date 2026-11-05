@@ -7,7 +7,7 @@ import type { MediaAlternative } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.

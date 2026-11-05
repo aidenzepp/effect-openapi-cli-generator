@@ -1,6 +1,6 @@
 import { Predicate } from "effect";
 import type { Line } from "../validate/index.ts";
-import type { Json } from "./pointer.ts";
+import type { Json } from "../model/pointer.ts";
 
 const isObject = (value: Json): value is { readonly [key: string]: Json } =>
   typeof value === "object" && value !== null && !Array.isArray(value);

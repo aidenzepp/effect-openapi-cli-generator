@@ -6,7 +6,7 @@ import { Parameter } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
+import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
 /**

@@ -98,13 +98,7 @@ describe("generator import graph (design 4.7)", () => {
   const downstream = ["names", "emit", "write", "report"] as const;
   const upstream = ["load", "validate", "resolve"] as const;
 
-  // Two imports of the resolver's pure RFC 6901 helper (`formatPointer`, the `Json` type) predate
-  // this rule. They are listed so the rule is enforced everywhere else, and a stale entry fails.
-  // Follow-up: move `pointer.ts` out of `resolve/` and empty this list.
-  const known = [
-    "src/emit/domain.ts -> ../resolve/pointer.ts",
-    "src/names/flatten.ts -> ../resolve/pointer.ts",
-  ];
+  const known: string[] = [];
 
   const edges = (stage: string): readonly string[] =>
     [...generatorImports(stage)].flatMap(([file, specifiers]) =>
@@ -270,10 +264,10 @@ describe("generated package import graph (design 4.1)", () => {
 
 describe("the rules catch violations", () => {
   test("a planted type-only import is seen", () => {
-    const planted = 'import type { Mode } from "../resolve/pointer.ts";\nexport type X = Mode;\n';
+    const planted = 'import type { Mode } from "../resolve/index.ts";\nexport type X = Mode;\n';
 
-    expect(importsOf(planted)).toEqual(["../resolve/pointer.ts"]);
-    expect(stageOf("src/emit/planted.ts", "../resolve/pointer.ts")).toBe("resolve");
+    expect(importsOf(planted)).toEqual(["../resolve/index.ts"]);
+    expect(stageOf("src/emit/planted.ts", "../resolve/index.ts")).toBe("resolve");
   });
 
   test("a planted platform import is seen", () => {
