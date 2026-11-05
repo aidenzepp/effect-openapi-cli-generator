@@ -459,6 +459,34 @@ describe("Auth.attach", () => {
     }
   });
 
+  test("a cookie apiKey whose name is not a token is refused without the value", async () => {
+    const definition: Auth.SecurityTable["schemes"][string] = {
+      in: "cookie",
+      kind: "apiKey",
+      name: "a; admin=1",
+    };
+    const odd: Auth.SecurityTable = { schemes: { oddCookie: definition } };
+    const request = HttpClientRequest.get(`${bound}/v1`);
+    const result = await Effect.runPromise(
+      Effect.result(
+        Auth.attach(odd, {
+          credentials: [
+            {
+              definition,
+              scheme: "oddCookie",
+              value: Redacted.make(secret),
+            },
+          ],
+          origins: [bound],
+        })(request),
+      ),
+    );
+    const error = Result.isFailure(result) ? result.failure : undefined;
+
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "odd-cookie-file" });
+    expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
   test("a bad basic user-id or password names the scheme only", async () => {
     const values = [
       `us\u0007er:${secret}`,

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  CookieName,
   DocumentUri,
   HeaderName,
   JsonLiteral,
@@ -212,7 +213,12 @@ export class Server extends Schema.Class<Server>("Server")({
 
 const schemeKind = Schema.Union([
   Schema.Struct({
-    in: Schema.Literals(["cookie", "header", "query"]),
+    in: Schema.Literal("cookie"),
+    name: CookieName,
+    type: Schema.Literal("apiKey"),
+  }),
+  Schema.Struct({
+    in: Schema.Literals(["header", "query"]),
     name: WireName,
     type: Schema.Literal("apiKey"),
   }),

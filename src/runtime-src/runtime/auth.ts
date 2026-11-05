@@ -423,6 +423,9 @@ const unsafeHeaderValue = (value: string): boolean =>
   value.includes("\u0000") ||
   value !== value.trim();
 
+// An RFC 6265 cookie-name is an RFC 9110 token.
+const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+
 const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> =>
@@ -476,6 +479,10 @@ const attachOne = (
 
   if (definition.in === "query") {
     return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, value));
+  }
+
+  if (!cookieNameToken.test(definition.name)) {
+    return refuse(scheme, "has a cookie name that is not a token");
   }
 
   if (!cookieOctets.test(secret)) {
