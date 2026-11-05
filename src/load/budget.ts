@@ -26,11 +26,16 @@ const messages = {
   "DOC-14/duplicate-key": "An object repeats a key.",
   "DOC-14/invalid-encoding": "The document is not valid UTF-8.",
   "DOC-14/invalid-json": "The document is not valid JSON.",
+  "DOC-14/invalid-yaml": "The document is not valid YAML 1.2.",
   "DOC-14/node-budget": "The document has more values than the node budget allows.",
   "DOC-14/too-large": "The document is larger than the size limit.",
   "DOC-14/unreadable": "The document could not be read.",
   "DOC-14/unsafe-integer": "An integer in default, enum or const is beyond 2^53.",
-  "DOC-14/yaml-unsupported": "YAML loading is not yet supported.",
+  "DOC-14/yaml-alias-cycle": "A YAML alias refers to a node that contains it.",
+  "DOC-14/yaml-multi-document": "The YAML stream holds more than one document.",
+  "DOC-14/yaml-non-finite": "A YAML number is not finite (.inf or .nan).",
+  "DOC-14/yaml-non-json-tag": "A YAML tag has no JSON value.",
+  "DOC-14/yaml-non-string-key": "A YAML mapping key is not a scalar.",
 } as const;
 
 export type LoadCode = keyof typeof messages;

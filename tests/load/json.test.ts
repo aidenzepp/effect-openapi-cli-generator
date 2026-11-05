@@ -156,9 +156,9 @@ describe("load: strict JSON", () => {
     expect(error.diagnostic.code).toBe("DOC-14/invalid-encoding");
   });
 
-  test("anything not starting with a brace is routed to YAML, which is not yet supported", async () => {
-    const error = await refusal(file("spec.yaml"));
-    expect(error.diagnostic.code).toBe("DOC-14/yaml-unsupported");
+  test("anything not starting with a brace is routed to YAML", async () => {
+    const loaded = await Effect.runPromise(file("spec.yaml"));
+    expect(loaded.format).toBe("yaml");
   });
 
   test("a missing file is refused as unreadable", async () => {
