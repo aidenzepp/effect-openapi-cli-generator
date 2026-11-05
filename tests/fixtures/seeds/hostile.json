@@ -11,7 +11,7 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "source": "\"\\ud800\""
+        "source": "\"\\uD800\""
       },
       "designSection": "\u00a73.6"
     },
@@ -26,7 +26,7 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "source": "\"\\udc00\""
+        "source": "\"\\uDC00\""
       },
       "designSection": "\u00a73.6"
     },
@@ -188,7 +188,7 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "source": "\"a\\u200bb\""
+        "source": "\"a\\u200Bb\""
       },
       "designSection": "\u00a73.6"
     },
@@ -201,7 +201,7 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "source": "\"a\\u007fb\""
+        "source": "\"a\\u007Fb\""
       },
       "designSection": "\u00a73.6"
     },
@@ -227,7 +227,7 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "source": "\"a\\u202eb\""
+        "source": "\"a\\u202Eb\""
       },
       "designSection": "\u00a73.6"
     }

@@ -3,7 +3,12 @@ import nodePath from "node:path";
 import { Effect, Exit, Schema } from "effect";
 import hostileSeeds from "../fixtures/seeds/hostile.json" with { type: "json" };
 import { JsonLiteral } from "../../src/model/brands.ts";
-import { JsDocText, stringLiteral } from "../../src/emit/escape.ts";
+import {
+  asciiStringLiteral,
+  guardTemplateCurly,
+  JsDocText,
+  stringLiteral,
+} from "../../src/emit/escape.ts";
 import {
   Identifier,
   MemberName,
@@ -763,6 +768,8 @@ describe("printModule", () => {
   });
 });
 
+const u = (hex: string): string => `${String.fromCodePoint(92)}u${hex}`;
+
 describe("hostile strings", () => {
   const printed = print(hostileModule);
 
@@ -781,9 +788,41 @@ describe("hostile strings", () => {
   test("leave no raw control, format, separator or lone surrogate code point", () => {
     expect(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u.test(printed.replaceAll("\n", ""))).toBe(false);
     expect(printed).toContain("\\u2028");
-    expect(printed).toContain("\\ud800");
+    expect(printed).toContain("\\uD800");
     expect(printed).toContain("caf\u00E9 \u4E2D\u6587 \u{1F600}");
   });
+
+  test("escape hex digits in upper case", () => {
+    expect(stringLiteral(`${String.fromCodePoint(0x7f)}${String.fromCodePoint(0xd8_00)}`)).toBe(
+      `"${u("007F")}${u("D800")}"`,
+    );
+    expect(stringLiteral(`${String.fromCodePoint(128_512)}${String.fromCodePoint(8203)}`)).toBe(
+      `"${String.fromCodePoint(128_512)}${u("200B")}"`,
+    );
+    expect(asciiStringLiteral(String.fromCodePoint(128_512))).toBe(`"${u("D83D")}${u("DE00")}"`);
+  });
+
+  test("fence a statement that holds a template placeholder literal in a disable range", () => {
+    const placeholder = ["a$", "{b}c"].join("");
+    const guarded = print({
+      imports: [],
+      statements: [
+        constant("plain", str("ok")),
+        constant("holder", fn("f", str("x"), str(placeholder))),
+      ],
+    });
+    expect(guarded).toBe(
+      [
+        'export const plain = "ok";',
+        "",
+        "/* oxlint-disable no-template-curly-in-string -- a spec string holds a template placeholder */",
+        `export const holder = f("x", ${stringLiteral(placeholder)});`,
+        "/* oxlint-enable no-template-curly-in-string */",
+        "",
+      ].join("\n"),
+    );
+    expectFixedPoint(guarded, "ts");
+  }, 30_000);
 
   test("never reach JSDoc", () => {
     const rejected = [
@@ -895,7 +934,7 @@ describe("hostile seeds", () => {
           : print({ imports: [], statements: [constant("x", obj([[text, num(1)]]))] });
       const expected =
         seed.expected.kind === "string-literal"
-          ? `export const x = ${seed.expected.source};\n`
+          ? `${guardTemplateCurly(`export const x = ${seed.expected.source};`)}\n`
           : `export const x = { ${seed.expected.source}: 1 };\n`;
       expect({ id: seed.id, printed }).toEqual({ id: seed.id, printed: expected });
     }

@@ -57,7 +57,7 @@ the same commit.
   time, so mixed objects are expected: `{ "200": [], default: [] }`.
 - The key `__proto__` is always the computed key `["__proto__"]`, which defines an own property. A
   bare or quoted `__proto__` sets the prototype instead. It sorts by its name, `__proto__`.
-- A quoted key escapes every non-ASCII code unit as `\u` and four lowercase hex digits. The formatter
+- A quoted key escapes every non-ASCII code unit as `\u` and four uppercase hex digits. The formatter
   unquotes a quoted key whose text is a Unicode identifier name, so `"café"` would become `café`, but
   it keeps a key that holds an escape quoted (measured). Escaping keeps every quoted key quoted.
 - Interface members follow the same key rules and are also sorted.
@@ -65,10 +65,15 @@ the same commit.
 ## Strings
 
 - A string literal is `JSON.stringify(value)`, then every UTF-16 code unit of a code point in the
-  escape set is replaced by `\u` and four lowercase hex digits. The escape set is Unicode Cc
+  escape set is replaced by `\u` and four uppercase hex digits. The escape set is Unicode Cc
   (controls), Cf (format characters, which include the bidi controls), U+2028, U+2029 and lone
   surrogates. A Cf code point outside the BMP becomes two escapes, one per surrogate.
   `JSON.stringify` already escapes controls below U+0020 and lone surrogates.
+- oxlint reads the cooked value of a literal, so no escape hides `${...}` from
+  `no-template-curly-in-string` (measured: escaping the `$` or the `{` is still reported). The
+  printer fences any printed statement that holds `${` followed later by `}` in a
+  `/* oxlint-disable no-template-curly-in-string -- ... */` and `/* oxlint-enable ... */` pair, so
+  a statement that spans several lines stays covered.
 - Printable non-ASCII stays literal, so non-ASCII help text reads as written (R10). `vp fmt` keeps
   every `\uXXXX` escape and every literal character as written (measured on samples from U+007F to
   U+FFFF, including U+2028, U+2029, bidi controls and lone surrogates).

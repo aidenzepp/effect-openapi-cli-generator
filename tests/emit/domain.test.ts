@@ -418,7 +418,7 @@ describe("emitDomainSchemas", () => {
 
     expect(content).toContain('"weird key"');
     expect(content).toContain('["__proto__"]');
-    expect(content).toContain('"caf\\u00e9"');
+    expect(content).toContain('"caf\\u00E9"');
     expect(content).toContain("class:");
     expectFixedPoint(content);
   }, 30_000);

@@ -14,7 +14,8 @@ const shortEscapes = new Map([
   ["\r", "\\r"],
 ]);
 
-const unitEscape = (unit: number): string => `\\u${unit.toString(16).padStart(4, "0")}`;
+const unitEscape = (unit: number): string =>
+  `\\u${unit.toString(16).toUpperCase().padStart(4, "0")}`;
 
 // One escape per UTF-16 code unit: a code point outside the BMP becomes its two surrogates.
 const unitEscapes = (char: string): string => {
@@ -99,3 +100,22 @@ export const jsDoc = (text: typeof JsDocText.Type): string => {
 
   return ["/**", ...lines.map((line) => ` * ${line}`), " */"].join("\n");
 };
+
+// oxlint reads the cooked value of a literal, so no escape hides `${...}` from
+// `no-template-curly-in-string`; the statement is fenced with a disable range instead.
+const templateCurlyPattern = /\$\{[^]*\}/u;
+
+const templateCurlyRule = "no-template-curly-in-string";
+
+/**
+ * Fences a printed statement that holds a `${...}` string literal in a disable/enable range for
+ * `no-template-curly-in-string`; any other statement is returned as it is.
+ */
+export const guardTemplateCurly = (statement: string): string =>
+  templateCurlyPattern.test(statement)
+    ? [
+        `/* oxlint-disable ${templateCurlyRule} -- a spec string holds a template placeholder */`,
+        statement,
+        `/* oxlint-enable ${templateCurlyRule} */`,
+      ].join("\n")
+    : statement;
