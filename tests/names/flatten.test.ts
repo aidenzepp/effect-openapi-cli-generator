@@ -226,4 +226,24 @@ describe("flattenBody", () => {
     const result = flattenBody({ Root: { allOf: members } }, alternative("json", "Root"));
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
+
+  test("many empty-folding keys under a shared def hit the budget instead of growing memory", () => {
+    const empties = Object.fromEntries(
+      Array.from({ length: 300 }, (_, index): [string, Schema.Json] => [
+        `\u4E00${String.fromCodePoint(20_000 + index)}`,
+        { type: "string" },
+      ]),
+    );
+    const uses = Object.fromEntries(
+      Array.from({ length: 300 }, (_, index): [string, Schema.Json] => [
+        `use${index}`,
+        { $ref: "#/$defs/Shared" },
+      ]),
+    );
+    const result = flattenBody(
+      { Root: object(uses), Shared: object(empties) },
+      alternative("json", "Root"),
+    );
+    expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
+  }, 5000);
 });
