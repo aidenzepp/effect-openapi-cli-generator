@@ -1,0 +1,16 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "base 3.0", "version": "1" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "A": { "type": "string" },
+      "Local": { "$ref": "#/components/schemas/A" },
+      "Retrieval": { "$ref": "file:///spec/openapi.json#/components/schemas/A" },
+      "Relative": { "$ref": "openapi.json#/components/schemas/A" },
+      "Escaped": { "$ref": "#/components/schemas/c%25d" },
+      "c%d": { "type": "integer" },
+      "WithId": { "$id": "https://example.com/with-id.json", "type": "object" }
+    }
+  }
+}
