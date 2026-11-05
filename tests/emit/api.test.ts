@@ -193,6 +193,25 @@ describe("emitApi: shapes beyond the fixture", () => {
     expect(users).toContain("Serialize.body(input.contentType, input.body)");
   });
 
+  test("an XML body is sent under its declared media type", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths({
+          "/feeds": {
+            post: {
+              operationId: "feeds-create",
+              requestBody: { content: { "text/xml": { schema: { type: "string" } } } },
+              responses: ok,
+              tags: ["feeds"],
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(content("src/api/feeds.ts")).toContain('Serialize.body("text/xml", input.body)');
+  });
+
   test("input keys fold wire names and rename a repeat by suffix, flag-unaware", async () => {
     const { api } = await Effect.runPromise(
       pipeline(

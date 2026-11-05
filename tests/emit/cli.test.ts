@@ -478,6 +478,29 @@ describe("emitCli: operation-scope refusals", () => {
   });
 });
 
+const xmlOperation = (mediaType: string): Schema.Json => ({
+  post: {
+    operationId: "feeds-create",
+    requestBody: { content: { [mediaType]: { schema: { type: "string" } } }, required: true },
+    responses: ok,
+    tags: ["feeds"],
+  },
+});
+
+describe("emitCli: XML request bodies", () => {
+  for (const mediaType of ["application/xml", "text/xml"]) {
+    test(`a ${mediaType} body is opaque --body-file bytes through Input.binaryBody`, async () => {
+      const output = await emit(withPaths({ ...paths, "/feeds": xmlOperation(mediaType) }));
+      expect(output.refusals).toEqual([]);
+
+      const text = contentOf(output, "src/cli/feeds.ts") ?? "";
+      expect(text).toContain("Input.binaryBody(");
+      expect(text).not.toContain("Input.mergeBody(");
+      expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
+    });
+  }
+});
+
 describe("emitCli: the body field walk", () => {
   test("an integer field whose $ref chain is a cycle is refused, not emitted as Flag.Int", async () => {
     const base = await counters({ total: { type: "integer" } });
