@@ -211,6 +211,29 @@ describe("emitDomainSchemas", () => {
     expectFixedPoint(content);
   }, 60_000);
 
+  test("a type and its value of one name pass the repository lint", async () => {
+    const content = await emit(
+      [
+        ["A", { properties: { a: ref("A") }, type: "object" }],
+        ["B", { properties: { a: ref("A") }, type: "object" }],
+      ],
+      ["A", "B"],
+    );
+    const directory = fs.mkdtempSync(nodePath.resolve(root, "tests/emit/lint-scratch-"));
+    try {
+      fs.writeFileSync(nodePath.resolve(directory, "schemas.ts"), content);
+
+      const lint = Bun.spawnSync([vp, "lint", directory], { cwd: root });
+
+      expect(decoder.decode(lint.stdout) + decoder.decode(lint.stderr)).not.toContain(
+        "no-redeclare",
+      );
+      expect(lint.exitCode).toBe(0);
+    } finally {
+      fs.rmSync(directory, { force: true, recursive: true });
+    }
+  }, 60_000);
+
   test("default, example and examples never reach the output", async () => {
     const content = await emit(
       [

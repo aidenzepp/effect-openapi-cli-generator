@@ -1415,6 +1415,11 @@ const orderOf = (
   return Arr.sort([...names], Order.String).every((name) => visit(name)) ? ordered : undefined;
 };
 
+// A type and its value share one name (the plan imports the value name, and `Schema.Codec<T>`
+// reads the type), which TypeScript merges but the plain `no-redeclare` rule reports.
+const typeRedeclaration =
+  "// oxlint-disable-next-line no-redeclare -- a type and its schema value share one name";
+
 const statementsOf = (definition: Definition): readonly string[] => {
   const constant = printDoc([
     assignment(["export const ", definition.name], " =", definition.runtime, false, exDoc),
@@ -1423,7 +1428,10 @@ const statementsOf = (definition: Definition): readonly string[] => {
 
   return definition.type === undefined
     ? [constant]
-    : [printDoc([typeAliasDoc(definition.name, definition.type), ";"]), constant];
+    : [
+        `${typeRedeclaration}\n${printDoc([typeAliasDoc(definition.name, definition.type), ";"])}`,
+        constant,
+      ];
 };
 
 const multiDocumentOf = (
