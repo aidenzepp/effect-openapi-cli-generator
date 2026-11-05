@@ -17,11 +17,13 @@
       "source": "E47 tests/cli.test.ts:36-62",
       "input": {
         "command": "generate",
-        "specText": "{"
+        "specText": "{",
+        "args": ["generate", "-", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "exitCode": 1,
-        "outputDirectoryCreated": false
+        "outputDirectoryCreated": false,
+        "stderrLineCount": 1
       },
       "designSection": "§8"
     },
@@ -30,11 +32,13 @@
       "source": "E47 tests/cli.test.ts:36-62",
       "input": {
         "command": "generate",
-        "specText": "{}"
+        "specText": "{}",
+        "args": ["generate", "-", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "exitCode": 1,
-        "outputDirectoryCreated": false
+        "outputDirectoryCreated": false,
+        "stderrLineCount": 1
       },
       "designSection": "§8"
     },
@@ -45,14 +49,20 @@
         "command": "generate",
         "title": "Tiny API",
         "config": {
-          "package": { "name": "tiny-api-cli", "version": "1.0.0" }
-        }
+          "package": {
+            "name": "tiny-api-cli",
+            "version": "1.0.0"
+          }
+        },
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "refused": true,
         "outputDirectoryCreated": false,
         "binNameDerivedFromTitle": false,
-        "hintSuggests": "tiny-api"
+        "hintSuggests": "tiny-api",
+        "exitCode": 1,
+        "stderrLineCount": 1
       },
       "designSection": "§4.2"
     },
@@ -61,11 +71,14 @@
       "source": "E47 design §4.2 (replaces the prior title-default test)",
       "input": {
         "command": "generate",
-        "binName": "Tiny_API"
+        "binName": "Tiny_API",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "refused": true,
-        "outputDirectoryCreated": false
+        "outputDirectoryCreated": false,
+        "exitCode": 1,
+        "stderrLineCount": 1
       },
       "designSection": "§4.2"
     },
@@ -74,11 +87,14 @@
       "source": "E47 design §4.2 (replaces the prior title-default test)",
       "input": {
         "command": "generate",
-        "binName": "1tiny"
+        "binName": "1tiny",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "refused": true,
-        "outputDirectoryCreated": false
+        "outputDirectoryCreated": false,
+        "exitCode": 1,
+        "stderrLineCount": 1
       },
       "designSection": "§4.2"
     },
@@ -87,11 +103,14 @@
       "source": "E47 design §4.2 (replaces the prior title-default test)",
       "input": {
         "command": "generate",
-        "binName": ""
+        "binName": "",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "refused": true,
-        "outputDirectoryCreated": false
+        "outputDirectoryCreated": false,
+        "exitCode": 1,
+        "stderrLineCount": 1
       },
       "designSection": "§4.2"
     },
@@ -101,11 +120,14 @@
       "input": {
         "command": "generate",
         "title": "Symlink API",
-        "binName": "symlink-api"
+        "binName": "symlink-api",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "exitCode": 0,
-        "packageJsonBin": { "symlink-api": "dist/bin.js" }
+        "packageJsonBin": {
+          "symlink-api": "dist/bin.js"
+        }
       },
       "designSection": "§4.2"
     },
@@ -127,7 +149,8 @@
       "input": {
         "entry": "symlink to the installed bin",
         "command": "generate",
-        "binName": "symlink-api"
+        "binName": "symlink-api",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "exitCode": 0,
@@ -155,12 +178,14 @@
       "input": {
         "command": "generate",
         "binName": "tiny-api",
-        "spec": "one supported operation and one operation refused at operation scope"
+        "spec": "one supported operation and one operation refused at operation scope",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out"]
       },
       "expected": {
         "exitCode": 0,
         "outputWritten": true,
-        "refusalListedInGenerationReport": true
+        "refusalListedInGenerationReport": true,
+        "stderrLineCount": 1
       },
       "designSection": "§8"
     },
@@ -171,7 +196,8 @@
         "command": "generate",
         "binName": "tiny-api",
         "strict": true,
-        "spec": "one supported operation and one operation refused at operation scope"
+        "spec": "one supported operation and one operation refused at operation scope",
+        "args": ["generate", "spec.json", "--config", "c.json", "--out", "out", "--strict"]
       },
       "expected": {
         "exitCode": 1
