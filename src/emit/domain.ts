@@ -17,6 +17,7 @@ import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts
 import type { Json } from "../resolve/pointer.ts";
 import { asciiStringLiteral, stringLiteral } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
+import { textWidth } from "./printer.ts";
 
 /**
  * The code-generation copy cannot become `domain/schemas.ts`.
@@ -417,60 +418,6 @@ type Node =
 
 const lineWidth = 100;
 
-// East Asian Wide and Fullwidth blocks, as in printer.ts: `vp fmt` counts such a code point as two.
-const wideRanges: readonly (readonly [number, number])[] = [
-  [0x11_00, 0x11_5f],
-  [0x23_29, 0x23_2a],
-  [0x2e_80, 0x30_3e],
-  [0x30_41, 0x33_ff],
-  [0x34_00, 0x4d_bf],
-  [0x4e_00, 0x9f_ff],
-  [0xa0_00, 0xa4_cf],
-  [0xa9_60, 0xa9_7f],
-  [0xac_00, 0xd7_a3],
-  [0xf9_00, 0xfa_ff],
-  [0xfe_10, 0xfe_19],
-  [0xfe_30, 0xfe_6f],
-  [0xff_00, 0xff_60],
-  [0xff_e0, 0xff_e6],
-  [0x1_6f_e0, 0x1_6f_ff],
-  [0x1_70_00, 0x1_8d_8f],
-  [0x1_af_f0, 0x1_b2_ff],
-  [0x1_f2_00, 0x1_f2_ff],
-  [0x2_00_00, 0x2_ff_fd],
-  [0x3_00_00, 0x3_ff_fd],
-];
-
-const zeroWidthPattern = /^[\p{Mn}\p{Me}\p{Cf}]/u;
-
-const emojiPattern = /^\p{Emoji_Presentation}/u;
-
-const charWidth = (char: string): number => {
-  const point = char.codePointAt(0) ?? 0;
-  if (point < 0x7f) {
-    return 1;
-  }
-
-  if (zeroWidthPattern.test(char)) {
-    return 0;
-  }
-
-  const wide =
-    emojiPattern.test(char) || wideRanges.some(([low, high]) => point >= low && point <= high);
-
-  return wide ? 2 : 1;
-};
-
-// Display columns as `vp fmt` counts them (docs/printer.md Layout).
-const textWidth = (text: string): number => {
-  let total = 0;
-  for (const char of text) {
-    total += charWidth(char);
-  }
-
-  return total;
-};
-
 const isList = (doc: Doc): doc is readonly Doc[] => Array.isArray(doc);
 
 const line: Doc = { _tag: "line", hard: false, soft: false };
@@ -818,9 +765,30 @@ const isNullType = (type: Ty): boolean =>
   type.path.length === 1 &&
   type.path[0] === "null";
 
-// An object type with only `null` beside it hugs: `{ ... } | null`.
+const keywords: ReadonlySet<string> = new Set([
+  "any",
+  "bigint",
+  "boolean",
+  "never",
+  "null",
+  "number",
+  "object",
+  "string",
+  "symbol",
+  "undefined",
+  "unknown",
+  "void",
+]);
+
+// A named type other than a keyword, with or without type arguments.
+const isTypeReference = (type: Ty): boolean =>
+  type._tag === "Ref" && !(type.path.length === 1 && keywords.has(type.path[0] ?? ""));
+
+// An object type or a type reference with only `null` beside it hugs: `{ ... } | null`,
+// `ReadonlyArray<X> | null`. A keyword, literal or tuple beside `null` does not.
 const hugsUnion = (members: readonly Ty[]): boolean =>
-  members.filter(isNullType).length === members.length - 1 && members.some(isObjectType);
+  members.filter(isNullType).length === members.length - 1 &&
+  members.some((member) => isObjectType(member) || isTypeReference(member));
 
 const isSimpleType = (type: Ty): boolean =>
   (type._tag === "Ref" && type.args.length === 0) || type._tag === "Lit";
@@ -879,7 +847,9 @@ const referenceDoc = (type: Extract<Ty, { readonly _tag: "Ref" }>, print: PrintT
 const memberDoc = (member: Member, print: PrintType): Doc => {
   const head = member.readonly ? "readonly " : "";
   if (member.index !== undefined) {
-    return [head, "[x: ", print(member.index), "]: ", print(member.type)];
+    const parameter = group([indent([softline, "x: ", print(member.index)]), softline]);
+
+    return [head, "[", parameter, "]: ", print(member.type)];
   }
 
   return [head, keyText(member.key), member.optional ? "?" : "", ": ", print(member.type)];
@@ -937,14 +907,18 @@ const typeDoc: PrintType = (type, context = "position") =>
     Union: (union) => unionDoc(union.members, context, typeDoc),
   });
 
-// A name or literal that does not fit moves under the `=`; other types open on its line.
+// A union opens on the `=` line, broken under it or hugging `null`. Any other type opens on that
+// line when it fits up to its first line break, otherwise under the `=` (the formatter's fluid
+// assignment layout).
 const typeAliasDoc = (name: string, type: Ty): Doc => {
   const head = `export type ${name} =`;
-  if (type._tag === "Lit" || (type._tag === "Ref" && type.args.length === 0)) {
-    return group([head, group(indent([line, typeDoc(type)]))]);
+  if (type._tag === "Union") {
+    return [head, " ", typeDoc(type)];
   }
 
-  return [head, " ", typeDoc(type)];
+  const id = Symbol("type-alias");
+
+  return group([head, group(indent(line), { id }), indentIfBreak(typeDoc(type), id)]);
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -997,9 +971,14 @@ const isPoorlyBreakableCall = (ex: Ex): boolean => {
 
 type Layout = "break-after-operator" | "fluid" | "never-break-after-operator";
 
+// A key shorter than five columns never moves its value under it (Prettier's short-key rule).
 const layoutOf = (value: Ex, shortKey: boolean): Layout => {
+  if (shortKey) {
+    return "never-break-after-operator";
+  }
+
   if (value._tag === "Str" || isMemberPath(value)) {
-    return shortKey ? "never-break-after-operator" : "break-after-operator";
+    return "break-after-operator";
   }
 
   const literal =
@@ -1123,6 +1102,13 @@ const hugsLast = (args: readonly Ex[]): boolean => {
   return !(args.length > 1 && last._tag === "Arr" && last.elements.every(isNumber));
 };
 
+// Two or more arguments where one is a call taking an arrow function, as in
+// `Schema.Record(Schema.String, Schema.suspend(() => X))`: the formatter always breaks them out
+// (Prettier's function-composition arguments).
+const isFunctionComposition = (args: readonly Ex[]): boolean =>
+  args.length > 1 &&
+  args.some((arg) => arg._tag === "Call" && arg.args.some((inner) => inner._tag === "Arrow"));
+
 const argumentsDoc = (args: readonly Ex[], print: PrintEx): Doc => {
   if (args.length === 0) {
     return "()";
@@ -1132,7 +1118,7 @@ const argumentsDoc = (args: readonly Ex[], print: PrintEx): Doc => {
   const allBroken = group(["(", indent([line, join([",", line], docs)]), ifBreak(","), line, ")"], {
     brk: true,
   });
-  if (docs.slice(0, -1).some(willBreak)) {
+  if (isFunctionComposition(args) || docs.slice(0, -1).some(willBreak)) {
     return allBroken;
   }
 

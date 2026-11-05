@@ -52,6 +52,75 @@ const position = (content: string, needle: string): number => {
 const literals = (prefix: string, count: number): readonly string[] =>
   Array.from({ length: count }, (_, index) => `${prefix}_${index}_value`);
 
+// A seeded generator of definition sets (Park-Miller): short and long names, quoted keys, nested
+// objects, nullable arrays and references, `additionalProperties` naming a definition, and
+// recursive references inside records and arrays.
+const random = (seed: number) => {
+  let state = seed;
+
+  return (): number => {
+    state = (state * 48_271) % 2_147_483_647;
+
+    return state / 2_147_483_647;
+  };
+};
+
+const longStem =
+  "Customer_balance_resource_cash_balance_transaction_resource_applied_to_payment_transaction_adjustment";
+
+const fuzzDefinitions = (seed: number, count: number): readonly (readonly [string, Json])[] => {
+  const draw = random(seed);
+  const index = (length: number): number => Math.floor(draw() * length);
+  const names = Array.from({ length: count }, (_, slot) =>
+    draw() < 0.3 ? `${longStem.slice(0, 40 + index(60))}_${slot}` : `D${slot}`,
+  );
+  const keys = ["id", "name", "total_pretax_credit_amounts", "weird key", "x", longStem.slice(9)];
+  const anyRef = (): Json => ref(names[index(names.length)] ?? "D0");
+  const nullable = (schema: Json): Json =>
+    draw() < 0.5 ? { anyOf: [schema, { type: "null" }] } : { anyOf: [{ type: "null" }, schema] };
+  const leaves: readonly (() => Json)[] = [
+    () => ({ type: "string" }),
+    () => ({ maxLength: 8, minLength: 1, type: "string" }),
+    () => ({ type: "integer" }),
+    () => ({ type: "boolean" }),
+    () => ({ enum: literals(draw() < 0.5 ? "s" : "a_much_longer_state_name", 2 + index(9)) }),
+    anyRef,
+  ];
+  const leaf = (): Json => (leaves[index(leaves.length)] ?? anyRef)();
+  const node = (depth: number, kind: "any" | "object"): Json => {
+    if (kind === "object") {
+      const chosen = keys.filter(() => draw() < 0.4);
+      const object = {
+        properties: Object.fromEntries(chosen.map((key) => [key, node(depth, "any")])),
+        required: chosen.filter(() => draw() < 0.5),
+        type: "object",
+      };
+
+      return draw() < 0.3 ? { additionalProperties: false, ...object } : object;
+    }
+
+    const forms: readonly (() => Json)[] = [
+      leaf,
+      leaf,
+      () => ({ items: node(depth + 1, "any"), type: "array" }),
+      () => nullable({ items: node(depth + 1, "any"), type: "array" }),
+      () => ({ items: anyRef(), type: ["array", "null"] }),
+      () => nullable(anyRef()),
+      () => ({ additionalProperties: anyRef(), type: "object" }),
+      () => ({ additionalProperties: { items: anyRef(), type: "array" }, type: "object" }),
+      () => ({ anyOf: [anyRef(), anyRef()] }),
+      () => node(depth + 1, "object"),
+    ];
+
+    return depth > 2 ? leaf() : (forms[index(forms.length)] ?? leaf)();
+  };
+
+  return names.map((name): readonly [string, Json] => [
+    name,
+    node(0, draw() < 0.7 ? "object" : "any"),
+  ]);
+};
+
 describe("emitDomainSchemas", () => {
   test("a recursive schema goes through Schema.suspend and passes vp fmt", async () => {
     const content = await emit(
@@ -279,6 +348,88 @@ describe("emitDomainSchemas", () => {
     );
 
     expectFixedPoint(content);
+  });
+
+  test("a recursive reference inside Record breaks out its arguments", async () => {
+    const content = await emit(
+      [
+        [
+          "P",
+          {
+            properties: { m: { additionalProperties: ref("P"), type: "object" } },
+            type: "object",
+          },
+        ],
+      ],
+      ["P"],
+    );
+
+    expect(content).toContain(`Schema.Record(
+        Schema.String,
+        Schema.suspend((): Schema.Codec<P> => P),
+      ),`);
+    expectFixedPoint(content);
+  });
+
+  test("a reference beside null stays on its member's line", async () => {
+    const content = await emit(
+      [
+        [
+          "Invoice",
+          {
+            properties: {
+              next: ref("Invoice"),
+              total_pretax_credit_amounts: {
+                anyOf: [
+                  { items: ref("Invoices_resource_pretax_credit_amount"), type: "array" },
+                  { type: "null" },
+                ],
+              },
+            },
+            type: "object",
+          },
+        ],
+        [
+          "Invoices_resource_pretax_credit_amount",
+          { properties: { amount: { type: "integer" } }, type: "object" },
+        ],
+      ],
+      ["Invoice"],
+    );
+
+    expect(content).toContain(
+      "  readonly total_pretax_credit_amounts?: ReadonlyArray<Invoices_resource_pretax_credit_amount> | null;",
+    );
+    expectFixedPoint(content);
+  });
+
+  test("a type whose head does not fit opens under the =", async () => {
+    const name =
+      "Customer_balance_resource_cash_balance_transaction_resource_applied_to_payment_transaction";
+    const content = await emit(
+      [[name, { properties: { self: ref(name) }, type: "object" }]],
+      [name],
+    );
+
+    expect(content).toContain(`export type ${name} =\n  {`);
+    expectFixedPoint(content);
+  });
+
+  test("generated definition sets pass vp fmt", async () => {
+    const contents = await Promise.all(
+      [1, 2, 3, 10, 18].map((seed) => {
+        const entries = fuzzDefinitions(seed, 200);
+
+        return emit(
+          entries,
+          entries.map(([name]) => name),
+        );
+      }),
+    );
+
+    for (const content of contents) {
+      expectFixedPoint(content);
+    }
   });
 
   test("no request-reachable definitions make an empty module", async () => {
