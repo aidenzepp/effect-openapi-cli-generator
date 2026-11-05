@@ -1,0 +1,153 @@
+{
+  "cases": [
+    {
+      "id": "hostile-lone-high-surrogate",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [55296]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-lone-low-surrogate",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [56320]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-surrogate-pair",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [55357, 56832]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-template-interpolation",
+      "source": "E16 src/core/source-text.ts:11-24 (defect D4)",
+      "input": "a${b}c",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "quote": "double"
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-backtick-and-backslash",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "`\\",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "quote": "double"
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-carriage-return",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "a\rb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-line-separators",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "\u2028\u2029",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-jsdoc-comment-terminator",
+      "source": "E16 src/core/source-text.ts:41-47",
+      "input": "text */ more",
+      "expected": {
+        "kind": "jsdoc-text",
+        "containsCommentTerminator": false,
+        "closesCommentEarly": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-jsdoc-line-leading-at",
+      "source": "E16 src/core/source-text.ts:41-47",
+      "input": "first line\n  @deprecated forged tag",
+      "expected": {
+        "kind": "jsdoc-text",
+        "lineLeadingTag": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-key-proto",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "__proto__",
+      "expected": {
+        "kind": "object-key",
+        "computed": true,
+        "ownProperty": true,
+        "quoted": true
+      },
+      "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-key-constructor",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "constructor",
+      "expected": {
+        "kind": "object-key",
+        "computed": false,
+        "ownProperty": true,
+        "quoted": true
+      },
+      "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-key-prototype",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "prototype",
+      "expected": {
+        "kind": "object-key",
+        "computed": false,
+        "ownProperty": true,
+        "quoted": true
+      },
+      "designSection": "\u00a79 I1"
+    }
+  ]
+}
