@@ -1,0 +1,1 @@
+{"openapi":"3.1.0","info":{"title":"Twin","version":"1.0","summary":"yes","date":"2001-12-14"},"paths":{"/pets/{id}":{"get":{"responses":{"200":{"description":"ok"},"404":{"description":"missing"}},"tags":["a","b"],"deprecated":false,"x-null":null,"x-num":1.5,"x-neg":-3,"x-text":"héllo é","__proto__":{"polluted":1}}}},"anchors":{"one":{"k":"v"},"two":{"k":"v"}}}

@@ -5,6 +5,7 @@ import type { Json } from "../resolve/pointer.ts";
 import { defaultLimits, readFileBounded, readStreamBounded, refuse } from "./budget.ts";
 import type { LoadLimits, LoadRefusal } from "./budget.ts";
 import { parseStrictJson } from "./json.ts";
+import { parseStrictYaml } from "./yaml.ts";
 
 export { defaultLimits, LoadRefusal } from "./budget.ts";
 
@@ -56,13 +57,15 @@ export const loadBytes = (
           ? parseStrictJson(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
               Effect.map((value): Loaded => ({ document, format: "json", value })),
             )
-          : refuse(document, "DOC-14/yaml-unsupported"),
+          : parseStrictYaml(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
+              Effect.map((value): Loaded => ({ document, format: "yaml", value })),
+            ),
     }),
   );
 };
 
 /**
- * Loads one document from a file, checking its size with `FileSystem.stat` before reading.
+ * Loads one document from a file through a bounded stream, so `maxBytes` caps the bytes read.
  */
 export const loadFile = (
   path: string,
