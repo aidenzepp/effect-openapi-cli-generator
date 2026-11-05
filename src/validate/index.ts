@@ -11,9 +11,16 @@ import "@hyperjump/json-schema/draft-04";
 // against.
 import "@hyperjump/json-schema/openapi-3-1";
 import "@hyperjump/json-schema/openapi-3-2";
-import { Data, Effect } from "effect";
+import { Data, Effect, Option, Schema } from "effect";
+import { rewriteDialect } from "./dialect.ts";
+import { matchDisagreement, noticeFor, refusalFor, knownDisagreements } from "./disagreements.ts";
+import type { Refusal } from "./disagreements.ts";
 import { lineOf, schemaUri } from "./dispatch.ts";
+import { groupErrors } from "./locations.ts";
+import type { InvalidInstanceLocation } from "./locations.ts";
 import type { Line, UnsupportedOpenApiVersion, ValidatorInput } from "./dispatch.ts";
+import type { DocumentUri } from "../model/brands.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { manifest } from "./schemas/manifest.ts";
 
 export { UnsupportedOpenApiVersion } from "./dispatch.ts";
@@ -139,4 +146,75 @@ export const validateDocument = (
       schema,
       valid: output.valid,
     };
+  });
+
+/**
+ * The diagnostics of one document: schema disagreements the text overrules as notices, every other
+ * schema error as a document refusal.
+ */
+export interface Diagnosis {
+  readonly notices: readonly Diagnostic[];
+  readonly refusals: readonly Refusal[];
+}
+
+const Declared = Schema.Struct({ openapi: Schema.String });
+
+const sch01 = Option.fromNullishOr(knownDisagreements.find((entry) => entry.row === "SCH-01"));
+
+/**
+ * Validates a document (design 3.2) and sorts the verdict into notices and refusals. The 3.1 line
+ * is validated as a deep copy with the text's dialect id rewritten; the input is never changed.
+ */
+export const diagnoseDocument = (
+  document: ValidatorInput,
+  uri: typeof DocumentUri.Type,
+): Effect.Effect<
+  Diagnosis,
+  | InvalidInstanceLocation
+  | Schema.SchemaError
+  | SchemaManifestError
+  | UnsupportedOpenApiVersion
+  | ValidatorError
+> =>
+  Effect.gen(function* diagnoseDocumentGen() {
+    const line = yield* lineOf(document);
+    const openapi = Schema.decodeUnknownOption(Declared)(document).pipe(
+      Option.map((found) => found.openapi),
+      Option.getOrElse(() => line),
+    );
+    const where = { document: uri, line, openapi };
+    const rewritten = yield* rewriteDialect(document);
+    const result = yield* validateDocument(rewritten.copy);
+    const groups = yield* groupErrors(result.errors);
+    const rewriteNotices = yield* Effect.all(
+      rewritten.occurrences.map((pointer) =>
+        Option.match(sch01, {
+          onNone: () => Effect.die("SCH-01 is missing from the known-disagreement table"),
+          onSome: (entry) =>
+            noticeFor(entry, where, pointer, "the schema pins the dated dialect id instead"),
+        }),
+      ),
+    );
+    const matched = groups.map((group) => ({ entry: matchDisagreement(line, group), group }));
+    const tableNotices = yield* Effect.all(
+      matched.flatMap(({ entry, group }) =>
+        entry === undefined
+          ? []
+          : [
+              noticeFor(
+                entry,
+                where,
+                group.pointer,
+                `the schema rejects it at ${group.deepest[0]?.absoluteKeywordLocation ?? ""}`,
+              ),
+            ],
+      ),
+    );
+    const refusals = yield* Effect.all(
+      matched.flatMap(({ entry, group }) =>
+        entry === undefined ? [refusalFor(where, group)] : [],
+      ),
+    );
+
+    return { notices: [...rewriteNotices, ...tableNotices], refusals };
   });
