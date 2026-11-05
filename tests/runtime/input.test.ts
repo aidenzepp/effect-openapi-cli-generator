@@ -744,3 +744,106 @@ describe("Input.mergeBody", () => {
     expect(JSON.stringify(error)).not.toContain("secret-path");
   });
 });
+
+const counting = (body: HttpBody.HttpBody) => {
+  const counter = { runs: 0 };
+  const effect = Effect.sync(() => {
+    counter.runs += 1;
+
+    return body;
+  });
+
+  return { counter, effect };
+};
+
+describe("Input.selectBody", () => {
+  const media = { request: ["application/json", "image/png"], responses: {} };
+  const marker = HttpBody.text("marker");
+
+  test("no --content-type selects the declared JSON alternative", async () => {
+    const json = counting(HttpBody.text("json"));
+    const png = counting(marker);
+    const selected = await run(
+      Input.selectBody({
+        alternatives: { "application/json": json.effect, "image/png": png.effect },
+        chosen: none,
+        media,
+      }),
+    );
+
+    expect(selected.contentType).toBe("application/json");
+    expect([json.counter.runs, png.counter.runs]).toEqual([1, 0]);
+  });
+
+  test("only the chosen alternative is evaluated", async () => {
+    const json = counting(HttpBody.text("json"));
+    const png = counting(HttpBody.uint8Array(bytes));
+    const selected = await run(
+      Input.selectBody({
+        alternatives: { "application/json": json.effect, "image/png": png.effect },
+        chosen: Option.some("image/png"),
+        media,
+      }),
+    );
+
+    expect(selected.contentType).toBe("image/png");
+    expect([...(await run(readBody(selected.body)))]).toEqual([...bytes]);
+    expect([json.counter.runs, png.counter.runs]).toEqual([0, 1]);
+  });
+
+  test("the unchosen binary alternative's refusals never fire and stdin is read once", async () => {
+    const selected = await run(
+      Input.selectBody({
+        alternatives: {
+          "application/json": Input.mergeBody({
+            body: none,
+            bodyFile: Option.some("-"),
+            fields: {},
+            required: true,
+            schema: Schema.Json,
+          }),
+          "image/png": Input.binaryBody({
+            body: Option.some("x"),
+            bodyFile: none,
+            required: true,
+          }),
+        },
+        chosen: none,
+        media,
+      }).pipe(Effect.provide(inputLayer(new TextEncoder().encode('{"a":1}')))),
+    );
+
+    expect(selected.contentType).toBe("application/json");
+    expect(new TextDecoder().decode(await run(readBody(selected.body)))).toBe('{"a":1}');
+  });
+
+  test("an undeclared --content-type is a UsageError that never echoes the value", async () => {
+    const png = counting(marker);
+    const error = await run(
+      Input.selectBody({
+        alternatives: { "application/json": png.effect, "image/png": png.effect },
+        chosen: Option.some("text/secret-value"),
+        media,
+      }).pipe(Effect.flip),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(JSON.stringify(error)).toContain("--content-type");
+    expect(JSON.stringify(error)).not.toContain("secret-value");
+    expect(png.counter.runs).toBe(0);
+  });
+
+  test("a range key sends the operator's concrete type", async () => {
+    const image = counting(HttpBody.uint8Array(bytes));
+    const selected = await run(
+      Input.selectBody({
+        alternatives: { "image/*": image.effect },
+        chosen: Option.some("image/webp"),
+        media: { request: ["image/*"], responses: {} },
+      }),
+    );
+
+    expect(selected.contentType).toBe("image/webp");
+    expect(image.counter.runs).toBe(1);
+  });
+});

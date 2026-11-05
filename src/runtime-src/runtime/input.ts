@@ -14,6 +14,8 @@ import { Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
+import * as Negotiate from "./negotiate.ts";
 
 /**
  * Ceiling for a body read from `--body-file`, a file or stdin, in bytes. A runtime choice: design
@@ -490,4 +492,35 @@ export const mergeBody = (options: {
     yield* assert(text);
 
     return HttpBody.uint8Array(encoder.encode(text));
+  });
+
+/**
+ * The request body for the media key `--content-type` selects (design 6.6). `alternatives` maps
+ * each declared request media key to its unevaluated body effect; only the chosen one is run, so
+ * the others' flag refusals never fire and stdin is read at most once. Returns the body and the
+ * `Content-Type` to send. A key the media declaration lists without an alternative is a defect of
+ * the generated code, not of the operator.
+ */
+export const selectBody = <E, R>(options: {
+  readonly alternatives: { readonly [key: string]: Effect.Effect<HttpBody.HttpBody, E, R> };
+  readonly chosen: Option.Option<string>;
+  readonly media: MediaDeclaration;
+}): Effect.Effect<
+  { readonly body: HttpBody.HttpBody; readonly contentType: string },
+  UsageError | E,
+  R
+> =>
+  Effect.gen(function* select() {
+    const picked = yield* Negotiate.selectRequestMedia(options.media, options.chosen);
+    const alternative = Object.hasOwn(options.alternatives, picked.key)
+      ? options.alternatives[picked.key]
+      : undefined;
+
+    if (alternative === undefined) {
+      return yield* Effect.die(
+        new Error("selectBody: a declared request media key has no body alternative"),
+      );
+    }
+
+    return { body: yield* alternative, contentType: picked.contentType };
   });
