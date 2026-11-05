@@ -19,12 +19,6 @@ export interface ResponseTable {
  */
 const maxRequestIdLength = 256;
 
-type MatchedKey = ApiResponseError["matched"];
-
-const matchedKeys: ReadonlySet<string> = new Set(["404", "4XX", "default", "undeclared"]);
-
-const isMatchedKey = (key: string): key is MatchedKey => matchedKeys.has(key);
-
 const declares = (responses: ResponseTable["responses"], key: string): boolean =>
   Object.hasOwn(responses, key);
 
@@ -90,9 +84,7 @@ export const toApiResponseError = (
 
   const base = {
     bodyExcerpt: bodyExcerpt === "" ? redirect : bodyExcerpt,
-    // The error class names four literals (design 7.1); a declared key outside them is not
-    // representable there and reports as undeclared until the class widens.
-    matched: isMatchedKey(key) ? key : "undeclared",
+    matched: key,
     operation: table.operation,
     status: response.status,
   } as const;
@@ -122,14 +114,14 @@ export const classify = (
  * is a string, a `DOMException`'s a legacy number.
  */
 interface CauseLink {
-  readonly cause?: CauseLink | undefined;
+  readonly cause?: unknown;
   readonly code?: string | number | undefined;
   readonly message?: string | undefined;
   readonly name?: string | undefined;
 }
 
-const CauseLinkSchema: Schema.Codec<CauseLink> = Schema.Struct({
-  cause: Schema.optional(Schema.suspend(() => CauseLinkSchema)),
+const CauseLinkSchema = Schema.Struct({
+  cause: Schema.optional(Schema.Unknown),
   code: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   message: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
@@ -140,15 +132,22 @@ const decodeCauseLink = Schema.decodeUnknownOption(CauseLinkSchema);
 const maxCauseDepth = 8;
 
 /**
- * The cause, its own `cause`, and so on, bounded so a cyclic chain terminates.
+ * The cause, its own `cause`, and so on. Each link is decoded on its own, with the depth bound
+ * checked before every decode, so a cyclic chain terminates without recursion.
  */
 const causeChain = (cause: unknown): readonly CauseLink[] => {
   const chain: CauseLink[] = [];
-  let current = Option.getOrUndefined(decodeCauseLink(cause));
+  let current = cause;
 
   while (current !== undefined && chain.length < maxCauseDepth) {
-    chain.push(current);
-    current = current.cause;
+    const link = Option.getOrUndefined(decodeCauseLink(current));
+
+    if (link === undefined) {
+      break;
+    }
+
+    chain.push(link);
+    current = link.cause;
   }
 
   return chain;
