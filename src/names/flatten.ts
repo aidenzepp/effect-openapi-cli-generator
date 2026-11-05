@@ -49,9 +49,9 @@ export interface ReservedClash {
 }
 
 /**
- * A property that has no field flag: its name folds to nothing (`EmptyFold`; `--body` still
- * reaches it), or it is a multipart part whose shape no part flag carries (`UnsupportedPart`: an
- * object, an array of objects, a map or a `oneOf`/`anyOf`; no whole-body flag reaches it).
+ * A property that has no field flag: its name folds to nothing (`EmptyFold`), or it is a multipart
+ * part whose shape no part flag carries (`UnsupportedPart`: an object, an array of objects, a map
+ * or a `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
  */
 export interface SkippedProperty {
   readonly pointer: string;

@@ -30,7 +30,10 @@ const tsc = nodePath.resolve(root, "node_modules/.bin/tsc");
 
 // Type-checks the emitted module beside the real `effect` package, under the repository's flags.
 const typeErrors = (content: string): string => {
-  const directory = fs.mkdtempSync(nodePath.resolve(root, "work/domain-emit-"));
+  const scratch = nodePath.resolve(root, "work");
+  fs.mkdirSync(scratch, { recursive: true });
+
+  const directory = fs.mkdtempSync(nodePath.resolve(scratch, "domain-emit-"));
   try {
     const file = nodePath.resolve(directory, "schemas.ts");
 

@@ -11,6 +11,8 @@ import {
 } from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
+import { formData } from "../../src/runtime-src/runtime/multipart.ts";
+import type { Part } from "../../src/runtime-src/runtime/multipart.ts";
 import { queryWireForm } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
@@ -413,6 +415,16 @@ describe("refusals happen before the next hop is sent", () => {
   });
 });
 
+const fileParts = (): Part[] => [
+  { body: Stream.make(bytes(BODY)), filename: "a.bin", name: "file" },
+  { body: bytes("Ada"), name: "title" },
+];
+
+const stdinParts = (): Part[] => [
+  { body: stdinBody().stream, name: "notes" },
+  { body: Stream.make(bytes(BODY)), filename: "a.bin", name: "file" },
+];
+
 describe("SP1: one-shot bodies are never re-sent", () => {
   test("a stdin-body 307 is refused with unreplayableBody", async () => {
     const { outcome, seen } = await run(withBody("POST", `${A}/r/307/A`, stdinBody()));
@@ -441,6 +453,26 @@ describe("SP1: one-shot bodies are never re-sent", () => {
       true,
       false,
     ]);
+  });
+
+  describe("a multipart body is never re-sent (M1: no replay)", () => {
+    for (const [source, make] of [
+      ["files only", fileParts],
+      ["stdin included", stdinParts],
+    ] as const) {
+      for (const [method, status] of [
+        ["POST", 307],
+        ["PUT", 308],
+      ] as const) {
+        test(`${source}: a ${status} is refused with unreplayableBody and the target sees nothing`, async () => {
+          const { outcome, seen } = await run(
+            withBody(method, `${A}/r/${status}/A`, await Effect.runPromise(formData(make()))),
+          );
+          expect(outcome).toBe("RedirectRefused:unreplayableBody");
+          expect(seen.length).toBe(1);
+        });
+      }
+    }
   });
 
   test("a file body re-runs on a 307", async () => {
