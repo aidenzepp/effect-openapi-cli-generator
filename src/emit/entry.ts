@@ -115,8 +115,8 @@ const builtIns = ["Help", "Version", "Completions", "LogLevel"];
  * `bin.ts` (design 4.1, 4.3): the only emitted module that names Bun. It composes the platform:
  * Bun services, the Bun HTTP client with manual redirects and no client timeout or `proxy` key,
  * the `FileBody` layer over `Bun.file` (spike S3), the client policy (the method allowlist of
- * design 6.7, the direct route `{ proxy: false }` for loopback hops of design 6.5, the
- * `User-Agent` name and version), the stdin claim, `RunCredentials` outside the final catch, the
+ * design 6.7, the runtime's `Client.directRoute` for loopback hops of design 6.5, the
+ * `User-Agent` name and version), `RunCredentials` outside the final catch, the
  * runtime presenter with no second formatter, the built-in flags, logs to stderr and no trace
  * propagation. `runMain` reports no error: the final catch already rendered it.
  */
@@ -141,7 +141,7 @@ const binModule = (config: AuthorConfig): Module => {
     obj([
       ["allowed", newExpr(path("Set"), [arr(allowed)])],
       ["binName", str(config.binName)],
-      ["direct", obj([["proxy", bool(false)]])],
+      ["direct", path("Client.directRoute")],
       ["version", str(config.package.version)],
     ]),
   );
@@ -157,7 +157,6 @@ const binModule = (config: AuthorConfig): Module => {
     ),
     path("clientPolicy"),
     path("fileBody"),
-    path("Input.stdinClaimLayer"),
     path("Output.runCredentialsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
     fn(
@@ -175,8 +174,8 @@ const binModule = (config: AuthorConfig): Module => {
       named("effect/cli", ["CliConfig", "CliOutput", "GlobalFlag"]),
       named("effect/http", ["HttpBody", "HttpClient"]),
       named("./main.ts", ["run"]),
+      namespace("./runtime/client.ts", "Client"),
       namespace("./runtime/file-body.ts", "FileBody"),
-      namespace("./runtime/input.ts", "Input"),
       namespace("./runtime/output.ts", "Output"),
     ],
     shebang: Schema.decodeSync(Shebang)("/usr/bin/env bun"),

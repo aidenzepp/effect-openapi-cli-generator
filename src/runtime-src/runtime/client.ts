@@ -36,6 +36,16 @@ export type Attach = (
 export type DirectRoute = FetchHttpClient.RequestInit["Service"];
 
 /**
+ * The direct-route value: `{ proxy: false }` routes a loopback hop around the proxy environment
+ * (probe SP5c). The DOM `RequestInit` has no `proxy` key, so the one assertion below is the only
+ * place the typing is bridged; Bun honors `proxy: false` at run time, which
+ * `tests/contract/bun-proxy-false.test.ts` pins. This module still never names Bun.
+ */
+// SAFETY: every RequestInit property is optional, so the object is a valid init; `proxy` is a key the DOM type lacks and Bun reads.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the DOM RequestInit has no proxy key (probe SP5c)
+export const directRoute: DirectRoute = { proxy: false } as RequestInit;
+
+/**
  * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
  */
 const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;

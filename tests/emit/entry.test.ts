@@ -98,7 +98,8 @@ describe("emitEntryFiles", () => {
     const bin = contentOf("src/bin.ts");
     expect(bin).toContain("Layer.succeed(Output.ClientPolicy, {");
     expect(bin).toContain('  binName: "example-cli",\n');
-    expect(bin).toContain("  direct: { proxy: false },\n");
+    expect(bin).toContain("  direct: Client.directRoute,\n");
+    expect(bin).not.toContain("proxy");
     expect(bin).toContain('  version: "1.2.3",\n');
   });
 
@@ -112,7 +113,6 @@ describe("emitEntryFiles", () => {
     for (const provided of [
       "BunServices.layer,",
       "Layer.succeed(FileBody.FileBody, {",
-      "Input.stdinClaimLayer,",
       "Output.runCredentialsLayer,",
       "CliOutput.layerPresenter(Output.presenter),",
       "Layer.succeed(References.LogToStderr, true),",
@@ -124,6 +124,7 @@ describe("emitEntryFiles", () => {
     expect(callText(bin, "CliConfig.layer(")).toContain(
       "builtIns: [GlobalFlag.Help, GlobalFlag.Version, GlobalFlag.Completions, GlobalFlag.LogLevel]",
     );
+    expect(bin).not.toContain("stdinClaimLayer");
     expect(bin).not.toContain("Wizard");
     expect(bin).not.toContain("CliOutput.layer(");
     expect(
