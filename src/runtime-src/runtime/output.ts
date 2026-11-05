@@ -652,7 +652,7 @@ export interface HelpNotes {
 /**
  * The `Command.annotate` key under which a generated command carries its help notes.
  */
-export const Help = Context.Service<HelpNotes>("runtime/output/Help");
+export const Help = Context.Service<HelpNotes>("openapi-cli/runtime/output/Help");
 
 const helpBase = CliOutput.defaultFormatter({ colors: false, globalFlags: "summary" });
 

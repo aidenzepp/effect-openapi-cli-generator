@@ -29,7 +29,7 @@ export interface CommandBinding {
 /**
  * The `Command.annotate` key under which a generated command carries its binding.
  */
-export const Binding = Context.Service<CommandBinding>("runtime/describe/Binding");
+export const Binding = Context.Service<CommandBinding>("openapi-cli/runtime/describe/Binding");
 
 /**
  * The `--describe` document. Fields are alphabetical, and `describeVersion` only gains fields.

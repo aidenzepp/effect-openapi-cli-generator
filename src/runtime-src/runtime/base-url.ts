@@ -35,7 +35,7 @@ export interface ServersTable {
 export class Servers extends Context.Service<
   Servers,
   { readonly table: ServersTable; readonly envPrefix: string }
->()("runtime/Servers") {}
+>()("openapi-cli/runtime/Servers") {}
 
 export const layer = (table: ServersTable, envPrefix: string): Layer.Layer<Servers> =>
   Layer.succeed(Servers, { envPrefix, table });
