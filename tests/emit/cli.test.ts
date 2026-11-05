@@ -399,23 +399,33 @@ describe("emitCli: operation-scope refusals", () => {
     ]);
   });
 
-  const int64Bodies: readonly (readonly [string, Schema.Json])[] = [
-    ["a scalar int64", { format: "int64", type: "integer" }],
-    ["a scalar unsafe bound", { maximum: 1e300, type: "integer" }],
-    ["an array of inline int64", { items: { format: "int64", type: "integer" }, type: "array" }],
-    ["an array of $ref int64", { items: { $ref: "#/components/schemas/Int64" }, type: "array" }],
+  const int64Bodies: readonly (readonly [string, Schema.Json, string])[] = [
+    ["a scalar int64", { format: "int64", type: "integer" }, 'Input.int64Flag("total").pipe('],
+    ["a scalar unsafe bound", { maximum: 1e300, type: "integer" }, 'Input.int64Flag("total")'],
+    [
+      "an array of inline int64",
+      { items: { format: "int64", type: "integer" }, type: "array" },
+      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+    ],
+    [
+      "an array of $ref int64",
+      { items: { $ref: "#/components/schemas/Int64" }, type: "array" },
+      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+    ],
     [
       "an array with an unsafe bound",
       { items: { maximum: 1e300, type: "integer" }, type: "array" },
+      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
     ],
     [
       "an array with an unsafe exclusive bound",
       { items: { exclusiveMinimum: -1e300, type: "integer" }, type: "array" },
+      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
     ],
   ];
 
-  for (const [label, property] of int64Bodies) {
-    test(`${label} body field refuses its operation until it has a flag form`, async () => {
+  for (const [label, property, expected] of int64Bodies) {
+    test(`${label} body field is emitted with Input.int64Flag`, async () => {
       const output = await emit({
         ...spec,
         components: {
@@ -430,12 +440,27 @@ describe("emitCli: operation-scope refusals", () => {
           }),
         },
       });
-      expect(refusalsOf(output)).toEqual([
-        { path: "/counters", reason: "unsupported-flag", scope: "operation" },
-      ]);
+      expect(output.refusals).toEqual([]);
+      expect(contentOf(output, "src/cli/counters.ts")).toContain(expected);
       expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
     });
   }
+
+  test("a JSON-valued body field is emitted with Input.jsonFlag", async () => {
+    const output = await emit(
+      withPaths({
+        "/counters": bodyOperation("counters-create", "counters", {
+          properties: { meta: { type: "object" } },
+          type: "object",
+        }),
+      }),
+    );
+    expect(output.refusals).toEqual([]);
+
+    const text = contentOf(output, "src/cli/counters.ts");
+    expect(text).toContain('Input.jsonFlag("meta")');
+    expect(text).not.toContain("Schema.fromJsonString");
+  });
 
   test("an array of safe integers is a repeated Flag.Int", async () => {
     const output = await emit(

@@ -287,6 +287,45 @@ const bunJson: {
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
 /**
+ * Deepest array and object nesting accepted in operator JSON (`--body`, `--body-file`, a JSON field
+ * flag, a field value). A runtime choice: no real request body nests this deep, and past a few
+ * thousand levels the engine's recursive reviver and every recursive walk overflow the stack.
+ */
+export const maxJsonDepth = 128;
+
+// Iterative scan of JSON text, so the bound holds before any recursive parse or walk runs. A
+// bracket inside a string never counts; malformed text is left for the parser to refuse.
+const nestsTooDeep = (text: string): boolean => {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "[" || char === "{") {
+      depth += 1;
+
+      if (depth > maxJsonDepth) {
+        return true;
+      }
+    } else if (char === "]" || char === "}") {
+      depth -= 1;
+    }
+  }
+
+  return false;
+};
+
+/**
  * An `int64` field flag's value as a `JsonNumber`, checked against the same digit pattern a merged
  * body is. A non-digit text is a `UsageError` naming the flag only, never the text.
  */
@@ -324,6 +363,44 @@ const revive: Reviver = (_key, value, context) => {
 
   return isObject(value) ? bare(value) : value;
 };
+
+// A field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2` decode
+// to the same number, and a `JsonNumber` in a field must be a digit string.
+// A number that overflows (`1e400`) decodes to Infinity, which `JSON.stringify` would send as
+// `null`; it throws here, and the flag's catch turns that into a value-free failure.
+const reviveIntegers: Reviver = (key, value, context) => {
+  if (Predicate.isNumber(value) && !Number.isFinite(value)) {
+    throw new RangeError("a JSON number is not finite");
+  }
+
+  return Predicate.isNumber(value) &&
+    context.source !== undefined &&
+    !int64Digits.test(context.source)
+    ? value
+    : revive(key, value, context);
+};
+
+/**
+ * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
+ * uses (digits past 2^53 stay a `JsonNumber`, objects have no prototype). A text that is not JSON,
+ * holds a number that is not finite, or nests deeper than `maxJsonDepth` fails the flag with an
+ * error that names `--name` and never the text.
+ */
+export const jsonFlag = (name: string) =>
+  Flag.String(name).pipe(
+    Flag.mapEffect((raw) =>
+      Effect.try({
+        catch: () => asCliError(usage(name, "is not valid JSON")),
+        try: () => {
+          if (nestsTooDeep(raw)) {
+            throw new RangeError("JSON nesting is too deep");
+          }
+
+          return bunJson.parse(raw, reviveIntegers);
+        },
+      }),
+    ),
+  );
 
 const replace = (_key: string, value: JsonNode): JsonNode | RawJson =>
   value instanceof JsonNumber ? bunJson.rawJSON(value.text) : value;
@@ -375,16 +452,32 @@ const supplied = (value: Fields[string]): FieldValue | undefined => {
   return value.length === 0 ? undefined : value;
 };
 
-const hasBadNumber = (value: FieldValue): boolean => {
-  if (value instanceof JsonNumber) {
-    return !int64Digits.test(value.text);
+// Walks a field value with an explicit stack, so a deep value cannot overflow it. After a
+// "fine" verdict `toNode` recurses at most `maxJsonDepth` levels.
+const inspectField = (root: FieldValue): "badNumber" | "fine" | "tooDeep" => {
+  const pending: { readonly depth: number; readonly value: FieldValue }[] = [
+    { depth: 0, value: root },
+  ];
+
+  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+    const { depth, value } = item;
+
+    if (value instanceof JsonNumber) {
+      if (!int64Digits.test(value.text)) {
+        return "badNumber";
+      }
+    } else if (Array.isArray(value) || Predicate.isObject(value)) {
+      if (depth >= maxJsonDepth) {
+        return "tooDeep";
+      }
+
+      for (const child of Object.values<FieldValue>(value)) {
+        pending.push({ depth: depth + 1, value: child });
+      }
+    }
   }
 
-  if (Array.isArray(value)) {
-    return value.some(hasBadNumber);
-  }
-
-  return Predicate.isObject(value) && Object.values(value).some(hasBadNumber);
+  return "fine";
 };
 
 // A field value enters the body as a deep copy whose objects have no prototype, so a later field
@@ -462,10 +555,12 @@ export const mergeBody = (options: {
       return value === undefined ? [] : [[pointer, value] as const];
     });
     const parse = (text: string, reviver?: Reviver): Effect.Effect<JsonNode, UsageError> =>
-      Effect.try({
-        catch: () => usage(flag, "is not valid JSON"),
-        try: () => bunJson.parse(text, reviver),
-      });
+      nestsTooDeep(text)
+        ? Effect.fail(usage(flag, `is nested over ${maxJsonDepth} levels`))
+        : Effect.try({
+            catch: () => usage(flag, "is not valid JSON"),
+            try: () => bunJson.parse(text, reviver),
+          });
     const assert = (text: string) =>
       parse(text).pipe(
         Effect.filterOrFail(Schema.is(options.schema), () =>
@@ -500,8 +595,16 @@ export const mergeBody = (options: {
     }
 
     for (const [pointer, value] of overrides) {
-      if (hasBadNumber(value)) {
+      const verdict = inspectField(value);
+
+      if (verdict === "badNumber") {
         return yield* Effect.fail(usage(flag, "an integer field is not a digit string"));
+      }
+
+      if (verdict === "tooDeep") {
+        return yield* Effect.fail(
+          usage(flag, `a field value is nested over ${maxJsonDepth} levels`),
+        );
       }
 
       yield* setAt(base, pointer, toNode(value));

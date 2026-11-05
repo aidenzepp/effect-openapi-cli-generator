@@ -44,9 +44,8 @@ export interface CliEmitInput {
 /**
  * The plan, model or author config holds something the `cli/` layer cannot express. Text, XML,
  * form and multipart request bodies are `unsupported-body` until their merge exists (follow-up
- * em4c). `unsupported-flag` is a flag with no call-expression form today: an `int64` field,
- * scalar or repeated, or one whose integer width the walk cannot settle (the runtime's digit
- * check fails in `UsageError`, while `Flag.mapEffect` takes `CliError`), and a required boolean
+ * em4c). `unsupported-flag` is a flag with no call-expression form today: an integer field whose
+ * width the walk cannot settle, and a required boolean
  * parameter (absent would send `false`). `unsupported-parameter` is a boolean path parameter.
  * Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
  */
@@ -396,6 +395,18 @@ const flagConstructor = (flag: PlannedFlag, kind: string): Expr => {
   return fn("Flag.Finite", str(flag.name));
 };
 
+const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): Expr => {
+  if (kind === "json") {
+    return fn("Input.jsonFlag", str(flag.name));
+  }
+
+  if (kind === "integer" && integer === "int64") {
+    return fn("Input.int64Flag", str(flag.name));
+  }
+
+  return kind === "string" ? fn("Flag.String", str(flag.name)) : flagConstructor(flag, kind);
+};
+
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
     const { source } = flag;
@@ -433,21 +444,16 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     const alternative = operation.body?.alternatives.find((candidate) =>
       source.media.includes(candidate.mediaType),
     );
-    const schema =
+    const schema: { readonly description: string; readonly integer: IntegerWidth } =
       alternative?.schema === undefined
         ? { description: "", integer: "unsettled" }
         : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
-    if (source.kind === "integer" && schema.integer !== "safe") {
+    if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
 
-    const json = source.kind === "json";
-    const head =
-      json || source.kind === "string"
-        ? fn("Flag.String", str(flag.name))
-        : flagConstructor(flag, source.kind);
+    const head = bodyFlagHead(flag, source.kind, schema.integer);
     const steps = [
-      ...(json ? [fn("Flag.withSchema", fn("Schema.fromJsonString", path("Schema.Json")))] : []),
       source.repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
       ...describedBy(schema.description).map((text) => fn("Flag.withDescription", text)),
     ];

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
 import { CliError, Command } from "effect/cli";
+import type { Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import * as FileBodyModule from "../../src/runtime-src/runtime/file-body.ts";
 import { FileBody } from "../../src/runtime-src/runtime/file-body.ts";
@@ -938,5 +939,130 @@ describe("Input.int64Flag", () => {
     expect(CliError.isCliError(error)).toBe(true);
     expect(text).toContain("--count");
     expect(text).not.toContain("12x-secret");
+  });
+});
+
+type Parsed = ReturnType<typeof Input.jsonFlag> extends Flag.Flag<infer A> ? A : never;
+
+const parseJson = (...args: readonly string[]) =>
+  Effect.gen(function* parsed() {
+    let seen: Parsed | undefined;
+    const command = Command.make("x", { value: Input.jsonFlag("value") }, ({ value }) =>
+      Effect.sync(() => {
+        seen = value;
+      }),
+    );
+
+    yield* Command.runWith(command, { version: "0" })(args);
+
+    return seen;
+  }).pipe(Effect.provide(BunServices.layer));
+
+describe("Input.jsonFlag", () => {
+  test("a JSON field value past 2^53 is sent with its exact digits", async () => {
+    const seen = await run(parseJson("--value", '{"id":9007199254740993,"n":[1.50]}'));
+    const text = await run(
+      Input.mergeBody({
+        body: Option.none(),
+        bodyFile: Option.none(),
+        fields: { "/x": Option.fromNullishOr(seen) },
+        required: true,
+        schema: Schema.Unknown,
+      }).pipe(
+        Effect.flatMap(readBody),
+        Effect.map((read) => decoder.decode(read)),
+        Effect.provide(inputLayer()),
+      ),
+    );
+
+    expect(text).toBe('{"x":{"id":9007199254740993,"n":[1.5]}}');
+  });
+
+  test("objects parse without a prototype", async () => {
+    const seen = await run(parseJson("--value", '{"__proto__":1}'));
+
+    expect(Object.getPrototypeOf(seen)).toBeNull();
+  });
+
+  test("text that is not JSON fails with a CliError naming the flag, never the value", async () => {
+    const error = await run(parseJson("--value", "{secret-oops").pipe(Effect.flip));
+    const text = JSON.stringify(error);
+
+    expect(CliError.isCliError(error)).toBe(true);
+    expect(text).toContain("--value");
+    expect(text).not.toContain("secret-oops");
+  });
+
+  test.each(["1e400", "-1e400"])(
+    "a non-finite number %s fails the flag, never the value",
+    async (literal) => {
+      const error = await run(parseJson("--value", `{"x":${literal}}`).pipe(Effect.flip));
+      const text = JSON.stringify(error);
+
+      expect(CliError.isCliError(error)).toBe(true);
+      expect(text).toContain("--value");
+      expect(text).not.toContain(literal);
+    },
+  );
+
+  test("nesting past the bound is a CliError naming the flag, not a stack overflow", async () => {
+    const depth = 100_000;
+    const error = await run(
+      parseJson("--value", "[".repeat(depth) + "]".repeat(depth)).pipe(Effect.flip),
+    );
+
+    expect(CliError.isCliError(error)).toBe(true);
+    expect(JSON.stringify(error)).toContain("--value");
+  });
+
+  test("nesting at the bound is accepted", async () => {
+    const depth = Input.maxJsonDepth;
+    const seen = await run(parseJson("--value", "[".repeat(depth) + "]".repeat(depth)));
+
+    expect(Array.isArray(seen)).toBe(true);
+  });
+});
+
+type Nested = readonly Nested[];
+
+describe("Input.mergeBody nesting", () => {
+  const depth = 100_000;
+  const deepArray = `${"[".repeat(depth)}${"]".repeat(depth)}`;
+  const deepObject = `${'{"a":'.repeat(depth)}1${"}".repeat(depth)}`;
+
+  test.each([deepArray, deepObject])(
+    "a deeply nested --body is a UsageError naming --body",
+    async (body) => {
+      const error = await run(failure({ body }));
+
+      expect(error).toBeInstanceOf(UsageError);
+      expect(error.flag).toBe("body");
+    },
+  );
+
+  test("a deeply nested --body with a field flag is a UsageError", async () => {
+    const error = await run(failure({ body: deepObject, fields: { "/x": Option.some(1) } }));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.flag).toBe("body");
+  });
+
+  test("a deeply nested field value is a UsageError, not a stack overflow", async () => {
+    let value: Nested = [];
+    for (let level = 0; level < depth; level += 1) {
+      value = [value];
+    }
+    const error = await run(failure({ fields: { "/x": Option.some(value) } }));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.flag).toBe("body");
+  });
+
+  test("nesting at the bound still merges", async () => {
+    const level = Input.maxJsonDepth - 1;
+    const body = "[".repeat(level) + "]".repeat(level);
+    const text = await run(mergedText({ body: `{"y":${body}}`, fields: { "/x": Option.some(1) } }));
+
+    expect(text.startsWith('{"y":[[')).toBe(true);
   });
 });
