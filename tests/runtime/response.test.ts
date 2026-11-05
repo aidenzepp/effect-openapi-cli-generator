@@ -143,10 +143,26 @@ describe("classify", () => {
     expect(Runtime.getErrorExitCode(error)).toBe(1);
   });
 
+  test("every declared key is reported as matched, not only four literals", () => {
+    const declared: ResponseTable = {
+      operation: "users-get",
+      responses: { "401": [], "500": [], "5XX": [] },
+    };
+
+    expect(toApiResponseError(declared, respond(500)).matched).toBe("500");
+    expect(toApiResponseError(declared, respond(503)).matched).toBe("5XX");
+    expect(toApiResponseError(declared, respond(401)).matched).toBe("401");
+  });
+
   test("toApiResponseError keeps the excerpt it is given", () => {
     expect(toApiResponseError(table, respond(404), "not found").bodyExcerpt).toBe("not found");
   });
 });
+
+interface Linked {
+  cause?: unknown;
+  name: string;
+}
 
 describe("mapClientError", () => {
   const abort = new DOMException("The operation was aborted.", "AbortError");
@@ -188,5 +204,24 @@ describe("mapClientError", () => {
 
     expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
     expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+  });
+
+  test("a self-referential cause terminates with a reason", async () => {
+    const loop: Linked = { name: "Loop" };
+    loop.cause = loop;
+    const error = await transportError(loop);
+
+    expect(error).toBeInstanceOf(TransportError);
+    expect(error.reason).toBe("connect");
+  });
+
+  test("a two-link cyclic cause terminates with a reason", async () => {
+    const a: Linked = { name: "A" };
+    const b: Linked = { cause: a, name: "B" };
+    a.cause = b;
+    const error = await transportError(a);
+
+    expect(error).toBeInstanceOf(TransportError);
+    expect(error.reason).toBe("connect");
   });
 });
