@@ -97,7 +97,7 @@ describe("emitPackageFiles", () => {
     const emitted = parsePackage();
     expect(emitted.name).toBe("example-cli");
     expect(emitted.version).toBe("1.2.3");
-    expect(emitted.bin).toEqual({ "example-cli": "dist/bin.js" });
+    expect(emitted.bin).toEqual({ "example-cli": "dist/src/bin.js" });
     expect(emitted.files).toEqual(["dist", "README.md"]);
   });
 
@@ -149,7 +149,7 @@ describe("emitPackageFiles", () => {
       declaration: true,
       noEmit: false,
       outDir: "dist",
-      rootDir: "src",
+      rootDir: ".",
     });
   });
 

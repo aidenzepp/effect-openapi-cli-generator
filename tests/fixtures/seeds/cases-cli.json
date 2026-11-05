@@ -126,7 +126,7 @@
       "expected": {
         "exitCode": 0,
         "packageJsonBin": {
-          "symlink-api": "dist/bin.js"
+          "symlink-api": "dist/src/bin.js"
         }
       },
       "designSection": "§4.2"
