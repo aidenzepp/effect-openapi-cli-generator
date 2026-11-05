@@ -228,3 +228,94 @@ export const serverVariableSetting = GlobalFlag.Setting("server-variable")({
     Flag.atLeast(0),
   ),
 });
+
+const templateVariable = /\{(?<name>[^{}]*)\}/gu;
+
+// The flag a server-derived failure names: the variables when the server has any, else the server.
+const serverFlag = (server: ServerEntry): string =>
+  Object.keys(server.variables ?? {}).length > 0 ? "--server-variable" : "--server";
+
+/**
+ * Substitute `{name}` in a server template. A value inside the scheme or authority is inserted as
+ * given and judged by the origin check; a value after the authority is percent-encoded as one
+ * path segment, so it cannot add a separator, a query or a fragment. Text outside the braces
+ * keeps its bytes.
+ */
+const expandTemplate = (
+  server: ServerEntry,
+  variables: Readonly<Record<string, string>>,
+): Effect.Effect<string, UsageError> => {
+  const flag = serverFlag(server);
+  const { url } = server;
+  const schemeEnd = url.indexOf("://");
+  const authorityStart = schemeEnd === -1 ? 0 : schemeEnd + 3;
+  const authorityEnd = authorityStart + url.slice(authorityStart).search(/[/?#]/u);
+  const inAuthority = (at: number): boolean => authorityEnd < authorityStart || at < authorityEnd;
+
+  return Effect.gen(function* expand() {
+    let out = "";
+    let last = 0;
+    for (const match of url.matchAll(templateVariable)) {
+      const [whole] = match;
+      const name = match.groups?.name ?? "";
+      const value = Object.hasOwn(variables, name) ? variables[name] : undefined;
+      if (value === undefined) {
+        return yield* usage(flag, "the server template names a variable that has no value");
+      }
+
+      const text = inAuthority(match.index)
+        ? value
+        : yield* Effect.try({
+            catch: () => usage(flag, "a server variable value is not valid text"),
+            try: () => encodeURIComponent(value),
+          });
+      out += url.slice(last, match.index) + text;
+      last = match.index + whole.length;
+    }
+
+    return out + url.slice(last);
+  });
+};
+
+const normalizeOrigin = (origin: string): string =>
+  URL.canParse(origin) ? new URL(origin).origin : origin;
+
+/**
+ * The base URL a request is built on. An operator base is returned as validated. A server
+ * selection is expanded, checked like an operator base (scheme, userinfo, query, fragment), parsed
+ * with the same `URL` parser the client uses, and its origin must be in the bound set; otherwise a
+ * `UsageError` names `--server` or `--server-variable`, before any connection. The operator's way
+ * to an unbound host is `--base-url`.
+ */
+export const resolve = (selection: Selection): Effect.Effect<string, UsageError, Servers> =>
+  Effect.gen(function* resolveBase() {
+    if (selection.provenance === "operator") {
+      return selection.baseUrl;
+    }
+
+    const { table } = yield* Servers;
+    const flag = serverFlag(selection.server);
+    const expanded = yield* expandTemplate(selection.server, selection.variables);
+    if (/[{}]/u.test(expanded)) {
+      return yield* usage(flag, "the server template is malformed");
+    }
+
+    const base = yield* validateBaseUrl(flag, expanded);
+    const { origin } = new URL(base);
+    if (!table.boundOrigins.some((bound) => normalizeOrigin(bound) === origin)) {
+      return yield* usage(flag, "the server URL is outside the origins bound at generation");
+    }
+
+    return base;
+  });
+
+/**
+ * The request URL: the base, then the builder's path and serialized query (no leading `?`), by
+ * string concatenation, never `new URL(path, base)`. One trailing `/` of the base is dropped so a
+ * base of `https://host/v1/` and a path of `/users` do not double the separator.
+ */
+export const requestUrl = (base: string, path: string, query = ""): string => {
+  const root = path.startsWith("/") && base.endsWith("/") ? base.slice(0, -1) : base;
+
+  return query === "" ? `${root}${path}` : `${root}${path}?${query}`;
+};

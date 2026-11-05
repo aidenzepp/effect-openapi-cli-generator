@@ -11,6 +11,7 @@ import {
   Stdio,
   Terminal,
 } from "effect";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import type { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
@@ -330,5 +331,235 @@ describe("global settings", () => {
     expect(BaseUrl.baseUrlSetting.id).toBe("base-url");
     expect(BaseUrl.serverSetting.id).toBe("server");
     expect(BaseUrl.serverVariableSetting.id).toBe("server-variable");
+  });
+});
+
+const server = (url: string, variables?: BaseUrl.ServerEntry["variables"]): BaseUrl.ServerEntry =>
+  variables === undefined ? { url } : { url, variables };
+
+const resolveServer = (
+  entry: BaseUrl.ServerEntry,
+  values: Readonly<Record<string, string>>,
+  bound: readonly string[] = ["https://api.example.com"],
+) =>
+  Effect.runPromiseExit(
+    BaseUrl.resolve({ provenance: "server", server: entry, variables: values }).pipe(
+      Effect.provide(BaseUrl.layer({ boundOrigins: bound, servers: [entry] }, "EXAMPLE")),
+    ),
+  );
+
+// A client that counts the requests it is given and answers each with 204.
+const counting = () => {
+  const urls: string[] = [];
+  const client = HttpClient.make((request) =>
+    Effect.sync(() => {
+      urls.push(request.url);
+
+      return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
+    }),
+  );
+
+  return { layer: Layer.succeed(HttpClient.HttpClient, client), urls };
+};
+
+const sendThrough = (selection: BaseUrl.Selection, boundTable: BaseUrl.ServersTable) => {
+  const { layer: clientLayer, urls } = counting();
+  const program = Effect.gen(function* send() {
+    const base = yield* BaseUrl.resolve(selection);
+    const client = yield* HttpClient.HttpClient;
+
+    return yield* client.get(BaseUrl.requestUrl(base, "/users/1", "a=b"));
+  }).pipe(Effect.provide(BaseUrl.layer(boundTable, "EXAMPLE")), Effect.provide(clientLayer));
+
+  return { exit: Effect.runPromiseExit(program), urls };
+};
+
+describe("resolve: operator selection", () => {
+  test("returns the operator's base unchanged and does not check the bound set", async () => {
+    const exit = await Effect.runPromiseExit(
+      BaseUrl.resolve({
+        baseUrl: "https://elsewhere.example.org/api",
+        provenance: "operator",
+      }).pipe(Effect.provide(BaseUrl.layer(table, "EXAMPLE"))),
+    );
+    expect(exit).toEqual(Exit.succeed("https://elsewhere.example.org/api"));
+  });
+});
+
+describe("resolve: server expansion", () => {
+  test("expands defaults and keeps the template's encoded bytes", async () => {
+    const exit = await resolveServer(
+      server("https://api.example.com/a%20b/{version}", { version: { default: "v1" } }),
+      { version: "v1" },
+    );
+    expect(exit).toEqual(Exit.succeed("https://api.example.com/a%20b/v1"));
+  });
+
+  test("encodes a path-position value per segment", async () => {
+    const exit = await resolveServer(
+      server("https://api.example.com/{p}", { p: { default: "x" } }),
+      { p: "a b/c?d#e" },
+    );
+    expect(exit).toEqual(Exit.succeed("https://api.example.com/a%20b%2Fc%3Fd%23e"));
+  });
+
+  test("a path value of /evil.com cannot leave the origin", async () => {
+    const exit = await resolveServer(
+      server("https://api.example.com/{x}", { x: { default: "v1" } }),
+      { x: "/evil.com" },
+    );
+    expect(exit).toEqual(Exit.succeed("https://api.example.com/%2Fevil.com"));
+  });
+
+  test("a path value of ../ or // stays inside one segment", async () => {
+    const exit = await resolveServer(
+      server("https://api.example.com/{x}", { x: { default: "v1" } }),
+      { x: "//evil.com" },
+    );
+    expect(exit).toEqual(Exit.succeed("https://api.example.com/%2F%2Fevil.com"));
+  });
+
+  test("an authority variable inside the bound set expands", async () => {
+    const exit = await resolveServer(
+      server("https://{region}.example.com/v1", { region: { default: "api", enum: ["api"] } }),
+      { region: "api" },
+    );
+    expect(exit).toEqual(Exit.succeed("https://api.example.com/v1"));
+  });
+
+  test("a bound origin written with a default port is matched after parsing", async () => {
+    const exit = await resolveServer(server("https://api.example.com:443/v1"), {}, [
+      "https://api.example.com",
+    ]);
+    expect(exit).toEqual(Exit.succeed("https://api.example.com:443/v1"));
+  });
+
+  test("a template naming an undeclared variable is a UsageError", async () => {
+    const error = failure(await resolveServer(server("https://api.example.com/{ghost}"), {}));
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "--server" });
+  });
+
+  test("a stray brace after expansion is a UsageError", async () => {
+    const error = failure(await resolveServer(server("https://api.example.com/{v"), {}));
+    expect(error).toMatchObject({ _tag: "UsageError" });
+  });
+});
+
+describe("resolve: unbound origins", () => {
+  const host = server("https://{host}/v1", { host: { default: "api.example.com" } });
+
+  test("an unbound --server-variable origin names --server-variable", async () => {
+    const error = failure(await resolveServer(host, { host: `${canary}.evil.test` }));
+    expectUsage(error, "--server-variable");
+  });
+
+  test("an unbound origin from a server without variables names --server", async () => {
+    const error = failure(await resolveServer(server("https://other.example.net/v1"), {}));
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "--server" });
+    expect(Runtime.getErrorExitCode(error)).toBe(2);
+  });
+
+  test("a different scheme or port is a different origin", async () => {
+    const scheme = failure(await resolveServer(server("http://api.example.com/v1"), {}));
+    const port = failure(await resolveServer(server("https://api.example.com:8443/v1"), {}));
+    expect(scheme).toMatchObject({ _tag: "UsageError" });
+    expect(port).toMatchObject({ _tag: "UsageError" });
+  });
+
+  test("an authority value that adds userinfo is refused without the value", async () => {
+    const error = failure(await resolveServer(host, { host: `${canary}@api.example.com` }));
+    expectUsage(error, "--server-variable");
+  });
+
+  test("a suffix that keeps the origin but adds a query is refused", async () => {
+    const error = failure(
+      await resolveServer(server("https://api.example.com{x}", { x: { default: "" } }), {
+        x: `?k=${canary}`,
+      }),
+    );
+    expectUsage(error, "--server-variable");
+  });
+
+  test("an authority value that adds a fragment is refused", async () => {
+    const error = failure(await resolveServer(host, { host: `api.example.com#${canary}` }));
+    expectUsage(error, "--server-variable");
+  });
+
+  test("a non-http scheme from a scheme variable is refused", async () => {
+    const error = failure(
+      await resolveServer(
+        server("{scheme}://api.example.com/v1", { scheme: { default: "https" } }),
+        { scheme: "ftp" },
+        ["ftp://api.example.com"],
+      ),
+    );
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "--server-variable" });
+  });
+
+  test("zero requests reach the client through --server-variable", async () => {
+    const entry = server("https://{host}/v1", { host: { default: "api.example.com" } });
+    const { exit, urls } = sendThrough(
+      { provenance: "server", server: entry, variables: { host: "evil.example.net" } },
+      { boundOrigins: ["https://api.example.com"], servers: [entry] },
+    );
+    expect(failure(await exit)).toMatchObject({ _tag: "UsageError", flag: "--server-variable" });
+    expect(urls).toEqual([]);
+  });
+
+  test("zero requests reach the client through --server", async () => {
+    const entry = server("https://unbound.example.net/v1");
+    const { exit, urls } = sendThrough(
+      { provenance: "server", server: entry, variables: {} },
+      { boundOrigins: ["https://api.example.com"], servers: [entry] },
+    );
+    expect(failure(await exit)).toMatchObject({ _tag: "UsageError", flag: "--server" });
+    expect(urls).toEqual([]);
+  });
+
+  test("a bound expansion reaches the client once with the concatenated URL", async () => {
+    const entry = server("https://api.example.com/a%20b/{version}", {
+      version: { default: "v1" },
+    });
+    const { exit, urls } = sendThrough(
+      { provenance: "server", server: entry, variables: { version: "v1" } },
+      { boundOrigins: ["https://api.example.com"], servers: [entry] },
+    );
+    await exit;
+    expect(urls).toEqual(["https://api.example.com/a%20b/v1/users/1?a=b"]);
+  });
+});
+
+describe("requestUrl", () => {
+  test("concatenates base, path and query", () => {
+    expect(BaseUrl.requestUrl("https://api.example.com", "/users/1", "a=b")).toBe(
+      "https://api.example.com/users/1?a=b",
+    );
+  });
+
+  test("omits the separator when the query is absent or empty", () => {
+    expect(BaseUrl.requestUrl("https://api.example.com", "/users")).toBe(
+      "https://api.example.com/users",
+    );
+    expect(BaseUrl.requestUrl("https://api.example.com", "/users", "")).toBe(
+      "https://api.example.com/users",
+    );
+  });
+
+  test("keeps a base path prefix and its encoded bytes", () => {
+    expect(BaseUrl.requestUrl("https://api.example.com/v1/a%20b", "/users/x%2Fy", "q=1")).toBe(
+      "https://api.example.com/v1/a%20b/users/x%2Fy?q=1",
+    );
+  });
+
+  test("a trailing slash on the base does not double the separator", () => {
+    expect(BaseUrl.requestUrl("https://api.example.com/v1/", "/users")).toBe(
+      "https://api.example.com/v1/users",
+    );
+  });
+
+  test("a path that looks absolute never replaces the base", () => {
+    expect(BaseUrl.requestUrl("https://api.example.com/v1", "//evil.com/x")).toBe(
+      "https://api.example.com/v1//evil.com/x",
+    );
   });
 });
