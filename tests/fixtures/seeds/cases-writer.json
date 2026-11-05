@@ -496,9 +496,9 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "the design does not say whether the writer creates missing parents of the output directory or refuses; prior behavior refused",
-        "priorOutcome": "rejected",
+        "outcome": "refused",
+        "exitCode": 1,
+        "nothingCreated": true,
         "mustHold": {
           "noFilesOutsideOutputDirectory": true
         }
@@ -614,13 +614,11 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "the design defines no recovery for a lock left by a killed run; a second claimant fails with exit 1 and the lock path, and nothing says whether the operator deletes it by hand",
-        "mustHold": {
-          "exitCode": 1,
-          "namesLockPath": true,
-          "nothingWritten": true
-        }
+        "outcome": "refused",
+        "exitCode": 1,
+        "namesLockPath": true,
+        "nothingWritten": true,
+        "lockLeftInPlace": true
       },
       "designSection": "§3.6 Run lock"
     },
@@ -759,6 +757,27 @@
         "directoryInodeUnchanged": true
       },
       "designSection": "§3.6 Write"
+    },
+    {
+      "id": "writer-creates-missing-output-directory",
+      "source": "b96c8946 SR:G8",
+      "input": {
+        "output": "absent-output-directory-with-existing-parent",
+        "application": {
+          "files": [
+            {
+              "path": "src/main.ts",
+              "content": "hello"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "written",
+        "outputDirectoryCreated": true,
+        "createdLevels": 1
+      },
+      "designSection": "§3.6"
     }
   ]
 }
