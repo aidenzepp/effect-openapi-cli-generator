@@ -5,6 +5,7 @@ import { Command } from "effect/cli";
 import { HttpBody } from "effect/http";
 import * as FileBodyModule from "../../src/runtime-src/runtime/file-body.ts";
 import { FileBody } from "../../src/runtime-src/runtime/file-body.ts";
+import { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 
 const bytes = Uint8Array.from([0, 1, 2, 253, 254, 255, 10, 13, 0x7b]);
@@ -102,6 +103,26 @@ const withTempFile = <A, E, R>(
     return yield* use(path);
   }).pipe(Effect.scoped);
 
+const withFifo = <A, E, R>(writer: string, use: (path: string) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* fifo() {
+    const fs = yield* FileSystem.FileSystem;
+    const path = `${yield* fs.makeTempDirectoryScoped()}/fifo`;
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        Bun.spawnSync(["mkfifo", path]);
+
+        return Bun.spawn(["sh", "-c", `${writer} > "$1"`, "sh", path], { stderr: "ignore" });
+      }),
+      (writerProcess) =>
+        Effect.sync(() => {
+          writerProcess.kill();
+        }),
+    );
+
+    return yield* use(path);
+  }).pipe(Effect.scoped);
+
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 const readBody = (body: HttpBody.HttpBody): Effect.Effect<Uint8Array> => {
@@ -180,7 +201,7 @@ describe("Input.binaryBody", () => {
     expect([...result.read]).toEqual([...bytes]);
   });
 
-  test("- reads stdin as a stream, bytes verbatim", async () => {
+  test("- reads stdin into memory, bytes verbatim", async () => {
     const read = await run(
       Input.binaryBody({ body: none, bodyFile: Option.some("-"), required: true }).pipe(
         Effect.flatMap(readBody),
@@ -228,14 +249,17 @@ describe("Input.binaryBody", () => {
     expect(error.message).not.toContain("input-test-secret-path");
   });
 
-  test("an over-limit file is refused before any byte is read", async () => {
+  test("a file declared over the limit is refused before any byte is read", async () => {
     const huge = Layer.succeed(FileBody, {
       open: () => Effect.succeed(HttpBody.stream(Stream.empty, undefined, Input.maxBodyBytes + 1)),
     });
     const error = await run(
-      Input.binaryBody({ body: none, bodyFile: Option.some("big"), required: true }).pipe(
-        Effect.flip,
-        Effect.provide(Layer.mergeAll(huge, stdinOf(), Input.stdinClaimLayer)),
+      withTempFile(bytes, (path) =>
+        Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }).pipe(
+          Effect.flip,
+        ),
+      ).pipe(
+        Effect.provide(Layer.mergeAll(huge, BunFileSystem.layer, stdinOf(), Input.stdinClaimLayer)),
       ),
     );
 
@@ -243,21 +267,116 @@ describe("Input.binaryBody", () => {
     expect(error.flag).toBe("body-file");
   });
 
-  test("stdin over the limit fails the stream", async () => {
-    const failed = await run(
+  test("a regular file over the limit is refused at flag time", async () => {
+    const error = await run(
+      withTempFile(bytes, (path) =>
+        Effect.gen(function* big() {
+          const fs = yield* FileSystem.FileSystem;
+
+          yield* fs.truncate(path, Input.maxBodyBytes + 1);
+
+          return yield* Effect.flip(
+            Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }),
+          );
+        }),
+      ).pipe(Effect.provide(inputLayer())),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
+  });
+
+  test("the limit counts bytes read: a stream longer than its declared size fails as a UsageError", async () => {
+    const lying = Layer.succeed(FileBody, {
+      open: () =>
+        Effect.succeed(HttpBody.stream(Stream.fromIterable(overLimitChunks()), undefined, 1)),
+    });
+    const error = await run(
+      withTempFile(bytes, (path) =>
+        Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }).pipe(
+          Effect.flatMap((body) =>
+            body._tag === "Stream" ? Stream.runDrain(body.stream) : Effect.void,
+          ),
+          Effect.flip,
+        ),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(lying, BunFileSystem.layer, stdinOf(), Input.stdinClaimLayer),
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error instanceof UsageError ? error.flag : undefined).toBe("body-file");
+  });
+
+  test("a FIFO over the limit is refused at flag time and points to -", async () => {
+    const error = await run(
+      withFifo(`head -c ${Input.maxBodyBytes + 1} /dev/zero`, (path) =>
+        Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }).pipe(
+          Effect.flip,
+        ),
+      ).pipe(Effect.provide(inputLayer())),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
+    expect(error.message).toContain("--body-file -");
+  });
+
+  test("a file without read permission is a UsageError at flag time, never the path", async () => {
+    const error = await run(
+      withTempFile(bytes, (path) =>
+        Effect.gen(function* locked() {
+          const fs = yield* FileSystem.FileSystem;
+
+          yield* fs.chmod(path, 0o000);
+
+          return yield* Effect.flip(
+            Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }),
+          );
+        }),
+      ).pipe(Effect.provide(inputLayer())),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
+    expect(error.message).not.toContain("/");
+  });
+
+  test("a directory is a UsageError at flag time, never the path", async () => {
+    const error = await run(
+      Effect.gen(function* directory() {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* fs.makeTempDirectoryScoped();
+
+        return yield* Effect.flip(
+          Input.binaryBody({ body: none, bodyFile: Option.some(path), required: true }),
+        );
+      }).pipe(Effect.scoped, Effect.provide(inputLayer())),
+    );
+
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
+    expect(error.message).not.toContain("/");
+  });
+
+  test("stdin over the limit is a UsageError naming --body-file at flag time", async () => {
+    const error = await run(
       Input.binaryBody({ body: none, bodyFile: Option.some("-"), required: true }).pipe(
-        Effect.flatMap((body) => Effect.exit(readBody(body))),
+        Effect.flip,
         Effect.provide(inputLayer(...overLimitChunks())),
       ),
     );
 
-    expect(failed._tag).toBe("Failure");
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
   });
 
-  test("a required body with no input sends {} and an optional one sends nothing", async () => {
-    const required = await run(
+  test("a required body with no input is a UsageError naming --body-file; an optional one is empty", async () => {
+    const error = await run(
       Input.binaryBody({ body: none, bodyFile: none, required: true }).pipe(
-        Effect.flatMap(readBody),
+        Effect.flip,
         Effect.provide(inputLayer()),
       ),
     );
@@ -267,7 +386,8 @@ describe("Input.binaryBody", () => {
       ),
     );
 
-    expect(new TextDecoder().decode(required)).toBe("{}");
+    expect(error._tag).toBe("UsageError");
+    expect(error.flag).toBe("body-file");
     expect(optional._tag).toBe("Empty");
   });
 });
@@ -359,9 +479,7 @@ const Person = Schema.Struct({
 const merge = (options: {
   readonly body?: string;
   readonly bodyFile?: string;
-  readonly fields?: Readonly<
-    Record<string, Option.Option<string | number | boolean | Input.JsonNumber>>
-  >;
+  readonly fields?: Parameters<typeof Input.mergeBody>[0]["fields"];
   readonly required?: boolean;
   readonly schema?: Schema.Top;
 }) =>
@@ -592,6 +710,31 @@ describe("Input.mergeBody", () => {
     );
 
     expect(error._tag).toBe("UsageError");
+  });
+
+  test("a JSON-valued field with a nested __proto__ key and an array of objects merges at its pointer", async () => {
+    const meta: unknown = JSON.parse(
+      '{"__proto__":{"polluted":true},"inner":{"k":[1,{"z":null}]}}',
+    );
+    const text = await run(
+      mergedText({
+        body: '{"name":"n"}',
+        fields: {
+          "/items": Option.some([{ id: 1 }, { id: 2, tags: ["a"] }]),
+          "/meta": Option.some(Schema.decodeUnknownSync(Schema.Json)(meta)),
+          "/plain": Option.some({ a: 1 }),
+          "/plain/__proto__/x": Option.some("1"),
+        },
+      }),
+    );
+
+    expect(text).toBe(
+      '{"name":"n","items":[{"id":1},{"id":2,"tags":["a"]}],' +
+        '"meta":{"__proto__":{"polluted":true},"inner":{"k":[1,{"z":null}]}},' +
+        '"plain":{"a":1,"__proto__":{"x":"1"}}}',
+    );
+    expect("polluted" in {}).toBe(false);
+    expect("x" in {}).toBe(false);
   });
 
   test("an unreadable --body-file names the flag, not the path", async () => {

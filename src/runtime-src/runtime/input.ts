@@ -87,6 +87,9 @@ const cannotRead = (): UsageError => usage(bodyFileName, "cannot read the file o
 
 const overLimit = (): UsageError => usage(bodyFileName, `the body is over ${maxBodyBytes} bytes`);
 
+const notAFile = (): UsageError =>
+  usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
+
 class OverLimit {
   readonly _tag = "OverLimit";
 }
@@ -121,6 +124,14 @@ const bounded = (
     ),
   );
 
+const toUsage = (cause: OverLimit | ReadFailed): UsageError =>
+  cause instanceof OverLimit ? overLimit() : cannotRead();
+
+const collect = (
+  source: Stream.Stream<Uint8Array, unknown>,
+): Effect.Effect<Uint8Array, UsageError> =>
+  bounded(source).pipe(Stream.runCollect, Effect.map(concat), Effect.mapError(toUsage));
+
 /**
  * Reads `--body-file` into memory, bounded: a file by path, or stdin for `-` (which takes the one
  * stdin claim). Failures name the flag, never the path or the file-system cause (design 4.6).
@@ -128,52 +139,76 @@ const bounded = (
 export const readBodyFile = (
   path: string,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  Effect.gen(function* read() {
-    const source =
-      path === "-"
-        ? yield* Effect.service(StdinClaim).pipe(
-            Effect.flatMap((claim) => claim.claim(bodyFileName)),
-            Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-            Effect.map((stdio) => stdio.stdin),
-          )
-        : yield* Effect.service(FileSystem.FileSystem).pipe(
-            Effect.map((fs) => fs.stream(path, { bytesToRead: maxBodyBytes + 1 })),
-          );
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(bodyFileName)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.flatMap((stdio) => collect(stdio.stdin)),
+      )
+    : Effect.service(FileSystem.FileSystem).pipe(
+        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }))),
+      );
 
-    return yield* bounded(source).pipe(
-      Stream.runCollect,
-      Effect.map(concat),
-      Effect.mapError((cause) => (cause instanceof OverLimit ? overLimit() : cannotRead())),
-    );
+// A body stream that counts the bytes it yields, so a file that grows past its stat size, or a
+// `FileBody` that under-declares, still stops at the limit; the send step sees a `UsageError`.
+const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, UsageError> => {
+  if (body._tag !== "Stream") {
+    return Effect.succeed(body);
+  }
+
+  return (body.contentLength ?? 0) > maxBodyBytes
+    ? Effect.fail(overLimit())
+    : Effect.succeed(
+        HttpBody.stream(
+          bounded(body.stream).pipe(Stream.mapError(toUsage)),
+          body.contentType,
+          body.contentLength,
+        ),
+      );
+};
+
+// Only a regular file is accepted. It is opened once here, so a missing read permission fails at
+// flag time, then streamed through `FileBody` with its size. A directory is refused, and so is a
+// pipe or device (a FIFO, `<(cmd)`): it has no size to trust, and the platform file system reads
+// by position, which a pipe refuses. Such input goes through `-` instead.
+const openFile = (
+  path: string,
+): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody | FileSystem.FileSystem> =>
+  Effect.gen(function* open() {
+    const fs = yield* FileSystem.FileSystem;
+    const info = yield* fs.stat(path).pipe(Effect.mapError(cannotRead));
+
+    if (info.type !== "File") {
+      return yield* Effect.fail(notAFile());
+    }
+
+    if (info.size > BigInt(maxBodyBytes)) {
+      return yield* Effect.fail(overLimit());
+    }
+
+    yield* fs.open(path, { flag: "r" }).pipe(Effect.scoped, Effect.mapError(cannotRead));
+
+    const fileBody = yield* FileBody;
+
+    return yield* fileBody.open(path).pipe(Effect.mapError(cannotRead), Effect.flatMap(limited));
   });
 
-const openFile = (path: string): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody> =>
-  Effect.service(FileBody).pipe(
-    Effect.flatMap((fileBody) => fileBody.open(path)),
-    Effect.mapError(cannotRead),
-    Effect.filterOrFail(
-      (body) => !(body._tag === "Stream" && (body.contentLength ?? 0) > maxBodyBytes),
-      overLimit,
-    ),
-  );
-
-const openStdin = (): Effect.Effect<HttpBody.HttpBody, UsageError, Stdio.Stdio | StdinClaim> =>
-  Effect.service(StdinClaim).pipe(
-    Effect.flatMap((claim) => claim.claim(bodyFileName)),
-    Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-    Effect.map((stdio) => HttpBody.stream(bounded(stdio.stdin))),
-  );
-
 /**
- * A binary request body from `--body-file` only: a file through `FileBody`, or stdin as a chunked
- * stream. `--body` is refused, and so is `--body` together with `--body-file`. With neither flag a
- * required body is `{}` and an optional one is empty.
+ * A binary request body from `--body-file` only. A regular file streams through `FileBody` with its
+ * size, its bytes counted against the limit; stdin (`-`) is read into memory, bounded, so an
+ * over-limit or unreadable input is a `UsageError` before any request. `--body` is refused, and so
+ * is `--body` together with `--body-file`. With neither flag a required body is a `UsageError`
+ * naming `--body-file` and an optional one is empty.
  */
 export const binaryBody = (options: {
   readonly body: Option.Option<string>;
   readonly bodyFile: Option.Option<string>;
   readonly required: boolean;
-}): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody | Stdio.Stdio | StdinClaim> => {
+}): Effect.Effect<
+  HttpBody.HttpBody,
+  UsageError,
+  FileBody | FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> => {
   if (Option.isSome(options.body)) {
     return Effect.fail(
       usage(
@@ -186,12 +221,14 @@ export const binaryBody = (options: {
   }
 
   if (Option.isNone(options.bodyFile)) {
-    return Effect.succeed(
-      options.required ? HttpBody.uint8Array(encoder.encode("{}")) : HttpBody.empty,
-    );
+    return options.required
+      ? Effect.fail(usage(bodyFileName, `this request needs a body; use --${bodyFileName}`))
+      : Effect.succeed(HttpBody.empty);
   }
 
-  return options.bodyFile.value === "-" ? openStdin() : openFile(options.bodyFile.value);
+  return options.bodyFile.value === "-"
+    ? readBodyFile("-").pipe(Effect.map((read) => HttpBody.uint8Array(read)))
+    : openFile(options.bodyFile.value);
 };
 
 /**
@@ -207,7 +244,18 @@ export class JsonNumber {
   }
 }
 
-type FieldValue = string | number | boolean | JsonNumber;
+/**
+ * A field flag's value: a scalar, an `int64` digit string as a `JsonNumber`, or a decoded JSON
+ * value (an object, an array, `null`) for a property that is not flattened (design 4.5).
+ */
+type FieldValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonNumber
+  | readonly FieldValue[]
+  | { readonly [key: string]: FieldValue };
 
 type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
 
@@ -294,7 +342,7 @@ const setAt = (
   return Effect.void;
 };
 
-const supplied = (value: Fields[string]): FieldValue | readonly FieldValue[] | undefined => {
+const supplied = (value: Fields[string]): FieldValue | undefined => {
   if (Option.isOption(value)) {
     return Option.getOrUndefined(value);
   }
@@ -302,10 +350,36 @@ const supplied = (value: Fields[string]): FieldValue | readonly FieldValue[] | u
   return value.length === 0 ? undefined : value;
 };
 
-const hasBadNumber = (value: FieldValue | readonly FieldValue[]): boolean =>
-  value instanceof JsonNumber
-    ? !int64Digits.test(value.text)
-    : Array.isArray(value) && value.some(hasBadNumber);
+const hasBadNumber = (value: FieldValue): boolean => {
+  if (value instanceof JsonNumber) {
+    return !int64Digits.test(value.text);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(hasBadNumber);
+  }
+
+  return Predicate.isObject(value) && Object.values(value).some(hasBadNumber);
+};
+
+// A field value enters the body as a deep copy whose objects have no prototype, so a later field
+// flag that writes `__proto__` beneath it sets an own key, as it does everywhere else.
+const toNode = (value: FieldValue): JsonNode => {
+  if (Array.isArray(value)) {
+    return value.map(toNode);
+  }
+
+  if (value instanceof JsonNumber || !Predicate.isObject(value)) {
+    return value;
+  }
+
+  const copy = bare();
+  for (const [key, entry] of Object.entries(value)) {
+    copy[key] = toNode(entry);
+  }
+
+  return copy;
+};
 
 const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
   Effect.try({
@@ -405,7 +479,7 @@ export const mergeBody = (options: {
         return yield* Effect.fail(usage(flag, "an integer field is not a digit string"));
       }
 
-      yield* setAt(base, pointer, value);
+      yield* setAt(base, pointer, toNode(value));
     }
 
     const text = yield* Effect.try({
