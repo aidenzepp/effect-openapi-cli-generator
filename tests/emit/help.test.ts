@@ -448,3 +448,29 @@ describe("operationHelp", () => {
     expect(elapsed).toBeLessThan(1000);
   }, 10_000);
 });
+
+describe("several media types", () => {
+  test("body and response media types join with ' or ' as the golden fixture does", () => {
+    const avatar = Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      body: {
+        alternatives: [media("application/json"), media("image/png")],
+        docs: {},
+        origin,
+        required: true,
+        rows,
+      },
+      key: { method: "PUT", path: "/users/{id}/avatar" },
+      operationId: "users-set-avatar",
+      responses: [response({ code: 200 }, ["application/json", "image/png"])],
+    });
+    const help = operationHelp({ ...input, operation: avatar });
+
+    expect(sectionText(help, "REQUEST")).toBe(
+      "PUT /users/{id}/avatar, body application/json or image/png (required), operationId users-set-avatar",
+    );
+    expect(sectionText(help, "RESPONSES")).toBe(
+      "200 application/json or image/png. Non-2xx exits 1 (401/403 exit 3)",
+    );
+  });
+});
