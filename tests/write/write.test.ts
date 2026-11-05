@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Array as Arr, Deferred, Effect, Fiber, FileSystem, Layer, Order, Path } from "effect";
+import {
+  Array as Arr,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Order,
+  Path,
+  Stream,
+} from "effect";
+import * as PlatformError from "effect/PlatformError";
 import { writeFiles } from "../../src/write/index.ts";
 import type { GeneratedFile } from "../../src/write/index.ts";
 import { runLockFileName } from "../../src/write/lock.ts";
@@ -586,5 +597,121 @@ describe("writer: previous manifest", () => {
   test("an absent previous manifest gives no notice", async () => {
     const notices = await inTempDir((dir) => writeFiles(dir, [file("a.ts")]));
     expect(notices).toEqual([]);
+  });
+});
+
+const denied = (method: string, target: string) =>
+  PlatformError.systemError({
+    _tag: "PermissionDenied",
+    method,
+    module: "FileSystem",
+    pathOrDescriptor: target,
+  });
+
+describe("writer: stale files and failed runs", () => {
+  test("an unreadable stale file becomes a notice and the other stale file is still removed", async () => {
+    const out = await inTempDir((dir, fs, path) =>
+      Effect.gen(function* stepStaleIo() {
+        yield* seed(dir, fs, path, [
+          file("keep.ts", "k"),
+          file("a-old.ts", "a"),
+          file("b-old.ts", "b"),
+        ]);
+
+        const unreadablePath = path.join(dir, "a-old.ts");
+        const notices = yield* withFs(
+          (real) => ({
+            lstat: (target) =>
+              target === unreadablePath ? Effect.fail(denied("lstat", target)) : real.lstat(target),
+            readFile: (target) =>
+              target === unreadablePath
+                ? Effect.fail(denied("readFile", target))
+                : real.readFile(target),
+            stream: (target, options) =>
+              target === unreadablePath
+                ? Stream.fail(denied("stream", target))
+                : real.stream(target, options),
+          }),
+          writeFiles(dir, [file("keep.ts", "k")]),
+        );
+
+        return { manifest: yield* manifestOf(fs, path, dir), notices, tree: yield* tree(fs, dir) };
+      }),
+    );
+    expect(out.notices).toEqual([{ path: "a-old.ts", reason: "unreadable" }]);
+    expect(out.tree).toEqual([manifestFileName, "a-old.ts", "author.ts", "keep.ts"]);
+    expect(out.manifest.map((e) => e.path)).toEqual(["keep.ts"]);
+  });
+
+  test("stale files are hashed by streaming, never read whole", async () => {
+    const out = await inTempDir((dir, fs, path) =>
+      Effect.gen(function* stepStaleStream() {
+        yield* seed(dir, fs, path, [file("keep.ts", "k"), file("old.ts", "o")]);
+
+        const notices = yield* withFs(
+          () => ({
+            readFile: (target) => Effect.die(new Error(`whole read of ${target}`)),
+          }),
+          writeFiles(dir, [file("keep.ts", "k")]),
+        );
+
+        return { notices, tree: yield* tree(fs, dir) };
+      }),
+    );
+    expect(out.notices).toEqual([]);
+    expect(out.tree).toEqual([manifestFileName, "author.ts", "keep.ts"]);
+  });
+
+  test("a failed run on a directory it created removes its own files and keeps a file another run placed there", async () => {
+    const out = await inTempDir((dir, fs, path) =>
+      Effect.gen(function* stepCreatedFailure() {
+        const output = path.join(dir, "out");
+        const error = yield* failureOf(
+          withFs(
+            (real) => ({
+              rename: (from, to) =>
+                path.basename(to) === manifestFileName
+                  ? real
+                      .writeFileString(path.join(output, "foreign.txt"), "theirs")
+                      .pipe(Effect.andThen(Effect.fail(denied("rename", to))))
+                  : real.rename(from, to),
+            }),
+            writeFiles(output, [file("src/main.ts", "m"), file("top.ts", "t")]),
+          ),
+        );
+
+        return {
+          error,
+          foreign: yield* fs.readFileString(path.join(output, "foreign.txt")),
+          tree: yield* tree(fs, output),
+        };
+      }),
+    );
+    expect(out.error).toEqual({ reason: "io", tag: "WriteRefused" });
+    expect(out.foreign).toBe("theirs");
+    expect(out.tree).toEqual(["foreign.txt"]);
+  });
+
+  test("a failed run on a directory it created removes the directory when nothing else is in it", async () => {
+    const out = await inTempDir((dir, fs, path) =>
+      Effect.gen(function* stepCreatedEmpty() {
+        const output = path.join(dir, "out");
+        const error = yield* failureOf(
+          withFs(
+            (real) => ({
+              rename: (from, to) =>
+                path.basename(to) === manifestFileName
+                  ? Effect.fail(denied("rename", to))
+                  : real.rename(from, to),
+            }),
+            writeFiles(output, [file("src/main.ts", "m")]),
+          ),
+        );
+
+        return { error, exists: yield* fs.exists(output) };
+      }),
+    );
+    expect(out.error).toEqual({ reason: "io", tag: "WriteRefused" });
+    expect(out.exists).toBe(false);
   });
 });

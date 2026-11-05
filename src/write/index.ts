@@ -1,6 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { rmdir } from "node:fs/promises";
 import type { Scope } from "effect";
-import { Array as Arr, Data, Effect, Exit, FileSystem, Option, Order, Path } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  Exit,
+  FileSystem,
+  Option,
+  Order,
+  Path,
+  Ref,
+  Stream,
+} from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { acquireRunLock, runLockFileName } from "./lock.ts";
 import type { RunLock, RunLockHeld, RunLockUnavailable } from "./lock.ts";
@@ -42,6 +54,7 @@ export interface WriteNotice {
     | "not-regular-file"
     | "remove-failed"
     | "symlink"
+    | "unreadable"
     | "unsafe-path";
   readonly path: string;
 }
@@ -209,6 +222,7 @@ const ensureOutput = (outputDir: string): Effect.Effect<boolean, WriteRefused, S
 const writeAtomic = (
   outputDir: string,
   lock: RunLock,
+  written: Ref.Ref<readonly string[]>,
   relative: string,
   content: string,
 ): Effect.Effect<void, WriteRefused, Services> =>
@@ -217,6 +231,7 @@ const writeAtomic = (
     const path = yield* Path.Path;
 
     yield* checkTarget(outputDir, relative, true);
+    yield* Ref.update(written, (all) => [...all, relative]);
 
     const target = path.join(outputDir, relative);
     const temp = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
@@ -266,7 +281,23 @@ const readPrevious = (
     });
   });
 
-const staleNotice = (
+const sha256OfFile = (
+  fs: FileSystem.FileSystem,
+  target: string,
+): Effect.Effect<string, PlatformError> => {
+  const hash = createHash("sha256");
+
+  return fs.stream(target).pipe(
+    Stream.runForEach((chunk) =>
+      Effect.sync(() => {
+        hash.update(chunk);
+      }),
+    ),
+    Effect.map(() => hash.digest("hex")),
+  );
+};
+
+const checkStale = (
   outputDir: string,
   entry: ManifestEntry,
 ): Effect.Effect<Option.Option<WriteNotice>, WriteRefused, Services> =>
@@ -304,9 +335,9 @@ const staleNotice = (
     }
 
     const target = path.join(outputDir, entry.path);
-    const current = yield* fs.readFile(target).pipe(Effect.mapError(ioFailure(entry.path)));
+    const current = yield* sha256OfFile(fs, target).pipe(Effect.mapError(ioFailure(entry.path)));
 
-    if (sha256Hex(current) !== entry.sha256) {
+    if (current !== entry.sha256) {
       return notice("edited");
     }
 
@@ -316,19 +347,88 @@ const staleNotice = (
     );
   });
 
+/**
+ * A stale path that cannot be checked or read is left in place with a notice, never a failed run.
+ */
+const staleNotice = (
+  outputDir: string,
+  entry: ManifestEntry,
+): Effect.Effect<Option.Option<WriteNotice>, never, Services> =>
+  checkStale(outputDir, entry).pipe(
+    Effect.orElseSucceed(() =>
+      Option.some<WriteNotice>({ path: entry.path, reason: "unreadable" }),
+    ),
+  );
+
 const removeStale = (
   outputDir: string,
   previous: readonly ManifestEntry[],
   written: ReadonlySet<string>,
-): Effect.Effect<readonly WriteNotice[], WriteRefused, Services> =>
+): Effect.Effect<readonly WriteNotice[], never, Services> =>
   Effect.forEach(
     previous.filter((entry) => !written.has(fold(entry.path))),
     (entry) => staleNotice(outputDir, entry),
   ).pipe(Effect.map((all) => all.filter(Option.isSome).map((some) => some.value)));
 
+const removeEmptyDirectory = (directory: string) =>
+  Effect.ignore(Effect.tryPromise(() => rmdir(directory)));
+
+/**
+ * Remove what this run wrote, then the directories that emptied; run while the lock is still held.
+ * Directories are removed with a non-recursive rmdir, so anything another party placed stays.
+ */
+const undoWrites = (outputDir: string, written: readonly string[]) =>
+  Effect.gen(function* step8() {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    for (const relative of Arr.reverse(written)) {
+      yield* Effect.ignore(fs.remove(path.join(outputDir, relative), { force: true }));
+    }
+
+    const directories = Arr.sort(
+      Arr.dedupe(written.flatMap(ancestorsOf)),
+      Order.mapInput(Order.flip(Order.Number), (directory: string) => segmentsOf(directory).length),
+    );
+
+    for (const directory of directories) {
+      yield* removeEmptyDirectory(path.join(outputDir, directory));
+    }
+  });
+
+const writeUnderLock = (
+  outputDir: string,
+  sorted: readonly GeneratedFile[],
+  manifest: string,
+  lock: RunLock,
+  written: Ref.Ref<readonly string[]>,
+): Effect.Effect<readonly WriteNotice[], WriteRefused, Services> =>
+  Effect.gen(function* step9() {
+    for (const relative of [...sorted.map((file) => file.path), manifestFileName]) {
+      yield* checkTarget(outputDir, relative, false);
+    }
+
+    const previous = yield* readPrevious(outputDir);
+
+    for (const file of sorted) {
+      yield* writeAtomic(outputDir, lock, written, file.path, file.content);
+    }
+
+    yield* writeAtomic(outputDir, lock, written, manifestFileName, manifest);
+
+    const stale = yield* removeStale(
+      outputDir,
+      previous.entries,
+      new Set(sorted.map((file) => fold(file.path))),
+    );
+
+    return [...previous.notices, ...stale];
+  });
+
 const writeLocked = (
   outputDir: string,
   files: readonly GeneratedFile[],
+  created: boolean,
 ): Effect.Effect<
   readonly WriteNotice[],
   RunLockHeld | RunLockUnavailable | WriteRefused,
@@ -345,26 +445,15 @@ const writeLocked = (
       Effect.mapError(() => new WriteRefused({ reason: "unsafe-path", subject: manifestFileName })),
     );
     const lock = yield* acquireRunLock(outputDir);
+    const written = yield* Ref.make<readonly string[]>([]);
 
-    for (const relative of [...sorted.map((file) => file.path), manifestFileName]) {
-      yield* checkTarget(outputDir, relative, false);
-    }
-
-    const previous = yield* readPrevious(outputDir);
-
-    for (const file of sorted) {
-      yield* writeAtomic(outputDir, lock, file.path, file.content);
-    }
-
-    yield* writeAtomic(outputDir, lock, manifestFileName, manifest);
-
-    const stale = yield* removeStale(
-      outputDir,
-      previous.entries,
-      new Set(sorted.map((file) => fold(file.path))),
+    return yield* writeUnderLock(outputDir, sorted, manifest, lock, written).pipe(
+      Effect.onExit((exit) =>
+        created && Exit.isFailure(exit)
+          ? Ref.get(written).pipe(Effect.flatMap((all) => undoWrites(outputDir, all)))
+          : Effect.void,
+      ),
     );
-
-    return [...previous.notices, ...stale];
   });
 
 /**
@@ -382,7 +471,6 @@ export const writeFiles = (
   Services
 > =>
   Effect.gen(function* step7() {
-    const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const fault = planFault(path, outputDir, files);
 
@@ -391,14 +479,10 @@ export const writeFiles = (
     }
 
     const created = yield* ensureOutput(outputDir);
-    const removeIfEmpty = fs.readDirectory(outputDir).pipe(
-      Effect.flatMap((entries) =>
-        entries.length === 0 ? fs.remove(outputDir, { recursive: true }) : Effect.void,
-      ),
-      Effect.ignore,
-    );
 
-    return yield* Effect.scoped(writeLocked(outputDir, files)).pipe(
-      Effect.onExit((exit) => (created && Exit.isFailure(exit) ? removeIfEmpty : Effect.void)),
+    return yield* Effect.scoped(writeLocked(outputDir, files, created)).pipe(
+      Effect.onExit((exit) =>
+        created && Exit.isFailure(exit) ? removeEmptyDirectory(outputDir) : Effect.void,
+      ),
     );
   });
