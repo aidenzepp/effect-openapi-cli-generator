@@ -48,6 +48,20 @@ describe("Diagnostic", () => {
     expect(Exit.isFailure(decode({ ...base, row: "PRM-28" }))).toBe(true);
   });
 
+  test("a row id with a digit in its prefix, like S30, decodes with its code", () => {
+    expect(
+      Exit.isSuccess(decode({ ...base, code: "S30-22/array-without-items", row: "S30-22" })),
+    ).toBe(true);
+  });
+
+  test("a row id that starts with a digit, is lowercase, or lacks digits is rejected", () => {
+    const rows = ["30S-1", "s30-1", "S30-"];
+    const rejected = rows.map((row) =>
+      Exit.isFailure(decode({ ...base, code: `${row}/array-without-items`, row })),
+    );
+    expect(rejected.every(Boolean)).toBe(true);
+  });
+
   test("a pointer that is not RFC 6901 text is rejected", () => {
     expect(Exit.isFailure(decode({ ...base, pointer: "#/paths" }))).toBe(true);
   });
