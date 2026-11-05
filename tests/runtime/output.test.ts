@@ -16,7 +16,7 @@ import {
   Stream,
 } from "effect";
 import { CliError } from "effect/cli";
-import { HttpClientRequest, UrlParams } from "effect/http";
+import { HttpClientRequest } from "effect/http";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
 import {
@@ -44,7 +44,7 @@ import {
   writeBody,
 } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
-import { scrub } from "../../src/runtime-src/runtime/redact.ts";
+import { queryWireForm, scrub } from "../../src/runtime-src/runtime/redact.ts";
 
 type Env =
   | FileSystem.FileSystem
@@ -510,15 +510,17 @@ const basicHeader = (): string => {
   return sent.headers.authorization ?? "";
 };
 
-// The query string exactly as the client serializes an apiKey query credential.
-const queryWire = (): string =>
-  UrlParams.toString(
-    HttpClientRequest.setUrlParam(
-      HttpClientRequest.get("https://api.example.com"),
-      "api_key",
-      "key/with+plus=CANARY&",
-    ).urlParams,
-  );
+// The query string exactly as the client writes an apiKey query credential.
+const queryWire = (): string => `api_key=${queryWireForm("key/with+plus=CANARY&")}`;
+
+// Audit M F1 probe values with each form a server may echo: raw, URLSearchParams, and the bytes
+// the request target carries.
+const queryProbes = [
+  { raw: "k e y", searchParams: "k+e+y", wire: "k%20e%20y" },
+  { raw: "a!b/c", searchParams: "a%21b%2Fc", wire: "a!b%2Fc" },
+  { raw: "a~b c", searchParams: "a%7Eb+c", wire: "a~b%20c" },
+  { raw: "x'y z", searchParams: "x%27y+z", wire: "x%27y%20z" },
+] as const;
 
 describe("credential scrubbing at the read budget (audit F1)", () => {
   test("a credential longer than its placeholder cut by the read budget leaves no prefix", async () => {
@@ -572,6 +574,27 @@ describe("every wire form of a credential is scrubbed (audit F2)", () => {
       expect(output).toContain("<redacted:apiKey>");
     }
   });
+});
+
+describe("every echoed form of a query credential is scrubbed (audit M F1)", () => {
+  for (const probe of queryProbes) {
+    const credential: Credential = { ...queryKey, value: Redacted.make(probe.raw) };
+
+    for (const form of ["raw", "searchParams", "wire"] as const) {
+      test(`${JSON.stringify(probe.raw)} echoed as its ${form} form in an excerpt and request id`, async () => {
+        const echo = `api_key=${probe[form]}`;
+        const text = await excerptWith(`echo ${echo} end`, defaultMaxErrorBytes, [credential]);
+        const rendered = renderError(
+          responseError({ bodyExcerpt: `echo ${echo} end`, requestId: `id-${probe[form]}` }),
+          [credential],
+        );
+
+        expect(text).toBe("echo api_key=<redacted:apiKey> end");
+        expect(rendered).toContain("Request ID: id-<redacted:apiKey>");
+        expect(rendered).not.toContain(probe[form]);
+      });
+    }
+  }
 });
 
 describe("overlapping credential forms are scrubbed as one run (recheck N1)", () => {

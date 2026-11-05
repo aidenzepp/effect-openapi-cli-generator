@@ -23,6 +23,7 @@ import {
 import { RedirectRefused } from "../domain/errors.ts";
 import type { UsageError } from "../domain/errors.ts";
 import { isLoopbackHost } from "./auth.ts";
+import { queryWireForm } from "./redact.ts";
 
 /**
  * The most redirects one request follows (design 6.5 Redirect loop). The response to the last
@@ -286,8 +287,8 @@ const querySeparator = (url: string): string => {
  * Fold `urlParams` into the request target. Effect builds the final URL with
  * `URLSearchParams.append`, which re-serializes the whole query and rewrites the serialized
  * `%20` as `+`. The target keeps its query bytes exactly as `Serialize` produced them; a param
- * added after serialization (an `apiKey` query credential) is appended percent-encoded, with no
- * `+` for a space.
+ * added after serialization (an `apiKey` query credential) is appended in its `queryWireForm`,
+ * the bytes redaction scrubs.
  */
 const foldUrlParams = (
   request: HttpClientRequest.HttpClientRequest,
@@ -296,7 +297,7 @@ const foldUrlParams = (
     value === undefined
       ? []
       : [
-          `${encodeURIComponent(name)}=${encodeURIComponent(
+          `${queryWireForm(name)}=${queryWireForm(
             Redacted.isRedacted(value) ? Redacted.value(value) : value,
           )}`,
         ],

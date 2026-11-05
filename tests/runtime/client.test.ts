@@ -11,6 +11,7 @@ import {
 } from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
+import { queryWireForm } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // Two bound origins (A over http, C over https) and one unbound origin (B).
@@ -816,6 +817,22 @@ describe("the query bytes survive to the wire", () => {
     expect(seen[0]?.url.startsWith(`${A}/q?spaced=a%20b&`)).toBe(true);
     expect(seen[0]?.url).not.toContain("+");
   });
+});
+
+describe("a query credential is sent in the form redaction scrubs (audit M F1)", () => {
+  for (const value of ["k e y", "a!b/c", "a~b c", "x'y z"]) {
+    test(`${JSON.stringify(value)} is sent as its queryWireForm`, async () => {
+      const attach = Auth.attach(table, {
+        credentials: [
+          { definition: definitions.queryKey, scheme: "queryKey", value: Redacted.make(value) },
+        ],
+        origins: [A, C],
+      });
+      const { seen } = await run(HttpClientRequest.get(`${A}/q`), attach);
+
+      expect(seen[0]?.url).toBe(`${A}/q?api_key=${queryWireForm(value)}`);
+    });
+  }
 });
 
 const queryOptions = (explode: boolean): Serialize.QueryOptions => ({
