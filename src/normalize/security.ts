@@ -2,8 +2,8 @@ import { Effect, Option, Schema } from "effect";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../resolve/pointer.ts";
+import { implicitComponent, referenceAt } from "../resolve/index.ts";
+import { escapeToken, evaluatePointer, unescapeToken } from "../resolve/pointer.ts";
 import type { Json } from "../resolve/pointer.ts";
 import type { Line } from "../validate/index.ts";
 
@@ -266,9 +266,17 @@ export const normalizeSecuritySchemes = (
       Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
       Option.match({ onNone: () => [], onSome: (map) => Object.keys(map) }),
     );
-    const built = names.map((name) =>
-      buildScheme(resolution, name, pointerOf(["components", "securitySchemes", name])),
+    const refused = new Set<string>(
+      resolution.diagnostics
+        .filter((diagnostic) => diagnostic.code === "SEC-10/uri-like-name")
+        .map((diagnostic) => diagnostic.pointer),
     );
+    const built = names.map((name): Built => {
+      const pointer = pointerOf(["components", "securitySchemes", name]);
+
+      // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
+      return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
+    });
     const diagnostics = yield* Effect.all(
       built.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
     );
@@ -279,6 +287,50 @@ export const normalizeSecuritySchemes = (
       unusable: names.filter((_, index) => built[index]?.scheme === undefined),
     };
   });
+
+interface Lookup {
+  readonly declared: ReadonlyMap<string, SecurityScheme>;
+  readonly unusable: ReadonlySet<string>;
+}
+
+// Built once per SchemeNormalization, so a requirement entry costs one map probe.
+const lookups = new WeakMap<SchemeNormalization, Lookup>();
+
+const lookupOf = (schemes: SchemeNormalization): Lookup => {
+  const cached = lookups.get(schemes);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const built = {
+    declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
+    unusable: new Set(schemes.unusable),
+  };
+  lookups.set(schemes, built);
+
+  return built;
+};
+
+const componentPrefix = "/components/securitySchemes/";
+
+// A 3.2 requirement name that is not a component name resolves as a URI inside the set. The result
+// is the component name it reaches, or undefined when it reaches nothing that is a component.
+const uriComponentName = (resolution: Resolution, name: string): string | undefined => {
+  if (resolution.line !== "3.2") {
+    return undefined;
+  }
+
+  const key = implicitComponent(resolution, "securitySchemes", name);
+  if (Option.isNone(key) || !key.value.pointer.startsWith(componentPrefix)) {
+    return undefined;
+  }
+
+  const token = key.value.pointer.slice(componentPrefix.length);
+
+  return token.includes("/")
+    ? undefined
+    : Option.getOrUndefined(Effect.runSync(Effect.option(unescapeToken(token))));
+};
 
 interface Source {
   readonly pointer: string;
@@ -314,26 +366,35 @@ interface Judged {
 }
 
 const judge = (
+  resolution: Resolution,
   schemes: SchemeNormalization,
   entries: readonly (readonly [string, readonly string[]])[],
   pointer: string,
 ): Judged => {
   const findings: Finding[] = [];
   const staged = new Set<string>();
-  for (const [name] of entries) {
-    const declared = schemes.schemes.find((scheme) => scheme.name === name);
+  const { declared: byName, unusable } = lookupOf(schemes);
+  const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
+  for (const [name, scopes] of entries) {
+    const exact = byName.has(name) || unusable.has(name);
+    const resolved = exact ? name : (uriComponentName(resolution, name) ?? name);
+    const declared = byName.get(resolved);
+    if (declared !== undefined) {
+      used.push({ scheme: resolved, scopes });
+    }
+
     if (declared !== undefined && stagedRules.has(declared.kind.type)) {
       staged.add(declared.kind.type);
     } else if (declared === undefined) {
       findings.push(
-        schemes.unusable.includes(name)
+        unusable.has(resolved)
           ? {
               anchor: "security-requirements-name",
               code: "SEC-02/unusable-scheme",
               element: "Security Requirement Object",
               message: "The requirement names a security scheme that is refused.",
               pointer: `${pointer}/${escapeToken(name)}`,
-              related: pointerOf(["components", "securitySchemes", name]),
+              related: pointerOf(["components", "securitySchemes", resolved]),
             }
           : {
               anchor: "security-requirements-name",
@@ -358,9 +419,7 @@ const judge = (
     });
   }
 
-  return findings.length > 0
-    ? { findings }
-    : { findings, use: entries.map(([scheme, scopes]) => ({ scheme, scopes })) };
+  return findings.length > 0 ? { findings } : { findings, use: used };
 };
 
 /**
@@ -396,7 +455,7 @@ export const normalizeSecurityPolicy = (
               },
             ],
           }
-        : judge(schemes, entries.value, pointer);
+        : judge(resolution, schemes, entries.value, pointer);
     });
     const diagnostics = yield* Effect.all(
       judged.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),

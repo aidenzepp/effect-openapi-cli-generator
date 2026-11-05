@@ -305,3 +305,67 @@ describe("token acquisition stays refused", () => {
     expect(schemes.diagnostics[0]?.hint).not.toContain("Milestone 3");
   });
 });
+
+describe("3.2 scheme URIs (SEC-10)", () => {
+  const uriName = "https://evil.example/s";
+
+  test("a SEC-10-refused scheme attaches no credential and refuses its alternatives", () => {
+    const { policy, schemes } = run("3.2", {
+      ...withSchemes({ [uriName]: bearer, key: keyed }),
+      security: [{ [uriName]: [] }, { key: [] }],
+    });
+
+    expect(schemes.schemes.map((scheme) => scheme.name)).toEqual(["key"]);
+    expect(schemes.unusable).toEqual([uriName]);
+    expect(policy.policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
+    expect(codes(policy.diagnostics)).toEqual(["SEC-02/unusable-scheme"]);
+  });
+
+  test("a requirement by scheme URI resolves to the component", () => {
+    const { policy } = run("3.2", {
+      ...withSchemes({ key: keyed }),
+      security: [{ "#/components/securitySchemes/key": ["a"] }],
+    });
+
+    expect(codes(policy.diagnostics)).toEqual([]);
+    expect(policy.policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: ["a"] }] }]);
+  });
+
+  test("a requirement by scheme URI is undeclared before 3.2", () => {
+    const { policy } = run("3.1", {
+      ...withSchemes({ key: keyed }),
+      security: [{ "#/components/securitySchemes/key": [] }],
+    });
+
+    expect(policy.policy.alternatives).toEqual([]);
+    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+  });
+
+  test("a scheme URI outside the component names stays undeclared", () => {
+    const { policy } = run("3.2", {
+      ...withSchemes({ key: keyed }),
+      security: [{ "#/components/securitySchemes/missing": [] }],
+    });
+
+    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+  });
+});
+
+describe("scheme lookup budget", () => {
+  test("50k schemes and one 50k-name alternative normalize in linear time", () => {
+    const names = Array.from({ length: 50_000 }, (_, index) => `s${index}`);
+    const securitySchemes: Record<string, Json> = {};
+    const requirement: Record<string, Json> = {};
+    for (const name of names) {
+      securitySchemes[name] = keyed;
+      requirement[name] = [];
+    }
+
+    const { policy } = run("3.1", {
+      ...withSchemes(securitySchemes),
+      security: [requirement],
+    });
+
+    expect(policy.policy.alternatives[0]?.uses.length).toBe(50_000);
+  }, 3000);
+});
