@@ -649,3 +649,57 @@ describe("node budget", () => {
     expect(failure._tag).toBe("SchemaBudgetExceeded");
   });
 });
+
+const rejected = (count: number): ReadonlyMap<string, Json> =>
+  new Map(
+    Arr.range(1, count).map((index): [string, Json] => [
+      `R${index}`,
+      {
+        additionalProperties: { type: "integer" },
+        properties: { a: { type: "string" } },
+        type: "object",
+      },
+    ]),
+  );
+
+describe("repair and cycle bounds", () => {
+  test(
+    "a 20,000-schema alias cycle is refused without exhausting the stack",
+    () => {
+      const size = 20_000;
+      const definitions = new Map<string, Json>(
+        Arr.range(0, size - 1).map((index): [string, Json] => [
+          `A${index}`,
+          { $ref: `#/$defs/A${(index + 1) % size}` },
+        ]),
+      );
+      const exit = Effect.runSyncExit(validationCopy("3.1", definitions));
+
+      expect(exit._tag).toBe("Success");
+      expect(
+        exit._tag === "Success" &&
+          exit.value.edits.every((edit) => edit.code === "DOC-23/alias-cycle"),
+      ).toBe(true);
+      expect(exit._tag === "Success" ? exit.value.edits.length : 0).toBe(size);
+    },
+    { timeout: 10_000 },
+  );
+
+  test(
+    "each importer repair pass is charged to the node budget",
+    () => {
+      const repaired = Effect.runSync(validationCopy("3.1", rejected(30)));
+
+      expect(repaired.edits.map((edit) => edit.code)).toEqual(
+        Arr.replicate("SCH-13/not-asserted", 30),
+      );
+
+      const failure = Effect.runSync(
+        Effect.flip(validationCopy("3.1", rejected(30), { maxNodes: 500 })),
+      );
+
+      expect(failure._tag).toBe("SchemaBudgetExceeded");
+    },
+    { timeout: 10_000 },
+  );
+});

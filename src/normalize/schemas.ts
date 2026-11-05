@@ -817,6 +817,12 @@ const edgesOf = (budget: Budget, definitions: ReadonlyMap<string, Json>): readon
   return edges;
 };
 
+interface Frame {
+  at: number;
+  readonly key: string;
+  readonly targets: readonly string[];
+}
+
 interface Tarjan {
   counter: number;
   readonly component: Map<string, number>;
@@ -825,29 +831,32 @@ interface Tarjan {
   readonly next: ReadonlyMap<string, readonly string[]>;
   readonly onStack: Set<string>;
   readonly stack: string[];
+  readonly work: Frame[];
 }
 
 const lower = (state: Tarjan, key: string, value: number): void => {
   state.low.set(key, Math.min(state.low.get(key) ?? value, value));
 };
 
-const connect = (state: Tarjan, key: string): void => {
-  const own = state.counter;
-  state.index.set(key, own);
-  state.low.set(key, own);
+const open = (state: Tarjan, key: string): void => {
+  state.index.set(key, state.counter);
+  state.low.set(key, state.counter);
   state.counter += 1;
   state.stack.push(key);
   state.onStack.add(key);
-  for (const target of state.next.get(key) ?? []) {
-    if (!state.index.has(target)) {
-      connect(state, target);
-      lower(state, key, state.low.get(target) ?? own);
-    } else if (state.onStack.has(target)) {
-      lower(state, key, state.index.get(target) ?? own);
-    }
+  state.work.push({ at: 0, key, targets: state.next.get(key) ?? [] });
+};
+
+// Closes a finished node: its low link flows to its caller, and a root pops its component.
+const close = (state: Tarjan, frame: Frame): void => {
+  const own = state.index.get(frame.key) ?? 0;
+  const low = state.low.get(frame.key) ?? own;
+  const caller = state.work.at(-1);
+  if (caller !== undefined) {
+    lower(state, caller.key, low);
   }
 
-  if (state.low.get(key) !== own) {
+  if (low !== own) {
     return;
   }
 
@@ -855,18 +864,46 @@ const connect = (state: Tarjan, key: string): void => {
   while (popped !== undefined) {
     state.onStack.delete(popped);
     state.component.set(popped, own);
-    popped = popped === key ? undefined : state.stack.pop();
+    popped = popped === frame.key ? undefined : state.stack.pop();
   }
 };
 
-// Tarjan's strongly connected components over the in-place reference graph.
+// One depth-first search with an explicit work stack, so a long reference chain cannot exhaust
+// the call stack.
+const connect = (state: Tarjan, root: string): void => {
+  open(state, root);
+  let frame = state.work.at(-1);
+  while (frame !== undefined) {
+    const target = frame.targets[frame.at];
+    if (target === undefined) {
+      state.work.pop();
+      close(state, frame);
+    } else {
+      frame.at += 1;
+      if (!state.index.has(target)) {
+        open(state, target);
+      } else if (state.onStack.has(target)) {
+        lower(state, frame.key, state.index.get(target) ?? 0);
+      }
+    }
+
+    frame = state.work.at(-1);
+  }
+};
+
+// Tarjan's strongly connected components over the in-place reference graph, iteratively.
 const componentsOf = (
   keys: readonly string[],
   edges: readonly Edge[],
 ): ReadonlyMap<string, number> => {
   const next = new Map<string, string[]>();
   for (const edge of edges) {
-    next.set(edge.from, [...(next.get(edge.from) ?? []), edge.to]);
+    const targets = next.get(edge.from);
+    if (targets === undefined) {
+      next.set(edge.from, [edge.to]);
+    } else {
+      targets.push(edge.to);
+    }
   }
 
   const state: Tarjan = {
@@ -877,6 +914,7 @@ const componentsOf = (
     next,
     onStack: new Set(),
     stack: [],
+    work: [],
   };
   for (const key of keys) {
     if (!state.index.has(key)) {
@@ -908,17 +946,6 @@ const replaceAt = (node: Json, path: readonly string[]): Json => {
   );
 };
 
-const replaceIn = (
-  definitions: ReadonlyMap<string, Json>,
-  key: string,
-  path: readonly string[],
-): ReadonlyMap<string, Json> =>
-  new Map(
-    [...definitions].map(([name, node]): [string, Json] =>
-      name === key ? [name, replaceAt(node, path)] : [name, node],
-    ),
-  );
-
 // Refuses every reference site on a cycle that returns to a schema without descending into the
 // instance (D-AD12 refused tier, DOC-23/alias-cycle): each such site becomes `{}` in the copy.
 const breakAliasCycles = (
@@ -933,7 +960,7 @@ const breakAliasCycles = (
     sizes.set(id, (sizes.get(id) ?? 0) + 1);
   }
 
-  let definitions = initial;
+  const definitions = new Map(initial);
   for (const edge of edges) {
     const id = component.get(edge.from);
     const cyclic =
@@ -947,7 +974,7 @@ const breakAliasCycles = (
         key: edge.from,
         path: edge.path,
       });
-      definitions = replaceIn(definitions, edge.from, edge.path);
+      definitions.set(edge.from, replaceAt(definitions.get(edge.from) ?? {}, edge.path));
     }
   }
 
@@ -1086,14 +1113,19 @@ const importEdit = (
 };
 
 // Imports with `patterns: "ignore"`; each rejected node becomes `{}` under the code of its class,
-// at its deepest existing schema ancestor, until the import succeeds.
+// at its deepest existing schema ancestor, until the import succeeds. The importer stops at its
+// first failure, so repairs cannot be batched: each pass is charged the number of definitions it
+// imports, and the budget caps the passes.
 const importCopy = (
+  budget: Budget,
   line: Line,
   initial: ReadonlyMap<string, Json>,
   edits: SchemaEdit[],
-): Effect.Effect<ReadonlyMap<string, Json>, SchemaImportDefect> =>
+): Effect.Effect<ReadonlyMap<string, Json>, SchemaBudgetExceeded | SchemaImportDefect> =>
   Effect.gen(function* importLoop() {
-    let definitions = initial;
+    const definitions = new Map(initial);
+    budget.spent += definitions.size;
+    yield* within(budget, definitions);
     let failure = yield* importOnce(definitions);
     while (Option.isSome(failure)) {
       const edit = importEdit(line, definitions, failure.value);
@@ -1102,7 +1134,9 @@ const importCopy = (
       }
 
       edits.push(edit);
-      definitions = replaceIn(definitions, edit.key, edit.path);
+      definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
+      budget.spent += definitions.size;
+      yield* within(budget, definitions);
       failure = yield* importOnce(definitions);
     }
 
@@ -1135,7 +1169,7 @@ export const validationCopy = (
       }),
     );
     const acyclic = yield* within(budget, breakAliasCycles(budget, filtered, edits));
-    const imported = yield* importCopy(line, acyclic, edits);
+    const imported = yield* importCopy(budget, line, acyclic, edits);
 
     return { definitions: imported, edits };
   });
