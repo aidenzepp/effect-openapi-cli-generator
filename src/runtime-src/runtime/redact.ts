@@ -3,9 +3,17 @@ import { Base64 } from "effect/encoding";
 import type { Credential } from "./auth.ts";
 
 /**
+ * A query name or value exactly as the request target carries it (audit M F1): percent-encoded
+ * with no `+` for a space, and with the `'` an http(s) URL parser percent-encodes in a query
+ * already encoded, so the client writes the normalized bytes and redaction matches them.
+ */
+export const queryWireForm = (text: string): string =>
+  encodeURIComponent(text).replaceAll("'", "%27");
+
+/**
  * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
- * token `basicAuth` sends and the password alone; for an apiKey in the query also the
- * percent-encoded form the URL serializer emits. Empty forms are dropped.
+ * token `basicAuth` sends and the password alone; for an apiKey in the query also the form the
+ * request target carries and the URLSearchParams form a server may echo. Empty forms are dropped.
  */
 const wireForms = (credential: Credential): readonly string[] => {
   const value: string = Redacted.value(credential.value);
@@ -17,7 +25,7 @@ const wireForms = (credential: Credential): readonly string[] => {
   }
 
   if (definition.kind === "apiKey" && definition.in === "query") {
-    forms.push(new URLSearchParams([["", value]]).toString().slice(1));
+    forms.push(queryWireForm(value), new URLSearchParams([["", value]]).toString().slice(1));
   }
 
   return forms.filter((form) => form !== "");

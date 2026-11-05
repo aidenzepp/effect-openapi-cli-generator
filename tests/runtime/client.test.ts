@@ -11,6 +11,8 @@ import {
 } from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
+import { queryWireForm } from "../../src/runtime-src/runtime/redact.ts";
+import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // Two bound origins (A over http, C over https) and one unbound origin (B).
 const A = "http://127.0.0.1:1";
@@ -796,5 +798,67 @@ describe("RT-5: loopback hops go direct", () => {
     expect(inits[0]).toBe(sentinel);
     expect(inits[1]).toBeUndefined();
     expect(inits[2]).toBe(sentinel);
+  });
+});
+
+describe("the query bytes survive to the wire", () => {
+  test("a serialized %20 and %7C are sent as written, never as +", async () => {
+    const { seen } = await run(
+      HttpClientRequest.get(`${A}/q?spaced=a%20b%20c&piped=a%7Cb&f=x%20y`),
+    );
+    expect(seen[0]?.url).toBe(`${A}/q?spaced=a%20b%20c&piped=a%7Cb&f=x%20y`);
+  });
+
+  test("the attach step keeps the other query bytes as written", async () => {
+    const { seen } = await run(
+      HttpClientRequest.get(`${A}/q?spaced=a%20b&api_key=x`),
+      attachFor("queryKey"),
+    );
+    expect(seen[0]?.url.startsWith(`${A}/q?spaced=a%20b&`)).toBe(true);
+    expect(seen[0]?.url).not.toContain("+");
+  });
+});
+
+describe("a query credential is sent in the form redaction scrubs (audit M F1)", () => {
+  for (const value of ["k e y", "a!b/c", "a~b c", "x'y z"]) {
+    test(`${JSON.stringify(value)} is sent as its queryWireForm`, async () => {
+      const attach = Auth.attach(table, {
+        credentials: [
+          { definition: definitions.queryKey, scheme: "queryKey", value: Redacted.make(value) },
+        ],
+        origins: [A, C],
+      });
+      const { seen } = await run(HttpClientRequest.get(`${A}/q`), attach);
+
+      expect(seen[0]?.url).toBe(`${A}/q?api_key=${queryWireForm(value)}`);
+    });
+  }
+});
+
+const queryOptions = (explode: boolean): Serialize.QueryOptions => ({
+  allowReserved: false,
+  explode,
+  required: false,
+});
+
+describe("a serialized request keeps its query bytes through the client", () => {
+  test("spaceDelimited, pipeDelimited and a spaced form value, with an apiKey appended", async () => {
+    const built = await Effect.runPromise(
+      Serialize.request("GET", {
+        headers: [],
+        path: Serialize.path("/q", []),
+        query: [
+          Serialize.spaceDelimited("spaced", ["a", "b"], queryOptions(false)),
+          Serialize.pipeDelimited("piped", ["c", "d"], queryOptions(false)),
+          Serialize.form("f", "x y", queryOptions(true)),
+        ],
+      }),
+    );
+    const request = HttpClientRequest.setUrl(built, `${A}${built.url}`);
+    const { seen } = await run(request, attachFor("queryKey"));
+    const url = seen[0]?.url ?? "";
+
+    expect(url).toContain("spaced=a%20b&piped=c%7Cd&f=x%20y");
+    expect(url).not.toContain("+");
   });
 });
