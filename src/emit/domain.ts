@@ -16,7 +16,7 @@ import type { SafeIdentifierValue } from "../names/fold.ts";
 import { codeGenerationCopy } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
 import type { Json } from "../model/pointer.ts";
-import { asciiStringLiteral, guardTemplateCurly, stringLiteral } from "./escape.ts";
+import { guardTemplateCurly, stringLiteral, lineWidth, keyText, numberText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 import { textWidth } from "./printer.ts";
 
@@ -115,11 +115,6 @@ const tokenize = (source: string): readonly Token[] | undefined => {
 };
 
 const decodeString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.String));
-
-const numberText = (value: number): string =>
-  value < 0 ? `-${numberText(-value)}` : String(value).replace("e+", "e");
-
-const identifierPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 
 const placeholder: Ty = { _tag: "Lit", text: "" };
 
@@ -419,8 +414,6 @@ type Node =
   | { readonly _tag: "indent"; readonly contents: Doc }
   | { readonly _tag: "indentIfBreak"; readonly contents: Doc; readonly id: symbol }
   | { readonly _tag: "line"; readonly hard: boolean; readonly soft: boolean };
-
-const lineWidth = 100;
 
 const isList = (doc: Doc): doc is readonly Doc[] => Array.isArray(doc);
 
@@ -752,14 +745,6 @@ const printDoc = (doc: Doc): string => new Printer().print(doc);
 
 // ---------------------------------------------------------------------------------------------
 // Layout of types.
-
-const keyText = (key: string): string => {
-  if (key === "__proto__") {
-    return `[${stringLiteral(key)}]`;
-  }
-
-  return identifierPattern.test(key) ? key : asciiStringLiteral(key);
-};
 
 const isObjectType = (type: Ty): boolean => type._tag === "Obj";
 

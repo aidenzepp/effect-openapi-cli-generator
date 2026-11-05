@@ -1,6 +1,6 @@
 import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
 import { Effect, Predicate, Record } from "effect";
-import { escapeToken } from "../model/pointer.ts";
+import { formatPointer } from "../model/pointer.ts";
 import { lineOf } from "./dispatch.ts";
 import type { Json } from "../model/pointer.ts";
 import type { UnsupportedOpenApiVersion } from "./dispatch.ts";
@@ -23,9 +23,6 @@ const schemaBase = "https://spec.openapis.org/oas/3.1/dialect/2024-11-10";
 // Array.isArray narrows a readonly array only to any[], which loses the element type.
 const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
 
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${escapeToken(token)}`).join("");
-
 const isDialectId = (tokens: readonly string[], key: string, member: Json): boolean =>
   member === textBase &&
   (key === "$schema" || (tokens.length === 0 && key === "jsonSchemaDialect"));
@@ -38,7 +35,7 @@ const sitesOf = (value: Json, tokens: readonly string[]): readonly string[] => {
   return Predicate.isObject(value)
     ? Record.toEntries(value).flatMap(([key, member]) =>
         isDialectId(tokens, key, member)
-          ? [pointerOf([...tokens, key])]
+          ? [formatPointer([...tokens, key])]
           : sitesOf(member, [...tokens, key]),
       )
     : [];

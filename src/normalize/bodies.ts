@@ -8,6 +8,8 @@ import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
 import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
+import { docsOf, sanitize } from "./docs.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -131,10 +133,6 @@ const SchemaNode = Schema.Struct({
 
 type SchemaNodeValue = typeof SchemaNode.Type;
 
-const specVersion: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
-
-const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
-
 const formUrlencoded = "application/x-www-form-urlencoded";
 
 const octetStream = "application/octet-stream";
@@ -229,8 +227,6 @@ const notice = (
   pointer: string,
 ): Finding => ({ anchor, code, element, message, pointer, severity: "notice" });
 
-const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
-
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
 
@@ -286,7 +282,7 @@ const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
     row: "REF-18",
     scope: "document",
     severity: "refusal",
-    specSection: `https://spec.openapis.org/oas/v${specVersion[walk.resolution.line]}.html#reference-object`,
+    specSection: specSectionUrl(walk.resolution.line, "reference-object"),
   }).pipe(
     Effect.orDie,
     Effect.flatMap((diagnostic) => Effect.fail(new BodyNodeBudget({ diagnostic }))),
@@ -1332,7 +1328,7 @@ const toDiagnostics = (
         row: item.code.slice(0, item.code.indexOf("/")),
         scope: "element",
         severity: item.severity,
-        specSection: `https://spec.openapis.org/oas/v${specVersion[ctx.line]}.html#${item.anchor}`,
+        specSection: specSectionUrl(ctx.line, item.anchor),
       };
       if (item.hint !== undefined) {
         fields.hint = item.hint;
@@ -1349,24 +1345,6 @@ const toDiagnostics = (
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
     }),
   ).pipe(Effect.orDie);
-
-interface Docs {
-  description?: string;
-  summary?: string;
-}
-
-const docsOf = (description: string | undefined, summary: string | undefined): Docs => {
-  const docs: Docs = {};
-  if (description !== undefined) {
-    docs.description = sanitize(description);
-  }
-
-  if (summary !== undefined) {
-    docs.summary = sanitize(summary);
-  }
-
-  return docs;
-};
 
 const emptyContent = (line: Line, pointer: string): Finding =>
   refusal(

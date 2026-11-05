@@ -1,9 +1,7 @@
 import { Predicate } from "effect";
 import type { Line } from "../validate/index.ts";
 import type { Json } from "../model/pointer.ts";
-
-const isObject = (value: Json): value is { readonly [key: string]: Json } =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+import { isObject } from "../model/json-tree.ts";
 
 /**
  * Resolves a URI reference against a base (RFC 3986 section 5.2 through WHATWG `URL`). Fails with

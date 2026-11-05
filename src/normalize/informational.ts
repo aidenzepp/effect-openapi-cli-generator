@@ -1,12 +1,10 @@
 import { Effect, Predicate, Schema } from "effect";
 import { Informational } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
+import { isObject, isArray } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 const reasons = {
   "CBK-01": "A callback describes a request the provider sends; a client never sends it.",
@@ -146,13 +144,6 @@ const componentSections = {
   securitySchemes: "securityScheme",
 } as const satisfies Record<string, Informative | Walked>;
 
-const isArray = (value: Json | undefined): value is readonly Json[] => Array.isArray(value);
-
-const isObject = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
-
 const isExtension = (key: string): boolean => key.startsWith("x-");
 
 const reservedExtension = /^x-o(?:ai|as)-/u;
@@ -168,7 +159,7 @@ class Walk {
 
   extensions(node: JsonObject, pointer: string): void {
     for (const key of Object.keys(node).filter(isExtension)) {
-      this.add(reservedExtension.test(key) ? "EXT-02" : "EXT-01", child(pointer, key));
+      this.add(reservedExtension.test(key) ? "EXT-02" : "EXT-01", childPointer(pointer, key));
     }
   }
 
@@ -185,25 +176,25 @@ class Walk {
     }
 
     for (const name of names) {
-      this.add(row, child(pointer, name));
+      this.add(row, childPointer(pointer, name));
     }
   }
 
   follow(edge: Edge, node: JsonObject, pointer: string): void {
     const [how, name, target] = edge;
     const value = node[name];
-    const site = child(pointer, name);
+    const site = childPointer(pointer, name);
     if (how === "informative") {
       this.informativeMap(informativeRow[target], value, site);
     } else if (how === "one") {
       this.visit(target, value, site);
     } else if (how === "list" && isArray(value)) {
       for (const [index, item] of value.entries()) {
-        this.visit(target, item, child(site, String(index)));
+        this.visit(target, item, childPointer(site, String(index)));
       }
     } else if (how === "map" && isObject(value)) {
       for (const [key, entry] of Object.entries(value)) {
-        this.visit(target, entry, child(site, key));
+        this.visit(target, entry, childPointer(site, key));
       }
     }
   }
@@ -227,7 +218,7 @@ class Walk {
     const { rest } = held;
     for (const [key, entry] of Object.entries(value)) {
       if (rest !== undefined && !isExtension(key)) {
-        this.visit(rest, entry, child(pointer, key));
+        this.visit(rest, entry, childPointer(pointer, key));
       }
     }
   }
@@ -245,8 +236,8 @@ class Walk {
     ] as const) {
       const part = value[name];
       if (isObject(part)) {
-        this.add(row, child("/info", name));
-        this.extensions(part, child("/info", name));
+        this.add(row, childPointer("/info", name));
+        this.extensions(part, childPointer("/info", name));
       }
     }
   }
@@ -254,10 +245,10 @@ class Walk {
   tags(value: Json | undefined): void {
     for (const [index, tag] of (isArray(value) ? value : []).entries()) {
       if (isObject(tag)) {
-        const pointer = child("/tags", String(index));
+        const pointer = childPointer("/tags", String(index));
         this.add("TAG-01", pointer);
         this.extensions(tag, pointer);
-        this.visit("externalDocs", tag.externalDocs, child(pointer, "externalDocs"));
+        this.visit("externalDocs", tag.externalDocs, childPointer(pointer, "externalDocs"));
       }
     }
   }
@@ -269,7 +260,7 @@ class Walk {
 
     for (const [key, item] of Object.entries(value)) {
       if (!isExtension(key)) {
-        this.visit("pathItem", item, child("/paths", key));
+        this.visit("pathItem", item, childPointer("/paths", key));
       }
     }
 
@@ -284,7 +275,7 @@ class Walk {
     this.extensions(value, "/components");
     for (const [section, kind] of Object.entries(componentSections)) {
       const map = value[section];
-      const pointer = child("/components", section);
+      const pointer = childPointer("/components", section);
       if (!isObject(map)) {
         continue;
       }
@@ -293,7 +284,7 @@ class Walk {
         this.informativeMap(informativeRow[kind], map, pointer);
       } else {
         for (const [name, entry] of Object.entries(map)) {
-          this.visit(kind, entry, child(pointer, name));
+          this.visit(kind, entry, childPointer(pointer, name));
         }
       }
     }
@@ -307,7 +298,7 @@ const findings = (root: JsonObject): readonly Finding[] => {
   walk.visit("externalDocs", root.externalDocs, "/externalDocs");
   walk.tags(root.tags);
   for (const [index, server] of (isArray(root.servers) ? root.servers : []).entries()) {
-    walk.visit("server", server, child("/servers", String(index)));
+    walk.visit("server", server, childPointer("/servers", String(index)));
   }
 
   walk.informativeMap("DOC-08", root.webhooks, "/webhooks");

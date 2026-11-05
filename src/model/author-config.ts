@@ -2,6 +2,7 @@ import { Array as Arr, Data, Effect, Schema } from "effect";
 import type { SchemaIssue } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
 import { Diagnostic, sortDiagnostics } from "./diagnostic.ts";
+import { formatPointer } from "./pointer.ts";
 
 const binNamePattern = /^[a-z][a-z0-9-]*$/u;
 
@@ -145,11 +146,6 @@ const findings = (issue: SchemaIssue.Issue, path: readonly string[]): readonly F
   return [{ kind: issue._tag === "UnexpectedKey" ? "unknown" : "invalid", path }];
 };
 
-const escapeToken = (token: string): string => token.replaceAll("~", "~0").replaceAll("/", "~1");
-
-const pointerOf = (path: readonly string[]): string =>
-  path.map((t) => `/${escapeToken(t)}`).join("");
-
 const isVersion = (path: readonly string[]): boolean =>
   path.length === 2 && path[0] === "package" && path[1] === "version";
 
@@ -209,7 +205,7 @@ const diagnose = (finding: Finding, context: AuthorConfigContext): Diagnostic =>
     element: "Author config",
     message: messages[rule],
     openapi: "",
-    pointer: pointerOf(finding.path),
+    pointer: formatPointer(finding.path),
     row: rowId,
     scope: "document",
     severity: "refusal",

@@ -4,9 +4,9 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, unescapeToken } from "../model/pointer.ts";
+import { escapeToken, evaluatePointer, unescapeToken, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import type { Line } from "../validate/index.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -42,8 +42,6 @@ interface Built {
   readonly findings: readonly Finding[];
   readonly scheme?: SecurityScheme;
 }
-
-const patch: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
 
 const SchemeNode = Schema.Struct({
   deprecated: Schema.optionalKey(Schema.Boolean),
@@ -89,9 +87,6 @@ const stagedRules = new Map([
   ["oidcToken", { code: "SSC-19/not-implemented", what: "openIdConnect token pass-through" }],
 ]);
 
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${escapeToken(token)}`).join("");
-
 const acquisitionHint = (permanent: boolean): string =>
   permanent
     ? "This flow is permanently refused. Supply an access token obtained elsewhere."
@@ -113,7 +108,7 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     row,
     scope: "element",
     severity: "refusal",
-    specSection: `https://spec.openapis.org/oas/v${patch[resolution.line]}.html#${finding.anchor}`,
+    specSection: specSectionUrl(resolution.line, finding.anchor),
   };
   const withHint = finding.hint === undefined ? base : { ...base, hint: finding.hint };
   const related = [{ document: resolution.document, pointer: finding.related }];
@@ -313,7 +308,7 @@ export const normalizeSecuritySchemes = (
         .map((diagnostic) => diagnostic.pointer),
     );
     const built = names.map((name): Built => {
-      const pointer = pointerOf(["components", "securitySchemes", name]);
+      const pointer = formatPointer(["components", "securitySchemes", name]);
 
       // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
       return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
@@ -435,7 +430,7 @@ const judge = (
               element: "Security Requirement Object",
               message: "The requirement names a security scheme that is refused.",
               pointer: `${pointer}/${escapeToken(name)}`,
-              related: pointerOf(["components", "securitySchemes", resolved]),
+              related: formatPointer(["components", "securitySchemes", resolved]),
             }
           : {
               anchor: "security-requirements-name",

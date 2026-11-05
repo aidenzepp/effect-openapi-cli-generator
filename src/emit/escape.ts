@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 
-const lineWidth = 100;
+/**
+ * The column limit of every printed file.
+ */
+export const lineWidth = 100;
+
+/**
+ * A JavaScript identifier name that needs no quoting as an object key.
+ */
+export const identifierPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 
 // Code points never left raw in a string literal (R10): controls, format characters (bidi controls
 // included), U+2028, U+2029 and lone surrogates.
@@ -119,3 +127,21 @@ export const guardTemplateCurly = (statement: string): string =>
         `/* oxlint-enable ${templateCurlyRule} */`,
       ].join("\n")
     : statement;
+
+/**
+ * Prints an object key: bare when it is an identifier name, quoted (ASCII-escaped) otherwise, and
+ * computed for `__proto__` so it stays an own property.
+ */
+export const keyText = (key: string): string => {
+  if (key === "__proto__") {
+    return `[${stringLiteral(key)}]`;
+  }
+
+  return identifierPattern.test(key) ? key : asciiStringLiteral(key);
+};
+
+/**
+ * Prints a number literal with no `+` in its exponent, as the formatter does.
+ */
+export const numberText = (value: number): string =>
+  value < 0 ? `-${numberText(-value)}` : String(value).replace("e+", "e");

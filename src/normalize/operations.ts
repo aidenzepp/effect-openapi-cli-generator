@@ -7,7 +7,7 @@ import { Operation } from "../model/entities.ts";
 import type { Body, Parameter, Server } from "../model/entities.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable } from "./bodies.ts";
@@ -18,6 +18,7 @@ import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -98,8 +99,6 @@ const rules = {
 
 type Code = keyof typeof rules;
 
-const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
-
 const JsonMap = Schema.Record(Schema.String, Schema.Json);
 
 const PathsRoot = Schema.Struct({
@@ -157,8 +156,6 @@ const unsendableMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "TRACE"])
 
 type Plain<T> = { -readonly [K in keyof T]: T[K] };
 
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
-
 const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> => {
   const exit = Effect.runSyncExit(evaluatePointer(resolution.value, pointer));
 
@@ -213,8 +210,8 @@ const operationsOfItem = (
 
   return [...fixed, ...extra].flatMap((entry): readonly RawOperation[] => {
     const pointer = entry.additional
-      ? child(child(item.pointer, "additionalOperations"), entry.name)
-      : child(item.pointer, entry.name);
+      ? childPointer(childPointer(item.pointer, "additionalOperations"), entry.name)
+      : childPointer(item.pointer, entry.name);
     const fields = nodeAt(resolution, pointer).pipe(
       Option.flatMap((node) => decodeOption(OperationFields, node)),
     );
@@ -245,7 +242,7 @@ const rawOperations = (resolution: Resolution): readonly RawOperation[] =>
     )
     .flatMap((key) => {
       const path = decodeOption(PathTemplate, key);
-      const item = locate(resolution, child("/paths", key));
+      const item = locate(resolution, childPointer("/paths", key));
       const fields = item.pipe(Option.flatMap((located) => decodeOption(ItemFields, located.node)));
       const node = item.pipe(Option.flatMap((located) => decodeOption(JsonMap, located.node)));
       if (
@@ -286,7 +283,7 @@ const entriesOf = (
   level: Level,
 ): readonly ParameterEntry[] =>
   (list ?? []).map((_entry, index) => {
-    const pointer = child(child(owner, "parameters"), String(index));
+    const pointer = childPointer(childPointer(owner, "parameters"), String(index));
 
     return { key: parameterKey(resolution, pointer), level, pointer };
   });
@@ -397,7 +394,7 @@ const diagnose = (
     row,
     scope: rule.scope,
     severity: rule.severity,
-    specSection: `https://spec.openapis.org/oas/v${patch[shared.resolution.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(shared.resolution.line, rule.anchor),
   };
   if (rule.hint !== undefined) {
     fields.hint = rule.hint;
@@ -419,7 +416,7 @@ const assembleBody = (
       return { diagnostics: [], refusedRequired: false };
     }
 
-    const pointer = child(raw.pointer, "requestBody");
+    const pointer = childPointer(raw.pointer, "requestBody");
     const operation = operationInfo(raw);
     if (bodylessMethods.has(raw.method)) {
       const ignored = shared.resolution.line === "3.0";
@@ -458,8 +455,11 @@ const effectiveServersOf = (
 
     return effectiveServers(
       {
-        operation: yield* serverSource(child(raw.pointer, "servers"), raw.fields.servers),
-        pathItem: yield* serverSource(child(raw.itemPointer, "servers"), raw.itemFields.servers),
+        operation: yield* serverSource(childPointer(raw.pointer, "servers"), raw.fields.servers),
+        pathItem: yield* serverSource(
+          childPointer(raw.itemPointer, "servers"),
+          raw.itemFields.servers,
+        ),
         root: yield* serverSource("/servers", Option.getOrUndefined(root)),
       },
       shared.context,
@@ -517,7 +517,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
     );
     const parameters = yield* assembleParameters(shared, raw, merged);
     const body = yield* assembleBody(shared, raw);
-    const responses = yield* normalizeResponses(resolution, child(raw.pointer, "responses"));
+    const responses = yield* normalizeResponses(resolution, childPointer(raw.pointer, "responses"));
     const policy = yield* normalizeSecurityPolicy(resolution, shared.schemes, raw.pointer);
     const servers = yield* effectiveServersOf(shared, raw);
     const site = { operation: operationInfo(raw), pointer: raw.pointer };
@@ -535,7 +535,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       ...(body.refusedRequired
         ? [
             yield* diagnose(shared, "OPR-09/required-body-refused", site, [
-              child(raw.pointer, "requestBody"),
+              childPointer(raw.pointer, "requestBody"),
             ]),
           ]
         : []),

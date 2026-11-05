@@ -1,15 +1,14 @@
-import { Array as Arr, Effect, Exit, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
 import { PathTemplate } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { methodTokens } from "../model/method-tokens.ts";
 import { referenceAt } from "../resolve/index.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
+import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
+import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 interface Rule {
   readonly anchor: string;
@@ -130,8 +129,6 @@ interface Parameter {
   readonly pointer: string;
 }
 
-const patch = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
-
 const componentName = /^[a-zA-Z0-9.\-_]+$/u;
 
 const expression = /\{(?<name>[^{}]+)\}/gu;
@@ -165,24 +162,6 @@ const componentSections = {
   "3.2": [...sections30, "pathItems", "mediaTypes"],
 } as const;
 
-const isObject = (value: Json | undefined): value is JsonObject => Predicate.isObject(value);
-
-const isArray = (value: Json | undefined): value is readonly Json[] => Array.isArray(value);
-
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
-
-const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const exit = Effect.runSyncExit(evaluatePointer(root, pointer));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
-
-const stringMember = (node: JsonObject, name: string): string | undefined => {
-  const value = node[name];
-
-  return Predicate.isString(value) ? value : undefined;
-};
-
 // An object at a use site, followed through its Reference Object to the end of the chain.
 const locate = (
   resolution: Resolution,
@@ -208,7 +187,7 @@ const pathItems = (resolution: Resolution): readonly PathItem[] => {
   }
 
   return Object.entries(paths).flatMap(([key, value]) => {
-    const use = child("/paths", key);
+    const use = childPointer("/paths", key);
     const located = locate(resolution, use, value);
 
     return located === undefined
@@ -224,11 +203,12 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
   const additional =
     resolution.line === "3.2" && isObject(extra)
       ? Object.keys(extra).map(
-          (name) => [name, child(child(item.pointer, "additionalOperations"), name)] as const,
+          (name) =>
+            [name, childPointer(childPointer(item.pointer, "additionalOperations"), name)] as const,
         )
       : [];
   const entries = [
-    ...fixed.map((name) => [name, child(item.pointer, name)] as const),
+    ...fixed.map((name) => [name, childPointer(item.pointer, name)] as const),
     ...additional,
   ];
 
@@ -262,7 +242,7 @@ const parametersOf = (
   }
 
   return list.flatMap((entry, index) => {
-    const pointer = child(child(ownerPointer, "parameters"), String(index));
+    const pointer = childPointer(childPointer(ownerPointer, "parameters"), String(index));
     const located = locate(resolution, pointer, entry);
     const name = located === undefined ? undefined : stringMember(located.node, "name");
     const location = located === undefined ? undefined : stringMember(located.node, "in");
@@ -327,7 +307,7 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
           .filter((name) => !componentName.test(name))
           .map((name): Finding => ({
             code: "CMP-13/invalid-key",
-            pointer: child(child("/components", section), name),
+            pointer: childPointer(childPointer("/components", section), name),
           }))
       : [];
   });
@@ -338,7 +318,7 @@ const duplicateIdFindings = (operations: readonly Operation[]): readonly Finding
   const found: Finding[] = [];
   for (const operation of operations) {
     if (operation.id !== undefined) {
-      const pointer = child(operation.pointer, "operationId");
+      const pointer = childPointer(operation.pointer, "operationId");
       const earlier = first.get(operation.id);
       if (earlier === undefined) {
         first.set(operation.id, pointer);
@@ -502,12 +482,12 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
     element: rule.element,
     hint: rule.hint,
     message: rule.message,
-    openapi: Predicate.isString(declared) ? declared : patch[resolution.line],
+    openapi: Predicate.isString(declared) ? declared : patchVersion[resolution.line],
     pointer: viaReference ? operation.item.use : finding.pointer,
     row,
     scope: rule.scope,
     severity: "refusal",
-    specSection: `https://spec.openapis.org/oas/v${patch[resolution.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(resolution.line, rule.anchor),
   };
   const located = operation === undefined ? base : { ...base, operation: operationOf(operation) };
   const fields =

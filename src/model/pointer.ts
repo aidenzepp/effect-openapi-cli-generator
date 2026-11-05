@@ -83,6 +83,12 @@ export const parsePointer = (
 };
 
 /**
+ * The pointer to member or index `token` of the node at `pointer`.
+ */
+export const childPointer = (pointer: string, token: string): string =>
+  `${pointer}/${escapeToken(token)}`;
+
+/**
  * Formats tokens as a pointer string.
  */
 export const formatPointer = (tokens: readonly string[]): string =>

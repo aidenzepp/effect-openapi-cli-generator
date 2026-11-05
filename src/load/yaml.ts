@@ -10,7 +10,7 @@ import type {
   YAMLSeq,
 } from "yaml";
 import type { DocumentUri } from "../model/brands.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { refuse } from "./budget.ts";
 import type { LoadCode, LoadLimits, LoadRefusal, Position } from "./budget.ts";
@@ -59,12 +59,9 @@ interface Walk {
   nodes: number;
 }
 
-const pointerOf = (path: readonly string[]): string =>
-  path.map((token) => `/${escapeToken(token)}`).join("");
-
 const fail = (walk: Walk, code: LoadCode, node: ParsedNode | null): void => {
   const index = node?.range[0];
-  const pointer = pointerOf(walk.path);
+  const pointer = formatPointer(walk.path);
 
   walk.failure ??= index === undefined ? { code, pointer } : { code, index, pointer };
 };

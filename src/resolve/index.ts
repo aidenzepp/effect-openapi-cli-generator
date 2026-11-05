@@ -5,16 +5,21 @@ import type { Line } from "../validate/index.ts";
 import { documentBase, resolveUri, schemaBase, stringMember, stripFragment } from "./base-uri.ts";
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
-import { escapeToken, evaluateTokens, parseFragment, parsePointer } from "../model/pointer.ts";
+import {
+  evaluateTokens,
+  parseFragment,
+  parsePointer,
+  formatPointer,
+  childPointer,
+} from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { specSectionUrl } from "../model/spec-section.ts";
+import { isObject, isArray } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
 
 type Document = typeof DocumentUri.Type;
-
-interface JsonObject {
-  readonly [key: string]: Json;
-}
 
 /**
  * One document of the set (a set of one in Milestone 1), with the `openapi` line it declares.
@@ -198,8 +203,6 @@ const elementRefusals: ReadonlySet<Code> = new Set<Code>([
   "SEC-10/uri-like-name",
 ]);
 
-const patch: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
-
 interface Finding {
   readonly code: Code;
   readonly pointer: string;
@@ -213,11 +216,6 @@ interface Failure {
 const failure = (code: DocumentCode, pointer: string, related?: CanonicalKey): Failure => ({
   finding: related === undefined ? { code, pointer } : { code, pointer, related },
 });
-
-const isObject = (value: Json): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isArray = (value: Json): value is readonly Json[] => Array.isArray(value);
 
 type Kind =
   | ReferenceKind
@@ -374,11 +372,6 @@ const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
 
-const child = (pointer: string, token: string): string => `${pointer}/${escapeToken(token)}`;
-
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${escapeToken(token)}`).join("");
-
 const tokensOf = (pointer: string): readonly string[] => {
   const exit = Effect.runSyncExit(parsePointer(pointer));
 
@@ -394,7 +387,7 @@ const nodeAt = (root: Json, pointer: string): Json | undefined => {
 const fragmentPointer = (fragment: string): string | undefined => {
   const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
 
-  return Exit.isSuccess(exit) ? pointerOf(exit.value) : undefined;
+  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
 };
 
 const memberOf = (node: Json, token: string): Json | undefined => {
@@ -688,7 +681,7 @@ class Resolver {
       if (uriSyntax.test(name)) {
         this.findings.push({
           code: "SEC-10/uri-like-name",
-          pointer: child(child(pointer, "securitySchemes"), name),
+          pointer: childPointer(childPointer(pointer, "securitySchemes"), name),
         });
       }
     }
@@ -704,7 +697,7 @@ class Resolver {
     };
 
     for (const [name, value] of Object.entries(node)) {
-      const at = child(pointer, name);
+      const at = childPointer(pointer, name);
       const field = fieldOf(this.line, kind, name);
       if (members !== undefined && !name.startsWith("x-")) {
         enqueue(members, value, at);
@@ -712,11 +705,11 @@ class Resolver {
         enqueue(field[1], value, at);
       } else if (field?.[2] === "list" && isArray(value)) {
         for (const [index, item] of value.entries()) {
-          enqueue(field[1], item, child(at, `${index}`));
+          enqueue(field[1], item, childPointer(at, `${index}`));
         }
       } else if (field?.[2] === "map" && isObject(value)) {
         for (const [entry, item] of Object.entries(value)) {
-          enqueue(field[1], item, child(at, entry));
+          enqueue(field[1], item, childPointer(at, entry));
         }
       }
     }
@@ -1070,7 +1063,7 @@ const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diag
     row,
     scope,
     severity: notices.has(finding.code) ? "notice" : "refusal",
-    specSection: `https://spec.openapis.org/oas/v${patch[input.line]}.html#${rule.anchor}`,
+    specSection: specSectionUrl(input.line, rule.anchor),
   };
 
   return Schema.decodeUnknownEffect(Diagnostic)(
@@ -1145,7 +1138,7 @@ export const implicitComponent = (
   section: ComponentSection,
   name: string,
 ): Option.Option<CanonicalKey> => {
-  const pointer = pointerOf(["components", section, name]);
+  const pointer = formatPointer(["components", section, name]);
   if (nodeAt(resolution.value, pointer) !== undefined) {
     return Option.some({ document: resolution.document, pointer });
   }
