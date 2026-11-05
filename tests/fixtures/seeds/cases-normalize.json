@@ -417,9 +417,9 @@
         "method": "post"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design §3.4 names dot segments, and §6.1 refuses percent-encoded dot segments after expansion at run time; whether a static %2E. in a path key is a generation refusal is not stated",
-        "candidates": ["PTH-07 refusal", "implemented, refused at run time"]
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation"
       },
       "designSection": "§3.4; §6.1"
     },
@@ -727,9 +727,11 @@
         "paths": {}
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design does not state whether a document with zero operations is generated, a notice, or refused; aliases no longer select operations",
-        "priorOutcome": "refusal 'selected'"
+        "priorOutcome": "refusal 'selected'",
+        "outcome": "implemented",
+        "operations": 0,
+        "refusals": 0,
+        "verdict": "accepted"
       },
       "designSection": "§3.5"
     },
@@ -1158,8 +1160,11 @@
         ]
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design lists only equal folds as collisions; a command that equals a group name (group vs command prefix) is not stated"
+        "outcome": "implemented",
+        "commandPaths": [
+          ["things", "get"],
+          ["things", "get-child"]
+        ]
       },
       "designSection": "§4.4"
     },
@@ -1842,8 +1847,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design makes non-schema reference cycles document refusals and schema cycles legal; a schema that is only a $ref to itself is a schema cycle with no content, and the design does not say which"
+        "outcome": "refusal",
+        "row": "DOC-23",
+        "code": "DOC-23/alias-cycle",
+        "scope": "element"
       },
       "designSection": "§3.3 Budgets"
     },
@@ -1934,8 +1941,9 @@
         "ref": "#"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "'#' is the whole document; design says fragments are JSON Pointers and an empty pointer is legal RFC 6901; whether a schema position referring to the document root is refused is not stated"
+        "outcome": "refusal",
+        "row": "SCH-03",
+        "scope": "element"
       },
       "designSection": "§3.3"
     },
@@ -2132,10 +2140,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal at exact pointer",
-        "pointerIfRefused": "/schema/required/0",
-        "basis": "JSON Schema allows required names without a property; design D-AD12 tier not stated for generation"
+        "outcome": "implemented",
+        "requiredKeys": ["missing"],
+        "flags": []
       },
       "designSection": "§3.2; §3.4; §10 D-AD12"
     },
@@ -2268,10 +2276,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal at exact pointer",
-        "pointerIfRefused": "/schema/enum",
-        "basis": "D-AD12 tier for object enum members not stated in the sections read"
+        "outcome": "notice",
+        "tier": "server-validated",
+        "pointer": "/schema/enum"
       },
       "designSection": "§3.2; §3.4; §10 D-AD12"
     },
@@ -2305,10 +2313,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal at exact pointer",
-        "pointerIfRefused": "/schema/properties",
-        "basis": "inapplicable keyword; D-AD12 not read for this case"
+        "outcome": "notice",
+        "tier": "vacuous",
+        "pointer": "/schema/properties"
       },
       "designSection": "§3.2; §3.4; §10 D-AD12"
     },
@@ -2364,10 +2372,9 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal at exact pointer",
-        "pointerIfRefused": "/schema/type",
-        "basis": "a schema with no type is not refused by the design: unconstrained values are Schema.Json (see multi-type union cases)"
+        "outcome": "implemented",
+        "refused": false
       },
       "designSection": "§3.2; §3.4; §10 D-AD12"
     },
@@ -2715,8 +2722,12 @@
         "operationId": ""
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "an empty string is a string, so the official schema accepts it; the fold of an empty result refuses (§4.4 'Empty result: refuse') but the scope and whether the route fallback applies are not stated"
+        "outcome": "refusal",
+        "row": "OPR-06",
+        "code": "OPR-06/empty-name",
+        "scope": "operation",
+        "routeFallback": false,
+        "hintNamesConfigKey": true
       },
       "designSection": "§4.4"
     },
@@ -3083,9 +3094,11 @@
         "title": "CloudAPI User Accounts!"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design says package name and bin name come from the author config (INF-*, D-AD11); whether a title slug is a default is not stated",
-        "priorValue": "cloud-api-user-accounts"
+        "priorValue": "cloud-api-user-accounts",
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": "cloud-api-user-accounts",
+        "exitCode": 1
       },
       "designSection": "§2.3 INF"
     },
@@ -3313,8 +3326,10 @@
         "title": "💥"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design takes names from the author config; behavior when no name is configured and the title does not fold is not stated",
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": null,
+        "exitCode": 1,
         "hintNamesConfigKey": true
       },
       "designSection": "§2.3 INF; §4.4"
@@ -3326,8 +3341,10 @@
         "title": "123 API"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design takes names from the author config; behavior when no name is configured and the title does not fold is not stated",
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": null,
+        "exitCode": 1,
         "hintNamesConfigKey": true
       },
       "designSection": "§2.3 INF; §4.4"
@@ -3339,8 +3356,10 @@
         "title": "Help"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "design takes names from the author config; behavior when no name is configured and the title does not fold is not stated",
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": "help",
+        "exitCode": 1,
         "hintNamesConfigKey": true
       },
       "designSection": "§2.3 INF; §4.4"
@@ -3528,9 +3547,11 @@
         "casing": "camel"
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "fold splits only at lower-to-upper boundaries, so HTTPResponse is one word; the camel result (httpresponse, hTTPResponse...) and the suffix spelling are not fixed",
-        "priorValue": "hTTPResponseCommand"
+        "priorValue": "hTTPResponseCommand",
+        "outcome": "implemented",
+        "camel": "httpresponse",
+        "pascal": "Httpresponse",
+        "kebab": "httpresponse"
       },
       "designSection": "§4.4 Fold"
     },
@@ -3684,9 +3705,10 @@
         "allowReserved": false
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "UsageError",
-        "question": "§6.1 names the refusal for allowReserved only; whether form non-exploded percent-encodes the item comma and so becomes ambiguous is not stated in the cells read"
+        "outcome": "implemented",
+        "wireValue": "private%2Ca",
+        "usageError": false
       },
       "designSection": "§6.1 query"
     },
@@ -3700,9 +3722,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal unsupported 'Constraints alongside multi-type unions'",
-        "question": "D-AD12 keyword tiers decide (enum is asserted, minLength applies to the string member only); not read in full for this combination"
+        "outcome": "implemented",
+        "refused": false,
+        "enumAsserted": true
       },
       "designSection": "§10 D-AD12"
     },
@@ -3716,9 +3739,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
         "priorOutcome": "refusal unsupported 'Constraints alongside multi-type unions'",
-        "question": "D-AD12 keyword tiers decide (enum is asserted, minLength applies to the string member only); not read in full for this combination"
+        "outcome": "implemented",
+        "refused": false,
+        "minLengthAppliesTo": "string"
       },
       "designSection": "§10 D-AD12"
     },
@@ -3749,8 +3773,10 @@
         }
       },
       "expected": {
-        "outcome": "unsettled",
-        "question": "3.0 has no webhooks field; official-schema validation for 3.0 may reject the unknown key, or the key reads as an extension; priorLocation /webhooks"
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/webhooks"
       },
       "designSection": "§3.2"
     },
@@ -3768,6 +3794,101 @@
         "pointer": "/webhooks"
       },
       "designSection": "§3.2"
+    },
+    {
+      "id": "validate-apikey-in-body-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "openapi": "3.1",
+        "securitySchemes": {
+          "key": {
+            "type": "apiKey",
+            "in": "body",
+            "name": "k"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "validate-apikey-missing-name-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "openapi": "3.1",
+        "securitySchemes": {
+          "key": {
+            "type": "apiKey",
+            "in": "header"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "cmd-command-equals-sibling-group-refused",
+      "source": "b96c8946 SR:G4",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "operationId": "things"
+          },
+          {
+            "tag": "things",
+            "operationId": "things-get"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CMD-collision",
+        "scope": "operation",
+        "refusedOperationIds": ["things"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "multipart-extra-fields-map-refused",
+      "source": "b96c8946 SR:G10",
+      "input": {
+        "openapi": "3.1",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "code": "SCH-13/multipart-extra-fields",
+        "scope": "element",
+        "operationKept": true
+      },
+      "designSection": "§10 D-ENC1"
     }
   ]
 }
