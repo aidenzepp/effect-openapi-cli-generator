@@ -682,9 +682,52 @@ const renderArgs = (args: readonly Expr[], place: Place, render: Render): string
   return block("(", lines, place.indent, ")");
 };
 
+// The text after `=>` that stays on the head's line: ` ({` or ` [` before a literal body.
+const headTail = (expr: ArrowExpr): number => {
+  if (expr.body._tag === "Object") {
+    return 3;
+  }
+
+  return expr.body._tag === "Array" ? 2 : 0;
+};
+
+// When the head's line runs past column 100, the parameters break one per line and the head ends
+// with `): Returns =>` at the arrow's indent. The body is then laid out after that line.
+const renderBrokenHead = (expr: ArrowExpr, place: Place, render: Render): string => {
+  const inner = place.indent + 2;
+  const params = expr.params.map((param) => `${pad(inner)}${paramText(param)},`);
+  const returns = expr.returns === undefined ? "" : `: ${typeText(expr.returns)}`;
+  const close = `)${returns} =>`;
+  const head = block("(", params, place.indent, close);
+  const column = place.indent + textWidth(close) + 1;
+  const body = flat(expr.body);
+  const flatBody = expr.body._tag === "Object" ? flatPair("(", "", flatPair(body, "", ")")) : body;
+  if (fits(flatBody, { ...place, column })) {
+    return `${head} ${flatBody}`;
+  }
+
+  if (expr.body._tag === "Object") {
+    const at = { column: column + 1, indent: place.indent, tail: place.tail + 1 };
+
+    return `${head} (${render(expr.body, at)})`;
+  }
+
+  if (expr.body._tag === "Array") {
+    return `${head} ${render(expr.body, { ...place, column })}`;
+  }
+
+  const moved = { column: inner, indent: inner, tail: place.tail };
+
+  return `${head}\n${pad(inner)}${render(expr.body, moved)}`;
+};
+
 const renderArrow = (expr: ArrowExpr, place: Place, render: Render): string => {
   const head = arrowHead(expr);
   const column = place.column + textWidth(head) + 1;
+  if (expr.params.length > 0 && column - 1 + headTail(expr) > lineWidth) {
+    return renderBrokenHead(expr, place, render);
+  }
+
   if (expr.body._tag === "Object") {
     const at = { column: column + 1, indent: place.indent, tail: place.tail + 1 };
 
