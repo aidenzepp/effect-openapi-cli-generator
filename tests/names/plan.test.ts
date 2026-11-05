@@ -253,7 +253,10 @@ describe("planNames: groups and commands", () => {
     });
 
     expect(result.groups[0]?.commands.map((command) => command.name)).toEqual(["get", "get-child"]);
-    expect(result.diagnostics).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "OPR-06/folded", scope: "element", severity: "notice" },
+    ]);
+    expect(result.diagnostics[0]?.operation?.operationId).toBe("things-get");
   });
 
   test("two commands folding equal in one group refuse both operations", () => {
