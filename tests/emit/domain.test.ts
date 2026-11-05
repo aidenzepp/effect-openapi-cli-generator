@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
 import nodePath from "node:path";
 import { Array as Arr, Effect, Schema } from "effect";
 import { emitDomainSchemas } from "../../src/emit/domain.ts";
@@ -23,6 +24,43 @@ const format = (text: string) => {
   });
 
   return { exitCode: result.exitCode, stdout: decoder.decode(result.stdout) };
+};
+
+const tsc = nodePath.resolve(root, "node_modules/.bin/tsc");
+
+// Type-checks the emitted module beside the real `effect` package, under the repository's flags.
+const typeErrors = (content: string): string => {
+  const directory = fs.mkdtempSync(nodePath.resolve(root, "work/domain-emit-"));
+  try {
+    const file = nodePath.resolve(directory, "schemas.ts");
+
+    fs.writeFileSync(file, content);
+
+    const result = Bun.spawnSync(
+      [
+        tsc,
+        "--ignoreConfig",
+        "--noEmit",
+        "--strict",
+        "--exactOptionalPropertyTypes",
+        "--skipLibCheck",
+        "--target",
+        "ES2022",
+        "--module",
+        "ESNext",
+        "--moduleResolution",
+        "Bundler",
+        "--types",
+        "node",
+        file,
+      ],
+      { cwd: root },
+    );
+
+    return decoder.decode(result.stdout) + decoder.decode(result.stderr);
+  } finally {
+    fs.rmSync(directory, { force: true, recursive: true });
+  }
 };
 
 const ref = (key: string): Json => ({ $ref: `#/$defs/${key}` });
@@ -157,6 +195,21 @@ describe("emitDomainSchemas", () => {
     expect(content).toContain("export const Node =");
     expectFixedPoint(content);
   }, 30_000);
+
+  test("a definition a Schema.Codec annotation names has its type, recursive or not", async () => {
+    const content = await emit(
+      [
+        ["A", { properties: { b: ref("B") }, type: "object" }],
+        ["B", { properties: { c: ref("C") }, type: "object" }],
+        ["C", { properties: { a: ref("A"), b: ref("B") }, type: "object" }],
+      ],
+      ["A", "B", "C"],
+    );
+
+    expect(content).toContain("Schema.suspend((): Schema.Codec<A> => A)");
+    expect(typeErrors(content)).toBe("");
+    expectFixedPoint(content);
+  }, 60_000);
 
   test("default, example and examples never reach the output", async () => {
     const content = await emit(
