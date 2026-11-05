@@ -1,5 +1,5 @@
 import { Effect, Option, Predicate } from "effect";
-import { Headers, HttpBody, HttpClientRequest } from "effect/http";
+import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 
 /**
@@ -780,7 +780,14 @@ export const request = (method: string, descriptors: RequestParts): Request =>
     );
     const url = query === "" ? expandedPath : `${expandedPath}?${query}`;
     let built = HttpClientRequest.setUrl(
-      HttpClientRequest.makeWith(method, "", [], Option.none(), Headers.empty, HttpBody.empty),
+      HttpClientRequest.makeWith(
+        method,
+        "",
+        UrlParams.empty,
+        Option.none(),
+        Headers.empty,
+        HttpBody.empty,
+      ),
       url,
     );
 

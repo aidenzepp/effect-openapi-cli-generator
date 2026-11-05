@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Runtime, Stream } from "effect";
-import { HttpBody } from "effect/http";
+import { HttpBody, UrlParams } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
@@ -814,6 +814,12 @@ const describeRequest = (parts: Partial<Serialize.RequestParts> = {}) =>
 const run = (request: Serialize.Request) => Effect.runPromise(request);
 
 describe("request", () => {
+  test("urlParams is a UrlParams value, not a bare array", async () => {
+    const built = await run(describeRequest());
+
+    expect(UrlParams.isUrlParams(built.urlParams)).toBe(true);
+  });
+
   test("the URL is the expanded path plus the query pairs, with no origin and no urlParams", async () => {
     const built = await run(
       describeRequest({

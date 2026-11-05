@@ -13,14 +13,7 @@ import {
   Sink,
   Stdio,
 } from "effect";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse,
-  UrlParams,
-} from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import type * as Client from "../../src/runtime-src/runtime/client.ts";
@@ -98,8 +91,6 @@ interface World {
   readonly defect?: boolean;
   readonly env?: Record<string, string>;
   readonly operation?: Output.OperationMeta;
-  // Replace the raw `[]` urlParams Serialize.request builds with a real UrlParams value.
-  readonly realUrlParams?: boolean;
 }
 
 const failingBody = (text: string | undefined): ReadableStream<Uint8Array> =>
@@ -200,18 +191,6 @@ const run = async (world: World = {}) => {
   );
   const program = Output.finalCatch([])(
     request.pipe(
-      Effect.map((built) =>
-        world.realUrlParams === true
-          ? HttpClientRequest.makeWith(
-              built.method,
-              built.url,
-              UrlParams.empty,
-              built.hash,
-              built.headers,
-              built.body,
-            )
-          : built,
-      ),
       Effect.flatMap(Output.send(world.operation ?? meta, Option.fromNullishOr(world.accept))),
     ),
   );
@@ -334,7 +313,6 @@ describe("Output.send errors", () => {
   test("a redirect from https to http is refused and exits 4", async () => {
     const result = await run({
       answer: { headers: { location: "http://api.example.com/users/42" }, status: 302 },
-      realUrlParams: true,
     });
 
     expect(result.tag).toBe("RedirectRefused");
