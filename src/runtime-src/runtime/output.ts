@@ -1,15 +1,14 @@
 import type { PlatformError } from "effect";
 import {
-  Array as Arr,
   Cause,
   Context,
   Data,
   Effect,
   FileSystem,
+  Layer,
   Option,
-  Order,
   Path,
-  Redacted,
+  Ref,
   Runtime,
   Schema,
   Sink,
@@ -18,7 +17,8 @@ import {
 } from "effect";
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
-import { Base64 } from "effect/encoding";
+import { Headers, HttpClient, HttpClientRequest } from "effect/http";
+import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
   CredentialMissing,
@@ -28,7 +28,30 @@ import {
   TransportError,
   UsageError,
 } from "../domain/errors.ts";
-import type { Credential } from "./auth.ts";
+import type { Credential, SecurityRequirement } from "./auth.ts";
+import {
+  allowCredentialsForBaseUrl,
+  attach,
+  credentialOrigins,
+  evaluate,
+  redactedNames,
+  Schemes,
+} from "./auth.ts";
+import {
+  baseUrlSetting,
+  requestUrl,
+  resolve,
+  select,
+  serverSetting,
+  Servers,
+  serverVariableSetting,
+} from "./base-url.ts";
+import type { DirectRoute } from "./client.ts";
+import { redirectLoop, withUserAgent } from "./client.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
+import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
+import { dropTrailingFragment, longestFormBytes, scrub } from "./redact.ts";
+import { classify, mapClientError, matchResponse, toApiResponseError } from "./response.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -218,94 +241,6 @@ const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
  */
 export const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
 
-/**
- * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
- * token `basicAuth` sends and the password alone; for an apiKey in the query also the
- * percent-encoded form the URL serializer emits. Empty forms are dropped.
- */
-const wireForms = (credential: Credential): readonly string[] => {
-  const value: string = Redacted.value(credential.value);
-  const { definition } = credential;
-  const forms = [value];
-
-  if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
-    forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
-  }
-
-  if (definition.kind === "apiKey" && definition.in === "query") {
-    forms.push(new URLSearchParams([["", value]]).toString().slice(1));
-  }
-
-  return forms.filter((form) => form !== "");
-};
-
-interface Covered {
-  readonly start: number;
-  readonly end: number;
-  readonly placeholder: string;
-}
-
-const byStartThenLongest = Order.combine(
-  Order.mapInput(Order.Number, (range: Covered) => range.start),
-  Order.mapInput(Order.flip(Order.Number), (range: Covered) => range.end),
-);
-
-/**
- * Every occurrence of every wire form of every credential as a character range, overlapping
- * occurrences included.
- */
-const occurrences = (text: string, credentials: readonly Credential[]): readonly Covered[] =>
-  credentials.flatMap((credential) =>
-    wireForms(credential).flatMap((form) => {
-      const placeholder = `<redacted:${credential.scheme}>`;
-      const found: Covered[] = [];
-
-      for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
-        found.push({ end: at + form.length, placeholder, start: at });
-      }
-
-      return found;
-    }),
-  );
-
-/**
- * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,
- * longest range.
- */
-const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
-  const runs: Covered[] = [];
-
-  for (const range of Arr.sort(ranges, byStartThenLongest)) {
-    const last = runs.at(-1);
-
-    if (last !== undefined && range.start <= last.end) {
-      runs[runs.length - 1] = { ...last, end: Math.max(last.end, range.end) };
-    } else {
-      runs.push(range);
-    }
-  }
-
-  return runs;
-};
-
-/**
- * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
- * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
- * character of any form survives (recheck N1), and placeholders are never rescanned.
- */
-export const scrub = (text: string, credentials: readonly Credential[]): string => {
-  const runs = mergeRuns(occurrences(text, credentials));
-  let scrubbed = "";
-  let at = 0;
-
-  for (const run of runs) {
-    scrubbed += text.slice(at, run.start) + run.placeholder;
-    at = run.end;
-  }
-
-  return scrubbed + text.slice(at);
-};
-
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
 const oneByteLimit = 128;
 
@@ -357,55 +292,6 @@ export const boundedExcerpt = (
   maxBytes: number,
   credentials: readonly Credential[],
 ): string => truncateUtf8(sanitize(scrub(text, credentials)), maxBytes);
-
-const encoder = new TextEncoder();
-
-const longestFormBytes = (credentials: readonly Credential[]): number =>
-  Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));
-
-/**
- * The length of the longest proper prefix of `form` that `text` ends with (Knuth-Morris-Pratt, so
- * a long credential costs linear time).
- */
-const trailingPrefixLength = (text: string, form: string): number => {
-  const fallback = [0];
-
-  for (let at = 1, matched = 0; at < form.length; at += 1) {
-    while (matched > 0 && form[at] !== form[matched]) {
-      matched = fallback[matched - 1] ?? 0;
-    }
-
-    matched += form[at] === form[matched] ? 1 : 0;
-    fallback.push(matched);
-  }
-
-  // Only the last form.length - 1 characters can hold a proper prefix, so a full match never forms.
-  let matched = 0;
-
-  for (let at = Math.max(0, text.length - form.length + 1); at < text.length; at += 1) {
-    while (matched > 0 && text[at] !== form[matched]) {
-      matched = fallback[matched - 1] ?? 0;
-    }
-
-    matched += text[at] === form[matched] ? 1 : 0;
-  }
-
-  return matched;
-};
-
-/**
- * Drop the trailing partial match of any credential form (audit F1). A read cut at its budget can
- * end inside a credential; that fragment never matches, so scrubbing would leave it, and a shorter
- * placeholder earlier in the text would pull it into the visible window.
- */
-const dropTrailingFragment = (text: string, credentials: readonly Credential[]): string => {
-  const cut = Math.max(
-    0,
-    ...credentials.flatMap(wireForms).map((form) => trailingPrefixLength(text, form)),
-  );
-
-  return text.slice(0, text.length - cut);
-};
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
 // larger than the limit, so each chunk is cut at the remaining budget instead.
@@ -597,47 +483,76 @@ const reportOnce = <E extends object>(
   );
 
 /**
+ * The credentials the run evaluated, so the final catch scrubs what the command handler chose.
+ * `send` records them; `finalCatch` adds them to its own list. Both require the service, so an
+ * entry that omits `runCredentialsLayer` does not compile.
+ */
+export class RunCredentials extends Context.Service<
+  RunCredentials,
+  Ref.Ref<readonly Credential[]>
+>()("openapi-cli/runtime/RunCredentials") {}
+
+export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
+  Ref.make<readonly Credential[]>([]),
+);
+
+const recordedCredentials: Effect.Effect<readonly Credential[], never, RunCredentials> =
+  Effect.flatMap(Effect.service(RunCredentials), Ref.get);
+
+const renderCause = <E>(
+  cause: Cause.Cause<E>,
+  credentials: readonly Credential[],
+): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
+  const failure = Cause.findErrorOption(cause);
+
+  if (Cause.hasInterruptsOnly(cause)) {
+    return Effect.failCause(cause);
+  }
+
+  if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
+    const text = renderCliError(failure.value);
+
+    return text === undefined
+      ? Effect.failCause(cause)
+      : reportOnce(sanitize(scrub(text, credentials)), failure.value);
+  }
+
+  if (Option.isSome(failure) && isKnownError(failure.value)) {
+    const error = failure.value;
+
+    return reportOnce(renderError(error, credentials), error);
+  }
+
+  const squashed = Cause.squash(cause);
+  const line = singleLine(
+    isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
+    credentials,
+  ).slice(0, maxDefectLineLength);
+
+  return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
+    Effect.andThen(Effect.fail(new InternalError())),
+  );
+};
+
+/**
  * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
  * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
  * itself, so its exit code stands; a `CliError` parse error is rendered once through
  * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
  * line and "internal error, please report" and fails with `InternalError`, exit 70.
- * `credentials` are the values to scrub; the caller holds them.
+ * `credentials` are the values to scrub that the caller holds; `RunCredentials`, provided outside
+ * the catch, adds the credentials the command handler evaluated.
  */
 export const finalCatch =
   (credentials: readonly Credential[]) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | InternalError, R | Stdio.Stdio> =>
-    Effect.catchCause(effect, (cause): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
-      const failure = Cause.findErrorOption(cause);
-
-      if (Cause.hasInterruptsOnly(cause)) {
-        return Effect.failCause(cause);
-      }
-
-      if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
-        const text = renderCliError(failure.value);
-
-        return text === undefined
-          ? Effect.failCause(cause)
-          : reportOnce(sanitize(scrub(text, credentials)), failure.value);
-      }
-
-      if (Option.isSome(failure) && isKnownError(failure.value)) {
-        const error = failure.value;
-
-        return reportOnce(renderError(error, credentials), error);
-      }
-
-      const squashed = Cause.squash(cause);
-      const line = singleLine(
-        isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
-        credentials,
-      ).slice(0, maxDefectLineLength);
-
-      return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
-        Effect.andThen(Effect.fail(new InternalError())),
-      );
-    });
+  <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | InternalError, R | RunCredentials | Stdio.Stdio> =>
+    Effect.catchCause(effect, (cause) =>
+      recordedCredentials.pipe(
+        Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
+      ),
+    );
 
 /**
  * The notes a generated command adds to its help (design 4.6): a note per argument and per flag,
@@ -820,3 +735,170 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
     }),
   formatVersion: valueFreeFormatter.formatVersion,
 });
+
+/**
+ * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path
+ * template (the display name when it has no `operationId`), its declared media, its security
+ * requirement and, when the operation declares one, the request-id header chosen at generation.
+ */
+export interface OperationMeta {
+  readonly media: MediaDeclaration;
+  readonly method: string;
+  readonly operationId?: string | undefined;
+  readonly pathTemplate: string;
+  readonly requestIdHeader?: string | undefined;
+  readonly security: SecurityRequirement;
+}
+
+/**
+ * The client policy inputs `bin.ts` provides: the method allowlist (design 6.7), the request
+ * init a loopback hop executes with (design 6.5 Loopback hosts), and the `User-Agent` name and
+ * version (design 6.2).
+ */
+export class ClientPolicy extends Context.Service<
+  ClientPolicy,
+  {
+    readonly allowed: ReadonlySet<string>;
+    readonly binName: string;
+    readonly direct: DirectRoute;
+    readonly version: string;
+  }
+>()("openapi-cli/runtime/ClientPolicy") {}
+
+/**
+ * The errors `send` fails with.
+ */
+export type SendError =
+  | ApiResponseError
+  | CredentialMissing
+  | OutputError
+  | RedirectRefused
+  | ResponseStreamError
+  | TransportError
+  | UsageError;
+
+const displayName = (meta: OperationMeta): string =>
+  meta.operationId ?? `${meta.method} ${meta.pathTemplate}`;
+
+/**
+ * The builder's URL is its path and serialized query; `requestUrl` takes them apart.
+ */
+const splitTarget = (target: string): readonly [path: string, query: string] => {
+  const at = target.indexOf("?");
+
+  return at === -1 ? [target, ""] : [target.slice(0, at), target.slice(at + 1)];
+};
+
+/**
+ * The one stderr notice of design 6.4 (F:R1): a configured credential is withheld from an unbound
+ * operator-chosen base URL. It names schemes and the flag, never a value.
+ */
+const withheldNotice = (credentials: readonly Credential[]): string => {
+  const schemes = [...new Set(credentials.map((credential) => credential.scheme))].join(", ");
+
+  return sanitize(
+    `Notice: not sending credentials (${schemes}) to an unbound base URL; ` +
+      "--allow-credentials-for-base-url sends them",
+  );
+};
+
+/**
+ * A response body read that fails part-way is a truncated body (exit 5).
+ */
+const bodyOf = (
+  response: HttpClientResponse.HttpClientResponse,
+): Stream.Stream<Uint8Array, ResponseStreamError> =>
+  Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+
+const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
+  const key = matchResponse(meta.media.responses, status);
+
+  return Object.hasOwn(meta.media.responses, key) ? (meta.media.responses[key] ?? []) : [];
+};
+
+/**
+ * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
+ * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
+ * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from `Servers`)
+ * joined to the builder's path and query; `Accept` from the declared response media or
+ * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
+ * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
+ * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
+ * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink; any
+ * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
+ * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
+ */
+export const send =
+  (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
+  (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.gen(function* sendRequest() {
+      const operation = displayName(meta);
+      const selection = yield* select({
+        baseUrl: yield* baseUrlSetting,
+        server: yield* serverSetting,
+        serverVariables: yield* serverVariableSetting,
+      });
+      const baseUrl = yield* resolve(selection);
+      const [path, query] = splitTarget(request.url);
+      const accepted = yield* acceptValue(meta.media, accept);
+      const located = HttpClientRequest.setUrl(request, requestUrl(baseUrl, path, query));
+      const built = Option.match(accepted, {
+        onNone: () => located,
+        onSome: (value) => HttpClientRequest.setHeader(located, "accept", value),
+      });
+
+      const credentials = yield* evaluate(operation, meta.security);
+      yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
+
+      const { table: security } = yield* Schemes;
+      const { table: servers } = yield* Servers;
+      const baseOrigin = new URL(baseUrl).origin;
+      const origins = credentialOrigins({
+        allowUnboundBase: yield* allowCredentialsForBaseUrl,
+        baseOrigin,
+        boundOrigins: servers.boundOrigins,
+        provenance: selection.provenance,
+      });
+
+      if (credentials.length > 0 && !origins.includes(baseOrigin)) {
+        yield* printStderr(withheldNotice(credentials));
+      }
+
+      const policy = yield* ClientPolicy;
+      const client = (yield* HttpClient.HttpClient).pipe(
+        redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        withUserAgent(policy.binName, policy.version),
+      );
+      const table = {
+        operation,
+        requestIdHeader: meta.requestIdHeader,
+        responses: meta.media.responses,
+      };
+
+      yield* client.execute(built).pipe(
+        Effect.catchTag("HttpClientError", mapClientError),
+        Effect.flatMap((response) =>
+          classify(table, response, credentials).pipe(
+            Effect.matchEffect({
+              onFailure: () =>
+                readExcerpt(bodyOf(response), credentials).pipe(
+                  Effect.orElseSucceed(() => ""),
+                  Effect.flatMap((excerpt) =>
+                    Effect.fail(toApiResponseError(table, response, excerpt, credentials)),
+                  ),
+                ),
+              onSuccess: (ok) =>
+                writeBody({
+                  bytes: bodyOf(ok),
+                  mediaType: dispatchResponse(
+                    declaredMedia(meta, ok.status),
+                    Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
+                  ),
+                }),
+            }),
+          ),
+        ),
+        Effect.scoped,
+        Effect.provide(redactedNames(security)),
+      );
+    });

@@ -38,12 +38,13 @@ import {
   finalCatch,
   readExcerpt,
   renderError,
+  runCredentialsLayer,
   sanitize,
-  scrub,
   valueFreeFormatter,
   writeBody,
 } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
+import { scrub } from "../../src/runtime-src/runtime/redact.ts";
 
 type Env =
   | FileSystem.FileSystem
@@ -385,7 +386,9 @@ const runCatch = <A, E>(program: Effect.Effect<A, E, Stdio.Stdio>, credentials =
   });
 
   return Effect.runPromise(
-    Effect.exit(finalCatch(credentials)(program)).pipe(Effect.provide(layer)),
+    Effect.exit(finalCatch(credentials)(program)).pipe(
+      Effect.provide(Layer.merge(layer, runCredentialsLayer)),
+    ),
   ).then((exit) => ({ exit, stderr: Buffer.concat(stderr).toString("utf-8") }));
 };
 

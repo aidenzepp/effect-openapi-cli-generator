@@ -3,7 +3,7 @@ import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
 import type { Credential } from "./auth.ts";
-import { scrub } from "./output.ts";
+import { scrub } from "./redact.ts";
 
 /**
  * What the matcher needs of one operation: its display name, its declared response keys (an
