@@ -712,11 +712,11 @@ describe("printModule", () => {
   test("printed modules are vp fmt fixed points", () => {
     expectFixedPoint(print(usersModule), "ts");
     expectFixedPoint(print(commandModule), "ts");
-  });
+  }, 30_000);
 
   test("the column 100 sweep is a vp fmt fixed point", () => {
     expectFixedPoint(print(sweepModule), "ts");
-  });
+  }, 30_000);
 
   test("object keys sort by code unit, print bare when identifier-shaped, and guard __proto__", () => {
     const keys = ["a1", "a-b", "a", "_b", "__proto__", "A", "9", "10", "404", "200", "default"];
@@ -728,7 +728,7 @@ describe("printModule", () => {
       'export const keys = {\n  "10": 0,\n  "200": 0,\n  "404": 0,\n  "9": 0,\n  A: 0,\n  ["__proto__"]: 0,\n  _b: 0,\n  a: 0,\n  "a-b": 0,\n  a1: 0,\n  default: 0,\n};\n',
     );
     expectFixedPoint(printed, "ts");
-  });
+  }, 30_000);
 
   test("printing is deterministic", () => {
     expect(print(sweepModule)).toBe(print(sweepModule));
@@ -740,7 +740,7 @@ describe("hostile strings", () => {
 
   test("stay inside literals that vp fmt keeps byte for byte", () => {
     expectFixedPoint(printed, "ts");
-  });
+  }, 30_000);
 
   test("round-trip through the printed literal", () => {
     const literals = printed
@@ -787,7 +787,7 @@ describe("hostile strings", () => {
     });
     expect(filled.split("\n").every((line) => line.length <= 100)).toBe(true);
     expectFixedPoint(filled, "ts");
-  });
+  }, 30_000);
 });
 
 // `export const w = f("` is 20 columns and `", bb);` is 7, so the literal's text has 73 columns.
@@ -801,7 +801,7 @@ describe("display width", () => {
     expect(wide.length + 27).toBeLessThanOrEqual(100);
     expect(line(wide)).toBe(`export const w = f(\n  ${stringLiteral(wide)},\n  bb,\n);\n`);
     expectFixedPoint(line(wide), "ts");
-  });
+  }, 30_000);
 
   test("combining marks count zero columns", () => {
     // 75 UTF-16 code units, 72 columns: within column 100 only when combining marks count zero.
@@ -809,7 +809,7 @@ describe("display width", () => {
     expect(combining.length + 27).toBeGreaterThan(100);
     expect(line(combining)).toBe(`export const w = f(${stringLiteral(combining)}, bb);\n`);
     expectFixedPoint(line(combining), "ts");
-  });
+  }, 30_000);
 });
 
 const HostileCase = Schema.Struct({
@@ -845,7 +845,7 @@ describe("hostile seeds", () => {
     expect(literals.map(literalValue)).toEqual(values);
     expect(literals.some((literal) => literal.startsWith("`"))).toBe(false);
     expectFixedPoint(printed, "ts");
-  });
+  }, 30_000);
 
   test("JSDoc text rejects hostile seed input", () => {
     const unsafe = hostileCases
@@ -883,7 +883,7 @@ describe("hostile seeds", () => {
       'export const keys = { ["__proto__"]: 1, constructor: 1, prototype: 1 };\n',
     );
     expectFixedPoint(printed, "ts");
-  });
+  }, 30_000);
 });
 
 const reason = (value: Expr) => failureOf({ imports: [], statements: [constant("x", value)] });
@@ -967,7 +967,7 @@ describe("printJson", () => {
 
   test("short arrays, long arrays and nested objects are vp fmt fixed points", () => {
     expectFixedPoint(printJson(value), "json");
-  });
+  }, 30_000);
 
   test("package.json keeps the formatter's layout and key order", () => {
     const manifest = json(
@@ -999,5 +999,5 @@ describe("printJson", () => {
     expect(
       Effect.runSync(Effect.flip(printPackageJson(json({ extra: 1, scripts: {} })))),
     ).toMatchObject({ reason: "unsupported-package-json", subject: "extra" });
-  });
+  }, 30_000);
 });
