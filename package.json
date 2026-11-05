@@ -21,7 +21,7 @@
   },
   "scripts": {
     "prepare:runtime": "bun tools/embed-runtime.ts",
-    "build": "bun run prepare:runtime && tsc -p tsconfig.build.json",
+    "build": "bun run prepare:runtime && tsc -p tsconfig.build.json && mkdir -p dist/validate/schemas && cp src/validate/schemas/*.json dist/validate/schemas/",
     "test": "bun run prepare:runtime && bun test",
     "format": "vp fmt --check",
     "lint": "vp lint --type-aware",

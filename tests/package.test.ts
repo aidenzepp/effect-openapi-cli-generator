@@ -48,20 +48,15 @@ const succeeds = async (command: readonly string[], cwd: string): Promise<Ran> =
 beforeAll(async () => {
   await succeeds(["bun", "run", "build"], root);
   await succeeds(["bun", "pm", "pack", "--destination", consumer], root);
-  // The generator's own pinned dependencies are listed beside the tarball so the install resolves
-  // from Bun's cache; `--prefer-offline` fetches only package manifests that are not cached.
   nodeFs.writeFileSync(
     nodePath.join(consumer, "package.json"),
-    JSON.stringify({
-      dependencies: {
-        ...generatorPackage.dependencies,
-        [generatorPackage.name]: `file:./${tarballName}`,
-      },
-      private: true,
-      type: "module",
-    }),
+    JSON.stringify({ private: true, type: "module" }),
   );
-  await succeeds(["bun", "install", "--prefer-offline"], consumer);
+  // Offline: the tarball's pinned dependencies resolve from Bun's cache; no registry fetch.
+  await succeeds(
+    ["bun", "add", "--offline", "--ignore-scripts", nodePath.join(consumer, tarballName)],
+    consumer,
+  );
 }, 120_000);
 
 afterAll(() => {
