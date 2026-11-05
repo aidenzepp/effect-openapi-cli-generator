@@ -1,0 +1,146 @@
+import { describe, expect, test } from "bun:test";
+import { Exit, Schema } from "effect";
+import hostile from "../fixtures/seeds/hostile.json" with { type: "json" };
+import {
+  CookieName,
+  DocumentUri,
+  HeaderName,
+  JsonLiteral,
+  JsonPointer,
+  MediaRange,
+  MediaType,
+  MethodToken,
+  PathTemplate,
+  SafeText,
+  ServerTemplate,
+  WireName,
+} from "../../src/model/brands.ts";
+import { methodTokens } from "../../src/model/method-tokens.ts";
+
+const decode = (codec: Schema.Decoder<unknown>, input: Schema.Json) =>
+  Schema.decodeUnknownExit(codec)(input);
+
+const issueTag = (codec: Schema.Decoder<unknown>, input: Schema.Json): string => {
+  const exit = decode(codec, input);
+  if (Exit.isSuccess(exit)) {
+    return "accepted";
+  }
+
+  return "rejected";
+};
+
+const HostileCases = Schema.Struct({
+  cases: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      input: Schema.Union([Schema.String, Schema.Struct({ codeUnits: Schema.Array(Schema.Number) })]),
+    }),
+  ),
+});
+
+const hostileStrings: readonly string[] = Schema.decodeUnknownSync(HostileCases)(hostile).cases.map(
+  ({ input }) => (Schema.is(Schema.String)(input) ? input : String.fromCodePoint(...input.codeUnits)),
+);
+
+const brands = [
+  ["WireName", WireName, "page[size]", ""],
+  ["HeaderName", HeaderName, "X-Request-Id", "bad name"],
+  ["CookieName", CookieName, "session_id", "a=b"],
+  ["MediaType", MediaType, "application/json; charset=utf-8", "application/*"],
+  ["MediaRange", MediaRange, "image/*", "image"],
+  ["PathTemplate", PathTemplate, "/users/{id}/posts", "users/{id}"],
+  ["ServerTemplate", ServerTemplate, "https://{region}.example.com/v1", "https://a b/{"],
+  ["MethodToken", MethodToken, "PROPFIND", "patch"],
+  ["SafeText", SafeText, "Line one\nline\ttwo", "bell\u0007"],
+  ["DocumentUri", DocumentUri, "file:///specs/api.yaml", "no scheme"],
+  ["JsonPointer", JsonPointer, "/a~1b/0", "a/b"],
+] as const;
+
+describe("branded codecs", () => {
+  for (const [name, codec, valid, invalid] of brands) {
+    test(`${name} accepts a valid value and rejects an invalid one`, () => {
+      const ok = decode(codec, valid);
+      expect(Exit.isSuccess(ok) ? ok.value : undefined).toBe(valid);
+      expect(issueTag(codec, invalid)).toBe("rejected");
+      expect(issueTag(codec, 42)).toBe("rejected");
+    });
+  }
+
+  test("rejection is stable across repeated decodes", () => {
+    for (const [, codec, , invalid] of brands) {
+      const first = decode(codec, invalid);
+      const second = decode(codec, invalid);
+      expect(Exit.isFailure(first)).toBe(true);
+      expect(String(first)).toBe(String(second));
+    }
+  });
+
+  test("path templates reject unbalanced and empty expressions", () => {
+    for (const bad of ["/a/{", "/a/}", "/a/{}", "/a/{x{y}}", "/a b", "/a?x=1"]) {
+      expect(issueTag(PathTemplate, bad)).toBe("rejected");
+    }
+    expect(issueTag(PathTemplate, "/")).toBe("accepted");
+  });
+
+  test("JsonLiteral accepts finite JSON and rejects non-finite or oversized values", () => {
+    expect(issueTag(JsonLiteral, { a: [1, "x", null, true] })).toBe("accepted");
+    expect(issueTag(JsonLiteral, Number.NaN)).toBe("rejected");
+    expect(issueTag(JsonLiteral, Number.POSITIVE_INFINITY)).toBe("rejected");
+    expect(issueTag(JsonLiteral, "x".repeat(2 ** 20 + 1))).toBe("rejected");
+    expect(issueTag(JsonLiteral, Array.from({ length: 70_000 }, () => 0))).toBe("rejected");
+  });
+
+  test("hostile strings never throw and the token brands reject all syntax-bearing ones", () => {
+    expect(hostileStrings.length).toBeGreaterThanOrEqual(12);
+    for (const text of hostileStrings) {
+      for (const [, codec] of brands) {
+        expect(() => decode(codec, text)).not.toThrow();
+      }
+    }
+    const nonTokens = hostileStrings.filter((s) => !/^[A-Za-z_]+$/u.test(s));
+    for (const text of nonTokens) {
+      for (const codec of [HeaderName, CookieName, MethodToken, MediaType, MediaRange]) {
+        expect(issueTag(codec, text)).toBe("rejected");
+      }
+      expect(issueTag(PathTemplate, text)).toBe("rejected");
+      expect(issueTag(DocumentUri, text)).toBe("rejected");
+    }
+  });
+
+  test("text brands reject control, lone-surrogate and line-separator input and keep plain text", () => {
+    for (const bad of ["\uD800", "\uDC00", "a\rb", String.fromCodePoint(0x20_28, 0x20_29)]) {
+      expect(issueTag(SafeText, bad)).toBe("rejected");
+    }
+    for (const bad of ["\uD800", "\uDC00", "a\rb"]) {
+      expect(issueTag(WireName, bad)).toBe("rejected");
+    }
+    for (const good of [["a", "{b}c"].join("$"), "`\\", "text */ more", "first line\n  @deprecated forged tag", "😀"]) {
+      expect(issueTag(SafeText, good)).toBe("accepted");
+    }
+    for (const good of ["__proto__", "constructor", "prototype", ["a", "{b}c"].join("$"), "😀"]) {
+      expect(issueTag(WireName, good)).toBe("accepted");
+    }
+    for (const good of ["__proto__", "constructor", "prototype"]) {
+      expect(issueTag(HeaderName, good)).toBe("accepted");
+    }
+  });
+});
+
+describe("method-token allowlist", () => {
+  test("has 35 unique uppercase entries", () => {
+    expect(methodTokens.length).toBe(35);
+    expect(new Set(methodTokens).size).toBe(35);
+    for (const token of methodTokens) {
+      expect(token).toBe(token.toUpperCase());
+    }
+  });
+
+  test("MethodToken accepts every allowlisted token and rejects others", () => {
+    for (const token of methodTokens) {
+      expect(issueTag(MethodToken, token)).toBe("accepted");
+    }
+    for (const bad of ["patch", "Query", "PTH-23", "BAD TOKEN", "", "FOO"]) {
+      expect(issueTag(MethodToken, bad)).toBe("rejected");
+    }
+  });
+});
