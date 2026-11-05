@@ -218,7 +218,12 @@ const schemeKind = Schema.Union([
     type: Schema.Literal("apiKey"),
   }),
   Schema.Struct({
-    in: Schema.Literals(["header", "query"]),
+    in: Schema.Literal("header"),
+    name: HeaderName,
+    type: Schema.Literal("apiKey"),
+  }),
+  Schema.Struct({
+    in: Schema.Literal("query"),
     name: WireName,
     type: Schema.Literal("apiKey"),
   }),

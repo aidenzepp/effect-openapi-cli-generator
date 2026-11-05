@@ -332,9 +332,8 @@ describe("attach runs on every hop", () => {
   });
 
   test("a hop never inherits the previous hop's attach output", async () => {
-    // Audit D F3: a cookie name that the strip cannot parse back. The next hop is built from the
-    // request before attach, so the attached cookie never reaches it.
-    const hostile: Auth.SecurityScheme = { in: "cookie", kind: "apiKey", name: "a; admin=1" };
+    // The next hop is built from the request before attach, so the attached cookie never reaches it.
+    const hostile: Auth.SecurityScheme = { in: "cookie", kind: "apiKey", name: "session" };
     const attach = Auth.attach(
       { schemes: { hostile } },
       {

@@ -60,8 +60,22 @@ describe("cookie apiKey names", () => {
     }
   });
 
-  test("a header or query apiKey name is not held to the cookie token rule", () => {
+  test("a header apiKey name that is not a token is refused at element scope", () => {
+    for (const name of ["a; b", "X Key", "x-key\u00E9", ""]) {
+      const result = run("3.1", withSchemes({ h: { in: "header", name, type: "apiKey" } }));
+
+      expect(result.schemes.schemes).toEqual([]);
+      expect(result.schemes.unusable).toEqual(["h"]);
+      expect(result.schemes.diagnostics.map((d) => [d.code, d.scope, d.severity])).toEqual([
+        ["SSC-12/invalid-header-name", "element", "refusal"],
+      ]);
+      expect(JSON.stringify(result.schemes.diagnostics)).not.toContain("a; b");
+    }
+  });
+
+  test("a query apiKey name and a token header name are accepted", () => {
     expect(kinds({ h: { in: "header", name: "X-Key", type: "apiKey" } }).length).toBe(1);
+    expect(kinds({ q: { in: "query", name: "api key", type: "apiKey" } }).length).toBe(1);
   });
 });
 

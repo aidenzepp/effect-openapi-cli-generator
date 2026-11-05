@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { CookieName } from "../model/brands.ts";
+import { CookieName, HeaderName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
@@ -250,6 +250,26 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
           element: "Security Scheme Object",
           hint: 'A cookie name must be an RFC 6265 token: no space, control, or any of ()<>@,;:\\"/[]?={}.',
           message: "The cookie apiKey name is not a valid cookie name.",
+          pointer,
+        },
+      ],
+    };
+  }
+
+  if (
+    node.type === "apiKey" &&
+    node.in === "header" &&
+    node.name !== undefined &&
+    Option.isNone(Schema.decodeUnknownOption(HeaderName)(node.name))
+  ) {
+    return {
+      findings: [
+        {
+          anchor: "security-scheme-name",
+          code: "SSC-12/invalid-header-name",
+          element: "Security Scheme Object",
+          hint: 'A header name must be an RFC 9110 token: no space, control, non-ASCII, or any of ()<>@,;:\\"/[]?={}.',
+          message: "The header apiKey name is not a valid header name.",
           pointer,
         },
       ],
