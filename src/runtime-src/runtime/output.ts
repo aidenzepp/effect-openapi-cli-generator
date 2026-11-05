@@ -2,6 +2,7 @@ import type { PlatformError } from "effect";
 import {
   Array as Arr,
   Cause,
+  Context,
   Data,
   Effect,
   FileSystem,
@@ -15,6 +16,7 @@ import {
   Stdio,
   Stream,
 } from "effect";
+import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
 import { Base64 } from "effect/encoding";
 import {
@@ -636,3 +638,185 @@ export const finalCatch =
         Effect.andThen(Effect.fail(new InternalError())),
       );
     });
+
+/**
+ * The notes a generated command adds to its help (design 4.6): a note per argument and per flag,
+ * keyed by its visible name, and the ordered sections printed after FLAGS.
+ */
+export interface HelpNotes {
+  readonly arguments: { readonly [name: string]: string };
+  readonly flags: { readonly [name: string]: string };
+  readonly sections: readonly (readonly [label: string, text: string])[];
+}
+
+/**
+ * The `Command.annotate` key under which a generated command carries its help notes.
+ */
+export const Help = Context.Service<HelpNotes>("runtime/output/Help");
+
+const helpBase = CliOutput.defaultFormatter({ colors: false, globalFlags: "summary" });
+
+interface HelpRow {
+  readonly left: string;
+  readonly description: string;
+  readonly note: string | undefined;
+}
+
+const indent = 2;
+
+const columnGap = 4;
+
+// effect's ARGUMENTS table caps its first column here; its FLAGS table does not.
+const argumentColumnCap = 25;
+
+const cellWidth = CliOutput.displayWidth;
+
+const padTo = (text: string, width: number): string =>
+  text + " ".repeat(Math.max(0, width - cellWidth(text)));
+
+const noteFor = (notes: { readonly [name: string]: string }, name: string): string | undefined =>
+  Object.hasOwn(notes, name) ? notes[name] : undefined;
+
+/**
+ * A table of rows, laid out as effect's `renderTable` lays out two columns (first column as wide
+ * as its widest cell plus 4, capped at `cap`, never closer than one space to its description),
+ * plus a third column of parenthesized notes. The notes column starts at the same character in
+ * every row that has a note: the widest description end among those rows plus 4, as
+ * `expected/help.txt` measures it (the long `--body` descriptions, which carry no note, do not
+ * widen it). A row without a note has no trailing spaces.
+ */
+const renderRows = (rows: readonly HelpRow[], cap = Number.POSITIVE_INFINITY): string => {
+  const column = Math.min(Math.max(...rows.map((row) => cellWidth(row.left))) + columnGap, cap);
+  const leftWidth = (row: HelpRow): number => Math.max(column, cellWidth(row.left) + 1);
+  const noteColumn =
+    Math.max(
+      0,
+      ...rows
+        .filter((row) => row.note !== undefined)
+        .map((row) => indent + leftWidth(row) + cellWidth(row.description)),
+    ) + columnGap;
+
+  return rows
+    .map((row) => {
+      const text =
+        row.note === undefined
+          ? row.description
+          : `${padTo(row.description, noteColumn - indent - leftWidth(row))}(${row.note})`;
+
+      return `${" ".repeat(indent)}${padTo(row.left, leftWidth(row))}${text}`.trimEnd();
+    })
+    .join("\n");
+};
+
+const argumentRow = (arg: HelpDoc.ArgDoc, notes: HelpNotes): HelpRow => ({
+  description: Option.getOrElse(arg.description, () => "") + (arg.required ? "" : " (optional)"),
+  left: `${arg.name}${arg.variadic ? "..." : ""} ${arg.type}`,
+  note: noteFor(notes.arguments, arg.name),
+});
+
+const flagRow = (flag: HelpDoc.FlagDoc, notes: HelpNotes): HelpRow => ({
+  description: Option.getOrElse(flag.description, () => ""),
+  left: `${[`--${flag.name}`, ...flag.aliases].join(", ")}${flag.type === "boolean" ? "" : ` ${flag.type}`}`,
+  note: noteFor(notes.flags, flag.name),
+});
+
+const declaresGlobalFlags = (doc: HelpDoc.HelpDoc): boolean =>
+  doc.commandPath === undefined ||
+  (doc.globalFlagsScope ?? doc.commandPath.slice(0, 1)).length === doc.commandPath.length;
+
+/**
+ * The notes-bearing layout applies to a leaf command that points at the global flags rather than
+ * declaring them. Anything else prints as the default formatter prints it, so no part of the
+ * document (subcommands, examples, the global flag table) is dropped.
+ */
+const isNotesLayout = (doc: HelpDoc.HelpDoc): boolean =>
+  (doc.subcommands ?? []).length === 0 &&
+  (doc.examples ?? []).length === 0 &&
+  !declaresGlobalFlags(doc);
+
+const renderNotedHelp = (doc: HelpDoc.HelpDoc, notes: HelpNotes): string => {
+  const blocks: string[][] = [];
+  const table = (title: string, rows: readonly HelpRow[], cap?: number): void => {
+    if (rows.length > 0) {
+      blocks.push([title, renderRows(rows, cap)]);
+    }
+  };
+
+  if (doc.description !== "") {
+    blocks.push(["DESCRIPTION", `  ${doc.description}`]);
+  }
+
+  blocks.push(["USAGE", `  ${doc.usage}`]);
+  table(
+    "ARGUMENTS",
+    (doc.args ?? []).map((arg) => argumentRow(arg, notes)),
+    argumentColumnCap,
+  );
+  table(
+    "FLAGS",
+    doc.flags.map((flag) => flagRow(flag, notes)),
+  );
+  table(
+    "INHERITED FLAGS",
+    (doc.inheritedFlags ?? []).map((flag) => flagRow(flag, notes)),
+  );
+
+  const labelWidth = Math.max(0, ...notes.sections.map(([label]) => cellWidth(label))) + 1;
+
+  if (notes.sections.length > 0) {
+    blocks.push(notes.sections.map(([label, text]) => `${padTo(label, labelWidth)}${text}`));
+  }
+
+  if ((doc.globalFlags ?? []).length > 0) {
+    const scope = doc.globalFlagsScope ?? doc.commandPath?.slice(0, 1) ?? [];
+
+    blocks.push([`Run '${scope.join(" ")} --help' for global flags`]);
+  }
+
+  return blocks.map((lines) => lines.join("\n")).join("\n\n");
+};
+
+const findCommand = (
+  root: Command.Command.Any,
+  path: readonly string[],
+): Command.Command.Any | undefined => {
+  let node: Command.Command.Any | undefined = path[0] === root.name ? root : undefined;
+
+  for (const name of path.slice(1)) {
+    node = node?.subcommands
+      .flatMap((group) => group.commands)
+      .find((child) => child.name === name);
+  }
+
+  return node;
+};
+
+const helpNotesOf = (
+  root: Command.Command.Any,
+  path: readonly string[] | undefined,
+): Option.Option<HelpNotes> =>
+  Option.flatMap(Option.fromNullishOr(path), (known) =>
+    Option.flatMap(Option.fromNullishOr(findCommand(root, known)), (command) =>
+      Context.getOption(command.annotations, Help),
+    ),
+  );
+
+/**
+ * The help formatter for a command tree (design 4.6). A command that carries `Output.Help` prints
+ * its DESCRIPTION, USAGE, ARGUMENTS and FLAGS with a third column of notes, then its sections,
+ * then the pointer to the global flags. Any other command prints as effect's default formatter
+ * prints it, without colors and with global flags as a pointer. Errors render through
+ * `valueFreeFormatter`.
+ */
+export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
+  formatCliError: valueFreeFormatter.formatCliError,
+  formatError: valueFreeFormatter.formatError,
+  formatErrors: valueFreeFormatter.formatErrors,
+  formatHelpDoc: (doc) =>
+    Option.match(helpNotesOf(root, doc.commandPath), {
+      onNone: () => helpBase.formatHelpDoc(doc),
+      onSome: (notes) =>
+        isNotesLayout(doc) ? renderNotedHelp(doc, notes) : helpBase.formatHelpDoc(doc),
+    }),
+  formatVersion: valueFreeFormatter.formatVersion,
+});
