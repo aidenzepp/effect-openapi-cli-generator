@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunServices } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
-import { Command } from "effect/cli";
+import { CliError, Command } from "effect/cli";
 import { HttpBody } from "effect/http";
 import * as FileBodyModule from "../../src/runtime-src/runtime/file-body.ts";
 import { FileBody } from "../../src/runtime-src/runtime/file-body.ts";
@@ -871,5 +871,72 @@ describe("Input.jsonNumber", () => {
     expect(error._tag).toBe("UsageError");
     expect(error.flag).toBe("count");
     expect(JSON.stringify(error)).not.toContain("12x-secret");
+  });
+});
+
+describe("Input.selectBody content type", () => {
+  const media = { request: ["application/json", "image/png"], responses: {} };
+
+  test("the content type has the declared key union, a range key stays a string", async () => {
+    const body = Effect.succeed(HttpBody.text("x"));
+    const declared = await run(
+      Input.selectBody({
+        alternatives: { "application/json": body, "image/png": body },
+        chosen: none,
+        media,
+      }),
+    );
+    // Without the generic key union this is `string`, which does not satisfy the union.
+    const typed: "application/json" | "image/png" = declared.contentType;
+    // @ts-expect-error -- the union excludes every other literal
+    const wrong: "text/plain" = declared.contentType;
+
+    expect(typed).toBe("application/json");
+
+    const widened: string = wrong;
+    expect(widened).toBe("application/json");
+
+    const ranged = await run(
+      Input.selectBody({
+        alternatives: { "image/*": body },
+        chosen: Option.some("image/webp"),
+        media: { request: ["image/*"], responses: {} },
+      }),
+    );
+    const concrete: string = ranged.contentType;
+
+    expect(concrete).toBe("image/webp");
+  });
+});
+
+const parseCount = (...args: readonly string[]) =>
+  Effect.gen(function* parsed() {
+    let seen: Input.JsonNumber | undefined;
+    const command = Command.make("x", { count: Input.int64Flag("count") }, ({ count }) =>
+      Effect.sync(() => {
+        seen = count;
+      }),
+    );
+
+    yield* Command.runWith(command, { version: "0" })(args);
+
+    return seen;
+  }).pipe(Effect.provide(BunServices.layer));
+
+describe("Input.int64Flag", () => {
+  test("digits past 2^53 parse to a JsonNumber with their exact text", async () => {
+    const seen = await run(parseCount("--count", "9007199254740993"));
+
+    expect(seen).toBeInstanceOf(Input.JsonNumber);
+    expect(seen?.text).toBe("9007199254740993");
+  });
+
+  test("a non-digit value fails with a CliError naming the flag, never the value", async () => {
+    const error = await run(parseCount("--count", "12x-secret").pipe(Effect.flip));
+    const text = JSON.stringify(error);
+
+    expect(CliError.isCliError(error)).toBe(true);
+    expect(text).toContain("--count");
+    expect(text).not.toContain("12x-secret");
   });
 });
