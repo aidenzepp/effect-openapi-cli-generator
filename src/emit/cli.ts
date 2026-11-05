@@ -1,4 +1,4 @@
-import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
 import { foldIdentifier } from "../names/fold.ts";
@@ -44,9 +44,11 @@ export interface CliEmitInput {
 /**
  * The plan, model or author config holds something the `cli/` layer cannot express. Text, XML,
  * form and multipart request bodies are `unsupported-body` until their merge exists (follow-up
- * em4c). `unsupported-flag` is a flag with no call-expression form today: an `int64` field (the
- * runtime's digit check fails in `UsageError`, while `Flag.mapEffect` takes `CliError`) and a
- * required boolean parameter (absent would send `false`).
+ * em4c). `unsupported-flag` is a flag with no call-expression form today: an `int64` field,
+ * scalar or repeated, or one whose integer width the walk cannot settle (the runtime's digit
+ * check fails in `UsageError`, while `Flag.mapEffect` takes `CliError`), and a required boolean
+ * parameter (absent would send `false`). `unsupported-parameter` is a boolean path parameter.
+ * Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
   readonly reason:
@@ -62,6 +64,36 @@ export class CliEmitError extends Data.TaggedError("CliEmitError")<{
     | "unsupported-parameter";
   readonly subject: string;
 }> {}
+
+type OperationReason = "unsupported-body" | "unsupported-flag" | "unsupported-parameter";
+
+const operationReasons: readonly string[] = [
+  "unsupported-body",
+  "unsupported-flag",
+  "unsupported-parameter",
+] satisfies readonly OperationReason[];
+
+const isOperationReason = (reason: CliEmitError["reason"]): reason is OperationReason =>
+  operationReasons.includes(reason);
+
+/**
+ * An operation-scope refusal: the operation's command is not emitted, the rest of the package
+ * is. `reason` is the `CliEmitError` code and `subject` names the parameter, flag or media type.
+ */
+export interface CliRefusal {
+  readonly operation: Operation["key"];
+  readonly reason: OperationReason;
+  readonly scope: "operation";
+  readonly subject: string;
+}
+
+/**
+ * The emitted `cli/` files, sorted by path, and the operations refused in operation order.
+ */
+export interface CliEmitOutput {
+  readonly files: readonly EmittedFile[];
+  readonly refusals: readonly CliRefusal[];
+}
 
 type Defs = Readonly<Record<string, Schema.Json>>;
 
@@ -130,108 +162,176 @@ const describedBy = (description: string): readonly Expr[] => {
 
 // ---------------------------------------------------------------------------------------------
 // Body field schemas: the property a field flag writes, for its description and `int64` check.
-// The walk follows `$ref`, `properties` and `allOf` members, each node once per pointer token
-// (so a cycle ends), under one visit budget per field.
+// The walk follows `$ref`, `properties`, `allOf` members and an array's `items`, each node once
+// per pointer token (so a cycle ends), under one visit budget per field. A node is read
+// shallowly: only the keywords below, never its subtree.
 
 const refPrefix = "#/$defs/";
 
 const maxVisits = 10_000;
 
-const StoredSchema = Schema.Struct({
-  $ref: Schema.optionalKey(Schema.String),
-  allOf: Schema.optionalKey(Schema.Array(Schema.Json)),
-  description: Schema.optionalKey(Schema.String),
-  format: Schema.optionalKey(Schema.Json),
-  maximum: Schema.optionalKey(Schema.Json),
-  minimum: Schema.optionalKey(Schema.Json),
-  properties: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
-  title: Schema.optionalKey(Schema.String),
-});
+type JsonObject = Readonly<Record<string, Schema.Json>>;
 
-type SchemaNode = typeof StoredSchema.Type;
+const own = (record: JsonObject, key: string): Schema.Json | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
 
-const decodeNode = Schema.decodeUnknownOption(StoredSchema);
+const isJsonObject = (json: Schema.Json | undefined): json is JsonObject =>
+  Predicate.isObject(json) && !Array.isArray(json);
 
 const unescapeToken = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
 
 // A bound outside the safe-integer range makes an integer field a digit string (design 4.5).
-const unsafeBound = (bound: Schema.Json | undefined): boolean =>
-  Schema.is(Schema.Finite)(bound) && Math.abs(bound) > Number.MAX_SAFE_INTEGER;
+const boundKeywords: readonly string[] = [
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "maximum",
+  "minimum",
+];
+
+interface FieldNode {
+  readonly allOf: readonly Schema.Json[];
+  readonly int64: boolean;
+  readonly items: Schema.Json | undefined;
+  readonly prose: string | undefined;
+  readonly properties: JsonObject | undefined;
+  readonly ref: string | undefined;
+}
+
+// `None` for a node the walk cannot read: not an object, or a `$ref` that is not a string.
+const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
+  if (!isJsonObject(json)) {
+    return Option.none();
+  }
+
+  const ref = own(json, "$ref");
+  if (ref !== undefined && !Predicate.isString(ref)) {
+    return Option.none();
+  }
+
+  const allOf = own(json, "allOf");
+  const properties = own(json, "properties");
+  const prose = [own(json, "description"), own(json, "title")].find(Predicate.isString);
+  const unsafe = boundKeywords.some((keyword) => {
+    const bound = own(json, keyword);
+
+    return Predicate.isNumber(bound) && Math.abs(bound) > Number.MAX_SAFE_INTEGER;
+  });
+
+  return Option.some({
+    allOf: Array.isArray(allOf) ? allOf : [],
+    int64: own(json, "format") === "int64" || unsafe,
+    items: own(json, "items"),
+    properties: isJsonObject(properties) ? properties : undefined,
+    prose,
+    ref,
+  });
+};
+
+/**
+ * Whether an integer field flag fits `Flag.Int`: `int64` when a node on its scalar's `$ref`
+ * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `unsettled`
+ * when the walk cannot reach that scalar (an unreadable node, a cycle, an exhausted budget).
+ */
+type IntegerWidth = "int64" | "safe" | "unsettled";
 
 interface FieldSchema {
   readonly description: string;
-  readonly int64: boolean;
+  readonly integer: IntegerWidth;
 }
 
-const own = (
-  record: Readonly<Record<string, Schema.Json>>,
-  key: string,
-): Schema.Json | undefined => (Object.hasOwn(record, key) ? record[key] : undefined);
+// The node chain a schema reaches through `$ref`, starting at the schema itself; `settled` when
+// it ends at a node without `$ref`.
+interface Chain {
+  readonly nodes: readonly FieldNode[];
+  readonly settled: boolean;
+}
 
-const fieldSchema = (defs: Defs, rootKey: string, pointer: string): FieldSchema => {
-  const seen = new Set<Schema.Json>();
+type Work =
+  | { readonly _tag: "Direct"; readonly node: FieldNode }
+  | { readonly _tag: "Expand"; readonly json: Schema.Json };
+
+const fieldSchema = (
+  defs: Defs,
+  rootKey: string,
+  pointer: string,
+  repeated: boolean,
+): FieldSchema => {
   let visits = 0;
-  // The node chain a schema reaches through `$ref`, starting at the schema itself.
-  const chain = (start: Schema.Json | undefined): readonly SchemaNode[] => {
-    const nodes: SchemaNode[] = [];
+  const chain = (start: Schema.Json | undefined): Chain => {
+    const nodes: FieldNode[] = [];
+    const seen = new Set<Schema.Json>();
     let current = start;
     while (current !== undefined && !seen.has(current) && visits < maxVisits) {
       seen.add(current);
       visits += 1;
 
-      const node = decodeNode(current);
+      const node = fieldNode(current);
       if (Option.isNone(node)) {
         break;
       }
 
       nodes.push(node.value);
 
-      const ref = node.value.$ref;
-      current =
-        ref?.startsWith(refPrefix) === true
-          ? own(defs, unescapeToken(ref.slice(refPrefix.length)))
-          : undefined;
-    }
-
-    return nodes;
-  };
-  const property = (start: Schema.Json | undefined, name: string): Schema.Json | undefined => {
-    for (const node of chain(start)) {
-      const direct = node.properties === undefined ? undefined : own(node.properties, name);
-      if (direct !== undefined) {
-        return direct;
+      const { ref } = node.value;
+      if (ref === undefined) {
+        return { nodes, settled: true };
       }
 
-      for (const part of node.allOf ?? []) {
-        const found = property(part, name);
+      current = ref.startsWith(refPrefix)
+        ? own(defs, unescapeToken(ref.slice(refPrefix.length)))
+        : undefined;
+    }
+
+    return { nodes, settled: false };
+  };
+  // Depth first, in declaration order: a node's own `properties`, then its `allOf` members.
+  const property = (start: Schema.Json, name: string): Schema.Json | undefined => {
+    const seen = new Set<Schema.Json>([start]);
+    const pending: Work[] = [{ _tag: "Expand", json: start }];
+    for (let work = pending.pop(); work !== undefined; work = pending.pop()) {
+      if (work._tag === "Direct") {
+        const found =
+          work.node.properties === undefined ? undefined : own(work.node.properties, name);
         if (found !== undefined) {
           return found;
         }
+
+        continue;
       }
+
+      const later: Work[] = [];
+      for (const node of chain(work.json).nodes) {
+        later.push({ _tag: "Direct", node });
+        for (const part of node.allOf) {
+          if (!seen.has(part)) {
+            seen.add(part);
+            later.push({ _tag: "Expand", json: part });
+          }
+        }
+      }
+
+      pending.push(...Arr.reverse(later));
     }
 
     return undefined;
   };
-  const tokens = pointer.split("/").slice(1).map(unescapeToken);
   let target = own(defs, rootKey);
-  for (const token of tokens) {
-    seen.clear();
+  for (const token of pointer.split("/").slice(1).map(unescapeToken)) {
     target = target === undefined ? undefined : property(target, token);
   }
 
-  seen.clear();
+  const field = chain(target);
+  const items = repeated ? chain(field.nodes.at(-1)?.items) : { nodes: [], settled: true };
+  const described = field.nodes.find((node) => node.prose !== undefined);
+  const width = (): IntegerWidth => {
+    if ([...field.nodes, ...items.nodes].some((node) => node.int64)) {
+      return "int64";
+    }
 
-  const nodes = chain(target);
-  const described = nodes.find(
-    (node) => node.description !== undefined || node.title !== undefined,
-  );
-
-  return {
-    description: described?.description ?? described?.title ?? "",
-    int64: nodes.some(
-      (node) => node.format === "int64" || unsafeBound(node.minimum) || unsafeBound(node.maximum),
-    ),
+    return field.settled && items.settled ? "safe" : "unsettled";
   };
+
+  return { description: described?.prose ?? "", integer: width() };
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -335,9 +435,9 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     );
     const schema =
       alternative?.schema === undefined
-        ? { description: "", int64: false }
-        : fieldSchema(context.defs, alternative.schema.key, source.wireName);
-    if (schema.int64 && source.kind === "integer") {
+        ? { description: "", integer: "unsettled" }
+        : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
+    if (source.kind === "integer" && schema.integer !== "safe") {
       return yield* refuse("unsupported-flag", flag.name);
     }
 
@@ -841,26 +941,51 @@ const checkDistinct = (names: readonly string[]) => {
   return Effect.void;
 };
 
-const commandsOf = (commands: readonly PlannedCommand[], context: CommandContext) =>
+interface Commands {
+  readonly domain: readonly string[];
+  readonly emitted: readonly PlannedCommand[];
+  readonly refusals: readonly CliRefusal[];
+  readonly statements: readonly Statement[];
+}
+
+// The commands a module emits; an operation-scope refusal drops its command and is recorded.
+const commandsOf = (
+  commands: readonly PlannedCommand[],
+  context: CommandContext,
+): Effect.Effect<Commands, CliEmitError> =>
   Effect.gen(function* emit() {
-    const parts = yield* Effect.all(commands.map((command) => commandStatement(command, context)));
+    const parts: CommandParts[] = [];
+    const emitted: PlannedCommand[] = [];
+    const refusals: CliRefusal[] = [];
+    for (const command of commands) {
+      const built = yield* Effect.result(commandStatement(command, context));
+      if (Result.isSuccess(built)) {
+        parts.push(built.success);
+        emitted.push(command);
+        continue;
+      }
+
+      const { reason, subject } = built.failure;
+      if (!isOperationReason(reason)) {
+        return yield* built.failure;
+      }
+
+      refusals.push({ operation: command.operation.key, reason, scope: "operation", subject });
+    }
 
     return {
       domain: Arr.dedupe(parts.flatMap((part) => part.domain)),
+      emitted,
+      refusals,
       statements: parts.map((part) => part.statement),
     };
   });
 
-const groupFile = (
-  group: PlannedGroup,
-  children: readonly PlannedGroup[],
-  base: Omit<CommandContext, "namespace">,
-) =>
+const groupFile = (group: PlannedGroup, built: Commands, children: readonly PlannedGroup[]) =>
   Effect.gen(function* file() {
-    const context: CommandContext = { ...base, namespace: group.namespace };
-    const { domain, statements } = yield* commandsOf(group.commands, context);
+    const { domain, emitted, statements } = built;
     const subcommands = [
-      ...group.commands.map((command) => ident(I(command.identifier))),
+      ...emitted.map((command) => ident(I(command.identifier))),
       ...children.map((child) => member(ident(I(cliAlias(child))), M("group"))),
     ];
     const all: Statement[] = [
@@ -944,18 +1069,17 @@ const globalSettings: readonly string[] = [
 
 const rootFile = (
   topLevel: readonly PlannedGroup[],
-  base: Omit<CommandContext, "namespace">,
+  built: Commands,
+  plan: NamePlan,
   config: AuthorConfig,
 ) =>
   Effect.gen(function* file() {
-    const { plan } = base;
-    const context: CommandContext = { ...base, namespace: "Root" };
-    const { domain, statements } = yield* commandsOf(plan.root, context);
+    const { domain, emitted, statements } = built;
     const author = yield* authorCommands(config);
     const prefix = str(envPrefixOf(config));
     const subcommands = [
       ...topLevel.map((group) => member(ident(I(cliAlias(group))), M("group"))),
-      ...plan.root.map((command) => ident(I(command.identifier))),
+      ...emitted.map((command) => ident(I(command.identifier))),
       ...author.names.map((name) => ident(I(name))),
     ];
     const settings = [
@@ -991,7 +1115,7 @@ const rootFile = (
     yield* checkDistinct([...declaredNames(all), ...author.names]);
 
     const imports = yield* moduleImports(all, [
-      ...(plan.root.length === 0
+      ...(emitted.length === 0
         ? []
         : [{ from: "../api/root.ts", kind: "Namespace" as const, name: "Root" }]),
       { from: "../api/security.ts", kind: "Named", name: "security" },
@@ -1021,11 +1145,13 @@ const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
  * constructors, three-state booleans, a handler that builds the body, calls the `api/` builder
  * with `inputKeys` and runs `Output.send`), its describe binding and help notes, and `group`;
  * and `cli/root.ts` with the untagged commands, the root command and its global settings, the
- * author-owned commands, and `services`. Files are sorted by path.
+ * author-owned commands, and `services`. Files are sorted by path. An operation the layer cannot
+ * express is refused alone (`CliRefusal`), and a group left with no command and no emitted child
+ * group is not emitted.
  */
 export const emitCli = (
   input: CliEmitInput,
-): Effect.Effect<readonly EmittedFile[], CliEmitError | PrinterError> =>
+): Effect.Effect<CliEmitOutput, CliEmitError | PrinterError> =>
   Effect.gen(function* emit() {
     const { api, config, plan } = input;
     const reserved = plan.groups.find((group) => reservedSegments.has(group.segment));
@@ -1051,7 +1177,16 @@ export const emitCli = (
       domain: plan.domain,
       plan,
     };
-    // A group is emitted when it holds a command or an emitted child group.
+    const built = new Map<string, Commands>();
+    for (const group of plan.groups) {
+      built.set(
+        group.tag,
+        yield* commandsOf(group.commands, { ...base, namespace: group.namespace }),
+      );
+    }
+
+    const rootCommands = yield* commandsOf(plan.root, { ...base, namespace: "Root" });
+    // A group is emitted when it keeps a command or has an emitted child group.
     const emitted = new Set<string>();
     let grew = true;
     while (grew) {
@@ -1060,26 +1195,38 @@ export const emitCli = (
         const hasChild = plan.groups.some(
           (child) => child.parent === group.tag && emitted.has(child.tag),
         );
-        if (!emitted.has(group.tag) && (group.commands.length > 0 || hasChild)) {
+        const kept = built.get(group.tag)?.emitted.length ?? 0;
+        if (!emitted.has(group.tag) && (kept > 0 || hasChild)) {
           emitted.add(group.tag);
           grew = true;
         }
       }
     }
 
+    const empty: Commands = { domain: [], emitted: [], refusals: [], statements: [] };
+    const commandsFor = (group: PlannedGroup): Commands => built.get(group.tag) ?? empty;
     const groups = plan.groups.filter((group) => emitted.has(group.tag));
     const childrenOf = (group: PlannedGroup) =>
       groups.filter((child) => child.parent === group.tag);
     const files: EmittedFile[] = [
-      ...(yield* Effect.all(groups.map((group) => groupFile(group, childrenOf(group), base)))),
+      ...(yield* Effect.all(
+        groups.map((group) => groupFile(group, commandsFor(group), childrenOf(group))),
+      )),
     ];
     files.push(
       yield* rootFile(
         groups.filter((group) => group.parent === undefined),
-        base,
+        rootCommands,
+        plan,
         config,
       ),
     );
 
-    return Arr.sort(files, byPath);
+    return {
+      files: Arr.sort(files, byPath),
+      refusals: [
+        ...plan.groups.flatMap((group) => commandsFor(group).refusals),
+        ...rootCommands.refusals,
+      ],
+    };
   });
