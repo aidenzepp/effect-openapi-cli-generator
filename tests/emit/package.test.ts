@@ -26,6 +26,7 @@ const EmittedPackage = Schema.Struct({
   engines: StringMap,
   files: Schema.Array(Schema.String),
   name: Schema.String,
+  packageManager: Schema.String,
   scripts: StringMap,
   version: Schema.String,
 });
@@ -99,6 +100,11 @@ describe("emitPackageFiles", () => {
     expect(emitted.version).toBe("1.2.3");
     expect(emitted.bin).toEqual({ "example-cli": "dist/src/bin.js" });
     expect(emitted.files).toEqual(["dist", "README.md"]);
+  });
+
+  test("packageManager pins the Bun version the generator pins", () => {
+    expect(parsePackage().packageManager).toBe(generatorPackage.packageManager);
+    expect(parsePackage().packageManager).toBe("bun@1.4.3");
   });
 
   test("build names tsconfig.build.json and typecheck is tsc --noEmit", () => {
