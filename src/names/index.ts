@@ -75,6 +75,7 @@ type ChainError =
   | "TAG-02/empty-name"
   | "TAG-02/unsafe-segment"
   | "TAG-06/parent-cycle"
+  | "TAG-06/parent-depth"
   | "TAG-06/unknown-parent";
 
 interface Candidate {
@@ -99,6 +100,17 @@ interface CredentialNames {
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 const root = "";
+
+const maxParentHops = 64;
+
+const push = <K, V>(map: Map<K, V[]>, key: K, value: V): void => {
+  const list = map.get(key);
+  if (list === undefined) {
+    map.set(key, [value]);
+  } else {
+    list.push(value);
+  }
+};
 
 const specVersion = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" } as const;
 
@@ -259,7 +271,9 @@ const groupNode = (
 
 /**
  * The group chain of a tag, root first, following 3.2 `parent` links. A parent that is not
- * declared, or a cycle, is refused (OpenAPI 3.2 tag `parent`: MUST exist, MUST NOT be circular).
+ * declared, or a cycle, is refused (OpenAPI 3.2 tag `parent`: MUST exist, MUST NOT be circular);
+ * so is a chain of more than 64 parent hops (design 3.3 budgets). Each tag's chain is walked once
+ * and shared, so total work is bounded by 65 nodes per distinct tag.
  */
 const makeChains = (api: Api) => {
   const declared = new Map(api.tags.map((tag) => [tag.name, tag.parent]));
@@ -271,8 +285,9 @@ const makeChains = (api: Api) => {
     return node;
   };
 
-  return (tag: string): Result.Result<readonly GroupNode[], ChainError> => {
+  const walk = (tag: string): Result.Result<readonly GroupNode[], ChainError> => {
     const chain: GroupNode[] = [];
+    const visited = new Set<string>();
     let current: string | undefined = tag;
     while (current !== undefined) {
       const node = nodeOf(current);
@@ -285,15 +300,29 @@ const makeChains = (api: Api) => {
         return Result.fail("TAG-06/unknown-parent");
       }
 
-      if (chain.includes(node.success)) {
+      if (visited.has(current)) {
         return Result.fail("TAG-06/parent-cycle");
       }
 
-      chain.unshift(node.success);
+      if (chain.length > maxParentHops) {
+        return Result.fail("TAG-06/parent-depth");
+      }
+
+      visited.add(current);
+      chain.push(node.success);
       current = parent;
     }
 
-    return Result.succeed(chain);
+    return Result.succeed(Arr.reverse(chain));
+  };
+
+  const chains = new Map<string, Result.Result<readonly GroupNode[], ChainError>>();
+
+  return (tag: string): Result.Result<readonly GroupNode[], ChainError> => {
+    const chain = chains.get(tag) ?? walk(tag);
+    chains.set(tag, chain);
+
+    return chain;
   };
 };
 
@@ -335,13 +364,40 @@ const groupOperations = (
   return candidates;
 };
 
-const groupNodesOf = (candidates: readonly Candidate[]): readonly GroupNode[] =>
-  Arr.dedupe(candidates.flatMap((candidate) => candidate.chain));
+/**
+ * The group nodes of the candidates in first-use order, each with the first candidate whose chain
+ * holds it.
+ */
+const firstUses = <C extends Candidate>(candidates: readonly C[]): ReadonlyMap<GroupNode, C> => {
+  const first = new Map<GroupNode, C>();
+  for (const candidate of candidates) {
+    for (const node of candidate.chain) {
+      if (!first.has(node)) {
+        first.set(node, candidate);
+      }
+    }
+  }
 
-const firstSite = (candidates: readonly Candidate[], tag: string) => {
-  const first = candidates.find((candidate) => candidate.chain.some((node) => node.tag === tag));
+  return first;
+};
 
-  return first === undefined ? [] : [siteOf(first.operation, first.tagPointer)];
+const groupNodesOf = (candidates: readonly Candidate[]): readonly GroupNode[] => [
+  ...firstUses(candidates).keys(),
+];
+
+const makeFirstSite = (candidates: readonly Candidate[]) => {
+  const first = new Map(
+    [...firstUses(candidates)].map(([node, candidate]) => [
+      node.tag,
+      siteOf(candidate.operation, candidate.tagPointer),
+    ]),
+  );
+
+  return (tag: string) => {
+    const site = first.get(tag);
+
+    return site === undefined ? [] : [site];
+  };
 };
 
 // Group names: two tags folding to one name or file segment, and reserved names.
@@ -350,15 +406,32 @@ const checkGroups = (
   authorCommands: ReadonlySet<string>,
   collector: Collector,
 ): void => {
-  const groups = groupNodesOf(candidates);
+  const firstSite = makeFirstSite(candidates);
+  const bySegment = new Map<string, GroupNode[]>();
+  for (const node of groupNodesOf(candidates)) {
+    push(bySegment, node.segment, node);
+  }
+
+  const relatedOf = new Map<GroupNode, ReturnType<typeof firstSite>>();
+  const collidingWith = (node: GroupNode) => {
+    const known = relatedOf.get(node);
+    if (known !== undefined) {
+      return known;
+    }
+
+    const others = (bySegment.get(node.segment) ?? []).filter((other) => other !== node);
+    const related = others.flatMap((other) => firstSite(other.tag));
+    relatedOf.set(node, related);
+
+    return related;
+  };
   const reserved = (node: GroupNode): boolean =>
     reservedCliNames.has(node.name) || (node.parent === undefined && authorCommands.has(node.name));
   for (const candidate of candidates) {
     const { operation, site, tagPointer } = candidate;
     const hint = `${site.configKey}.group`;
     for (const node of candidate.chain) {
-      const others = groups.filter((other) => other.segment === node.segment && other !== node);
-      if (others.length > 0) {
+      if ((bySegment.get(node.segment)?.length ?? 0) > 1) {
         collector.report(
           operation,
           "TAG-02/segment-collision",
@@ -367,7 +440,7 @@ const checkGroups = (
           {
             hint,
             pointer: tagPointer,
-            related: others.flatMap((other) => firstSite(candidates, other.tag)),
+            related: collidingWith(node),
           },
         );
       }
@@ -420,12 +493,27 @@ const nameCommands = (
 
     return entry === undefined ? [] : [entry];
   });
-  const groups = groupNodesOf(candidates);
+  const firstSite = makeFirstSite(candidates);
+  const siblings = new Map<string | undefined, Map<string, GroupNode>>();
+  for (const node of groupNodesOf(candidates)) {
+    const names = siblings.get(node.parent) ?? new Map<string, GroupNode>();
+    siblings.set(node.parent, names);
+    if (!names.has(node.name)) {
+      names.set(node.name, node);
+    }
+  }
+
+  const byName = new Map<string, Map<string, Named[]>>();
+  for (const entry of named) {
+    const names = byName.get(entry.container) ?? new Map<string, Named[]>();
+    byName.set(entry.container, names);
+    push(names, entry.name, entry);
+  }
+
   for (const entry of named) {
     const hint = `${entry.site.configKey}.command`;
-    const twins = named.filter(
-      (other) =>
-        other !== entry && other.container === entry.container && other.name === entry.name,
+    const twins = (byName.get(entry.container)?.get(entry.name) ?? []).filter(
+      (other) => other !== entry,
     );
     if (twins.length > 0) {
       collector.report(
@@ -441,7 +529,7 @@ const nameCommands = (
     }
 
     const parent = entry.container === root ? undefined : entry.container;
-    const sibling = groups.find((node) => node.parent === parent && node.name === entry.name);
+    const sibling = siblings.get(parent)?.get(entry.name);
     if (sibling !== undefined) {
       collector.report(
         entry.operation,
@@ -450,7 +538,7 @@ const nameCommands = (
         "The command name equals a sibling group's name.",
         {
           hint,
-          related: firstSite(candidates, sibling.tag),
+          related: firstSite(sibling.tag),
         },
       );
     }
@@ -465,17 +553,36 @@ interface CredentialPlan {
   readonly usesOf: (operation: Operation) => readonly SecurityScheme[];
 }
 
-const usesOfApi =
-  (api: Api) =>
-  (operation: Operation): readonly SecurityScheme[] => {
-    const names = Arr.dedupe(
+// The schemes an operation uses, in `securitySchemes` order; settled once per operation.
+const usesOfApi = (api: Api) => {
+  const index = new Map(api.securitySchemes.map((scheme, position) => [scheme.name, position]));
+  const memo = new Map<Operation, readonly SecurityScheme[]>();
+
+  return (operation: Operation): readonly SecurityScheme[] => {
+    const known = memo.get(operation);
+    if (known !== undefined) {
+      return known;
+    }
+
+    const positions = new Set(
       operation.security.alternatives.flatMap((alternative) =>
-        alternative.uses.map((use) => use.scheme),
+        alternative.uses.flatMap((use) => {
+          const position = index.get(use.scheme);
+
+          return position === undefined ? [] : [position];
+        }),
       ),
     );
+    const uses = Arr.sort(positions, Order.Number).flatMap((position) => {
+      const scheme = api.securitySchemes[position];
 
-    return api.securitySchemes.filter((scheme) => names.includes(scheme.name));
+      return scheme === undefined ? [] : [scheme];
+    });
+    memo.set(operation, uses);
+
+    return uses;
   };
+};
 
 const schemeSite = (scheme: SecurityScheme) => ({
   document: scheme.origin.document,
@@ -501,12 +608,20 @@ const planCredentials = (
   }
 
   const all = [...names.values()];
-  const count = (pick: (credential: CredentialNames) => string, value: string): number =>
-    all.filter((credential) => pick(credential) === value).length;
+  const tally = (pick: (credential: CredentialNames) => string): ReadonlyMap<string, number> => {
+    const counts = new Map<string, number>();
+    for (const credential of all) {
+      counts.set(pick(credential), (counts.get(pick(credential)) ?? 0) + 1);
+    }
+
+    return counts;
+  };
+  const envCounts = tally((entry) => entry.env);
+  const flagCounts = tally((entry) => entry.flag);
   const clashes = (credential: CredentialNames): boolean =>
     credential.slug !== "" &&
-    (count((entry) => entry.env, credential.env) > 1 ||
-      count((entry) => entry.flag, credential.flag) > 1 ||
+    ((envCounts.get(credential.env) ?? 0) > 1 ||
+      (flagCounts.get(credential.flag) ?? 0) > 1 ||
       reservedEnv.has(credential.env) ||
       reservedCliNames.has(credential.flag));
 
@@ -698,13 +813,12 @@ const planModule = (
 
 const planGroup = (
   node: GroupNode,
-  finals: readonly Named[],
+  entries: readonly Named[],
+  first: Named | undefined,
   drafts: ReadonlyMap<Operation, Draft>,
   collector: Collector,
 ): PlannedGroup => {
-  const entries = finals.filter((entry) => entry.container === node.tag);
   const imported = domainNames(entries);
-  const first = finals.find((entry) => entry.chain.includes(node));
   const blocked = (candidate: string): boolean =>
     fixedNamespaces.has(candidate) || imported.has(candidate);
   const base = identifierOf(node.name, "pascal");
@@ -784,8 +898,13 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     const rootEntries = finals.filter((entry) => entry.container === root);
     const rootReserved = new Set([...fixedNamespaces, ...domainNames(rootEntries)]);
     const rootCommands = planModule(rootEntries, rootReserved, drafts, collector);
-    const groups = Arr.dedupe(finals.flatMap((entry) => entry.chain)).map((node) =>
-      planGroup(node, finals, drafts, collector),
+    const byContainer = new Map<string, Named[]>();
+    for (const entry of finals) {
+      push(byContainer, entry.container, entry);
+    }
+
+    const groups = [...firstUses(finals)].map(([node, first]) =>
+      planGroup(node, byContainer.get(node.tag) ?? [], first, drafts, collector),
     );
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),

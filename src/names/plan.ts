@@ -537,7 +537,10 @@ export interface Subject {
   readonly site: OverrideSite;
 }
 
+// `pointer` is the parameter or media alternative; `field` is a body flag's RFC 6901 pointer
+// relative to the body root.
 interface Owner {
+  readonly field?: string;
   readonly hint: string;
   readonly kind: "body" | "parameter";
   readonly pointer: string;
@@ -546,7 +549,12 @@ interface Owner {
 type Owners = Map<string, Owner[]>;
 
 const addOwner = (owners: Owners, name: string, owner: Owner): void => {
-  owners.set(name, [...(owners.get(name) ?? []), owner]);
+  const list = owners.get(name);
+  if (list === undefined) {
+    owners.set(name, [owner]);
+  } else {
+    list.push(owner);
+  }
 };
 
 const parameterHint = (site: OverrideSite, key: string): string =>
@@ -719,7 +727,7 @@ const draftBody = (
         } else if (sameFlag(known.flag, flag)) {
           known.media.push(alternative.mediaType);
         } else {
-          addOwner(owners, flag.name, { hint, kind: "body", pointer });
+          addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer });
         }
       }
     }
@@ -727,9 +735,10 @@ const draftBody = (
     return [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
       if (!isWholeBody(flag.kind)) {
-        addOwner(owners, flag.name, { hint, kind: "body", pointer });
+        const owner: Owner = { field: flag.pointer, hint, kind: "body", pointer };
+        addOwner(owners, flag.name, owner);
         if (boolean) {
-          addOwner(owners, `no-${flag.name}`, { hint, kind: "body", pointer });
+          addOwner(owners, `no-${flag.name}`, owner);
         }
       }
 
@@ -759,14 +768,18 @@ const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): vo
     }
 
     const isParameter = primary.kind === "parameter";
-    const related = Arr.dedupe(rest.map((owner) => owner.pointer))
+    const related = [...new Set(rest.map((owner) => owner.pointer))]
       .filter((pointer) => pointer !== primary.pointer)
       .map((pointer) => siteOf(operation, pointer));
+    const fields = [
+      ...new Set(list.flatMap((owner) => (owner.field === undefined ? [] : [owner.field]))),
+    ];
+    const named = fields.length === 0 ? "" : ` Body fields: ${fields.join(", ")}.`;
     context.collector.report(
       operation,
       `${isParameter ? "PRM-02" : "RQB-03"}/flag-collision`,
       isParameter ? "Parameter" : "Request body",
-      `The flag --${name} collides with another flag or a reserved name.`,
+      `The flag --${name} collides with another flag or a reserved name.${named}`,
       { hint: primary.hint, pointer: primary.pointer, related },
     );
   }

@@ -451,6 +451,27 @@ describe("planNames: positionals and flags", () => {
     expect(result.diagnostics[0]?.hint).toContain('naming.operations["talk"].skip');
   });
 
+  test("two properties of one alternative folding to one flag are refused naming both", () => {
+    const result = plan({
+      defs: { Body: object({ fooBar: { type: "string" }, foo_bar: { type: "string" } }) },
+      operations: [
+        {
+          body: [{ media: "application/json", schema: "Body" }],
+          method: "POST",
+          operationId: "make",
+          path: "/things",
+        },
+      ],
+    });
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("/fooBar");
+    expect(result.diagnostics[0]?.message).toContain("/foo_bar");
+  });
+
   test("a property whose name folds to nothing gives one notice and no flag", () => {
     const result = plan({
       defs: { Body: object({ "!!!": { type: "string" }, ok: { type: "string" } }) },
@@ -676,6 +697,83 @@ describe("planNames: bounded schema walks", () => {
 
     expect(Exit.isFailure(exit) && Exit.hasDies(exit)).toBe(true);
   });
+});
+
+const chainTags = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    index === 0 ? { name: "t0" } : { name: `t${index}`, parent: `t${index - 1}` },
+  );
+
+// A chain of `count` tags with one operation on the deepest.
+const deep = (count: number) =>
+  plan({
+    operations: [{ operationId: "leaf-get", path: "/leaf", tags: [`t${count - 1}`] }],
+    tags: chainTags(count),
+  });
+
+// Plans a prepared Api and times the planner alone.
+const timed = (input: ApiInput) => {
+  const api = makeApi(input);
+  const tags = tagIndex(input);
+  const start = performance.now();
+  const result = Effect.runSync(
+    planNames(api, {
+      config: makeConfig(),
+      configDocument,
+      strict: false,
+      tagsOf: (operation: Operation) => tags.get(operation.origin.pointer) ?? [],
+    }),
+  );
+
+  return { ms: performance.now() - start, result };
+};
+
+describe("planNames: bounded plan work", () => {
+  test("a parent chain of 64 hops nests; one more hop is TAG-06/parent-depth", () => {
+    expect(deep(65).groups).toHaveLength(65);
+    expect(codes(deep(66))).toEqual([
+      { code: "TAG-06/parent-depth", scope: "operation", severity: "refusal" },
+    ]);
+  });
+
+  test("a 10,000-tag parent chain used by 1,000 operations is refused in bounded work", () => {
+    const { ms, result } = timed({
+      operations: Array.from({ length: 1000 }, (_, index) => ({
+        operationId: `op${index}`,
+        path: `/p${index}`,
+        tags: ["t9999"],
+      })),
+      tags: chainTags(10_000),
+    });
+
+    expect(allCommands(result)).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1000);
+    expect(new Set(codes(result).map((entry) => entry.code))).toEqual(
+      new Set(["TAG-06/parent-depth"]),
+    );
+    expect(ms).toBeLessThan(2000);
+  }, 10_000);
+
+  test("50,000 operations over distinct and shared tags and 500 schemes plan in bounded work", () => {
+    const { ms, result } = timed({
+      operations: Array.from({ length: 50_000 }, (_, index) => ({
+        operationId: `op${index}`,
+        path: `/r${index}`,
+        security: [[`s${index % 500}`]],
+        tags: [index % 2 === 0 ? `tag${index}` : "shared"],
+      })),
+      schemes: Array.from({ length: 500 }, (_, index) => ({
+        kind: { scheme: "bearer", type: "http" },
+        name: `s${index}`,
+      })),
+    });
+
+    expect(allCommands(result)).toHaveLength(50_000);
+    expect(result.groups).toHaveLength(25_001);
+    expect(result.credentials).toHaveLength(500);
+    expect(result.diagnostics).toEqual([]);
+    expect(ms).toBeLessThan(10_000);
+  }, 60_000);
 });
 
 describe("planNames: the golden users-update fixture", () => {
