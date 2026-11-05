@@ -560,3 +560,36 @@ describe("Auth.redactedNames", () => {
     );
   });
 });
+
+const hostnameOf = (host: string): string => new URL(`http://${host}/`).hostname;
+
+describe("loopback predicate", () => {
+  test("design 6.5 loopback forms", () => {
+    const loopback = [
+      "127.0.0.1",
+      "127.255.255.255",
+      "0x7f.1",
+      "2130706433",
+      "[::1]",
+      "[::ffff:127.0.0.1]",
+      "localhost",
+      "LOCALHOST.",
+      "api.localhost",
+      "API.LOCALHOST.",
+    ];
+    const other = [
+      "0.0.0.0",
+      "[::]",
+      "[::2]",
+      "[::ffff:8.8.8.8]",
+      "128.0.0.1",
+      "10.0.0.1",
+      "localhost.example.com",
+      "127.example.com",
+      "localhost..",
+    ];
+
+    expect(loopback.filter((host) => !Auth.isLoopbackHost(hostnameOf(host)))).toEqual([]);
+    expect(other.filter((host) => Auth.isLoopbackHost(hostnameOf(host)))).toEqual([]);
+  });
+});

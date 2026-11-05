@@ -529,3 +529,25 @@ export const redactedNames = (table: SecurityTable) =>
       ]),
     ),
   );
+
+const dottedLoopback = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u;
+
+const mappedLoopback = /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/u;
+
+/**
+ * The one loopback predicate (design 6.5 Loopback hosts). Its input is a WHATWG `URL.hostname`:
+ * lowercase, IPv6 in brackets, IPv4 in dotted form. Loopback is `localhost` or a `.localhost`
+ * name (one trailing dot allowed), a dotted IPv4 address in `127.0.0.0/8`, `[::1]`, and an
+ * IPv4-mapped address in `127.0.0.0/8`, which `URL` writes in hex (`[::ffff:7f00:1]`).
+ */
+export const isLoopbackHost = (hostname: string): boolean => {
+  const name = hostname.replace(/\.$/u, "");
+
+  return (
+    name === "localhost" ||
+    name.endsWith(".localhost") ||
+    name === "[::1]" ||
+    dottedLoopback.test(name) ||
+    mappedLoopback.test(name)
+  );
+};
