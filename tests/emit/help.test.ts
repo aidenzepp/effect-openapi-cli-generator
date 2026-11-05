@@ -118,6 +118,7 @@ const operationPlain = {
     rows,
   },
   servers: [],
+  tags: [],
 };
 
 const operation = Schema.decodeUnknownSync(Operation)(operationPlain);
