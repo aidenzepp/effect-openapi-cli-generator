@@ -1,12 +1,47 @@
 /* oxlint-disable unicorn/no-array-for-each -- Sink.forEach is the Effect sink, not Array#forEach */
 import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Effect, Exit, FileSystem, Layer, Option, Path, Sink, Stdio, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Redacted,
+  Runtime,
+  Sink,
+  Stdio,
+  Stream,
+} from "effect";
+import { CliError } from "effect/cli";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
-import { UsageError } from "../../src/runtime-src/domain/errors.ts";
+import {
+  ApiResponseError,
+  CredentialMissing,
+  OutputError as OutputErrorClass,
+  TransportError,
+  UsageError,
+} from "../../src/runtime-src/domain/errors.ts";
 import type { OutputError } from "../../src/runtime-src/domain/errors.ts";
-import { Force, OutputPath, writeBody } from "../../src/runtime-src/runtime/output.ts";
+import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import {
+  Force,
+  InternalError,
+  defaultMaxErrorBytes,
+  MaxErrorBytes,
+  OutputPath,
+  boundedExcerpt,
+  finalCatch,
+  readExcerpt,
+  renderError,
+  sanitize,
+  scrub,
+  valueFreeFormatter,
+  writeBody,
+} from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
 
 type Env =
@@ -295,5 +330,290 @@ describe("--output file", () => {
       const result = await run({ output: path.join(dir, "missing", "out.bin") }, writeBody(body));
       expect(reasonOf(failure(result.exit))).toBe("write");
     });
+  });
+});
+
+const canary = "CANARY-SECRET-123";
+
+const bearer: Credential = {
+  definition: { kind: "http", scheme: "bearer" },
+  scheme: "bearer",
+  value: Redacted.make(canary),
+};
+
+const utf8 = new TextEncoder();
+
+const utf8Length = (text: string): number => utf8.encode(text).length;
+
+const chunked = (text: string, size: number): Stream.Stream<Uint8Array> => {
+  const all = utf8.encode(text);
+  const chunks: Uint8Array[] = [];
+
+  for (let at = 0; at < all.length; at += size) {
+    chunks.push(all.subarray(at, at + size));
+  }
+
+  return Stream.fromIterable(chunks);
+};
+
+const excerptOf = (text: string, max: number, chunkSize = 1000) =>
+  Effect.runPromise(
+    readExcerpt(chunked(text, chunkSize), [bearer]).pipe(
+      Effect.provide(Layer.succeed(MaxErrorBytes, max)),
+    ),
+  );
+
+const responseError = (fields: Partial<ConstructorParameters<typeof ApiResponseError>[0]> = {}) =>
+  new ApiResponseError({
+    bodyExcerpt: "",
+    matched: "404",
+    operation: "users.get",
+    status: 404,
+    ...fields,
+  });
+
+const runCatch = <A, E>(program: Effect.Effect<A, E, Stdio.Stdio>, credentials = [bearer]) => {
+  const stderr: Buffer[] = [];
+  const layer = Stdio.layerTest({
+    stderr: () =>
+      Sink.forEach((chunk: string | Uint8Array) =>
+        Effect.sync(() => {
+          stderr.push(Buffer.from(chunk));
+        }),
+      ),
+  });
+
+  return Effect.runPromise(
+    Effect.exit(finalCatch(credentials)(program)).pipe(Effect.provide(layer)),
+  ).then((exit) => ({ exit, stderr: Buffer.concat(stderr).toString("utf-8") }));
+};
+
+describe("readExcerpt bounds", () => {
+  test("the default is 4 KiB, even when one chunk crosses the limit", async () => {
+    const text = await excerptOf("a".repeat(10_000), defaultMaxErrorBytes, 10_000);
+
+    expect(text.length).toBe(4096);
+  });
+
+  test("--max-error-bytes sets the bound and 0 reads nothing", async () => {
+    const bounded = await excerptOf("a".repeat(10_000), 100, 300);
+
+    expect(bounded.length).toBe(100);
+    expect(await excerptOf("a".repeat(10_000), 0)).toBe("");
+  });
+
+  test("the 64 KiB ceiling holds", async () => {
+    const text = await excerptOf("a".repeat(100_000), 65_536, 7000);
+
+    expect(text.length).toBe(65_536);
+  });
+
+  test("the bound counts bytes, never splitting a character", async () => {
+    const text = await excerptOf("é".repeat(5000), 101, 7);
+
+    expect(utf8Length(text)).toBeLessThanOrEqual(101);
+    expect(text).toBe("é".repeat(50));
+  });
+
+  test("a short body is returned whole", async () => {
+    expect(await excerptOf("not found", defaultMaxErrorBytes)).toBe("not found");
+  });
+});
+
+describe("credential scrubbing", () => {
+  test("a canary echoed in the body is absent and marked", async () => {
+    const body = JSON.stringify({ echo: { authorization: `Bearer ${canary}` } });
+    const text = await excerptOf(body, defaultMaxErrorBytes, 5);
+
+    expect(text).not.toContain(canary);
+    expect(text).toContain("<redacted:bearer>");
+  });
+
+  test("a canary straddling the truncation point leaves no prefix", async () => {
+    const text = await excerptOf(`0123456789${canary}-tail`, 20, 4);
+
+    expect(text).not.toContain("CANA");
+    expect(utf8Length(text)).toBeLessThanOrEqual(20);
+  });
+
+  test("the longest credential is scrubbed first", () => {
+    const longer: Credential = { ...bearer, scheme: "long", value: Redacted.make(`${canary}-X`) };
+
+    expect(scrub(`${canary}-X`, [bearer, longer])).toBe("<redacted:long>");
+  });
+
+  test("an empty credential value is ignored", () => {
+    const empty: Credential = { ...bearer, value: Redacted.make("") };
+
+    expect(scrub("text", [empty])).toBe("text");
+  });
+
+  test("the bound applies after scrubbing, which can lengthen text (audit F6)", () => {
+    const short: Credential = { ...bearer, scheme: "bearer", value: Redacted.make("x") };
+    const text = boundedExcerpt("x".repeat(70_000), 65_536, [short]);
+
+    expect(utf8Length(text)).toBeLessThanOrEqual(65_536);
+    expect(() => {
+      responseError({ bodyExcerpt: text });
+    }).not.toThrow();
+  });
+});
+
+describe("sanitize", () => {
+  test("keeps LF and TAB; removes C0, DEL, C1, bidi, format and line separators", () => {
+    const dirty = "a\u0000b\u001Bc\u007Fd\u0085e\u202Ef\u200Bg\u2028h\u2029i\n\tj";
+
+    expect(sanitize(dirty)).toBe("abcdefghi\n\tj");
+  });
+
+  test("removes lone surrogates and keeps paired ones", () => {
+    expect(sanitize("a\uD800b\u{1F600}")).toBe("ab\u{1F600}");
+  });
+});
+
+describe("renderError", () => {
+  test("an ApiResponseError shows its line, request id and scrubbed excerpt", () => {
+    const text = renderError(
+      responseError({ bodyExcerpt: `echo ${canary}\u001B[31m`, requestId: "req-1" }),
+      [bearer],
+    );
+
+    expect(text).toContain("users.get");
+    expect(text).toContain("404");
+    expect(text).toContain("Request ID: req-1");
+    expect(text).toContain("<redacted:bearer>");
+    expect(text).not.toContain(canary);
+    expect(text).not.toContain("\u001B");
+  });
+
+  test("an empty excerpt prints no body section", () => {
+    expect(renderError(responseError(), [bearer]).trimEnd().split("\n")).toHaveLength(1);
+  });
+
+  test("a credential in a request id or transport URL is scrubbed", () => {
+    const api = renderError(responseError({ requestId: `id-${canary}` }), [bearer]);
+    const transport = renderError(
+      new TransportError({ reason: "connect", url: `https://h/?k=${canary}` }),
+      [bearer],
+    );
+
+    expect(api).not.toContain(canary);
+    expect(transport).not.toContain(canary);
+  });
+
+  test("an oversized excerpt is bounded at the ceiling after scrubbing", () => {
+    const short: Credential = { ...bearer, value: Redacted.make("x") };
+    const text = renderError(responseError({ bodyExcerpt: "x".repeat(65_536) }), [short]);
+
+    expect(utf8Length(text)).toBeLessThan(65_536 + 512);
+    expect(text).not.toContain("xxxx");
+  });
+});
+
+describe("valueFreeFormatter", () => {
+  const invalid = new CliError.InvalidValue({
+    expected: `Expected a port, got "${canary}"`,
+    kind: "flag",
+    option: "port",
+    value: canary,
+  });
+
+  test("an InvalidValue names the option and never the value or expectation", () => {
+    for (const text of [
+      valueFreeFormatter.formatError(invalid),
+      valueFreeFormatter.formatErrors([invalid]),
+      valueFreeFormatter.formatCliError(invalid),
+    ]) {
+      expect(text).toContain("port");
+      expect(text).not.toContain(canary);
+      expect(text).not.toContain("Expected");
+    }
+  });
+
+  test("an argument names its position label, not its value", () => {
+    const argument = new CliError.InvalidValue({
+      expected: "integer",
+      kind: "argument",
+      option: "count",
+      value: canary,
+    });
+
+    expect(valueFreeFormatter.formatErrors([argument])).toContain("count");
+    expect(valueFreeFormatter.formatErrors([argument])).not.toContain(canary);
+  });
+});
+
+describe("finalCatch", () => {
+  test("success passes through untouched", async () => {
+    const { exit, stderr } = await runCatch(Effect.succeed(7));
+
+    expect(Exit.isSuccess(exit) && exit.value).toBe(7);
+    expect(stderr).toBe("");
+  });
+
+  test("an unknown defect prints one scrubbed line and exits 70", async () => {
+    const { exit, stderr } = await runCatch(Effect.die(new Error(`boom ${canary}\nsecond`)));
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+
+    expect(error).toBeInstanceOf(InternalError);
+    expect(Runtime.getErrorExitCode(error)).toBe(70);
+    expect(Runtime.getErrorReported(error)).toBe(false);
+    expect(stderr).toContain("internal error, please report");
+    expect(stderr).toContain("<redacted:bearer>");
+    expect(stderr).not.toContain(canary);
+    expect(stderr.trimEnd().split("\n")).toHaveLength(2);
+  });
+
+  test("an unrecognized typed failure also exits 70", async () => {
+    const { exit } = await runCatch(Effect.fail("plain string"));
+
+    expect(Exit.isFailure(exit) && Runtime.getErrorExitCode(Cause.squash(exit.cause))).toBe(70);
+  });
+
+  test("a known error is rendered once and keeps its tag and exit code", async () => {
+    const original = responseError({ bodyExcerpt: `echo ${canary}`, matched: "401", status: 401 });
+    const { exit, stderr } = await runCatch(Effect.fail(original));
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+
+    expect(error).toBe(original);
+    expect(Runtime.getErrorExitCode(error)).toBe(3);
+    expect(Runtime.getErrorReported(error)).toBe(false);
+    expect(stderr).not.toContain(canary);
+    expect(stderr).toContain("<redacted:bearer>");
+    expect(stderr.match(/users\.get/gu)).toHaveLength(1);
+  });
+
+  test("each known class keeps its exit code", async () => {
+    const known = [
+      [new UsageError({ message: "bad" }), 2],
+      [new CredentialMissing({ alternatives: ["a"], operation: "op" }), 3],
+      [new TransportError({ reason: "dns", url: "https://h" }), 4],
+      [new OutputErrorClass({ path: "p", reason: "write" }), 5],
+    ] as const;
+
+    const codes = await Promise.all(
+      known.map(async ([error]) => {
+        const { exit } = await runCatch(Effect.fail(error));
+
+        return Exit.isFailure(exit) ? Runtime.getErrorExitCode(Cause.squash(exit.cause)) : 0;
+      }),
+    );
+
+    expect(codes).toEqual(known.map(([, code]) => code));
+  });
+
+  test("a parse-time CliError passes through unprinted", async () => {
+    const help = new CliError.ShowHelp({ commandPath: [], errors: [] });
+    const { exit, stderr } = await runCatch(Effect.fail(help));
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(help);
+    expect(stderr).toBe("");
+  });
+
+  test("an interrupt passes through unprinted", async () => {
+    const { exit, stderr } = await runCatch(Effect.interrupt);
+
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+    expect(stderr).toBe("");
   });
 });
