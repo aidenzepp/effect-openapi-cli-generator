@@ -1,6 +1,11 @@
+import { Schema } from "effect";
+import process from "node:process";
+
+const Manifest = Schema.Struct({ packageManager: Schema.optional(Schema.String) });
+
 const path = Bun.argv[2] ?? "./package.json";
 
-const manifest: { packageManager?: string } = await Bun.file(path).json();
+const manifest = Schema.decodeUnknownSync(Manifest)(await Bun.file(path).json());
 
 const pinned = manifest.packageManager?.replace(/^bun@/u, "");
 
