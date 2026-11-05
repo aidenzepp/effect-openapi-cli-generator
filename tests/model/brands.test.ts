@@ -136,17 +136,42 @@ describe("branded codecs", () => {
     }
   });
 
-  test("JsonLiteral accepts finite JSON and rejects non-finite or oversized values", () => {
+  test("JsonLiteral accepts finite JSON of any size and refuses non-JSON values", () => {
     expect(issueTag(JsonLiteral, { a: [1, "x", null, true] })).toBe("accepted");
-    expect(issueTag(JsonLiteral, Number.NaN)).toBe("rejected");
-    expect(issueTag(JsonLiteral, Number.POSITIVE_INFINITY)).toBe("rejected");
-    expect(issueTag(JsonLiteral, "x".repeat(2 ** 20 + 1))).toBe("rejected");
+    expect(issueTag(JsonLiteral, "x".repeat(2 ** 20 + 1))).toBe("accepted");
     expect(
       issueTag(
         JsonLiteral,
-        Array.from({ length: 70_000 }, () => 0),
+        Array.from({ length: 100_000 }, () => 0),
       ),
-    ).toBe("rejected");
+    ).toBe("accepted");
+
+    const wide = Object.fromEntries(Array.from({ length: 100_000 }, (_, i) => [`k${i}`, [i]]));
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(JsonLiteral)(wide))).toBe(true);
+    for (const bad of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      [Number.NEGATIVE_INFINITY],
+      { a: { b: [Number.NaN] } },
+      () => 0,
+      undefined,
+      { f: () => 0 },
+      { [Symbol("k")]: 1 },
+      Symbol("v"),
+      10n,
+    ]) {
+      expect(Exit.isFailure(Schema.decodeUnknownExit(JsonLiteral)(bad))).toBe(true);
+    }
+  });
+
+  test("JsonLiteral survives 10,000-deep nesting", () => {
+    type Nested = number | readonly Nested[];
+    let deep: Nested = 0;
+    for (let i = 0; i < 10_000; i += 1) {
+      deep = [deep];
+    }
+    expect(() => Schema.decodeUnknownExit(JsonLiteral)(deep)).not.toThrow();
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(JsonLiteral)(deep))).toBe(true);
   });
 
   test("hostile strings never throw and the token brands reject all syntax-bearing ones", () => {

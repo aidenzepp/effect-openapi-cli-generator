@@ -123,55 +123,38 @@ export const JsonPointer = Schema.String.pipe(
   Schema.brand("JsonPointer"),
 );
 
-const maxNodes = 65_536;
-
-const maxStringLength = 2 ** 20;
-
-const isJson = Schema.is(Schema.Json);
-
-const childrenOf = (value: Schema.Json): readonly unknown[] => {
-  if (Arr.isArray(value)) {
-    return value;
-  }
-
-  return Predicate.isObject(value) ? Object.values(value) : [];
-};
-
-const withinBounds = (root: Schema.Json): boolean => {
-  const pending: Schema.Json[] = [root];
-  let nodes = 0;
-  let next = pending.pop();
-  while (next !== undefined) {
-    nodes += 1;
-    if (nodes > maxNodes) {
-      return false;
-    }
-
-    if (Predicate.isNumber(next) && !Number.isFinite(next)) {
-      return false;
-    }
-
-    if (Predicate.isString(next) && next.length > maxStringLength) {
-      return false;
-    }
-
-    const children = childrenOf(next);
-    for (const child of children) {
-      if (isJson(child)) {
-        pending.push(child);
+// Iterative so a deeply nested literal cannot overflow the stack.
+const isJsonValue = (root: unknown): root is Schema.Json => {
+  const pending: unknown[] = [root];
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (Arr.isArray(next)) {
+      pending.push(...next);
+    } else if (Predicate.isObject(next) && typeof next === "object") {
+      // SAFETY: getPrototypeOf is typed any; the value is only compared by identity.
+      const proto = Object.getPrototypeOf(next) as unknown;
+      if (
+        (proto !== Object.prototype && proto !== null) ||
+        Object.getOwnPropertySymbols(next).length > 0
+      ) {
+        return false;
       }
-    }
 
-    next = pending.pop();
+      pending.push(...Object.values(next));
+    } else if (
+      next !== null &&
+      !Predicate.isString(next) &&
+      !Predicate.isBoolean(next) &&
+      !(Predicate.isNumber(next) && Number.isFinite(next))
+    ) {
+      return false;
+    }
   }
 
   return true;
 };
 
 /**
- * A finite JSON value of bounded size.
+ * A finite JSON value. Resource bounds belong to the stage budgets, not the brand.
  */
-export const JsonLiteral = Schema.Json.pipe(
-  Schema.check(Schema.makeFilter(withinBounds)),
-  Schema.brand("JsonLiteral"),
-);
+export const JsonLiteral = Schema.declare(isJsonValue).pipe(Schema.brand("JsonLiteral"));
