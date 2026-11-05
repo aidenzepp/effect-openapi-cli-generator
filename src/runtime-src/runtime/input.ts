@@ -10,7 +10,7 @@ import {
   Stdio,
   Stream,
 } from "effect";
-import { Flag } from "effect/cli";
+import { CliError, Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
@@ -295,6 +295,20 @@ export const jsonNumber = (digits: string, flag: string): Effect.Effect<JsonNumb
     ? Effect.succeed(new JsonNumber(digits))
     : Effect.fail(usage(flag, "an integer field is not a digit string"));
 
+// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
+const asCliError = (error: UsageError): CliError.CliError =>
+  new CliError.UserError({ cause: error, userMessage: error.message });
+
+/**
+ * The flag for an `int64` field: its digit string parsed to a `JsonNumber`, so a later merge writes
+ * the digits unchanged. A non-digit value fails the flag with an error that names `--name` and
+ * never the value.
+ */
+export const int64Flag = (name: string) =>
+  Flag.String(name).pipe(
+    Flag.mapEffect((raw) => jsonNumber(raw, name).pipe(Effect.mapError(asCliError))),
+  );
+
 const isObject = (value: JsonNode | undefined): value is JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value) && !(value instanceof JsonNumber);
 
@@ -504,26 +518,32 @@ export const mergeBody = (options: {
   });
 
 /**
+ * The `Content-Type` a declared key sends: the key itself, or any concrete string when the key is a
+ * range (`image/*`), where the operator names the type.
+ */
+type SentType<K extends string> = K extends `${string}*${string}` ? string : K;
+
+/**
  * The request body for the media key `--content-type` selects (design 6.6). `alternatives` maps
  * each declared request media key to its unevaluated body effect; only the chosen one is run, so
  * the others' flag refusals never fire and stdin is read at most once. Returns the body and the
  * `Content-Type` to send. A key the media declaration lists without an alternative is a defect of
  * the generated code, not of the operator.
  */
-export const selectBody = <E, R>(options: {
-  readonly alternatives: { readonly [key: string]: Effect.Effect<HttpBody.HttpBody, E, R> };
+export const selectBody = <K extends string, E, R>(options: {
+  readonly alternatives: { readonly [P in K]: Effect.Effect<HttpBody.HttpBody, E, R> };
   readonly chosen: Option.Option<string>;
   readonly media: MediaDeclaration;
 }): Effect.Effect<
-  { readonly body: HttpBody.HttpBody; readonly contentType: string },
+  { readonly body: HttpBody.HttpBody; readonly contentType: SentType<K> },
   UsageError | E,
   R
 > =>
   Effect.gen(function* select() {
     const picked = yield* Negotiate.selectRequestMedia(options.media, options.chosen);
-    const alternative = Object.hasOwn(options.alternatives, picked.key)
-      ? options.alternatives[picked.key]
-      : undefined;
+    const declared: { readonly [key: string]: Effect.Effect<HttpBody.HttpBody, E, R> } =
+      options.alternatives;
+    const alternative = Object.hasOwn(declared, picked.key) ? declared[picked.key] : undefined;
 
     if (alternative === undefined) {
       return yield* Effect.die(
@@ -531,5 +551,7 @@ export const selectBody = <E, R>(options: {
       );
     }
 
-    return { body: yield* alternative, contentType: picked.contentType };
+    // SAFETY: selectRequestMedia returns the declared key itself, or a concrete type inside a declared range.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- selectRequestMedia returns the declared key's own type, or a concrete type inside a declared range
+    return { body: yield* alternative, contentType: picked.contentType as SentType<K> };
   });
