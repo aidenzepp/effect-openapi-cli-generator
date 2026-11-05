@@ -16,6 +16,7 @@ import {
   Stream,
 } from "effect";
 import { CliError } from "effect/cli";
+import { HttpClientRequest, UrlParams } from "effect/http";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
 import {
@@ -459,6 +460,117 @@ describe("credential scrubbing", () => {
   });
 });
 
+const longSecret = "SECRETTOKEN-abcdefghijklmnopqrstuvwxyz01";
+
+const longBearer: Credential = { ...bearer, value: Redacted.make(longSecret) };
+
+const basic: Credential = {
+  definition: { kind: "http", scheme: "basic" },
+  scheme: "basicAuth",
+  value: Redacted.make("alice:pass/word+=CANARY"),
+};
+
+const queryKey: Credential = {
+  definition: { in: "query", kind: "apiKey", name: "api_key" },
+  scheme: "apiKey",
+  value: Redacted.make("key/with+plus=CANARY&"),
+};
+
+const excerptWith = (text: string, max: number, credentials: readonly Credential[]) =>
+  Effect.runPromise(
+    readExcerpt(chunked(text, 7), credentials).pipe(
+      Effect.provide(Layer.succeed(MaxErrorBytes, max)),
+    ),
+  );
+
+/**
+ * The longest non-empty prefix of `secret` that `text` ends with, or "" when there is none.
+ */
+const trailingPrefix = (text: string, secret: string): string => {
+  for (let size = secret.length; size > 0; size -= 1) {
+    if (text.endsWith(secret.slice(0, size))) {
+      return secret.slice(0, size);
+    }
+  }
+
+  return "";
+};
+
+// The Authorization header exactly as HttpClientRequest.basicAuth sends it.
+const basicHeader = (): string => {
+  const sent = HttpClientRequest.basicAuth(
+    HttpClientRequest.get("https://api.example.com"),
+    "alice",
+    "pass/word+=CANARY",
+  );
+
+  return sent.headers.authorization ?? "";
+};
+
+// The query string exactly as the client serializes an apiKey query credential.
+const queryWire = (): string =>
+  UrlParams.toString(
+    HttpClientRequest.setUrlParam(
+      HttpClientRequest.get("https://api.example.com"),
+      "api_key",
+      "key/with+plus=CANARY&",
+    ).urlParams,
+  );
+
+describe("credential scrubbing at the read budget (audit F1)", () => {
+  test("a credential longer than its placeholder cut by the read budget leaves no prefix", async () => {
+    const body = `${longSecret}${"x".repeat(61)}${longSecret}tail`;
+    const text = await excerptWith(body, 100, [longBearer]);
+
+    expect(text).toContain("<redacted:bearer>");
+    expect(text).not.toContain("SECRETTOKEN");
+    expect(trailingPrefix(text, longSecret)).toBe("");
+    expect(utf8Length(text)).toBeLessThanOrEqual(100);
+  });
+
+  test("a basic token cut by the read budget leaves no prefix of it", async () => {
+    const token = basicHeader().slice("Basic ".length);
+    const body = `Basic ${token} ${"y".repeat(40)} Basic ${token}`;
+    const text = await excerptWith(body, 60, [basic]);
+
+    expect(text).not.toContain(token.slice(0, 4));
+    expect(trailingPrefix(text, token)).toBe("");
+  });
+});
+
+describe("every wire form of a credential is scrubbed (audit F2)", () => {
+  test("the I4 Authorization echo of a basic credential is scrubbed in excerpt and render", async () => {
+    const echo = basicHeader();
+    const token = echo.slice("Basic ".length);
+    const text = await excerptWith(echo, defaultMaxErrorBytes, [basic]);
+    const rendered = renderError(responseError({ bodyExcerpt: echo, status: 401 }), [basic]);
+
+    for (const output of [text, rendered]) {
+      expect(output).not.toContain(token);
+      expect(output).not.toContain("CANARY");
+      expect(output).toContain("<redacted:basicAuth>");
+    }
+  });
+
+  test("the password of a basic credential alone is scrubbed", () => {
+    expect(scrub("password was pass/word+=CANARY", [basic])).toBe(
+      "password was <redacted:basicAuth>",
+    );
+  });
+
+  test("a percent-encoded query key echoed in a URL is scrubbed", async () => {
+    const url = `https://api.example.com/users?${queryWire()}`;
+    const text = await excerptWith(`redirected to ${url}`, defaultMaxErrorBytes, [queryKey]);
+    const rendered = renderError(new TransportError({ reason: "connect", url }), [queryKey]);
+
+    expect(queryWire()).toContain("%2F");
+    for (const output of [text, rendered]) {
+      expect(output).not.toContain("CANARY");
+      expect(output).toContain("<redacted:apiKey>");
+    }
+  });
+});
+
 describe("sanitize", () => {
   test("keeps LF and TAB; removes C0, DEL, C1, bidi, format and line separators", () => {
     const dirty = "a\u0000b\u001Bc\u007Fd\u0085e\u202Ef\u200Bg\u2028h\u2029i\n\tj";
@@ -602,12 +714,46 @@ describe("finalCatch", () => {
     expect(codes).toEqual(known.map(([, code]) => code));
   });
 
-  test("a parse-time CliError passes through unprinted", async () => {
+  test("help with no parse errors passes through unprinted", async () => {
     const help = new CliError.ShowHelp({ commandPath: [], errors: [] });
     const { exit, stderr } = await runCatch(Effect.fail(help));
 
     expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(help);
     expect(stderr).toBe("");
+  });
+
+  test("a parse error is rendered once, value-free, and keeps exit 1 (audit F5)", async () => {
+    const invalid = new CliError.InvalidValue({
+      expected: `Expected a port, got "${canary}"`,
+      kind: "flag",
+      option: "port",
+      value: canary,
+    });
+    const help = new CliError.ShowHelp({ commandPath: ["cli"], errors: [invalid] });
+    const { exit, stderr } = await runCatch(Effect.fail(help));
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+
+    expect(error).toBe(help);
+    expect(Runtime.getErrorExitCode(error)).toBe(1);
+    expect(Runtime.getErrorReported(error)).toBe(false);
+    expect(stderr.match(/--port/gu)).toHaveLength(1);
+    expect(stderr).not.toContain(canary);
+    expect(stderr).not.toContain("Expected");
+  });
+
+  test("a CliError outside help is rendered once through the value-free formatter", async () => {
+    const invalid = new CliError.InvalidValue({
+      expected: canary,
+      kind: "argument",
+      option: "count",
+      value: canary,
+    });
+    const { exit, stderr } = await runCatch(Effect.fail(invalid));
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(invalid);
+    expect(Runtime.getErrorReported(invalid)).toBe(false);
+    expect(stderr.match(/<count>/gu)).toHaveLength(1);
+    expect(stderr).not.toContain(canary);
   });
 
   test("an interrupt passes through unprinted", async () => {

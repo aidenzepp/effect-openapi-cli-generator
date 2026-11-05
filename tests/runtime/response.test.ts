@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Effect, Exit, Runtime } from "effect";
+import { Cause, Effect, Exit, Redacted, Runtime } from "effect";
 import { HttpClientError, HttpClientRequest, HttpClientResponse, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../../src/runtime-src/domain/errors.ts";
+import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import { renderError } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseTable } from "../../src/runtime-src/runtime/response.ts";
 import {
   classify,
@@ -120,6 +122,23 @@ describe("classify", () => {
     expect(long.requestId).toHaveLength(256);
     expect(absent).not.toHaveProperty("requestId");
     expect(undeclared).not.toHaveProperty("requestId");
+  });
+
+  test("the request id is scrubbed before it is bounded (audit F6)", () => {
+    const secret = "SECRETTOKEN-abcdefghijklmnopqrstuvwxyz01";
+    const credential: Credential = {
+      definition: { kind: "http", scheme: "bearer" },
+      scheme: "bearer",
+      value: Redacted.make(secret),
+    };
+    const header = `${"r".repeat(230)}${secret}`;
+    const error = toApiResponseError(table, respond(404, { "x-request-id": header }), "", [
+      credential,
+    ]);
+    const rendered = renderError(error, [credential]);
+
+    expect(error.requestId).toBe(`${"r".repeat(230)}<redacted:bearer>`);
+    expect(rendered).not.toContain("SECRETTOKEN");
   });
 
   test("an unfollowed 3xx carries the Location with query credentials redacted, exit 1", async () => {

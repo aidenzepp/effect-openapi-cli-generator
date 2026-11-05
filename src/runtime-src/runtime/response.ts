@@ -2,6 +2,8 @@ import { Effect, Option, Schema } from "effect";
 import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
+import type { Credential } from "./auth.ts";
+import { scrub } from "./output.ts";
 
 /**
  * What the matcher needs of one operation: its display name, its declared response keys (an
@@ -48,16 +50,34 @@ const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | 
     ?.trim()
     .toLowerCase();
 
+/**
+ * The first `maxRequestIdLength` UTF-16 units of `text`, never ending in half a surrogate pair.
+ */
+const boundRequestId = (text: string): string => {
+  const head = text.slice(0, maxRequestIdLength);
+
+  return /[\uD800-\uDBFF]$/u.test(head) && text.length > maxRequestIdLength
+    ? head.slice(0, -1)
+    : head;
+};
+
+/**
+ * The declared request-id header, credentials scrubbed and then bounded (audit F6): bounding
+ * first could cut a credential so that the remaining prefix no longer matches.
+ */
 const requestIdOf = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
-): string | undefined =>
-  table.requestIdHeader === undefined
-    ? undefined
-    : Option.getOrUndefined(Headers.get(response.headers, table.requestIdHeader))?.slice(
-        0,
-        maxRequestIdLength,
-      );
+  credentials: readonly Credential[],
+): string | undefined => {
+  if (table.requestIdHeader === undefined) {
+    return undefined;
+  }
+
+  const header = Option.getOrUndefined(Headers.get(response.headers, table.requestIdHeader));
+
+  return header === undefined ? undefined : boundRequestId(scrub(header, credentials));
+};
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
   const location = Option.getOrUndefined(Headers.get(response.headers, "location"));
@@ -70,16 +90,17 @@ const locationNote = (response: HttpClientResponse.HttpClientResponse): string =
  * of the running fiber (`UrlParams.CurrentRedactedNames`, which the runtime extends with every spec
  * `apiKey` name); outside a fiber only Effect's defaults apply. The body excerpt is bounded and
  * rendered elsewhere (RT-6), so the caller passes it in. A 3xx with no excerpt carries its redacted
- * `Location` there instead.
+ * `Location` there instead. `credentials` are scrubbed from the request id before it is bounded.
  */
 export const toApiResponseError = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
   bodyExcerpt = "",
+  credentials: readonly Credential[] = [],
 ): ApiResponseError => {
   const key = matchResponse(table.responses, response.status);
   const mediaType = mediaTypeOf(response);
-  const requestId = requestIdOf(table, response);
+  const requestId = requestIdOf(table, response, credentials);
   const redirect = response.status >= 300 && response.status < 400 ? locationNote(response) : "";
 
   const base = {
@@ -102,11 +123,12 @@ export const toApiResponseError = (
 export const classify = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
+  credentials: readonly Credential[] = [],
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, ApiResponseError> =>
   Effect.suspend(() =>
     isSuccess(response.status)
       ? Effect.succeed(response)
-      : Effect.fail(toApiResponseError(table, response)),
+      : Effect.fail(toApiResponseError(table, response, "", credentials)),
   );
 
 /**

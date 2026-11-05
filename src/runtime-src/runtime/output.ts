@@ -16,6 +16,7 @@ import {
   Stream,
 } from "effect";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
+import { Base64 } from "effect/encoding";
 import {
   ApiResponseError,
   CredentialMissing,
@@ -215,29 +216,68 @@ const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
  */
 export const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
 
-const byLongestValue = Order.mapInput(Order.flip(Order.Number), (credential: Credential) => {
-  const value: string = Redacted.value(credential.value);
-
-  return value.length;
-});
-
 /**
- * Replace every configured credential value with `<redacted:<scheme>>` (design 7.5, C5). The
- * longest value goes first so a value that contains another is not left half visible. Empty
- * values are skipped.
+ * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
+ * token `basicAuth` sends and the password alone; for an apiKey in the query also the
+ * percent-encoded form the URL serializer emits. Empty forms are dropped.
  */
-export const scrub = (text: string, credentials: readonly Credential[]): string => {
-  let scrubbed = text;
+const wireForms = (credential: Credential): readonly string[] => {
+  const value: string = Redacted.value(credential.value);
+  const { definition } = credential;
+  const forms = [value];
 
-  for (const credential of Arr.sort(credentials, byLongestValue)) {
-    const value: string = Redacted.value(credential.value);
-
-    if (value !== "") {
-      scrubbed = scrubbed.replaceAll(value, `<redacted:${credential.scheme}>`);
-    }
+  if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
+    forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
   }
 
-  return scrubbed;
+  if (definition.kind === "apiKey" && definition.in === "query") {
+    forms.push(new URLSearchParams([["", value]]).toString().slice(1));
+  }
+
+  return forms.filter((form) => form !== "");
+};
+
+const byLongestForm = Order.mapInput(
+  Order.flip(Order.Number),
+  ([form]: readonly [string, string]) => form.length,
+);
+
+/**
+ * Each wire form of each credential with its placeholder, longest form first.
+ */
+const placeholders = (credentials: readonly Credential[]): ReadonlyMap<string, string> =>
+  new Map(
+    Arr.sort(
+      credentials.flatMap((credential) =>
+        wireForms(credential).map((form): readonly [string, string] => [
+          form,
+          `<redacted:${credential.scheme}>`,
+        ]),
+      ),
+      byLongestForm,
+    ),
+  );
+
+const regexSyntax = /[\\^$.*+?()[\]{}|/]/gu;
+
+/**
+ * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
+ * C5) in one pass. At each position the longest form wins, so a form that contains another is
+ * not left half visible, and no form is matched inside an inserted placeholder.
+ */
+export const scrub = (text: string, credentials: readonly Credential[]): string => {
+  const forms = placeholders(credentials);
+
+  if (forms.size === 0) {
+    return text;
+  }
+
+  const pattern = new RegExp(
+    [...forms.keys()].map((form) => form.replaceAll(regexSyntax, "\\$&")).join("|"),
+    "gu",
+  );
+
+  return text.replaceAll(pattern, (match) => forms.get(match) ?? match);
 };
 
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
@@ -294,16 +334,51 @@ export const boundedExcerpt = (
 
 const encoder = new TextEncoder();
 
-const longestCredentialBytes = (credentials: readonly Credential[]): number => {
-  let longest = 0;
+const longestFormBytes = (credentials: readonly Credential[]): number =>
+  Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));
 
-  for (const credential of credentials) {
-    const value: string = Redacted.value(credential.value);
+/**
+ * The length of the longest proper prefix of `form` that `text` ends with (Knuth-Morris-Pratt, so
+ * a long credential costs linear time).
+ */
+const trailingPrefixLength = (text: string, form: string): number => {
+  const fallback = [0];
 
-    longest = Math.max(longest, encoder.encode(value).length);
+  for (let at = 1, matched = 0; at < form.length; at += 1) {
+    while (matched > 0 && form[at] !== form[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+
+    matched += form[at] === form[matched] ? 1 : 0;
+    fallback.push(matched);
   }
 
-  return longest;
+  // Only the last form.length - 1 characters can hold a proper prefix, so a full match never forms.
+  let matched = 0;
+
+  for (let at = Math.max(0, text.length - form.length + 1); at < text.length; at += 1) {
+    while (matched > 0 && text[at] !== form[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+
+    matched += text[at] === form[matched] ? 1 : 0;
+  }
+
+  return matched;
+};
+
+/**
+ * Drop the trailing partial match of any credential form (audit F1). A read cut at its budget can
+ * end inside a credential; that fragment never matches, so scrubbing would leave it, and a shorter
+ * placeholder earlier in the text would pull it into the visible window.
+ */
+const dropTrailingFragment = (text: string, credentials: readonly Credential[]): string => {
+  const cut = Math.max(
+    0,
+    ...credentials.flatMap(wireForms).map((form) => trailingPrefixLength(text, form)),
+  );
+
+  return text.slice(0, text.length - cut);
 };
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
@@ -335,8 +410,10 @@ const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
 
 /**
  * Read the excerpt of an error response body for `ApiResponseError.bodyExcerpt`, bounded by
- * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential, so
- * a credential cut by the limit is still found and scrubbed, then bounds the scrubbed text.
+ * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
+ * form, so a credential cut by the limit is still found and scrubbed. When the read stops at that
+ * budget, an incomplete character and any trailing partial credential are dropped first; then the
+ * text is scrubbed, sanitized and bounded.
  */
 export const readExcerpt = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
@@ -349,11 +426,14 @@ export const readExcerpt = <E, R>(
       return "";
     }
 
-    const chunks = yield* Stream.runCollect(
-      takeBytes(body, maxBytes + longestCredentialBytes(credentials)),
-    );
+    const budget = maxBytes + longestFormBytes(credentials);
+    const read = concatBytes(yield* Stream.runCollect(takeBytes(body, budget)));
+    const text =
+      read.length < budget
+        ? new TextDecoder().decode(read)
+        : dropTrailingFragment(new TextDecoder().decode(read, { stream: true }), credentials);
 
-    return boundedExcerpt(new TextDecoder().decode(concatBytes(chunks)), maxBytes, credentials);
+    return boundedExcerpt(text, maxBytes, credentials);
   });
 
 /**
@@ -466,11 +546,37 @@ const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
   }).pipe(Effect.ignore);
 
 /**
- * The final catch around `Command.run` (design 7.4): a known error is rendered once and fails
- * again as itself, so its exit code stands; interruption and `CliError`s (rendered by the CLI
- * presenter) pass through; anything else prints one scrubbed line and "internal error, please
- * report" and fails with `InternalError`, exit 70. `credentials` are the values to scrub; the
- * caller holds them.
+ * The text printed on stderr for a `CliError`, or `undefined` when there is nothing to print:
+ * help with no parse errors, which `Command.run` has already presented. Parse errors go through
+ * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value.
+ */
+const renderCliError = (error: CliError.CliError): string | undefined => {
+  if (error._tag !== "ShowHelp") {
+    return valueFreeFormatter.formatError(error);
+  }
+
+  return error.errors.length === 0 ? undefined : valueFreeFormatter.formatErrors(error.errors);
+};
+
+/**
+ * Print already scrubbed text, then fail again with `error` marked reported, so its exit code
+ * stands and nothing renders it a second time.
+ */
+const reportOnce = <E extends object>(
+  text: string,
+  error: E,
+): Effect.Effect<never, E, Stdio.Stdio> =>
+  printStderr(text).pipe(
+    Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
+  );
+
+/**
+ * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
+ * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
+ * itself, so its exit code stands; a `CliError` parse error is rendered once through
+ * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
+ * line and "internal error, please report" and fails with `InternalError`, exit 70.
+ * `credentials` are the values to scrub; the caller holds them.
  */
 export const finalCatch =
   (credentials: readonly Credential[]) =>
@@ -478,19 +584,22 @@ export const finalCatch =
     Effect.catchCause(effect, (cause): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
       const failure = Cause.findErrorOption(cause);
 
-      if (
-        Cause.hasInterruptsOnly(cause) ||
-        (Option.isSome(failure) && CliError.isCliError(failure.value))
-      ) {
+      if (Cause.hasInterruptsOnly(cause)) {
         return Effect.failCause(cause);
+      }
+
+      if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
+        const text = renderCliError(failure.value);
+
+        return text === undefined
+          ? Effect.failCause(cause)
+          : reportOnce(sanitize(scrub(text, credentials)), failure.value);
       }
 
       if (Option.isSome(failure) && isKnownError(failure.value)) {
         const error = failure.value;
 
-        return printStderr(renderError(error, credentials)).pipe(
-          Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
-        );
+        return reportOnce(renderError(error, credentials), error);
       }
 
       const squashed = Cause.squash(cause);
