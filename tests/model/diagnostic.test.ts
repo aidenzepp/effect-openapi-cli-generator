@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Exit, Schema } from "effect";
+import { Array as Arr, Exit, Schema } from "effect";
 import { Diagnostic, sortDiagnostics } from "../../src/model/diagnostic.ts";
 import { Verdict } from "../../src/model/verdict.ts";
 
-const base = {
+const base: typeof Diagnostic.Encoded = {
   code: "PRM-27/compound-nested",
   column: 3,
   document: "file:///spec.json",
@@ -64,7 +64,7 @@ describe("sortDiagnostics", () => {
       make("file:///a.json", "/paths/~1x/get/parameters/10", "PRM-1/a"),
       make("file:///b.json", "/info", "PRM-1/a"),
     ];
-    const shuffled = [ordered[3], ordered[4], ordered[1], ordered[2], ordered[0]];
+    const shuffled = Arr.getSomes([3, 4, 1, 2, 0].map((index) => Arr.get(ordered, index)));
     expect(keys(sortDiagnostics(documents, shuffled))).toEqual(keys(ordered));
   });
 
@@ -76,7 +76,7 @@ describe("sortDiagnostics", () => {
 });
 
 describe("Verdict", () => {
-  const verdict = {
+  const verdict: typeof Verdict.Encoded = {
     corpusVersion: 1,
     counts: {
       informational: 0,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Array as Arr, Exit, Order, Predicate, Schema } from "effect";
+import { Array as Arr, Exit, Order, Schema } from "effect";
 import {
   Api,
   Body,
@@ -157,12 +157,16 @@ const decodes = (codec: Schema.Codec<unknown, unknown>, input: Plain): boolean =
 const without = (input: Plain, key: string): Plain =>
   Object.fromEntries(Object.entries(input).filter(([name]) => name !== key));
 
+const isJsonArray = Schema.is(Schema.Array(Schema.Json));
+
+const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json));
+
 const keyOrderSorted = (value: Schema.Json): boolean => {
-  if (Arr.isArray(value)) {
+  if (isJsonArray(value)) {
     return value.every((item) => keyOrderSorted(item));
   }
 
-  if (Predicate.isObject(value)) {
+  if (isJsonObject(value)) {
     const keys = Object.keys(value);
     const sorted = Arr.sort(keys, Order.String);
     const inOrder = keys.every((key, index) => key === sorted[index]);
