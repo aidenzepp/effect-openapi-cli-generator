@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Effect, Match, Option, Order, Predicate, Schema } from "effect";
 import type { JsonLiteral } from "../model/brands.ts";
-import { asciiStringLiteral, jsDoc, stringLiteral } from "./escape.ts";
+import { asciiStringLiteral, guardTemplateCurly, jsDoc, stringLiteral } from "./escape.ts";
 import type { JsDocText } from "./escape.ts";
 
 const identifierPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
@@ -1067,7 +1067,8 @@ const importLine = (entry: Import): string => {
  * with a `PrinterError` when the module holds a construct outside the printer's syntax subset.
  */
 export const printModule = (module: Module): Effect.Effect<string, PrinterError> =>
-  Effect.map(Effect.all(module.statements.map(printStatement)), (statements) => {
+  Effect.map(Effect.all(module.statements.map(printStatement)), (printed) => {
+    const statements = printed.map(guardTemplateCurly);
     const imports = mergeImports(module.imports).map(importLine);
     const blocks = [
       ...(module.shebang === undefined ? [] : [`#!${module.shebang}`]),

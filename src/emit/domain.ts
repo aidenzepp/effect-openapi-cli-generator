@@ -16,7 +16,7 @@ import type { SafeIdentifierValue } from "../names/fold.ts";
 import { codeGenerationCopy } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
 import type { Json } from "../model/pointer.ts";
-import { asciiStringLiteral, stringLiteral } from "./escape.ts";
+import { asciiStringLiteral, guardTemplateCurly, stringLiteral } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 import { textWidth } from "./printer.ts";
 
@@ -1656,7 +1656,7 @@ export const emitDomainSchemas = (
       return yield* new DomainEmitError({ reason: "reference-cycle" });
     }
 
-    const statements = ordered.flatMap(statementsOf);
+    const statements = ordered.flatMap(statementsOf).map(guardTemplateCurly);
 
     return {
       content: `import { Schema } from "effect";\n\n${statements.join("\n\n")}\n`,

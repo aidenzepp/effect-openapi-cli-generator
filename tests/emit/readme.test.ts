@@ -134,7 +134,7 @@ describe("emitReadme", () => {
     const readme = emitReadme(await input(withWebhooks)).content;
 
     expect(fenced(section(readme, "Webhooks"))).toEqual([
-      String.raw`"${"`".repeat(3)}\nrm\u202e"`,
+      String.raw`"${"`".repeat(3)}\nrm\u202E"`,
       '"new-user"',
     ]);
     expect(readme).not.toContain("\u202E");
