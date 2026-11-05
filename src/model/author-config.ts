@@ -11,6 +11,11 @@ const parameterKeyPattern = /^(?:cookie|header|path|query):.+$/u;
 
 const rowId = "CFG-1";
 
+// semver 2.0.0 (semver.org), whose grammar is visible ASCII with no whitespace, so the version is
+// safe as a header value and an emitted literal.
+const semverPattern =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/u;
+
 const environmentName = Schema.String.pipe(Schema.check(Schema.isPattern(environmentNamePattern)));
 
 const nonNegative = Schema.Finite.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
@@ -50,7 +55,10 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       operations: Schema.optionalKey(Schema.Record(Schema.NonEmptyString, OperationOverride)),
     }),
   ),
-  package: Schema.Struct({ name: Schema.NonEmptyString, version: Schema.NonEmptyString }),
+  package: Schema.Struct({
+    name: Schema.NonEmptyString,
+    version: Schema.String.pipe(Schema.check(Schema.isPattern(semverPattern))),
+  }),
   retrievalUri: Schema.optionalKey(DocumentUri),
   runtime: Schema.optionalKey(
     Schema.Struct({
@@ -85,6 +93,7 @@ type Kind = "invalid" | "missing" | "unknown";
 
 type Rule =
   | "invalid-bin-name"
+  | "invalid-version"
   | "invalid-value"
   | "missing-bin-name"
   | "missing-key"
@@ -123,6 +132,9 @@ const escapeToken = (token: string): string => token.replaceAll("~", "~0").repla
 const pointerOf = (path: readonly string[]): string =>
   path.map((t) => `/${escapeToken(t)}`).join("");
 
+const isVersion = (path: readonly string[]): boolean =>
+  path.length === 2 && path[0] === "package" && path[1] === "version";
+
 const isBinName = (path: readonly string[]): boolean => path.length === 1 && path[0] === "binName";
 
 // Keys the design names but this release does not consume; they are refused, not ignored.
@@ -138,12 +150,17 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
     return kind === "missing" ? "missing-bin-name" : "invalid-bin-name";
   }
 
+  if (isVersion(path) && kind === "invalid") {
+    return "invalid-version";
+  }
+
   return kind === "missing" ? "missing-key" : "invalid-value";
 };
 
 const messages: Readonly<Record<Rule, string>> = {
   "invalid-bin-name": "binName must match ^[a-z][a-z0-9-]*$.",
   "invalid-value": "An author config value is not valid.",
+  "invalid-version": "package.version must be a semver 2.0.0 version such as 1.2.3.",
   "missing-bin-name": "The author config has no binName.",
   "missing-key": "A required author config key is missing.",
   "unknown-key": "The author config has a key this generator does not define.",

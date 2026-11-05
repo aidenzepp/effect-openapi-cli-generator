@@ -29,9 +29,9 @@ export type Attach = (
 ) => Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError>;
 
 /**
- * The request init a loopback hop executes with, supplied by the entry (design 6.5 Loopback hosts).
- * It is opaque here: the runtime never names its keys, and `bin.ts` decides what routes a hop
- * direct.
+ * The request init a loopback hop executes with (design 6.5 Loopback hosts). The runtime owns the
+ * value (`directRoute` below, probe SP5c) and `bin.ts` passes it in; this type keeps the keys
+ * opaque to callers.
  */
 export type DirectRoute = FetchHttpClient.RequestInit["Service"];
 
