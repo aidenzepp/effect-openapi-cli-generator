@@ -1,0 +1,146 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hostile names API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://hostile.example.com"
+    }
+  ],
+  "paths": {
+    "/things/{id}": {
+      "patch": {
+        "tags": ["things"],
+        "operationId": "things-update",
+        "description": "Update a thing. a${b}c | `\\ | a\rb |    | text */ more | first line\n  @deprecated forged tag",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "One of the hostile literals.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "\ud800",
+                "\udc00",
+                "😀",
+                "a${b}c",
+                "`\\",
+                "a\rb",
+                "  ",
+                "text */ more",
+                "first line\n  @deprecated forged tag",
+                "__proto__",
+                "constructor",
+                "prototype",
+                "café",
+                "a​b",
+                "ab",
+                "ab",
+                "a‮b"
+              ],
+              "default": "a${b}c"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Hostile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated thing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Hostile"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Hostile": {
+        "type": "object",
+        "properties": {
+          "😀": {
+            "type": "string",
+            "description": "case hostile-surrogate-pair"
+          },
+          "a${b}c": {
+            "type": "string",
+            "description": "case hostile-template-interpolation"
+          },
+          "`\\": {
+            "type": "string",
+            "description": "case hostile-backtick-and-backslash"
+          },
+          "a\rb": {
+            "type": "string",
+            "description": "case hostile-carriage-return"
+          },
+          "  ": {
+            "type": "string",
+            "description": "case hostile-line-separators"
+          },
+          "text */ more": {
+            "type": "string",
+            "description": "case hostile-jsdoc-comment-terminator"
+          },
+          "first line\n  @deprecated forged tag": {
+            "type": "string",
+            "description": "case hostile-jsdoc-line-leading-at"
+          },
+          "constructor": {
+            "type": "string",
+            "description": "case hostile-key-constructor"
+          },
+          "prototype": {
+            "type": "string",
+            "description": "case hostile-key-prototype"
+          },
+          "café": {
+            "type": "string",
+            "description": "case hostile-printable-non-ascii"
+          },
+          "a​b": {
+            "type": "string",
+            "description": "case hostile-escape-set-format"
+          },
+          "ab": {
+            "type": "string",
+            "description": "case hostile-escape-set-del"
+          },
+          "ab": {
+            "type": "string",
+            "description": "case hostile-escape-set-c1"
+          },
+          "a‮b": {
+            "type": "string",
+            "description": "case hostile-escape-set-bidi"
+          }
+        }
+      }
+    }
+  }
+}
