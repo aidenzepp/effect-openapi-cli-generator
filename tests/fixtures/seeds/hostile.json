@@ -10,7 +10,8 @@
         "kind": "string-literal",
         "asciiOnly": true,
         "roundTrip": true,
-        "templateLiteral": false
+        "templateLiteral": false,
+        "source": "\"\\ud800\""
       },
       "designSection": "\u00a73.6"
     },
@@ -24,7 +25,8 @@
         "kind": "string-literal",
         "asciiOnly": true,
         "roundTrip": true,
-        "templateLiteral": false
+        "templateLiteral": false,
+        "source": "\"\\udc00\""
       },
       "designSection": "\u00a73.6"
     },
@@ -36,9 +38,10 @@
       },
       "expected": {
         "kind": "string-literal",
-        "asciiOnly": true,
+        "asciiOnly": false,
         "roundTrip": true,
-        "templateLiteral": false
+        "templateLiteral": false,
+        "source": "\"\ud83d\ude00\""
       },
       "designSection": "\u00a73.6"
     },
@@ -51,7 +54,8 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "quote": "double"
+        "quote": "double",
+        "source": "\"a${b}c\""
       },
       "designSection": "\u00a73.6"
     },
@@ -64,7 +68,8 @@
         "asciiOnly": true,
         "roundTrip": true,
         "templateLiteral": false,
-        "quote": "double"
+        "quote": "double",
+        "source": "\"`\\\\\""
       },
       "designSection": "\u00a73.6"
     },
@@ -76,7 +81,8 @@
         "kind": "string-literal",
         "asciiOnly": true,
         "roundTrip": true,
-        "templateLiteral": false
+        "templateLiteral": false,
+        "source": "\"a\\rb\""
       },
       "designSection": "\u00a73.6"
     },
@@ -88,7 +94,8 @@
         "kind": "string-literal",
         "asciiOnly": true,
         "roundTrip": true,
-        "templateLiteral": false
+        "templateLiteral": false,
+        "source": "\"\\u2028\\u2029\""
       },
       "designSection": "\u00a73.6"
     },
@@ -97,9 +104,12 @@
       "source": "E16 src/core/source-text.ts:41-47",
       "input": "text */ more",
       "expected": {
-        "kind": "jsdoc-text",
-        "containsCommentTerminator": false,
-        "closesCommentEarly": false
+        "kind": "string-literal",
+        "source": "\"text */ more\"",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "inJsDoc": false
       },
       "designSection": "\u00a73.6"
     },
@@ -108,8 +118,12 @@
       "source": "E16 src/core/source-text.ts:41-47",
       "input": "first line\n  @deprecated forged tag",
       "expected": {
-        "kind": "jsdoc-text",
-        "lineLeadingTag": false
+        "kind": "string-literal",
+        "source": "\"first line\\n  @deprecated forged tag\"",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "inJsDoc": false
       },
       "designSection": "\u00a73.6"
     },
@@ -121,6 +135,7 @@
         "kind": "object-key",
         "computed": true,
         "ownProperty": true,
+        "source": "[\"__proto__\"]",
         "quoted": true
       },
       "designSection": "\u00a79 I1"
@@ -133,7 +148,8 @@
         "kind": "object-key",
         "computed": false,
         "ownProperty": true,
-        "quoted": true
+        "source": "constructor",
+        "quoted": false
       },
       "designSection": "\u00a79 I1"
     },
@@ -145,9 +161,75 @@
         "kind": "object-key",
         "computed": false,
         "ownProperty": true,
-        "quoted": true
+        "source": "prototype",
+        "quoted": false
       },
       "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-printable-non-ascii",
+      "source": "b96c8946 MP:1",
+      "input": "caf\u00e9",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": false,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"caf\u00e9\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-format",
+      "source": "b96c8946 MP:1",
+      "input": "a\u200bb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u200bb\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-del",
+      "source": "b96c8946 MP:1",
+      "input": "a\u007fb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u007fb\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-c1",
+      "source": "b96c8946 MP:1",
+      "input": "a\u0085b",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u0085b\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-bidi",
+      "source": "b96c8946 MP:1",
+      "input": "a\u202eb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u202eb\""
+      },
+      "designSection": "\u00a73.6"
     }
   ]
 }
