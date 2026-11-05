@@ -135,6 +135,48 @@ describe("Output.presenter routing", () => {
   });
 });
 
+describe("Output.presenter sanitizing", () => {
+  const hostile = "\u001B[31mred\u009B2Jx\u0085y";
+  const hostileFormatter: CliOutput.Formatter = {
+    formatCliError: Output.valueFreeFormatter.formatCliError,
+    formatError: Output.valueFreeFormatter.formatError,
+    formatErrors: () => `bad${hostile}`,
+    formatHelpDoc: () => `help${hostile}`,
+    formatVersion: () => `v${hostile}`,
+  };
+  const neutral = "[31mred2Jxy";
+
+  test("requested help and version reach stdout with control characters removed", async () => {
+    const help = await run(["login", "--help"], { formatter: hostileFormatter });
+    const version = await run(["--version"], { formatter: hostileFormatter });
+
+    expect(help.stdout).toBe(`help${neutral}\n`);
+    expect(help.stderr).toBe("");
+    expect(version.stdout).toBe(`v${neutral}\n`);
+    expect(version.stderr).toBe("");
+  });
+
+  test("implicit help reaches stderr with control characters removed", async () => {
+    const { stderr, stdout } = await run([], { formatter: hostileFormatter });
+
+    expect(stderr).toBe(`help${neutral}\n`);
+    expect(stdout).toBe("");
+  });
+
+  test("an invalid invocation reaches stderr with control characters removed", async () => {
+    const { stderr, stdout } = await run(["login", "--port", "x"], {
+      formatter: hostileFormatter,
+      renderErrors: true,
+    });
+
+    expect(stderr).toContain(`help${neutral}\n`);
+    expect(stderr).toContain(`bad${neutral}\n`);
+    expect(stderr.includes("\u001B")).toBe(false);
+    expect(stderr.includes("\u009B")).toBe(false);
+    expect(stdout).toBe("");
+  });
+});
+
 describe("Output.exitForHelp", () => {
   test("a parse error exits 2 and finalCatch reports it once", async () => {
     const { exit, stderr, stdout } = await run(["login", "--port", canary]);

@@ -559,7 +559,7 @@ export const finalCatch =
  * Where help, version and invalid-invocation output go. Requested help and the
  * version are the answer, so they go to stdout; implicit help (a group run without a
  * subcommand) and an invalid invocation explain a run that did nothing, so they go to stderr.
- * The text comes from the `CliOutput.Formatter` in context.
+ * The text comes from the `CliOutput.Formatter` in context and is sanitized before it is printed.
  */
 export const presenter: CliOutput.Presenter = {
   present: (event) =>
@@ -567,16 +567,16 @@ export const presenter: CliOutput.Presenter = {
       const format = yield* CliOutput.Formatter;
 
       if (event._tag === "Version") {
-        yield* Console.log(format.formatVersion(event.name, event.version));
+        yield* Console.log(sanitize(format.formatVersion(event.name, event.version)));
 
         return;
       }
 
-      const help = format.formatHelpDoc(event.helpDoc);
+      const help = sanitize(format.formatHelpDoc(event.helpDoc));
 
       if (event._tag === "InvalidInvocation") {
         yield* Console.error(help);
-        yield* Console.error(format.formatErrors(event.errors));
+        yield* Console.error(sanitize(format.formatErrors(event.errors)));
 
         return;
       }
