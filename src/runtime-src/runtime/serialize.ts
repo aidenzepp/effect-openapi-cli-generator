@@ -1073,7 +1073,28 @@ interface JsonObject {
 const isJsonObject = (value: Json): value is JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value);
 
-const isJsonScalar = (value: Json): value is Exclude<Json, object> => !Predicate.isObject(value);
+const isJsonScalar = (value: Json): value is Exclude<Json, object> =>
+  !Predicate.isObject(value) && !Array.isArray(value);
+
+/**
+ * Whether a string, member name or item anywhere in `value` holds a lone surrogate.
+ */
+const hasLoneSurrogate = (value: Json): boolean => {
+  if (Predicate.isString(value)) {
+    return unpairedSurrogate.test(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item: Json) => hasLoneSurrogate(item));
+  }
+
+  return (
+    isJsonObject(value) &&
+    Object.entries(value).some(
+      ([member, text]) => unpairedSurrogate.test(member) || hasLoneSurrogate(text),
+    )
+  );
+};
 
 const formSafe = /^[\w*.-]$/u;
 
@@ -1119,10 +1140,25 @@ const isFlat = (value: Json): value is Json & Value =>
   (isJsonObject(value) ? Object.values(value) : value).every((member) => isJsonScalar(member));
 
 /**
+ * The pairs one property sends. `members` marks pairs named by the value's members (an exploded
+ * object or `deepObject`) rather than by the property itself.
+ */
+interface PropertyPairs {
+  readonly members: boolean;
+  readonly pairs: readonly string[];
+}
+
+const noPairs: PropertyPairs = { members: false, pairs: [] };
+
+/**
  * RFC 6570 expansion with percent-encoding disabled decides delimiters, explode and value text; the
  * form encoder then encodes each name and value once. Missing fields take the query defaults.
  */
-const styledPairs = (name: string, value: Json, encoding: FormEncoding) =>
+const styledPairs = (
+  name: string,
+  value: Json,
+  encoding: FormEncoding,
+): Effect.Effect<PropertyPairs, UsageError> =>
   Effect.gen(function* styledExpansion() {
     const style = encoding.style ?? "form";
     const options = {
@@ -1137,7 +1173,7 @@ const styledPairs = (name: string, value: Json, encoding: FormEncoding) =>
     const text = yield* toText(name, value, false);
 
     if (text === undefined) {
-      return [];
+      return noPairs;
     }
 
     if (style === "deepObject" && text.kind !== "object") {
@@ -1146,17 +1182,25 @@ const styledPairs = (name: string, value: Json, encoding: FormEncoding) =>
 
     yield* checkQueryDelimiter(name, style, text, { ...options, required: false });
 
-    return composePairs(style, name, text, options.explode, formCodec(options.allowReserved));
+    return {
+      members: text.kind === "object" && (style === "deepObject" || options.explode),
+      pairs: composePairs(style, name, text, options.explode, formCodec(options.allowReserved)),
+    };
   });
 
 /**
- * The default `contentType` table: an object as compact JSON, a scalar as its text. An array
- * repeats the name, one pair per item; `null` is omitted.
+ * The default `contentType` table: an object or an array item that is an array as compact JSON, a
+ * scalar as its text. An array repeats the name, one pair per item; `null` is omitted. A lone
+ * surrogate anywhere in the value is refused, not sent as a JSON escape.
  */
-const contentPairs = (name: string, value: Json) =>
+const contentPairs = (name: string, value: Json): Effect.Effect<PropertyPairs, UsageError> =>
   Effect.gen(function* contentExpansion() {
     if (value === null) {
-      return [];
+      return noPairs;
+    }
+
+    if (hasLoneSurrogate(value)) {
+      return yield* refuse(`property ${name} holds an unpaired surrogate, which has no UTF-8 form`);
     }
 
     const items: readonly Json[] = Array.isArray(value) ? value : [value];
@@ -1169,7 +1213,7 @@ const contentPairs = (name: string, value: Json) =>
       pairs.push(`${encode(name)}=${encode(text)}`);
     }
 
-    return pairs;
+    return { members: false, pairs };
   });
 
 /**
@@ -1179,6 +1223,11 @@ const contentPairs = (name: string, value: Json) =>
  * `contentType`. Binary reaches a form only as text already encoded by its `contentEncoding`. A
  * key the form does not declare follows the declared ones in input order, by the default
  * `contentType` rules (design 4.5).
+ *
+ * A server cannot tell two sources of one pair name apart, so a pair name sent by two properties,
+ * or a member-named pair (an exploded object or `deepObject`) named like any declared property, is
+ * refused, naming the property that sent it last (design 4.5, SM-9). One property repeating its own
+ * name, as an array does, is sent.
  */
 export const urlEncode = (
   value: JsonObject,
@@ -1189,6 +1238,9 @@ export const urlEncode = (
     const undeclared = Object.keys(value)
       .filter((name) => !declared.has(name))
       .map((name) => [name, {}] as const);
+    const encodeName = formEncoder(false);
+    const declaredNames = new Set([...declared].map(encodeName));
+    const senders = new Map<string, string>();
     const pairs: string[] = [];
 
     for (const [name, encoding] of [...options.properties, ...undeclared]) {
@@ -1202,11 +1254,28 @@ export const urlEncode = (
         return yield* refuse("a form property has a name with no UTF-8 form");
       }
 
-      pairs.push(
-        ...(hasStyle(encoding)
-          ? yield* styledPairs(name, property, encoding)
-          : yield* contentPairs(name, property)),
-      );
+      const sent = hasStyle(encoding)
+        ? yield* styledPairs(name, property, encoding)
+        : yield* contentPairs(name, property);
+
+      for (const pair of sent.pairs) {
+        // An encoded name holds no `=`, so the first one ends it.
+        const pairName = pair.slice(0, pair.indexOf("="));
+        const sender = senders.get(pairName);
+
+        if (
+          (sender !== undefined && sender !== name) ||
+          (sent.members && declaredNames.has(pairName))
+        ) {
+          return yield* refuse(
+            `property ${name} sends a pair named like another property's, which a server cannot tell apart`,
+          );
+        }
+
+        senders.set(pairName, name);
+      }
+
+      pairs.push(...sent.pairs);
     }
 
     return pairs.join("&");
@@ -1214,7 +1283,7 @@ export const urlEncode = (
 
 const urlEncodedOf = (
   mediaType: string,
-  value: Json,
+  value: Json | undefined,
   options: UrlEncodedOptions & { readonly required: boolean },
 ) =>
   Effect.gen(function* urlEncodedEvaluation() {
@@ -1222,22 +1291,27 @@ const urlEncodedOf = (
       return yield* refuse("the request media type is not a valid header value");
     }
 
+    if (value === undefined) {
+      return options.required ? HttpBody.text("", mediaType) : HttpBody.empty;
+    }
+
     if (!isJsonObject(value)) {
       return yield* refuse("a form-urlencoded body must be an object");
     }
 
-    const text = yield* urlEncode(value, options);
-
-    return text === "" && !options.required ? HttpBody.empty : HttpBody.text(text, mediaType);
+    return HttpBody.text(yield* urlEncode(value, options), mediaType);
   });
 
 /**
- * A form-urlencoded body for `mediaType`, encoded by `urlEncode`. With no pair a required body is
- * empty text under `mediaType` and an optional one is no body.
+ * A form-urlencoded body for `mediaType`, encoded by `urlEncode` (design 4.5 body presence).
+ * `value` is `undefined` when the caller has no body input at all: then a required body is empty
+ * text under `mediaType` and an optional one is no body. Present input is always sent under
+ * `mediaType`, even when it yields no pair (`--body '{}'` sends empty text, as the JSON path sends
+ * `{}`). An emitter (m2-em7) passes `undefined` for absent input, never `{}`.
  */
 export const urlEncoded = (
   mediaType: string,
-  value: Json,
+  value: Json | undefined,
   options: UrlEncodedOptions & { readonly required: boolean },
 ): RequestBody => ({
   expand: urlEncodedOf(mediaType, value, options),

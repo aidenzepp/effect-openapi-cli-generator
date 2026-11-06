@@ -26,9 +26,27 @@ const expectUsage = async (effect: Effect.Effect<unknown, UsageError>) => {
 
   expect(error).toBeInstanceOf(UsageError);
   expect(error[Runtime.errorExitCode]).toBe(2);
+
+  return error.message;
 };
 
-const send = (value: Json, properties: Properties, required = true) =>
+// The refusal names `property` and holds none of `values`.
+const expectRefusalNaming = async (
+  value: { readonly [property: string]: Json },
+  properties: Properties,
+  property: string,
+  ...values: readonly string[]
+) => {
+  const message = await expectUsage(Serialize.urlEncode(value, { properties }));
+
+  expect(message).toContain(property);
+
+  for (const text of values) {
+    expect(message).not.toContain(text);
+  }
+};
+
+const send = (value: Json | undefined, properties: Properties, required = true) =>
   Effect.runPromise(
     Serialize.request("POST", {
       body: Serialize.urlEncoded(media, value, { properties, required }),
@@ -81,6 +99,17 @@ describe("form-urlencoded default contentType", () => {
 
   test("an object item of an array is sent as compact JSON", async () => {
     expect(await encode({ tag: [{ a: 1 }] })).toBe("tag=%7B%22a%22%3A1%7D");
+  });
+
+  test("an array item of an array is sent as compact JSON", async () => {
+    expect(await encode({ tag: [[1, "a"], "b"] })).toBe("tag=%5B1%2C%22a%22%5D&tag=b");
+    expect(await encode({ grid: [[]] }, [])).toBe("grid=%5B%5D");
+  });
+
+  test("a lone surrogate inside a JSON-valued property is refused", async () => {
+    await expectRefusalNaming({ meta: { a: "x\uD800" } }, declared({ meta: {} }), "meta");
+    await expectRefusalNaming({ meta: { "\uDC00": 1 } }, declared({ meta: {} }), "meta");
+    await expectRefusalNaming({ tag: [["\uD800"]] }, declared({ tag: [] }), "tag");
   });
 
   test("a null property is omitted", async () => {
@@ -203,6 +232,73 @@ describe("form-urlencoded pairs", () => {
   });
 });
 
+describe("form-urlencoded pair name collisions", () => {
+  test("an exploded member named like another declared property is refused", async () => {
+    await expectRefusalNaming(
+      inOrder(["color", { a: "evil" }], ["a", "good"]),
+      [
+        ["color", { explode: true }],
+        ["a", {}],
+      ],
+      "color",
+      "evil",
+      "good",
+    );
+  });
+
+  test("an exploded member named like an absent declared property is refused", async () => {
+    await expectRefusalNaming(
+      { color: { a: "evil" } },
+      [
+        ["color", { explode: true }],
+        ["a", {}],
+      ],
+      "color",
+      "evil",
+    );
+  });
+
+  test("an exploded member named like its own property is refused", async () => {
+    await expectRefusalNaming({ color: { color: "x" } }, [["color", { explode: true }]], "color");
+  });
+
+  test("an undeclared key named like an exploded member is refused", async () => {
+    await expectRefusalNaming(
+      inOrder(["color", { z: "1" }], ["z", "2"]),
+      [["color", { explode: true }]],
+      "z",
+    );
+  });
+
+  test("an undeclared key named like a deepObject pair is refused", async () => {
+    await expectRefusalNaming(
+      inOrder(["color", { a: "1" }], ["color[a]", "2"]),
+      [["color", { style: "deepObject" }]],
+      "color[a]",
+    );
+  });
+
+  test("members of two exploded properties with one name are refused", async () => {
+    await expectRefusalNaming(
+      { p: { k: "1" }, q: { k: "2" } },
+      [
+        ["p", { explode: true }],
+        ["q", { explode: true }],
+      ],
+      "q",
+    );
+  });
+
+  test("one array property repeating its own name is sent", async () => {
+    expect(
+      await encode({ color: { R: 1 }, tag: ["a", "b"] }, [
+        ["color", { explode: true }],
+        ["tag", { explode: true }],
+      ]),
+    ).toBe("R=1&tag=a&tag=b");
+  });
+});
+
 describe("form-urlencoded body", () => {
   test("the body is the encoded text under the declared media type", async () => {
     const built = await send({ a: "x y", b: ["1", "2"] }, [
@@ -214,14 +310,29 @@ describe("form-urlencoded body", () => {
     expect(bytes(built)).toBe("a=x+y&b=1&b=2");
   });
 
-  test("a required body with no pairs is empty text, an optional one is no body", async () => {
-    const required = await send({}, [["a", {}]]);
-    const optional = await send({}, [["a", {}]], false);
+  test("an absent required body is empty text, an absent optional one is no body", async () => {
+    const required = await send(undefined, [["a", {}]]);
+    const optional = await send(undefined, [["a", {}]], false);
 
     expect(bytes(required)).toBe("");
     expect(required.headers["content-type"]).toBe(media);
     expect(bytes(optional)).toBe("Empty");
     expect(optional.headers["content-type"]).toBeUndefined();
+  });
+
+  test.each([
+    ["an empty object", {}],
+    ["only null properties", { a: null }],
+    ["only empty arrays", { a: [] }],
+  ])("a present body with %s is empty text under the media type", async (_, value) => {
+    const built = await Promise.all(
+      [true, false].map((required) => send(value, [["a", {}]], required)),
+    );
+
+    for (const request of built) {
+      expect(bytes(request)).toBe("");
+      expect(request.headers["content-type"]).toBe(media);
+    }
   });
 
   test("a body that is not an object is refused", async () => {
