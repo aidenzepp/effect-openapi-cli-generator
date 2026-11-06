@@ -192,6 +192,7 @@ const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, Usag
 // by position, which a pipe refuses. Such input goes through `-` instead.
 const openFile = (
   path: string,
+  guarded = true,
 ): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody | FileSystem.FileSystem> =>
   Effect.gen(function* open() {
     const fs = yield* FileSystem.FileSystem;
@@ -201,7 +202,7 @@ const openFile = (
       return yield* Effect.fail(notAFile());
     }
 
-    if (info.size > BigInt(maxBodyBytes)) {
+    if (guarded && info.size > BigInt(maxBodyBytes)) {
       return yield* Effect.fail(overLimit());
     }
 
@@ -209,7 +210,9 @@ const openFile = (
 
     const fileBody = yield* FileBody;
 
-    return yield* fileBody.open(path).pipe(Effect.mapError(cannotRead), Effect.flatMap(limited));
+    const opened = fileBody.open(path).pipe(Effect.mapError(cannotRead));
+
+    return yield* guarded ? opened.pipe(Effect.flatMap(limited)) : opened;
   });
 
 /**
@@ -248,6 +251,47 @@ export const binaryBody = (options: {
   return options.bodyFile.value === "-"
     ? readBodyFile("-").pipe(Effect.map((read) => HttpBody.uint8Array(read)))
     : openFile(options.bodyFile.value);
+};
+
+/**
+ * A sequential request body (NDJSON, JSON Lines, JSON-seq; design 6.3 Sequential uploads) exactly
+ * as the operator gives it: `--body` is the text as given; a `--body-file` regular file streams
+ * through `FileBody` with its size; `-` streams stdin chunked under the one stdin claim. The bytes
+ * are never parsed, re-framed, buffered whole, asserted against a schema or counted against the
+ * in-memory read limit, which bounds only reads into memory (design I5). The caller sets the
+ * declared media type as `Content-Type`. `--body` together with `--body-file` is refused. With
+ * neither flag a required body is a `UsageError` and an optional one is empty.
+ */
+export const sequentialBody = (options: {
+  readonly body: Option.Option<string>;
+  readonly bodyFile: Option.Option<string>;
+  readonly required: boolean;
+}): Effect.Effect<
+  HttpBody.HttpBody,
+  UsageError,
+  FileBody | FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> => {
+  if (Option.isSome(options.body)) {
+    return Option.isSome(options.bodyFile)
+      ? Effect.fail(usage("body", `cannot be used with --${bodyFileName}`))
+      : Effect.succeed(HttpBody.text(options.body.value));
+  }
+
+  if (Option.isNone(options.bodyFile)) {
+    return options.required
+      ? Effect.fail(usage(bodyFileName, `this request needs a body; use --${bodyFileName}`))
+      : Effect.succeed(HttpBody.empty);
+  }
+
+  const path = options.bodyFile.value;
+
+  return path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(bodyFileName)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.map((stdio) => HttpBody.stream(stdio.stdin.pipe(Stream.mapError(cannotRead)))),
+      )
+    : openFile(path, false);
 };
 
 /**
