@@ -265,12 +265,13 @@ const cookieFormMultiple = refusal(
   "PRM-34/cookie-form-multiple",
   "appendix-d-serializing-headers-and-cookies",
   "Parameter in cookie, style form, array or object",
-  "An exploded form cookie cannot carry an array or object; the specification calls it always incorrect.",
+  "A form cookie cannot carry an array or object, exploded or not; the specification calls it always incorrect.",
   "Use a primitive schema, or style: cookie in 3.2",
 );
 
-// STY-33, 34, 36 and 38 build; STY-35, 37 and 39 are refused for good, and so is an exploded form
-// cookie over an array or object (PRM-34, Appendix D).
+// STY-33, 34, 36 and 38 build; STY-35, 37 and 39 are refused for good, and so is any form cookie
+// over an array or object, whatever explode is (PRM-34, Appendix D). A 3.2 explode false form
+// cookie reports its STY row alone.
 const decideCookie = (
   line: Line,
   plan: Omit<StylePlan, "kind" | "row">,
@@ -282,7 +283,7 @@ const decideCookie = (
     return refuse(cookieExplodeFalse(style, allowReserved));
   }
 
-  if (style === "form" && explode && multiple) {
+  if (style === "form" && multiple) {
     return refuse(cookieFormMultiple);
   }
 

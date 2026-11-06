@@ -187,7 +187,7 @@ describe("cookie parameters refused", () => {
   ];
 
   for (const [label, line, schema, components] of multiple) {
-    test(`PRM-34: ${line} exploded cookie form over ${label} is refused`, () => {
+    test(`PRM-34: ${line} cookie form over ${label} is refused`, () => {
       expect(refusalOf(line, cookie({ schema }), components)).toEqual({
         code: "PRM-34/cookie-form-multiple",
         count: 1,
@@ -199,6 +199,20 @@ describe("cookie parameters refused", () => {
       });
     });
   }
+
+  for (const line of ["3.0", "3.1"] as const) {
+    test(`PRM-34: ${line} cookie form with explode false over an array is refused too`, () => {
+      const schema = { items: string, type: "array" };
+      expect(refusalOf(line, cookie({ explode: false, schema })).code).toBe(
+        "PRM-34/cookie-form-multiple",
+      );
+    });
+  }
+
+  test("STY-35: a 3.2 explode false form cookie over an object reports the STY row alone", () => {
+    const outcome = refusalOf("3.2", cookie({ explode: false, schema: { type: "object" } }));
+    expect([outcome.code, outcome.count]).toEqual(["STY-35/cookie-explode-false", 1]);
+  });
 
   for (const name of ["a b", "a;b", "a=b", "sé"]) {
     test(`PRM-02: cookie name ${JSON.stringify(name)} is not an RFC 6265 token`, () => {
