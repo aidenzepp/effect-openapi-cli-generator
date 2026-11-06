@@ -60,6 +60,7 @@ export class CliEmitError extends Data.TaggedError("CliEmitError")<{
     | "name-clash"
     | "reserved-segment"
     | "unknown-parent"
+    | "unknown-primary"
     | "unplanned-parameter"
     | "unprintable-name"
     | "unresolved-schema"
@@ -377,13 +378,20 @@ const fieldSchema = (
 // ---------------------------------------------------------------------------------------------
 // One command.
 
+// Where an operation's builder and meta live: its primary command's `api/` module (design 4.4).
+interface Target {
+  readonly from: string;
+  readonly identifier: string;
+  readonly namespace: string;
+}
+
 interface CommandContext {
   readonly api: Api;
   readonly booleans: Map<string, boolean>;
   readonly defs: Defs;
   readonly domain: NamePlan["domain"];
-  readonly namespace: string;
   readonly plan: NamePlan;
+  readonly targets: ReadonlyMap<Operation, Target>;
 }
 
 const parameterOf = (operation: Operation, location: string, wireName: string) =>
@@ -990,9 +998,16 @@ const commandStatement = (
   context: CommandContext,
 ): Effect.Effect<CommandParts, CliEmitError> =>
   Effect.gen(function* statement() {
-    const namespace = ident(yield* identifier(context.namespace));
+    // Every command of an operation, alias or not, calls the primary's builder and meta, so each
+    // sends the same bytes and binds the same operation.
+    const target = context.targets.get(command.operation);
+    if (target === undefined) {
+      return yield* refuse("unknown-primary", command.name);
+    }
+
+    const namespace = ident(yield* identifier(target.namespace));
     const name = yield* identifier(command.identifier);
-    const meta = member(namespace, yield* memberName(`${command.identifier}Meta`));
+    const meta = member(namespace, yield* memberName(`${target.identifier}Meta`));
     const choices = choicesOf(command.operation);
     const config = yield* configOf(command, choices, context);
     const body = yield* bodyPlan(command, meta, choices.choosesType, context);
@@ -1000,7 +1015,7 @@ const commandStatement = (
       ...Option.match(body, { onNone: () => [], onSome: (plan) => plan.args }),
       ...(yield* parameterInputs(command, context)),
     ];
-    const builder = member(namespace, yield* memberName(command.identifier));
+    const builder = member(namespace, yield* memberName(target.identifier));
     const built = call(builder, inputs.length === 0 ? [] : [obj(inputs)]);
     const send = fn(
       "Effect.flatMap",
@@ -1220,7 +1235,37 @@ const commandsOf = (
     };
   });
 
-const groupFile = (group: PlannedGroup, built: Commands, children: readonly PlannedGroup[]) =>
+const targetsOf = (plan: NamePlan): ReadonlyMap<Operation, Target> => {
+  const modules = [
+    ...plan.groups.map((group) => ({
+      commands: group.commands,
+      from: `../api/${group.segment}.ts`,
+      namespace: String(group.namespace),
+    })),
+    { commands: plan.root, from: "../api/root.ts", namespace: "Root" },
+  ];
+
+  return new Map(
+    modules.flatMap(({ commands, from, namespace }) =>
+      commands
+        .filter((command) => command.alias === undefined)
+        .map((command) => [command.operation, { from, identifier: command.identifier, namespace }]),
+    ),
+  );
+};
+
+// The api namespaces a cli module may read; only the ones its commands use are imported.
+const apiBindings = (targets: ReadonlyMap<Operation, Target>): readonly Binding[] =>
+  [...new Map([...targets.values()].map((target) => [target.from, target])).values()].map(
+    ({ from, namespace }) => ({ from, kind: "Namespace", name: namespace }),
+  );
+
+const groupFile = (
+  group: PlannedGroup,
+  built: Commands,
+  children: readonly PlannedGroup[],
+  api: readonly Binding[],
+) =>
   Effect.gen(function* file() {
     const { domain, emitted, statements } = built;
     const subcommands = [
@@ -1241,7 +1286,7 @@ const groupFile = (group: PlannedGroup, built: Commands, children: readonly Plan
     yield* checkDistinct(declaredNames(all));
 
     const imports = yield* moduleImports(all, [
-      { from: `../api/${group.segment}.ts`, kind: "Namespace", name: group.namespace },
+      ...api,
       ...domainBindings(domain),
       ...children.map((child) => ({
         from: `./${child.segment}.ts`,
@@ -1311,6 +1356,7 @@ const rootFile = (
   built: Commands,
   plan: NamePlan,
   config: AuthorConfig,
+  api: readonly Binding[],
 ) =>
   Effect.gen(function* file() {
     const { domain, emitted, statements } = built;
@@ -1354,9 +1400,7 @@ const rootFile = (
     yield* checkDistinct([...declaredNames(all), ...author.names]);
 
     const imports = yield* moduleImports(all, [
-      ...(emitted.length === 0
-        ? []
-        : [{ from: "../api/root.ts", kind: "Namespace" as const, name: "Root" }]),
+      ...api,
       { from: "../api/security.ts", kind: "Named", name: "security" },
       { from: "../api/servers.ts", kind: "Named", name: "servers" },
       ...domainBindings(domain),
@@ -1380,9 +1424,10 @@ const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
 
 /**
  * Emits the V1 `cli/` layer (design 4.1, 4.4, 4.6, 4.8, 5, 6.6, 8.3; §14 D4, D5): `cli/<group>.ts`
- * per planned group with one `Command.make` per operation (inline `Flag` and `Argument`
- * constructors, three-state booleans, a handler that builds the body, calls the `api/` builder
- * with `inputKeys` and runs `Output.send`), its describe binding and help notes, and `group`;
+ * per planned group with one `Command.make` per planned command (inline `Flag` and `Argument`
+ * constructors, three-state booleans, a handler that builds the body, calls the operation's one
+ * `api/` builder, in its primary command's module, with `inputKeys` and runs `Output.send`), its
+ * describe binding and help notes, and `group`, so an alias is a full command for its operation;
  * and `cli/root.ts` with the untagged commands, the root command and its global settings, the
  * author-owned commands, and `services`. Files are sorted by path. An operation the layer cannot
  * express is refused alone (`CliRefusal`), and a group left with no command and no emitted child
@@ -1406,7 +1451,8 @@ export const emitCli = (
       return yield* refuse("unknown-parent", orphan.tag);
     }
 
-    const base: Omit<CommandContext, "namespace"> = {
+    const targets = targetsOf(plan);
+    const context: CommandContext = {
       api,
       booleans: new Map(),
       defs: Option.match(decodeDefs(api.schemas.document), {
@@ -1415,16 +1461,14 @@ export const emitCli = (
       }),
       domain: plan.domain,
       plan,
+      targets,
     };
     const built = new Map<string, Commands>();
     for (const group of plan.groups) {
-      built.set(
-        group.tag,
-        yield* commandsOf(group.commands, { ...base, namespace: group.namespace }),
-      );
+      built.set(group.tag, yield* commandsOf(group.commands, context));
     }
 
-    const rootCommands = yield* commandsOf(plan.root, { ...base, namespace: "Root" });
+    const rootCommands = yield* commandsOf(plan.root, context);
     // A group is emitted when it keeps a command or has an emitted child group.
     const emitted = new Set<string>();
     let grew = true;
@@ -1449,7 +1493,9 @@ export const emitCli = (
       groups.filter((child) => child.parent === group.tag);
     const files: EmittedFile[] = [
       ...(yield* Effect.all(
-        groups.map((group) => groupFile(group, commandsFor(group), childrenOf(group))),
+        groups.map((group) =>
+          groupFile(group, commandsFor(group), childrenOf(group), apiBindings(targets)),
+        ),
       )),
     ];
     files.push(
@@ -1458,6 +1504,7 @@ export const emitCli = (
         rootCommands,
         plan,
         config,
+        apiBindings(targets),
       ),
     );
 

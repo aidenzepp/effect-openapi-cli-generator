@@ -1022,9 +1022,9 @@ const planFlags = (
 
 /**
  * Command identifiers of one emitted module. The scope reserves `group`, the fixed namespaces, the
- * api namespace alias, the imported domain names and every command's `<cmd>Meta`, `<cmd>Media`,
- * `<cmd>Security` and `<Cmd>Input`; identifiers compare exactly and a clash renames by suffix
- * (SM-6). Visible names never change.
+ * api namespace aliases (its own and those its alias commands call), the imported domain names and
+ * every command's `<cmd>Meta`, `<cmd>Media`, `<cmd>Security` and `<Cmd>Input`; identifiers compare
+ * exactly and a clash renames by suffix (SM-6). Visible names never change.
  */
 const planModule = (
   entries: readonly Named[],
@@ -1110,23 +1110,72 @@ const makeFlagPlans = (collector: Collector): FlagPlans => {
   };
 };
 
+interface GroupNamespace {
+  readonly base: string;
+  readonly namespace: SafeIdentifierValue;
+}
+
+// A group's api namespace alias: the Pascal fold of its name, suffixed past every name a cli
+// module that imports it already binds.
+const namespaceOf = (node: GroupNode, blocked: (candidate: string) => boolean): GroupNamespace => {
+  const base = identifierOf(node.name, "pascal");
+
+  return {
+    base: base.name,
+    namespace: blocked(base.name) ? toIdentifier(suffixed(base.name, blocked)) : base.name,
+  };
+};
+
+// The modules (by container) an alias command calls into: an alias in one container calls its
+// primary's builder in the primary's container (design 4.4). `hosts` maps a primary container to
+// the containers holding its aliases, `targets` the reverse.
+interface AliasLinks {
+  readonly hosts: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly targets: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+const link = (map: Map<string, Set<string>>, key: string, value: string): void => {
+  const set = map.get(key) ?? new Set<string>();
+  set.add(value);
+  map.set(key, set);
+};
+
+const aliasLinks = (entries: readonly Named[]): AliasLinks => {
+  const primaries = new Map<Operation, string>();
+  for (const entry of entries) {
+    if (entry.alias === undefined) {
+      primaries.set(entry.operation, entry.container);
+    }
+  }
+
+  const hosts = new Map<string, Set<string>>();
+  const targets = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    const primary = primaries.get(entry.operation);
+    if (entry.alias !== undefined && primary !== undefined && primary !== entry.container) {
+      link(hosts, primary, entry.container);
+      link(targets, entry.container, primary);
+    }
+  }
+
+  return { hosts, targets };
+};
+
 const planGroup = (
   node: GroupNode,
   entries: readonly Named[],
   first: Named | undefined,
+  { base, namespace }: GroupNamespace,
+  foreign: ReadonlySet<string>,
   domain: ReadonlyMap<string, SafeIdentifierValue>,
   drafts: ReadonlyMap<Operation, Draft>,
   flagPlans: FlagPlans,
   collector: Collector,
 ): PlannedGroup => {
   const imported = domainNames(entries, domain);
-  const blocked = (candidate: string): boolean =>
-    fixedNamespaces.has(candidate) || imported.has(candidate);
-  const base = identifierOf(node.name, "pascal");
-  const namespace = blocked(base.name) ? toIdentifier(suffixed(base.name, blocked)) : base.name;
   if (first !== undefined) {
     collector.folded(first.operation, "TAG-02", "Tag", first.tagPointer, node.notes);
-    if (namespace !== base.name) {
+    if (namespace !== base) {
       collector.report(
         first.operation,
         "TAG-02/renamed",
@@ -1144,7 +1193,7 @@ const planGroup = (
   const group: Mutable<PlannedGroup> = {
     commands: planModule(
       entries,
-      new Set([...fixedNamespaces, namespace, ...imported]),
+      new Set([...fixedNamespaces, namespace, ...imported, ...foreign]),
       drafts,
       flagPlans,
       collector,
@@ -1200,21 +1249,56 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
 
     const domain = domainIdentifiers(Object.keys(context.defs));
     const finals = named.filter((entry) => !collector.refused.has(entry.operation));
-    const rootEntries = finals.filter((entry) => entry.container === root);
-    const rootReserved = new Set([
-      ...fixedNamespaces,
-      ...rootModuleNames,
-      ...domainNames(rootEntries, domain),
-    ]);
-    const flagPlans = makeFlagPlans(collector);
-    const rootCommands = planModule(rootEntries, rootReserved, drafts, flagPlans, collector);
     const byContainer = new Map<string, Named[]>();
     for (const entry of finals) {
       push(byContainer, entry.container, entry);
     }
 
-    const groups = [...firstUses(finals)].map(([node, first]) =>
-      planGroup(node, byContainer.get(node.tag) ?? [], first, domain, drafts, flagPlans, collector),
+    const imports = (container: string): ReadonlySet<string> =>
+      new Set([
+        ...domainNames(byContainer.get(container) ?? [], domain),
+        ...(container === root ? rootModuleNames : []),
+      ]);
+    // A group's namespace is also imported by every cli module holding one of its aliases.
+    const links = aliasLinks(finals);
+    const used = [...firstUses(finals)].map(([node, first]) => {
+      const importers = [node.tag, ...(links.hosts.get(node.tag) ?? [])].map(imports);
+      const blocked = (candidate: string): boolean =>
+        fixedNamespaces.has(candidate) || importers.some((names) => names.has(candidate));
+
+      return { first, namespace: namespaceOf(node, blocked), node };
+    });
+    const namespaces = new Map(used.map(({ namespace, node }) => [node.tag, namespace.namespace]));
+    // The api namespaces a container's aliases call into; `Root` is `api/root.ts` (emit/cli).
+    const foreign = (container: string): ReadonlySet<string> =>
+      new Set(
+        [...(links.targets.get(container) ?? [])].flatMap((target) => {
+          const namespace = target === root ? "Root" : namespaces.get(target);
+
+          return namespace === undefined ? [] : [namespace];
+        }),
+      );
+    const rootEntries = byContainer.get(root) ?? [];
+    const rootReserved = new Set([
+      ...fixedNamespaces,
+      ...rootModuleNames,
+      ...domainNames(rootEntries, domain),
+      ...foreign(root),
+    ]);
+    const flagPlans = makeFlagPlans(collector);
+    const rootCommands = planModule(rootEntries, rootReserved, drafts, flagPlans, collector);
+    const groups = used.map(({ first, namespace, node }) =>
+      planGroup(
+        node,
+        byContainer.get(node.tag) ?? [],
+        first,
+        namespace,
+        foreign(node.tag),
+        domain,
+        drafts,
+        flagPlans,
+        collector,
+      ),
     );
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),

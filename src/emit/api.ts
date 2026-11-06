@@ -753,6 +753,11 @@ const commandStatements = (
     ];
   });
 
+// An operation's builder, `Meta`, `Media`, `Security` and `Input` belong to its primary command
+// alone; its alias commands call them (design 4.4).
+const primaries = (commands: readonly PlannedCommand[]): readonly PlannedCommand[] =>
+  commands.filter((command) => command.alias === undefined);
+
 const moduleFile = (
   segment: string,
   commands: readonly PlannedCommand[],
@@ -874,12 +879,12 @@ const decodeDefs = Schema.decodeUnknownOption(
 const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
 
 /**
- * Emits the V1 `api/` layer (design 4.1, 4.8, 6.4, 6.5; §14 D1, D6): `api/<group>.ts` per planned
- * group and `api/root.ts` for untagged commands, each operation with its `Input` type, a pure
- * request builder over `runtime/serialize`, its media declaration, its security requirement and
- * its meta (servers only when the operation or path item overrides them); `api/servers.ts`; and
- * `api/security.ts` with every scheme the planned operations use. Builders read no flag. Files
- * are sorted by path.
+ * Emits the V1 `api/` layer (design 4.1, 4.4, 4.8, 6.4, 6.5; §14 D1, D6): `api/<group>.ts` per
+ * planned group and `api/root.ts` for untagged commands that hold a primary command, each
+ * operation once, under its primary command, with its `Input` type, a pure request builder over
+ * `runtime/serialize`, its media declaration, its security requirement and its meta (servers only
+ * when the operation or path item overrides them); `api/servers.ts`; and `api/security.ts` with
+ * every scheme the planned operations use. Builders read no flag. Files are sorted by path.
  */
 export const emitApi = (
   input: ApiEmitInput,
@@ -902,13 +907,16 @@ export const emitApi = (
       schemes: new Set(plan.credentials.map((credential) => credential.scheme)),
     };
     const byTag = new Map(plan.groups.map((group) => [group.tag, group] as const));
-    const groups = yield* Effect.forEach(
-      plan.groups.filter((group) => group.commands.length > 0),
-      (group) => moduleFile(group.segment, group.commands, groupPrefix(group, byTag), context),
+    const withPrimaries = plan.groups.filter((group) => primaries(group.commands).length > 0);
+    const groups = yield* Effect.all(
+      withPrimaries.map((group) =>
+        moduleFile(group.segment, primaries(group.commands), groupPrefix(group, byTag), context),
+      ),
     );
     const files: EmittedFile[] = [...groups];
-    if (plan.root.length > 0) {
-      files.push(yield* moduleFile("root", plan.root, "", context));
+    const rootPrimaries = primaries(plan.root);
+    if (rootPrimaries.length > 0) {
+      files.push(yield* moduleFile("root", rootPrimaries, "", context));
     }
 
     files.push(yield* securityFile(api, plan), yield* serversFile(api, input.boundOrigins));
