@@ -331,21 +331,48 @@ const locationStyles: Readonly<
   Record<Exclude<Parameter["location"], "querystring">, ReadonlySet<string>>
 > = { cookie: cookieStyles, header: headerStyles, path: pathStyles, query: queryStyles };
 
+const formMedia = "application/x-www-form-urlencoded";
+
+// The constructor that writes a `content` parameter in each location that takes one (PRM-15).
+const contentConstructors: Readonly<Partial<Record<Parameter["location"], string>>> = {
+  cookie: "cookieContent",
+  header: "headerContent",
+  query: "queryContent",
+};
+
 /**
- * Whether the `api/` layer builds a parameter: a `querystring` parameter in `content` form, or any
- * other in a style its location takes. An operation with any other parameter gets no builder, and
- * `emitCli` refuses it alone (`unsupported-parameter`).
+ * Whether the `api/` layer builds a parameter: a `querystring` parameter in `content` form, a
+ * query, header or cookie parameter in `content` form under any media but form-urlencoded, or any
+ * other in a style its location takes. An operation with any other parameter (path content among
+ * them) gets no builder, and `emitCli` refuses it alone (`unsupported-parameter`).
  */
 export const buildsParameter = (parameter: Parameter): boolean => {
   const { location, serialization } = parameter;
-  if (location === "querystring") {
-    return serialization.kind === "content";
+  if (serialization.kind === "content") {
+    return (
+      location === "querystring" ||
+      (contentConstructors[location] !== undefined &&
+        essence(serialization.mediaType) !== formMedia)
+    );
   }
 
-  return serialization.kind === "style" && locationStyles[location].has(serialization.style);
+  return location !== "querystring" && locationStyles[location].has(serialization.style);
 };
 
-const formMedia = "application/x-www-form-urlencoded";
+/**
+ * Whether a `content` parameter's value is JSON data: under JSON media, which the runtime writes as
+ * compact JSON text, and under form media in `querystring`, whose object the runtime writes as
+ * pairs. Under any other media the value is the operator's string, sent as given.
+ */
+export const takesJsonContent = (location: Parameter["location"], mediaType: string): boolean => {
+  const base = essence(mediaType);
+
+  return (
+    base === "application/json" ||
+    base.endsWith("+json") ||
+    (location === "querystring" && base === formMedia)
+  );
+};
 
 interface ParameterContext {
   readonly defs: Defs;
@@ -391,6 +418,37 @@ const querystringParts = (
     };
   });
 
+// A query, header or cookie `content` parameter (design 6.1): JSON data the runtime serializes by
+// its one media type, through the location's content constructor.
+const contentParts = (entry: InputKey): Effect.Effect<ParameterParts, ApiEmitError> =>
+  Effect.gen(function* parts() {
+    const { key, parameter } = entry;
+    const { location, serialization } = parameter;
+    const writer = contentConstructors[location];
+    if (serialization.kind !== "content" || writer === undefined) {
+      return yield* refuse("unsupported-parameter", `${location}:${parameter.wireName}`);
+    }
+
+    const json = typeRef(I("Serialize"), [M("Json")]);
+    const field: Field = {
+      key,
+      optional: !parameter.required,
+      type: parameter.required ? json : optionalOf(json),
+    };
+    const value = member(ident(I("input")), yield* memberName(key));
+    const built = fn(writer, [
+      str(parameter.wireName),
+      str(serialization.mediaType),
+      value,
+      obj([["required", bool(parameter.required)]]),
+    ]);
+    if (location === "query") {
+      return { field, query: built };
+    }
+
+    return location === "header" ? { field, header: built } : { cookie: built, field };
+  });
+
 const parameterParts = (
   entry: InputKey,
   context: ParameterContext,
@@ -408,8 +466,8 @@ const parameterParts = (
       return yield* querystringParts(entry, defs);
     }
 
-    if (serialization.kind !== "style") {
-      return yield* refuse("unsupported-parameter", subject);
+    if (serialization.kind === "content") {
+      return yield* contentParts(entry);
     }
 
     const boolean = isBooleanSchema(defs, memo, parameter.schema.key);
