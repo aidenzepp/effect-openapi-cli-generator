@@ -188,12 +188,14 @@ describe("generator CLI document set", () => {
         .update(nodeFs.readFileSync(nodePath.join(ran.dir, name)))
         .digest("hex");
 
-    expect(report.inputs.map((input) => String(input.document))).toEqual([
+    const documents = report.inputs.map((input) => String(input.document));
+    expect(documents.slice(0, 3)).toEqual([
       `file://${nodePath.join(nodeFs.realpathSync(ran.dir), "openapi.json")}`,
       schemasUri,
       avatarUri,
-      expect.stringMatching(/c\.json$/u),
     ]);
+    expect(documents).toHaveLength(4);
+    expect(documents[3]).toMatch(/c\.json$/u);
     expect(report.inputs.map((input) => input.sha256).slice(1, 3)).toEqual([
       hash("users.json"),
       hash("avatar.json"),

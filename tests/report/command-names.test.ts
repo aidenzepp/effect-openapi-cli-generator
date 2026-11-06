@@ -57,7 +57,10 @@ const curated = spec({
     post: {
       ...ok,
       operationId: "notesCreate",
-      requestBody: { content: { "text/plain": { schema: { type: "string" } } }, required: true },
+      requestBody: {
+        content: { "text/event-stream": { schema: { type: "string" } } },
+        required: true,
+      },
       tags: ["notes"],
       "x-forge-aliases": [{ "x-forge-group-name": "memo", "x-forge-method-name": "add" }],
     },

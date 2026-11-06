@@ -25,7 +25,7 @@ const goldenText = readFixture("openapi.json");
 
 const goldenSpec = decodeRecord(JSON.parse(goldenText));
 
-// The golden spec plus one operation whose only request body is `text/plain` (EMT-1).
+// The golden spec plus one operation whose only request body is `text/event-stream` (EMT-1).
 const withTextBody = JSON.stringify({
   ...goldenSpec,
   paths: {
@@ -33,7 +33,10 @@ const withTextBody = JSON.stringify({
     "/notes": {
       post: {
         operationId: "notes-create",
-        requestBody: { content: { "text/plain": { schema: { type: "string" } } }, required: true },
+        requestBody: {
+          content: { "text/event-stream": { schema: { type: "string" } } },
+          required: true,
+        },
         responses: { "204": { description: "Stored." } },
         tags: ["notes"],
       },
