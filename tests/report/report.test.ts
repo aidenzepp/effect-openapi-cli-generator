@@ -76,6 +76,7 @@ describe("generation report bytes", () => {
       "commandNames",
       "generator",
       "inputs",
+      "nonStandard",
       "notices",
       "refusals",
       "renames",

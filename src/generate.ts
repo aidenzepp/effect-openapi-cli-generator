@@ -31,7 +31,7 @@ import { distinctDiagnostics } from "./normalize/operations.ts";
 import { normalizeSchemas } from "./normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaImportDefect } from "./normalize/schemas.ts";
 import { boundOrigins } from "./normalize/servers.ts";
-import { makeGenerationReport, printGenerationReport } from "./report/index.ts";
+import { makeGenerationReport, nonStandardEntries, printGenerationReport } from "./report/index.ts";
 import type { GenerationReportValue } from "./report/index.ts";
 import { resolve } from "./resolve/index.ts";
 import type { Resolution, ResolveMember } from "./resolve/index.ts";
@@ -585,6 +585,7 @@ export const generate = (
         ...memberInputs(document, input.documents),
         { document: configDocument, sha256: sha256Hex(author.bytes) },
       ],
+      nonStandard: nonStandardEntries(api, order),
       // The names plan reports renames as notices only; it carries no from/to pairs yet.
       renames: [],
       schemes: api.securitySchemes,
