@@ -1,0 +1,13 @@
+{
+  "openapi": "3.1.1",
+  "info": { "title": "multi 3.1", "version": "1" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Pet": {
+        "$id": "https://schemas.example.com/root/pet-wrapper",
+        "properties": { "owner": { "$ref": "owner.json#/$defs/Owner" } }
+      }
+    }
+  }
+}

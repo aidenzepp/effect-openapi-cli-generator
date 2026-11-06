@@ -1,0 +1,15 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "common 3.2", "version": "1" },
+  "components": {
+    "parameters": {
+      "Limit": {
+        "in": "query",
+        "name": "limit",
+        "schema": { "$ref": "#/components/schemas/LimitValue" }
+      }
+    },
+    "schemas": { "LimitValue": { "type": "integer" } },
+    "securitySchemes": { "MemberKey": { "type": "apiKey", "in": "header", "name": "X-Key" } }
+  }
+}
