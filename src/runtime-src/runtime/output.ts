@@ -53,7 +53,13 @@ import { redirectLoop, withUserAgent } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import { dropTrailingFragment, longestFormBytes, scrub } from "./redact.ts";
-import { classify, mapClientError, matchResponse, toApiResponseError } from "./response.ts";
+import {
+  classify,
+  isBodiless,
+  mapClientError,
+  matchResponse,
+  toApiResponseError,
+} from "./response.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -860,12 +866,15 @@ const withheldNotice = (credentials: readonly Credential[]): string => {
 };
 
 /**
- * A response body read that fails part-way is a truncated body (exit 5).
+ * A response body read that fails part-way is a truncated body (exit 5). A bodiless response
+ * (`isBodiless`) is the empty body and is never read.
  */
 const bodyOf = (
   response: HttpClientResponse.HttpClientResponse,
 ): Stream.Stream<Uint8Array, ResponseStreamError> =>
-  Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+  isBodiless(response)
+    ? Stream.empty
+    : Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
 
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
@@ -882,7 +891,8 @@ const declaredMedia = (meta: OperationMeta, status: number): readonly string[] =
  * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
  * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
  * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink; any
+ * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink (a
+ * bodiless one, `isBodiless`, writes nothing and reads nothing); any
  * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
  * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
  */
@@ -949,13 +959,15 @@ export const send =
                   ),
                 ),
               onSuccess: (ok) =>
-                writeBody({
-                  bytes: bodyOf(ok),
-                  mediaType: dispatchResponse(
-                    declaredMedia(meta, ok.status),
-                    Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
-                  ),
-                }),
+                isBodiless(ok)
+                  ? Effect.void
+                  : writeBody({
+                      bytes: bodyOf(ok),
+                      mediaType: dispatchResponse(
+                        declaredMedia(meta, ok.status),
+                        Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
+                      ),
+                    }),
             }),
           ),
         ),
