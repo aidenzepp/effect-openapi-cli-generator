@@ -13,7 +13,7 @@ import type {
 } from "../names/index.ts";
 import type { FieldEncoding } from "../runtime-src/runtime/input.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { encodesByKey, formParts, inputKeys, isScalarArraySchema } from "./api.ts";
+import { buildsParameter, encodesByKey, formParts, inputKeys, isScalarArraySchema } from "./api.ts";
 import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
@@ -57,9 +57,10 @@ export interface CliEmitInput {
  * `--body-file` stream (design 6.3).
  * `unsupported-flag` is a flag with no call-expression form today: an integer field whose width the
  * walk cannot settle, and a required boolean parameter (absent would send `false`).
- * `unsupported-parameter` is a boolean path parameter, or a path array before another positional (a
- * repeated argument would take the later ones). Those three refuse one operation (`CliRefusal`);
- * every other reason fails `emitCli`.
+ * `unsupported-parameter` is a parameter the `api/` layer does not build (`buildsParameter`), a
+ * boolean path parameter, or a path array before another positional (a repeated argument would take
+ * the later ones). Those three refuse one operation (`CliRefusal`); every other reason fails
+ * `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
   readonly reason:
@@ -1116,6 +1117,12 @@ const commandStatement = (
   context: CommandContext,
 ): Effect.Effect<CommandParts, CliEmitError> =>
   Effect.gen(function* statement() {
+    // The `api/` layer emits no builder for an operation with a parameter it does not build.
+    const unbuilt = command.operation.parameters.find((parameter) => !buildsParameter(parameter));
+    if (unbuilt !== undefined) {
+      return yield* refuse("unsupported-parameter", `${unbuilt.location}:${unbuilt.wireName}`);
+    }
+
     // Every command of an operation, alias or not, calls the primary's builder and meta, so each
     // sends the same bytes and binds the same operation.
     const target = context.targets.get(command.operation);
