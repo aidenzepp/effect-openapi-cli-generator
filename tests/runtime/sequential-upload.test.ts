@@ -169,21 +169,28 @@ describe("sequential upload", () => {
     expect(pulled).toEqual([]);
   });
 
-  test("a file larger than the in-memory body limit is streamed with Content-Length", async () => {
-    const size = Input.maxBodyBytes + 1;
+  test("a file over the in-memory limit is refused by a guarded read but streamed here", async () => {
+    const limit = ndjson.length - 1;
     const seen = await run(
-      Effect.gen(function* big() {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* fs.makeTempFileScoped();
+      withTempFile(ndjson, (path) =>
+        Effect.gen(function* guarded() {
+          const refused = yield* Input.binaryBody({
+            body: none,
+            bodyFile: Option.some(path),
+            maxBytes: limit,
+            required: true,
+          }).pipe(Effect.flip, Effect.provide(inputLayer()));
 
-        yield* fs.truncate(path, size);
+          expect(refused._tag).toBe("UsageError");
 
-        return yield* send("application/x-ndjson", { bodyFile: path });
-      }).pipe(Effect.scoped, Effect.provide(BunFileSystem.layer)),
+          return yield* send("application/x-ndjson", { bodyFile: path });
+        }),
+      ),
     );
 
-    expect(seen.body.length).toBe(size);
-    expect(header(seen, "content-length")).toBe(String(size));
+    expect([...seen.body]).toEqual([...ndjson]);
+    expect(header(seen, "content-length")).toBe(String(ndjson.length));
+    expect(header(seen, "transfer-encoding")).toBeUndefined();
   });
 
   test("--body with --body-file is a UsageError naming --body", async () => {

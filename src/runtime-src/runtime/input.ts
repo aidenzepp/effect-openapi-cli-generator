@@ -123,10 +123,11 @@ const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
 
 const bounded = (
   source: Stream.Stream<Uint8Array, unknown>,
+  limit: number = maxBodyBytes,
 ): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
   source.pipe(
     Stream.mapError((): OverLimit | ReadFailed => new ReadFailed()),
-    Stream.limitBytes(maxBodyBytes, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
+    Stream.limitBytes(limit, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
       Stream.fail(new OverLimit()),
     ),
   );
@@ -170,16 +171,19 @@ export const readBodyFile = (
 
 // A body stream that counts the bytes it yields, so a file that grows past its stat size, or a
 // `FileBody` that under-declares, still stops at the limit; the send step sees a `UsageError`.
-const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, UsageError> => {
+const limited = (
+  body: HttpBody.HttpBody,
+  limit: number,
+): Effect.Effect<HttpBody.HttpBody, UsageError> => {
   if (body._tag !== "Stream") {
     return Effect.succeed(body);
   }
 
-  return (body.contentLength ?? 0) > maxBodyBytes
+  return (body.contentLength ?? 0) > limit
     ? Effect.fail(overLimit())
     : Effect.succeed(
         HttpBody.stream(
-          bounded(body.stream).pipe(Stream.mapError(toUsage)),
+          bounded(body.stream, limit).pipe(Stream.mapError(toUsage)),
           body.contentType,
           body.contentLength,
         ),
@@ -189,10 +193,11 @@ const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, Usag
 // Only a regular file is accepted. It is opened once here, so a missing read permission fails at
 // flag time, then streamed through `FileBody` with its size. A directory is refused, and so is a
 // pipe or device (a FIFO, `<(cmd)`): it has no size to trust, and the platform file system reads
-// by position, which a pipe refuses. Such input goes through `-` instead.
+// by position, which a pipe refuses. Such input goes through `-` instead. `limit` is the in-memory
+// ceiling the file is counted against; `undefined` streams it unguarded.
 const openFile = (
   path: string,
-  guarded = true,
+  limit?: number,
 ): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody | FileSystem.FileSystem> =>
   Effect.gen(function* open() {
     const fs = yield* FileSystem.FileSystem;
@@ -202,7 +207,7 @@ const openFile = (
       return yield* Effect.fail(notAFile());
     }
 
-    if (guarded && info.size > BigInt(maxBodyBytes)) {
+    if (limit !== undefined && info.size > BigInt(limit)) {
       return yield* Effect.fail(overLimit());
     }
 
@@ -212,7 +217,9 @@ const openFile = (
 
     const opened = fileBody.open(path).pipe(Effect.mapError(cannotRead));
 
-    return yield* guarded ? opened.pipe(Effect.flatMap(limited)) : opened;
+    return yield* limit === undefined
+      ? opened
+      : opened.pipe(Effect.flatMap((body) => limited(body, limit)));
   });
 
 /**
@@ -220,12 +227,13 @@ const openFile = (
  * size, its bytes counted against the limit; stdin (`-`) is read into memory, bounded, so an
  * over-limit or unreadable input is a `UsageError` before any request. `--body` is refused, and so
  * is `--body` together with `--body-file`. With neither flag a required body is a `UsageError`
- * naming `--body-file` and an optional one is empty.
+ * naming `--body-file` and an optional one is empty. `maxBytes` replaces the default limit.
  */
 export const binaryBody = (options: {
   readonly body: Option.Option<string>;
   readonly bodyFile: Option.Option<string>;
   readonly required: boolean;
+  readonly maxBytes?: number;
 }): Effect.Effect<
   HttpBody.HttpBody,
   UsageError,
@@ -250,7 +258,7 @@ export const binaryBody = (options: {
 
   return options.bodyFile.value === "-"
     ? readBodyFile("-").pipe(Effect.map((read) => HttpBody.uint8Array(read)))
-    : openFile(options.bodyFile.value);
+    : openFile(options.bodyFile.value, options.maxBytes ?? maxBodyBytes);
 };
 
 /**
@@ -291,7 +299,7 @@ export const sequentialBody = (options: {
         Effect.flatMap(() => Effect.service(Stdio.Stdio)),
         Effect.map((stdio) => HttpBody.stream(stdio.stdin.pipe(Stream.mapError(cannotRead)))),
       )
-    : openFile(path, false);
+    : openFile(path);
 };
 
 /**
