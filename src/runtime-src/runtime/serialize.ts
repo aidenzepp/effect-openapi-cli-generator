@@ -662,6 +662,109 @@ export const header = (name: string, value: Value, options: HeaderOptions): Head
   style: "simple",
 });
 
+export interface CookieOptions {
+  readonly allowReserved: boolean;
+  readonly explode: boolean;
+  /**
+   * The OpenAPI line the parameter comes from.
+   */
+  readonly line: "3.0" | "3.1" | "3.2";
+  readonly required: boolean;
+  readonly style: "cookie" | "form";
+}
+
+/**
+ * A cookie parameter: plain data plus its expansion, which fails with `UsageError` instead of
+ * throwing. The expansion is the pairs for one `Cookie` header joined by `; `, or `undefined` when
+ * the parameter sends nothing.
+ */
+export interface CookieParameter {
+  readonly expand: Effect.Effect<string | undefined, UsageError>;
+  readonly name: string;
+  readonly style: "cookie" | "form";
+}
+
+/**
+ * RFC 6265 `cookie-octet`: `%x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E`.
+ */
+const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
+
+/**
+ * Reserved characters a 3.2 `form` cookie value may pass under `allowReserved`: RFC 3986 reserved
+ * less `,` and `;`, the two reserved characters outside `cookie-octet` (Appendix D.1).
+ */
+const cookieReserved = ":/?#[]@!$&'()*+=";
+
+const cookieAssignment = (key: string, text: string) => `${key}=${text}`;
+
+const composeCookie = (name: string, text: Text, explode: boolean): string => {
+  if (explode && text.kind === "array") {
+    return text.items.map((item) => cookieAssignment(name, item)).join("; ");
+  }
+
+  if (explode && text.kind === "object") {
+    return text.members.map(([key, member]) => cookieAssignment(key, member)).join("; ");
+  }
+
+  return cookieAssignment(name, flat(text));
+};
+
+/**
+ * A cookie parameter. 3.0 and 3.1 `form` and 3.2 `form` encode as RFC 6570 does (only 3.2 honors
+ * `allowReserved`), and any array or object is refused, exploded or not (PRM-34, "always
+ * incorrect"). 3.2 `cookie` sends the text as given and refuses a value outside `cookie-octet`. 3.2
+ * refuses `explode: false`, and `cookie` exists only on 3.2.
+ */
+export const cookie = (name: string, value: Value, options: CookieOptions): CookieParameter => ({
+  expand: Effect.gen(function* cookieExpansion() {
+    if (!headerToken.test(name)) {
+      return yield* refuse("a cookie parameter has a name that is not an RFC 6265 token");
+    }
+
+    if (options.style === "cookie" && options.line !== "3.2") {
+      return yield* refuse(`parameter ${name} uses style cookie, which only 3.2 has`);
+    }
+
+    if (options.line === "3.2" && !options.explode) {
+      return yield* refuse(`parameter ${name} sets explode false, which 3.2 forbids for a cookie`);
+    }
+
+    const text = yield* toText(name, value, options.required);
+
+    if (text === undefined) {
+      return text;
+    }
+
+    if (options.style === "cookie") {
+      const keys = text.kind === "object" ? text.members.map(([key]) => key) : [];
+
+      if (keys.some((key) => !headerToken.test(key))) {
+        return yield* refuse(`parameter ${name} holds a member name that is not an RFC 6265 token`);
+      }
+
+      if (headerTexts(text).some((part) => !cookieOctets.test(part))) {
+        return yield* refuse(`parameter ${name} holds a character outside RFC 6265 cookie-octet`);
+      }
+
+      return composeCookie(name, text, options.explode);
+    }
+
+    if (text.kind !== "primitive") {
+      return yield* refuse(
+        `parameter ${name} is an array or object, which a form cookie cannot carry (OAS Appendix D)`,
+      );
+    }
+
+    return composeCookie(
+      name,
+      encodeText(text, encoder(options.line === "3.2" && options.allowReserved, cookieReserved)),
+      options.explode,
+    );
+  }),
+  name,
+  style: options.style,
+});
+
 /**
  * A JSON value.
  */
