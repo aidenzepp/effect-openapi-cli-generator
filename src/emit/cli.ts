@@ -514,6 +514,16 @@ const fieldDescription = (
     return fileDescription(schema);
   });
 
+// A parameter flag's constructor: a `querystring` value is JSON data (design 6.1), decoded the way
+// a non-flattened JSON field flag is; a boolean styled parameter is negatable.
+const parameterFlagHead = (flag: PlannedFlag, parameter: Parameter): Expr => {
+  if (parameter.location === "querystring") {
+    return fn("Input.jsonFlag", str(flag.name));
+  }
+
+  return flag.boolean ? fn("Flag.Boolean", str(flag.name)) : fn("Flag.String", str(flag.name));
+};
+
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
     const { source } = flag;
@@ -536,9 +546,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       }
 
       const array = yield* isArrayParameter(parameter, context);
-      const head = flag.boolean
-        ? fn("Flag.Boolean", str(flag.name))
-        : fn("Flag.String", str(flag.name));
+      const head = parameterFlagHead(flag, parameter);
       const presence = parameter.required ? [] : [path("Flag.optional")];
       const steps = [
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
