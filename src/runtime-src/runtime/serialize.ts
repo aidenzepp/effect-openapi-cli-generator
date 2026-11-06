@@ -471,43 +471,49 @@ const checkQueryDelimiter = (
     : Effect.void;
 };
 
-const joiners = {
-  deepObject: ",",
-  form: ",",
-  pipeDelimited: "%7C",
-  spaceDelimited: "%20",
-} as const;
+/**
+ * How a query string or a form body writes pairs: names, values, and the joiner of each style's
+ * non-exploded value. Names are always strictly encoded; `allowReserved` is for values only.
+ */
+interface PairCodec {
+  readonly joiners: Readonly<Record<QueryStyle, string>>;
+  readonly name: (text: string) => string;
+  readonly value: (text: string) => string;
+}
 
-const composeQuery = (
+const queryCodec = (allowReserved: boolean): PairCodec => ({
+  joiners: { deepObject: ",", form: ",", pipeDelimited: "%7C", spaceDelimited: "%20" },
+  name: encodeUnreserved,
+  value: encoder(allowReserved, queryReserved),
+});
+
+const composePairs = (
   style: QueryStyle,
   name: string,
   raw: Text,
   explode: boolean,
-  encode: (text: string) => string,
-) => {
-  const key = encodeUnreserved(name);
-  const text = encodeText(raw, encode);
+  codec: PairCodec,
+): readonly string[] => {
+  const key = codec.name(name);
+  const text = encodeText(raw, codec.value);
 
-  // Keys that become names are always strictly encoded; `allowReserved` is for values only.
   if (raw.kind === "object" && style === "deepObject") {
-    return raw.members
-      .map(
-        ([member, memberText]) => `${key}%5B${encodeUnreserved(member)}%5D=${encode(memberText)}`,
-      )
-      .join("&");
+    return raw.members.map(
+      ([member, memberText]) => `${codec.name(`${name}[${member}]`)}=${codec.value(memberText)}`,
+    );
   }
 
   if (explode && text.kind === "array") {
-    return text.items.map((item) => `${key}=${item}`).join("&");
+    return text.items.map((item) => `${key}=${item}`);
   }
 
   if (explode && raw.kind === "object") {
-    return raw.members
-      .map(([member, memberText]) => `${encodeUnreserved(member)}=${encode(memberText)}`)
-      .join("&");
+    return raw.members.map(
+      ([member, memberText]) => `${codec.name(member)}=${codec.value(memberText)}`,
+    );
   }
 
-  return `${key}=${flat(text, joiners[style])}`;
+  return [`${key}=${flat(text, codec.joiners[style])}`];
 };
 
 const isEmptyCompound = (value: Value) =>
@@ -539,13 +545,13 @@ const queryStyled =
 
       yield* checkQueryDelimiter(name, style, text, options);
 
-      return composeQuery(
+      return composePairs(
         style,
         name,
         text,
         options.explode,
-        encoder(options.allowReserved, queryReserved),
-      );
+        queryCodec(options.allowReserved),
+      ).join("&");
     }),
     name,
     style,
@@ -1040,6 +1046,203 @@ export const formData = (fields: FormFields, options: FormDataOptions): RequestB
   expand: formDataOf(fields, options),
   mediaType: "multipart/form-data",
   ownsContentType: true,
+});
+
+/**
+ * An Encoding Object's RFC 6570 fields for one form-urlencoded property. With none of the three the
+ * property is encoded by its default `contentType` (design 6.3).
+ */
+export interface FormEncoding {
+  readonly allowReserved?: boolean;
+  readonly explode?: boolean;
+  readonly style?: QueryStyle;
+}
+
+/**
+ * The declared properties of a form-urlencoded body in document order, each with its Encoding
+ * Object fields.
+ */
+export interface UrlEncodedOptions {
+  readonly properties: readonly (readonly [name: string, encoding: FormEncoding])[];
+}
+
+interface JsonObject {
+  readonly [member: string]: Json;
+}
+
+const isJsonObject = (value: Json): value is JsonObject =>
+  Predicate.isObject(value) && !Array.isArray(value);
+
+const isJsonScalar = (value: Json): value is Exclude<Json, object> => !Predicate.isObject(value);
+
+const formSafe = /^[\w*.-]$/u;
+
+/**
+ * The WHATWG `application/x-www-form-urlencoded` serializer for one name or value: ASCII
+ * alphanumerics and `*-._` pass, a space becomes `+`, every other UTF-8 byte is percent-encoded.
+ * Under `allowReserved` the query's reserved set and percent triplets also pass, so `&`, `=`, `+`
+ * and `#` stay encoded.
+ */
+const formEncoder = (allowReserved: boolean) => (text: string) =>
+  text.replaceAll(/%[0-9A-Fa-f]{2}|[\S\s]/gu, (token) => {
+    if (token === " ") {
+      return "+";
+    }
+
+    if (formSafe.test(token)) {
+      return token;
+    }
+
+    if (allowReserved && (percentTriplet.test(token) || queryReserved.includes(token))) {
+      return token;
+    }
+
+    return token === "~" ? "%7E" : encodeUnreserved(token);
+  });
+
+const formCodec = (allowReserved: boolean): PairCodec => ({
+  joiners: { deepObject: ",", form: ",", pipeDelimited: "%7C", spaceDelimited: "+" },
+  name: formEncoder(false),
+  value: formEncoder(allowReserved),
+});
+
+const hasStyle = (encoding: FormEncoding) =>
+  encoding.style !== undefined ||
+  encoding.explode !== undefined ||
+  encoding.allowReserved !== undefined;
+
+/**
+ * A value an RFC 6570 style can expand: a scalar, or an array or object of scalars.
+ */
+const isFlat = (value: Json): value is Json & Value =>
+  isJsonScalar(value) ||
+  (isJsonObject(value) ? Object.values(value) : value).every((member) => isJsonScalar(member));
+
+/**
+ * RFC 6570 expansion with percent-encoding disabled decides delimiters, explode and value text; the
+ * form encoder then encodes each name and value once. Missing fields take the query defaults.
+ */
+const styledPairs = (name: string, value: Json, encoding: FormEncoding) =>
+  Effect.gen(function* styledExpansion() {
+    const style = encoding.style ?? "form";
+    const options = {
+      allowReserved: encoding.allowReserved ?? false,
+      explode: encoding.explode ?? style === "form",
+    };
+
+    if (!isFlat(value)) {
+      return yield* refuse(`property ${name} holds a value nested deeper than one level`);
+    }
+
+    const text = yield* toText(name, value, false);
+
+    if (text === undefined) {
+      return [];
+    }
+
+    if (style === "deepObject" && text.kind !== "object") {
+      return yield* refuse(`property ${name} is not an object, which deepObject requires`);
+    }
+
+    yield* checkQueryDelimiter(name, style, text, { ...options, required: false });
+
+    return composePairs(style, name, text, options.explode, formCodec(options.allowReserved));
+  });
+
+/**
+ * The default `contentType` table: an object as compact JSON, a scalar as its text. An array
+ * repeats the name, one pair per item; `null` is omitted.
+ */
+const contentPairs = (name: string, value: Json) =>
+  Effect.gen(function* contentExpansion() {
+    if (value === null) {
+      return [];
+    }
+
+    const items: readonly Json[] = Array.isArray(value) ? value : [value];
+    const encode = formEncoder(false);
+    const pairs: string[] = [];
+
+    for (const item of items) {
+      const text = isJsonScalar(item) ? yield* itemText(name, item) : yield* jsonText(item);
+
+      pairs.push(`${encode(name)}=${encode(text)}`);
+    }
+
+    return pairs;
+  });
+
+/**
+ * The `application/x-www-form-urlencoded` text of an object (design 6.3): the pairs of each
+ * declared property in document order, joined by `&`. A property with Encoding `style`, `explode`
+ * or `allowReserved` is expanded as a query parameter is; one with none of them by its default
+ * `contentType`. Binary reaches a form only as text already encoded by its `contentEncoding`. A
+ * property the form does not declare is refused.
+ */
+export const urlEncode = (
+  value: JsonObject,
+  options: UrlEncodedOptions,
+): Effect.Effect<string, UsageError> =>
+  Effect.gen(function* formExpansion() {
+    const declared = new Set(options.properties.map(([name]) => name));
+
+    if (Object.keys(value).some((name) => !declared.has(name))) {
+      return yield* refuse("the form body has a property its schema does not declare");
+    }
+
+    const pairs: string[] = [];
+
+    for (const [name, encoding] of options.properties) {
+      const property = Object.hasOwn(value, name) ? value[name] : undefined;
+
+      if (property === undefined) {
+        continue;
+      }
+
+      if (unpairedSurrogate.test(name)) {
+        return yield* refuse("a form property has a name with no UTF-8 form");
+      }
+
+      pairs.push(
+        ...(hasStyle(encoding)
+          ? yield* styledPairs(name, property, encoding)
+          : yield* contentPairs(name, property)),
+      );
+    }
+
+    return pairs.join("&");
+  });
+
+const urlEncodedOf = (
+  mediaType: string,
+  value: Json,
+  options: UrlEncodedOptions & { readonly required: boolean },
+) =>
+  Effect.gen(function* urlEncodedEvaluation() {
+    if (mediaType === "" || unsafeHeaderText(mediaType)) {
+      return yield* refuse("the request media type is not a valid header value");
+    }
+
+    if (!isJsonObject(value)) {
+      return yield* refuse("a form-urlencoded body must be an object");
+    }
+
+    const text = yield* urlEncode(value, options);
+
+    return text === "" && !options.required ? HttpBody.empty : HttpBody.text(text, mediaType);
+  });
+
+/**
+ * A form-urlencoded body for `mediaType`, encoded by `urlEncode`. With no pair a required body is
+ * empty text under `mediaType` and an optional one is no body.
+ */
+export const urlEncoded = (
+  mediaType: string,
+  value: Json,
+  options: UrlEncodedOptions & { readonly required: boolean },
+): RequestBody => ({
+  expand: urlEncodedOf(mediaType, value, options),
+  mediaType,
 });
 
 /**
