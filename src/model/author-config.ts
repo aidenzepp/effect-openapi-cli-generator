@@ -89,6 +89,11 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       operations: Schema.optionalKey(Schema.Record(Schema.NonEmptyString, OperationOverride)),
     }),
   ),
+  // Opt-in switches for behavior outside the OpenAPI specification (D-AD11, D-OQ1); absent and
+  // `false` both mean strict.
+  nonStandard: Schema.optionalKey(
+    Schema.Struct({ deepObjectBrackets: Schema.optionalKey(Schema.Boolean) }),
+  ),
   package: Schema.Struct({
     name: Schema.NonEmptyString,
     version: Schema.String.pipe(Schema.check(Schema.isPattern(semverPattern))),
