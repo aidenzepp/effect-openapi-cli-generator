@@ -14,7 +14,7 @@ import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
 import { resolve } from "../../src/resolve/index.ts";
-import { JsonNumber } from "../../src/runtime-src/runtime/input.ts";
+import type { JsonNumber } from "../../src/runtime-src/runtime/input.ts";
 
 // Normalize refuses cookie and querystring parameters and form-urlencoded bodies until m2-nz7 and
 // m2-nz8, so these fixtures start from a normalized operation and swap the construct in directly.
@@ -364,6 +364,9 @@ type Builder = (input: {
 
 const isBuilder = (value: unknown): value is Builder => Predicate.isFunction(value);
 
+const isJsonNumberClass = (value: unknown): value is typeof JsonNumber =>
+  Predicate.isFunction(value);
+
 describe("emitApi: the emitted module against the runtime types", () => {
   test("a module with a cookie, a querystring and a form body type-checks", async () => {
     const packageDir = await packaged();
@@ -377,12 +380,18 @@ describe("emitApi: the emitted module against the runtime types", () => {
     expect(result.exitCode).toBe(0);
   }, 120_000);
 
-  // Runtime defect outside this slice (src/runtime-src/runtime/serialize.ts, urlEncode): a
-  // `JsonNumber` is not a JSON scalar there, so a styled property refuses it as nested and an
-  // undeclared one (default content rules) sends the compact JSON of the wrapper object,
-  // `{"text":"1.50"}`. Expected: the digit text of both.
-  test.todo("a JsonNumber form property keeps its digit text: refusal or wrapper JSON vs the digits", async () => {
-    const emitted: unknown = await import(nodePath.join(await packaged(), "src/api/users.ts"));
+  test("a JsonNumber form property keeps its digit text", async () => {
+    const packageDir = await packaged();
+    const emitted: unknown = await import(nodePath.join(packageDir, "src/api/users.ts"));
+    // The emitted module's own runtime copy: its encoder recognizes only that copy's class.
+    const input: unknown = await import(nodePath.join(packageDir, "src/runtime/input.ts"));
+    const Digits =
+      Predicate.isObject(input) && "JsonNumber" in input ? input.JsonNumber : undefined;
+    expect(isJsonNumberClass(Digits)).toBe(true);
+    if (!isJsonNumberClass(Digits)) {
+      return;
+    }
+
     const builder =
       Predicate.isObject(emitted) && "sessionsCreate" in emitted
         ? emitted.sessionsCreate
@@ -394,7 +403,7 @@ describe("emitApi: the emitted module against the runtime types", () => {
 
     const request = await Effect.runPromise(
       builder({
-        body: { extra: new JsonNumber("1.50"), name: new JsonNumber("12345678901234567890") },
+        body: { extra: new Digits("1.50"), name: new Digits("12345678901234567890") },
       }),
     );
     const text =

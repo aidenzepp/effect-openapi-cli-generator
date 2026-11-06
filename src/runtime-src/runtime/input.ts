@@ -315,6 +315,14 @@ export class JsonNumber {
   }
 }
 
+const jsonNumberGrammar = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
+/**
+ * Whether `text` is a JSON number (RFC 8259 section 6). A `JsonNumber` is sent as its text, so a
+ * text outside this grammar is refused before it reaches the wire.
+ */
+export const isJsonNumberText = (text: string): boolean => jsonNumberGrammar.test(text);
+
 /**
  * A field flag's value: a scalar, an `int64` digit string as a `JsonNumber`, or a decoded JSON
  * value (an object, an array, `null`) for a property that is not flattened (design 4.5).
@@ -370,7 +378,10 @@ export interface JsonObject {
   [key: string]: JsonNode;
 }
 
-interface RawJson {
+/**
+ * What `JSON.rawJSON` returns: a value `JSON.stringify` writes as its text, unchanged.
+ */
+export interface RawJson {
   readonly rawJSON: string;
 }
 
@@ -386,6 +397,12 @@ const bunJson: {
   readonly rawJSON: (text: string) => RawJson;
   // oxlint-disable-next-line anti-slop/no-reflect-get, typescript/no-unsafe-assignment -- the one way to type Bun's JSON without a global augmentation
 } = Reflect.get(globalThis, jsonGlobal);
+
+/**
+ * `text` as raw JSON for a `JSON.stringify` replacer, written unchanged. Throws `SyntaxError` when
+ * `text` is not a JSON primitive.
+ */
+export const rawJson = (text: string): RawJson => bunJson.rawJSON(text);
 
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
