@@ -711,7 +711,7 @@ const composeCookie = (name: string, text: Text, explode: boolean): string => {
 
 /**
  * A cookie parameter. 3.0 and 3.1 `form` and 3.2 `form` encode as RFC 6570 does (only 3.2 honors
- * `allowReserved`), and an exploded array or object is refused (Appendix D, "always incorrect").
+ * `allowReserved`), and any array or object is refused, exploded or not (PRM-34, "always incorrect").
  * 3.2 `cookie` sends the text as given and refuses a value outside `cookie-octet`. 3.2 refuses
  * `explode: false`, and `cookie` exists only on 3.2.
  */
@@ -749,9 +749,9 @@ export const cookie = (name: string, value: Value, options: CookieOptions): Cook
       return composeCookie(name, text, options.explode);
     }
 
-    if (options.explode && text.kind !== "primitive") {
+    if (text.kind !== "primitive") {
       return yield* refuse(
-        `parameter ${name} is an array or object, which an exploded form cookie cannot carry`,
+        `parameter ${name} is an array or object, which a form cookie cannot carry (OAS Appendix D)`,
       );
     }
 

@@ -38,14 +38,12 @@ describe("cookie form on 3.0 and 3.1", () => {
     expect(await expand("c", "a/b", { ...form31, allowReserved: true })).toBe("c=a%2Fb");
   });
 
-  test("a non-exploded array or object joins with commas", async () => {
-    expect(await expand("c", ["a", 2, true], { ...form31, explode: false })).toBe("c=a,2,true");
-    expect(await expand("c", { G: "x y", R: 100 }, { ...form31, explode: false })).toBe(
-      "c=G,x%20y,R,100",
-    );
+  test("PRM-34: a non-exploded array or object is refused", async () => {
+    await expectUsage("c", ["a", 2, true], { ...form31, explode: false });
+    await expectUsage("c", { G: "x y", R: 100 }, { ...form30, explode: false });
   });
 
-  test("an exploded array or object is refused", async () => {
+  test("PRM-34: an exploded array or object is refused", async () => {
     await expectUsage("c", ["a", "b"], form31);
     await expectUsage("c", { R: 100 }, form30);
   });
@@ -65,7 +63,7 @@ describe("cookie form on 3.2", () => {
     expect(await expand("c", "é%41", reserved)).toBe("c=%C3%A9%41");
   });
 
-  test("explode false and an exploded array or object are refused", async () => {
+  test("PRM-34: explode false and an exploded array or object are refused", async () => {
     await expectUsage("c", "x", { ...form32, explode: false });
     await expectUsage("c", ["a"], form32);
     await expectUsage("c", { R: 1 }, form32);
