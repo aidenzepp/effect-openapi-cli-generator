@@ -834,6 +834,21 @@ const serversTable = (servers: readonly Server[], bound: ApiEmitInput["boundOrig
   return obj(entries);
 };
 
+const requestIdNames: ReadonlySet<string> = new Set([
+  "request-id",
+  "x-request-id",
+  "x-correlation-id",
+]);
+
+/**
+ * The first declared response header, in response-key then document order, named `request-id`,
+ * `x-request-id` or `x-correlation-id` in any case (design 7.1), with its declared spelling.
+ */
+const requestIdHeaderOf = (responses: Operation["responses"]): string | undefined =>
+  responses
+    .flatMap((response) => response.headers)
+    .find((header) => requestIdNames.has(header.name.toLowerCase()))?.name;
+
 const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
   Effect.gen(function* requirement() {
     const alternatives = operation.security.alternatives.map((alternative) =>
@@ -928,6 +943,12 @@ const commandStatements = (
     ];
     if (operation.operationId !== undefined) {
       meta.push(["operationId", str(operation.operationId)]);
+    }
+
+    // Only an operation that declares a candidate names one, so M1 output is unchanged (C16).
+    const requestId = requestIdHeaderOf(operation.responses);
+    if (requestId !== undefined) {
+      meta.push(["requestIdHeader", str(requestId)]);
     }
 
     if (operation.servers.some((server) => server.level !== "root")) {
