@@ -174,7 +174,8 @@ describe("emitCli: the golden users-update fixture", () => {
     expect(content).toContain('BaseUrl.layer(servers, "EXAMPLE")');
     expect(content).toContain('Auth.layer(security, "EXAMPLE")');
     expect(content).toContain('import { login } from "../../custom/commands.ts";');
-    expect(content).toContain("Command.withSubcommands([UsersCli.group, login])");
+    expect(content).toContain('{ load: () => import("./users.ts"), name: "users" }');
+    expect(content).toContain("Command.withSubcommands(Arr.appendAll(groups, [login]))");
     for (const setting of [
       "BaseUrl.baseUrlSetting",
       "BaseUrl.serverSetting",
@@ -264,7 +265,7 @@ describe("emitCli: shapes beyond the fixture", () => {
     const content = contentOf(output, "src/cli/root.ts") ?? "";
     expect(content).toContain('import * as Root from "../api/root.ts";');
     expect(content).toContain('export const health = Command.make("health", {}, () =>');
-    expect(content).toContain("Command.withSubcommands([UsersCli.group, health, login])");
+    expect(content).toContain("Command.withSubcommands(Arr.appendAll(groups, [health, login]))");
   });
 
   test("a 3.2 child group is listed in its parent's module, not in root", async () => {
@@ -296,7 +297,9 @@ describe("emitCli: shapes beyond the fixture", () => {
     expect(users).toContain("AdminsCli.group]");
 
     const rootModule = contentOf(output, "src/cli/root.ts") ?? "";
-    expect(rootModule).toContain("Command.withSubcommands([UsersCli.group, login])");
+    expect(rootModule).toContain('{ load: () => import("./users.ts"), name: "users" }');
+    expect(rootModule).not.toContain("./admins.ts");
+    expect(rootModule).toContain("Command.withSubcommands(Arr.appendAll(groups, [login]))");
     expect(rootModule).not.toContain("AdminsCli");
   });
 

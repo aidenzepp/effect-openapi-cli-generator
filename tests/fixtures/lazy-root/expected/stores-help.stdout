@@ -1,0 +1,7 @@
+USAGE
+  lazy stores <subcommand> [flags]
+
+Run 'lazy --help' for global flags
+
+SUBCOMMANDS
+  list    List stores.
