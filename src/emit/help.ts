@@ -79,6 +79,38 @@ export const sanitizeProse = (text: string): SafeTextValue =>
 // A single-line generated field: sanitized, with LF and TAB runs folded to one space.
 const line = (text: string): string => sanitizeProse(text).replaceAll(/[\n\t]+/gu, " ");
 
+const bracketNote =
+  "non-standard: sent as name[a][b]=v (author config nonStandard.deepObjectBrackets)";
+
+// The first pointer token, unescaped: the form property a body flag writes.
+const propertyOf = (pointer: string): string =>
+  (pointer.split("/")[1] ?? "").replaceAll("~1", "/").replaceAll("~0", "~");
+
+// Whether the author config marked the form property a body flag writes (design 6.1).
+const bodyMarked = (operation: Operation, pointer: string): boolean => {
+  const name = propertyOf(pointer);
+
+  return (operation.body?.alternatives ?? []).some((alternative) =>
+    alternative.encoding.some(
+      (rule) =>
+        rule.nonStandard === "deepObjectBrackets" &&
+        rule.target.kind === "property" &&
+        rule.target.name === name,
+    ),
+  );
+};
+
+const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
+  const { source } = flag;
+  if (source._tag === "Body") {
+    return bodyMarked(operation, source.pointer);
+  }
+
+  const { serialization } = source.parameter;
+
+  return serialization.kind === "style" && serialization.nonStandard === "deepObjectBrackets";
+};
+
 const locationNote = (source: HelpFlagSource, name: string): string => {
   if (source._tag === "Body") {
     return `body ${line(source.pointer)}`;
@@ -224,10 +256,22 @@ const refusedLine = (input: HelpInput): string | undefined => {
 const isArgument = (flag: HelpFlag): boolean =>
   flag.source._tag === "Parameter" && flag.source.parameter.location === "path";
 
-const noted = (flag: HelpFlag): readonly [string, string] => [
-  line(flag.name),
-  locationNote(flag.source, flag.name),
-];
+const noted =
+  (operation: Operation) =>
+  (flag: HelpFlag): readonly [string, string] => {
+    const note = locationNote(flag.source, flag.name);
+
+    return [line(flag.name), isMarked(operation, flag) ? `${note}; ${bracketNote}` : note];
+  };
+
+// The NON-STANDARD line: the marked flags of the command, by visible name.
+const nonStandardLine = (input: HelpInput): string | undefined => {
+  const marked = input.flags.filter((flag) => isMarked(input.operation, flag));
+
+  return marked.length === 0
+    ? undefined
+    : `${marked.map((flag) => `--${line(flag.name)}`).join(", ")} (deepObjectBrackets)`;
+};
 
 /**
  * The description and generated notes of one command, from the model alone: source prose first,
@@ -238,20 +282,25 @@ export const operationHelp = (input: HelpInput): OperationHelp => {
   const { operation } = input;
   const auth = authLine(input);
   const refused = refusedLine(input);
+  const nonStandard = nonStandardLine(input);
   const sections: (readonly [string, string])[] = [["REQUEST", requestLine(operation)]];
   if (auth !== undefined) {
     sections.push(["AUTH", auth]);
   }
 
   sections.push(["RESPONSES", responsesLine(operation)]);
+  if (nonStandard !== undefined) {
+    sections.push(["NON-STANDARD", nonStandard]);
+  }
+
   if (refused !== undefined) {
     sections.push(["REFUSED", refused]);
   }
 
   return {
-    arguments: record(input.flags.filter(isArgument).map(noted)),
+    arguments: record(input.flags.filter(isArgument).map(noted(operation))),
     description: sanitizeProse(operation.docs.description ?? operation.docs.summary ?? ""),
-    flags: record(input.flags.filter((flag) => !isArgument(flag)).map(noted)),
+    flags: record(input.flags.filter((flag) => !isArgument(flag)).map(noted(operation))),
     sections,
   };
 };
