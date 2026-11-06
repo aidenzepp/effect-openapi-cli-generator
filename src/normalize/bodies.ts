@@ -113,6 +113,7 @@ const RequestBodyObject = Schema.Struct({
 });
 
 const MediaTypeObject = Schema.Struct({
+  description: Schema.optionalKey(Schema.String),
   encoding: Schema.optionalKey(Schema.Record(Schema.String, EncodingObject)),
   itemEncoding: Schema.optionalKey(EncodingObject),
   itemSchema: Schema.optionalKey(Schema.Unknown),
@@ -1121,6 +1122,28 @@ const encodingIgnored = (line: Line, at: CanonicalKey): Finding =>
         at,
       );
 
+// D-OC5: a Media Type description has no use in a generated CLI, so it is ignored.
+const descriptionIgnored = (at: CanonicalKey): Finding =>
+  notice(
+    "MED-09/description-ignored",
+    "media-type-object",
+    "Media type description",
+    "The description of a media type is not used, so it is ignored here.",
+    at,
+  );
+
+// MED-26: a form-data body is a set of named parts, so an array of name/value objects has no part
+// flags to fill and every run would fail.
+const arrayFormData = (at: CanonicalKey): Finding =>
+  refusal(
+    "MED-26/array-form-data",
+    "encoding-multipart-media-types",
+    "Multipart form-data array body",
+    "A multipart/form-data body whose schema is an array has no named parts to send, so the media type is refused.",
+    at,
+    "Describe the body as an object whose properties are the parts",
+  );
+
 interface Media {
   readonly home: CanonicalKey;
   readonly node: MediaNode;
@@ -1326,6 +1349,29 @@ const partInputs = (
 };
 
 // Multipart part rules: the declared properties by name, then 3.2 positions (design 6.3).
+const typesOf = (nodes: readonly Located[]): readonly string[] => {
+  const type = firstLocated(nodes, (node) => node.type)?.value;
+
+  return type === undefined ? [] : Arr.ensure(type);
+};
+
+// An array root: typed array, or item schemas with no declared properties.
+const isArrayBody = (
+  walk: Walk,
+  schema: CanonicalKey,
+  members: Members,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* arrayBody() {
+    if (
+      members.properties.length === 0 &&
+      (members.items !== undefined || members.prefixItems.length > 0)
+    ) {
+      return true;
+    }
+
+    return typesOf(yield* flatten(walk, schema)).includes("array");
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1340,6 +1386,14 @@ const multipartParts = (
 
     const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
     const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+    if (
+      schema !== undefined &&
+      base === "multipart/form-data" &&
+      (yield* isArrayBody(ctx.walk, schema, members))
+    ) {
+      return refusedParts([arrayFormData(media.home)]);
+    }
+
     const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
     const keys = unknownKeys(line, media, members);
     if (keys.refused) {
@@ -1435,12 +1489,6 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
 
 const isCompound = (types: readonly string[]): boolean =>
   types.some((name) => name === "object" || name === "array");
-
-const typesOf = (nodes: readonly Located[]): readonly string[] => {
-  const type = firstLocated(nodes, (node) => node.type)?.value;
-
-  return type === undefined ? [] : Arr.ensure(type);
-};
 
 // PRM-27 (design 6.1): a deepObject value is nested when its schema is an array, or declares a
 // property or additionalProperties schema whose type is or includes object or array. An untyped
@@ -1658,15 +1706,8 @@ const normalizeAlternative = (
     const { line, resolution } = ctx;
     const mediaSite = childKey(body, "content", key);
     if (Option.isNone(Schema.decodeUnknownOption(MediaRange)(key))) {
-      return stopAlternative(
-        refusal(
-          "MED-24/invalid-media-type",
-          "media-types",
-          "Request body content key",
-          `The content key ${JSON.stringify(sanitize(key))} is not a media type or range.`,
-          mediaSite,
-        ),
-      );
+      // The grammar check refuses the key (MED-24) before normalization, so it is not raised twice.
+      return stopAlternative();
     }
 
     const base = baseType(key);
@@ -1706,7 +1747,12 @@ const normalizeAlternative = (
       result.itemEncoding = parts.itemEncoding;
     }
 
-    return { alternative: result, findings: parts.findings };
+    const described = line === "3.2" && node.description !== undefined;
+
+    return {
+      alternative: result,
+      findings: described ? [...parts.findings, descriptionIgnored(home)] : parts.findings,
+    };
   });
 
 // --- Diagnostics and the body ---

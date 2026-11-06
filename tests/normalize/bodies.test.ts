@@ -227,10 +227,10 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
     }
   });
 
-  test("MED-24 a key that is not a media range is refused and the others stay", () => {
+  test("MED-24 a key that is not a media range is dropped and the others stay; the grammar check reports it", () => {
     const outcome = implemented("3.1", { content: { "not a media type": {}, "text/plain": {} } });
 
-    expect(codes(outcome)).toEqual(["MED-24/invalid-media-type"]);
+    expect(codes(outcome)).toEqual([]);
     expect(outcome.body.alternatives.map((alternative) => String(alternative.mediaType))).toEqual([
       "text/plain",
     ]);

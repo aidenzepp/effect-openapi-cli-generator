@@ -30,6 +30,8 @@ const ResponseObject = Schema.Struct({
 });
 
 const MediaObject = Schema.Struct({
+  description: Schema.optionalKey(Schema.Unknown),
+  encoding: Schema.optionalKey(Schema.Unknown),
   itemSchema: Schema.optionalKey(Schema.Unknown),
   schema: Schema.optionalKey(Schema.Unknown),
 });
@@ -47,6 +49,19 @@ interface Rule {
 }
 
 const rules = {
+  "MED-09/description-ignored": {
+    anchor: "media-type-object",
+    element: "Media type description",
+    message: "The description of a media type is not used, so it is ignored here.",
+    severity: "notice",
+  },
+  "MED-10/encoding-ignored": {
+    anchor: "media-type-encoding",
+    element: "Media type encoding",
+    message:
+      "The encoding field applies to multipart and form-urlencoded request bodies only, so it is ignored here.",
+    severity: "notice",
+  },
   "RSP-05/invalid-media-type": {
     anchor: "response-content",
     element: "Response content key",
@@ -192,6 +207,16 @@ const alternativeOf = (
       Effect.flatMap(Schema.decodeUnknownEffect(MediaObject)),
       Effect.orDie,
     );
+    // Encoding applies to request bodies only (MED-10, 3.0 and 3.1); a 3.2 Media Type description
+    // is ignored (MED-09, D-OC5).
+    if (media.encoding !== undefined && resolution.line !== "3.2") {
+      findings.push({ at: home, code: "MED-10/encoding-ignored" });
+    }
+
+    if (media.description !== undefined && resolution.line === "3.2") {
+      findings.push({ at: home, code: "MED-09/description-ignored" });
+    }
+
     const plain: PlainAlternative = {
       codec: codecOf(mediaType),
       encoding: [],
