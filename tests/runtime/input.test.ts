@@ -204,7 +204,7 @@ describe("Input.binaryBody", () => {
     expect([...result.read]).toEqual([...bytes]);
   });
 
-  test("- reads stdin into memory, bytes verbatim", async () => {
+  test("- streams stdin through, bytes verbatim", async () => {
     const read = await run(
       Input.binaryBody({ body: none, bodyFile: Option.some("-"), required: true }).pipe(
         Effect.flatMap(readBody),
@@ -364,16 +364,17 @@ describe("Input.binaryBody", () => {
     expect(error.message).not.toContain("/");
   });
 
-  test("stdin over the limit is a UsageError naming --body-file at flag time", async () => {
+  test("stdin over the limit fails the body stream with a UsageError naming --body-file", async () => {
     const error = await run(
       Input.binaryBody({ body: none, bodyFile: Option.some("-"), required: true }).pipe(
+        Effect.flatMap((body) => Stream.runCollect(streamOf(body).stream)),
         Effect.flip,
         Effect.provide(inputLayer(...overLimitChunks())),
       ),
     );
 
-    expect(error._tag).toBe("UsageError");
-    expect(error.flag).toBe("body-file");
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error instanceof UsageError ? error.flag : undefined).toBe("body-file");
   });
 
   test("a required body with no input is a UsageError naming --body-file; an optional one is empty", async () => {
