@@ -518,6 +518,47 @@ export const numericArgument = (name: string, kind: NumericKind) =>
     ),
   );
 
+// The one stderr notice for a given deprecated parameter: it names the flag or argument, never a
+// value, and passes the value on unchanged. An absent optional flag is `None` and an absent
+// repeated one is empty; neither prints.
+const noticeDeprecated =
+  (label: string) =>
+  <A>(value: A): Effect.Effect<A, never, Stdio.Stdio> => {
+    const absent =
+      (Option.isOption(value) && Option.isNone(value)) ||
+      (Array.isArray(value) && value.length === 0);
+
+    return absent
+      ? Effect.succeed(value)
+      : Effect.gen(function* notify() {
+          const stdio = yield* Stdio.Stdio;
+          yield* Stream.run(
+            Stream.make(`Notice: the parameter ${label} is deprecated\n`),
+            stdio.stderr(),
+          );
+        }).pipe(Effect.ignore, Effect.as(value));
+  };
+
+/**
+ * A deprecated parameter's flag (PRM-07): one stderr notice naming `--name` when the operator gives
+ * the flag, however often, and none when it is absent; the value is unchanged. It applies outside
+ * the `Flag.optional` or `Flag.atLeast` wrapper, which only then has settled whether a value was
+ * given.
+ */
+export const deprecated =
+  (name: string) =>
+  <A>(self: Flag.Flag<A>): Flag.Flag<A> =>
+    self.pipe(Flag.mapEffect(noticeDeprecated(`--${name}`)));
+
+/**
+ * The positional argument twin of `deprecated` for a deprecated path parameter: the notice names
+ * `<name>`, never the value.
+ */
+export const deprecatedArgument =
+  (name: string) =>
+  <A>(self: Argument.Argument<A>): Argument.Argument<A> =>
+    self.pipe(Argument.mapEffect(noticeDeprecated(`<${name}>`)));
+
 const isObject = (value: JsonNode | undefined): value is JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value) && !(value instanceof JsonNumber);
 

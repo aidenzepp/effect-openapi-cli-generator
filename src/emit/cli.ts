@@ -448,6 +448,10 @@ const numericKindOf = (parameter: Parameter, context: CommandContext) =>
 const parameterDescription = (parameter: Parameter): string =>
   parameter.docs.description ?? parameter.docs.summary ?? "";
 
+// The notice step of a deprecated parameter's flag or argument (PRM-07); none for any other.
+const deprecation = (parameter: Parameter, combinator: string, name: string): readonly Expr[] =>
+  parameter.deprecated ? [fn(combinator, str(name))] : [];
+
 const positionalEntry = (
   operation: Operation,
   positional: PlannedPositional,
@@ -483,6 +487,7 @@ const positionalEntry = (
     const described = describedBy(parameterDescription(parameter));
     const value = pipe(head, [
       ...(array ? [fn("Argument.atLeast", num(1))] : []),
+      ...deprecation(parameter, "Input.deprecatedArgument", positional.name),
       ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
     ]);
 
@@ -625,8 +630,11 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       const array = styled && (yield* isArrayParameter(parameter, context));
       const head = parameterFlagHead(flag, parameter, yield* numericKindOf(parameter, context));
       const presence = parameter.required ? [] : [path("Flag.optional")];
+      // A deprecated parameter's notice goes outside the presence wrapper, which settles whether
+      // the operator gave the flag (PRM-07).
       const steps = [
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
+        ...deprecation(parameter, "Input.deprecated", flag.name),
         ...describedBy(parameterDescription(parameter)).map((text) =>
           fn("Flag.withDescription", text),
         ),

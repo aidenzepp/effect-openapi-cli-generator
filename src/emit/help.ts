@@ -256,12 +256,20 @@ const refusedLine = (input: HelpInput): string | undefined => {
 const isArgument = (flag: HelpFlag): boolean =>
   flag.source._tag === "Parameter" && flag.source.parameter.location === "path";
 
+const isDeprecated = (flag: HelpFlag): boolean =>
+  flag.source._tag === "Parameter" && flag.source.parameter.deprecated;
+
+// A flag's annotation: its location, then the bracket note and `deprecated` when they apply.
 const noted =
   (operation: Operation) =>
   (flag: HelpFlag): readonly [string, string] => {
-    const note = locationNote(flag.source, flag.name);
+    const notes = [
+      locationNote(flag.source, flag.name),
+      ...(isMarked(operation, flag) ? [bracketNote] : []),
+      ...(isDeprecated(flag) ? ["deprecated"] : []),
+    ];
 
-    return [line(flag.name), isMarked(operation, flag) ? `${note}; ${bracketNote}` : note];
+    return [line(flag.name), notes.join("; ")];
   };
 
 // The NON-STANDARD line: the marked flags of the command, by visible name.
