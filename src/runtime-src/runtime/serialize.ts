@@ -445,7 +445,7 @@ export interface QueryOptions {
 export interface QueryParameter {
   readonly expand: Effect.Effect<string | undefined, UsageError>;
   readonly name: string;
-  readonly style: QueryStyle | "querystring";
+  readonly style: QueryStyle | "content" | "querystring";
 }
 
 /**
@@ -712,7 +712,7 @@ export interface HeaderOptions {
 export interface HeaderParameter {
   readonly expand: Effect.Effect<string | undefined, UsageError>;
   readonly name: string;
-  readonly style: "simple";
+  readonly style: "content" | "simple";
 }
 
 /**
@@ -809,7 +809,7 @@ export interface CookieOptions {
 export interface CookieParameter {
   readonly expand: Effect.Effect<string | undefined, UsageError>;
   readonly name: string;
-  readonly style: "cookie" | "form";
+  readonly style: "content" | "cookie" | "form";
 }
 
 /**
@@ -1499,22 +1499,34 @@ export const urlEncoded = (
 });
 
 /**
+ * A content-based parameter's options (design 6.1, `content` rows).
+ */
+export interface ContentOptions {
+  readonly required: boolean;
+}
+
+/**
  * A `querystring` parameter's content: `required`, and for form-urlencoded content the declared
  * properties as for a body (none declared means every key takes the default rules).
  */
-export interface QuerystringOptions extends Partial<UrlEncodedOptions> {
-  readonly required: boolean;
-}
+export interface QuerystringOptions extends ContentOptions, Partial<UrlEncodedOptions> {}
 
 const isFormMedia = (mediaType: string) =>
   (mediaType.split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
 
 /**
- * The text a `querystring` value has before any percent-encoding: its codec's text, JSON compact
- * and text as is.
+ * A content-based parameter with no value: an optional one sends nothing and a required one is
+ * refused.
  */
-const querystringText = (name: string, mediaType: string, value: Json) =>
-  Effect.gen(function* querystringCodec() {
+const absentContent = (name: string, options: ContentOptions) =>
+  options.required ? refuse(`parameter ${name} is required and has no value`) : Effect.undefined;
+
+/**
+ * The text a content-based parameter's value has before any location encoding: its codec's text,
+ * JSON compact and text as is. The one codec for `querystring` and every `content` parameter.
+ */
+const contentText = (name: string, mediaType: string, value: Json) =>
+  Effect.gen(function* contentCodec() {
     if (isJsonMedia(mediaType)) {
       return yield* jsonText(`parameter ${name}`, value);
     }
@@ -1543,9 +1555,7 @@ export const querystring = (
 ): QueryParameter => ({
   expand: Effect.gen(function* querystringExpansion() {
     if (value === undefined) {
-      return options.required
-        ? yield* refuse(`parameter ${name} is required and has no value`)
-        : undefined;
+      return yield* absentContent(name, options);
     }
 
     if (isFormMedia(mediaType)) {
@@ -1554,10 +1564,94 @@ export const querystring = (
         : yield* refuse(`parameter ${name} must be an object under form-urlencoded content`);
     }
 
-    return encodeUnreserved(yield* querystringText(name, mediaType, value));
+    return encodeUnreserved(yield* contentText(name, mediaType, value));
   }),
   name,
   style: "querystring",
+});
+
+/**
+ * Query `content` (PRM-23): `name=` and the codec's text, both percent-encoded outside unreserved.
+ * `value` is `undefined` when the caller gave none, as for `querystring`.
+ */
+export const queryContent = (
+  name: string,
+  mediaType: string,
+  value: Json | undefined,
+  options: ContentOptions,
+): QueryParameter => ({
+  expand: Effect.gen(function* queryContentExpansion() {
+    if (unpairedSurrogate.test(name)) {
+      return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
+    }
+
+    if (value === undefined) {
+      return yield* absentContent(name, options);
+    }
+
+    return `${encodeUnreserved(name)}=${encodeUnreserved(yield* contentText(name, mediaType, value))}`;
+  }),
+  name,
+  style: "content",
+});
+
+/**
+ * Header `content` (PRM-24): the codec's text sent as is, one opaque value, so it has no delimiter
+ * to check; text no header line can carry unchanged is refused. `value` is as for `queryContent`.
+ */
+export const headerContent = (
+  name: string,
+  mediaType: string,
+  value: Json | undefined,
+  options: ContentOptions,
+): HeaderParameter => ({
+  expand: Effect.gen(function* headerContentExpansion() {
+    if (!headerToken.test(name)) {
+      return yield* refuse("a header parameter has a name that is not an RFC 9110 token");
+    }
+
+    if (value === undefined) {
+      return yield* absentContent(name, options);
+    }
+
+    const text = yield* contentText(name, mediaType, value);
+
+    return unsafeHeaderText(text)
+      ? yield* refuse(`header ${name} holds a value no header line can carry unchanged`)
+      : text;
+  }),
+  name,
+  style: "content",
+});
+
+/**
+ * Cookie `content` (PRM-24): `name=` and the codec's text sent as is. Text outside RFC 6265
+ * `cookie-octet` is refused, so JSON content, with its quotes and commas, is refused: quoting and
+ * escaping are the caller's (OAS Appendix D). `value` is as for `queryContent`.
+ */
+export const cookieContent = (
+  name: string,
+  mediaType: string,
+  value: Json | undefined,
+  options: ContentOptions,
+): CookieParameter => ({
+  expand: Effect.gen(function* cookieContentExpansion() {
+    if (!headerToken.test(name)) {
+      return yield* refuse("a cookie parameter has a name that is not an RFC 6265 token");
+    }
+
+    if (value === undefined) {
+      return yield* absentContent(name, options);
+    }
+
+    const text = yield* contentText(name, mediaType, value);
+
+    return cookieOctets.test(text)
+      ? cookieAssignment(name, text)
+      : yield* refuse(`parameter ${name} holds a character outside RFC 6265 cookie-octet`);
+  }),
+  name,
+  style: "content",
 });
 
 /**
