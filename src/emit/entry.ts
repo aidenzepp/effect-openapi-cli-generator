@@ -63,17 +63,18 @@ const constant = (name: string, value: Expr, exported = false): Statement => ({
 });
 
 /**
- * `main.ts` (design 4.1, 14 D5): `Command.run` with `renderErrors: false` (the final catch is the
- * only renderer), provided with the root's `services` and
- * `CliOutput.layer(Output.formatter(root))`, then `Output.exitForHelp` (help with parse errors
- * exits 2) inside `Output.finalCatch`. The credentials the handler evaluated reach the catch
- * through `RunCredentials`, so its own list is empty. M1 carries no runtime defaults, so there is
- * no `ConfigProvider` fallback.
+ * `main.ts` (design 4.1 Lazy root, 14 D5): reads the arguments from `Stdio`, builds the root with
+ * `cli/root.ts` `root` (which loads only the groups the arguments select), then `Command.run` over
+ * that root with `renderErrors: false` (the final catch is the only renderer), provided with the
+ * root's `services` and `CliOutput.layer(Output.formatter(root))`, then `Output.exitForHelp` (help
+ * with parse errors exits 2) inside `Output.finalCatch`. The credentials the handler evaluated
+ * reach the catch through `RunCredentials`, so its own list is empty. M1 carries no runtime
+ * defaults, so there is no `ConfigProvider` fallback.
  */
 const mainModule = (config: AuthorConfig): Module => {
   const runRoot = fn(
     "Command.run",
-    path("root"),
+    path("command"),
     obj([
       ["renderErrors", bool(false)],
       ["version", str(config.package.version)],
@@ -82,12 +83,13 @@ const mainModule = (config: AuthorConfig): Module => {
   const layers = fn(
     "Layer.mergeAll",
     path("services"),
-    fn("CliOutput.layer", fn("Output.formatter", path("root"))),
+    fn("CliOutput.layer", fn("Output.formatter", path("command"))),
   );
+  const args = fn("Stdio.Stdio.use", arrow([{ name: I("stdio") }], path("stdio.args")));
 
   return {
     imports: [
-      named("effect", ["Effect", "Layer"]),
+      named("effect", ["Effect", "Layer", "Stdio"]),
       named("effect/cli", ["CliOutput", "Command"]),
       named("./cli/root.ts", ["root", "services"]),
       namespace("./runtime/output.ts", "Output"),
@@ -95,8 +97,15 @@ const mainModule = (config: AuthorConfig): Module => {
     statements: [
       constant(
         "run",
-        call(member(runRoot, M("pipe")), [
-          fn("Effect.provide", layers),
+        call(member(args, M("pipe")), [
+          fn("Effect.flatMap", path("root")),
+          fn(
+            "Effect.flatMap",
+            arrow(
+              [{ name: I("command") }],
+              call(member(runRoot, M("pipe")), [fn("Effect.provide", layers)]),
+            ),
+          ),
           path("Output.exitForHelp"),
           fn("Output.finalCatch", arr([])),
         ]),

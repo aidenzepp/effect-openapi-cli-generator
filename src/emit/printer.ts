@@ -158,7 +158,8 @@ export type Expr =
       readonly consequent: Expr;
       readonly alternate: Expr;
     }
-  | { readonly _tag: "Plus"; readonly left: Expr; readonly right: Expr };
+  | { readonly _tag: "Plus"; readonly left: Expr; readonly right: Expr }
+  | { readonly _tag: "DynamicImport"; readonly from: ModuleSpecifierType };
 
 export interface Field {
   readonly key: string;
@@ -277,6 +278,11 @@ export const conditional = (test: Expr, consequent: Expr, alternate: Expr): Expr
 });
 
 export const plus = (left: Expr, right: Expr): Expr => ({ _tag: "Plus", left, right });
+
+/**
+ * `import("<from>")`: a dynamic import of a module, printed with a literal specifier.
+ */
+export const dynamicImport = (from: ModuleSpecifierType): Expr => ({ _tag: "DynamicImport", from });
 
 export const typeRef = (
   head: IdentifierType,
@@ -499,6 +505,7 @@ const flat = (expr: Expr): string | undefined =>
         " : ",
         flat(choice.alternate),
       ),
+    DynamicImport: (entry) => `import(${stringLiteral(entry.from)})`,
     Identifier: (name) => name.name,
     Member: (access) => flatPair(flat(access.object), ".", access.name),
     New: (construct) =>
@@ -778,6 +785,7 @@ const render: Render = (expr, place) => {
       return `${callee}${renderArgs(invocation.args, { ...place, column }, render)}`;
     },
     Conditional: (choice) => renderConditional(choice, place, render),
+    DynamicImport: leaf,
     Identifier: leaf,
     Member: (access) => {
       const tail = place.tail + 1 + access.name.length;
@@ -901,6 +909,7 @@ const check = (expr: Expr, role: Role): Issue => {
         ? firstIssue(operands, asValue)
         : issue("unsupported-conditional", nested._tag);
     },
+    DynamicImport: none,
     Identifier: none,
     Member: (access) => {
       if (isPath(access)) {

@@ -19,6 +19,7 @@ import {
   bool,
   call,
   conditional,
+  dynamicImport,
   ident,
   member,
   newExpr,
@@ -1353,6 +1354,33 @@ describe("entry-module constructs", () => {
   test("new expressions take any constructor path and lay out arguments by the call rule", () => {
     const printed = print(newModule);
     expect(printed).toBe(newExpected);
+    expectFixedPoint(printed, "ts");
+  }, 30_000);
+
+  test("a dynamic import prints import() with its literal specifier", () => {
+    const entry = (segment: string) =>
+      obj([
+        ["name", str(segment)],
+        ["load", arrow([], dynamicImport(S(`./${segment}.ts`)))],
+      ]);
+    const printed = print({
+      imports: [],
+      statements: [
+        constant("load", arrow([], dynamicImport(S("./pets.ts")))),
+        constant("table", arr([entry("pets"), entry("stores")])),
+      ],
+    });
+    expect(printed).toBe(
+      [
+        'export const load = () => import("./pets.ts");',
+        "",
+        "export const table = [",
+        '  { load: () => import("./pets.ts"), name: "pets" },',
+        '  { load: () => import("./stores.ts"), name: "stores" },',
+        "];",
+        "",
+      ].join("\n"),
+    );
     expectFixedPoint(printed, "ts");
   }, 30_000);
 

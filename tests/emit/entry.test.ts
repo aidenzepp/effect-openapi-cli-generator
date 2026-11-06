@@ -64,13 +64,18 @@ describe("emitEntryFiles", () => {
   test("main.ts runs the root without rendering, provides services and the formatter", () => {
     expect(contentOf("src/main.ts")).toBe(
       [
-        'import { Effect, Layer } from "effect";',
+        'import { Effect, Layer, Stdio } from "effect";',
         'import { CliOutput, Command } from "effect/cli";',
         'import { root, services } from "./cli/root.ts";',
         'import * as Output from "./runtime/output.ts";',
         "",
-        'export const run = Command.run(root, { renderErrors: false, version: "1.2.3" }).pipe(',
-        "  Effect.provide(Layer.mergeAll(services, CliOutput.layer(Output.formatter(root)))),",
+        "export const run = Stdio.Stdio.use((stdio) => stdio.args).pipe(",
+        "  Effect.flatMap(root),",
+        "  Effect.flatMap((command) =>",
+        '    Command.run(command, { renderErrors: false, version: "1.2.3" }).pipe(',
+        "      Effect.provide(Layer.mergeAll(services, CliOutput.layer(Output.formatter(command)))),",
+        "    ),",
+        "  ),",
         "  Output.exitForHelp,",
         "  Output.finalCatch([]),",
         ");",

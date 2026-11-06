@@ -1,0 +1,9 @@
+USAGE
+  lazy pets <subcommand> [flags]
+
+Run 'lazy --help' for global flags
+
+SUBCOMMANDS
+  list    List pets.
+  get     Get a pet.
+  toys    

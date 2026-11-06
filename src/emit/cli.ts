@@ -25,6 +25,7 @@ import {
   arrow,
   bool,
   call,
+  dynamicImport,
   ident,
   member,
   newExpr,
@@ -32,6 +33,8 @@ import {
   obj,
   printModule,
   str,
+  typeKeyword,
+  typeReadonlyArray,
 } from "./printer.ts";
 import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
 
@@ -1097,6 +1100,7 @@ const heads = (expr: Expr, into: Set<string>): Set<string> => {
       break;
     }
     case "Boolean":
+    case "DynamicImport":
     case "Number":
     case "String":
     case "Undefined": {
@@ -1260,6 +1264,14 @@ const apiBindings = (targets: ReadonlyMap<Operation, Target>): readonly Binding[
     ({ from, namespace }) => ({ from, kind: "Namespace", name: namespace }),
   );
 
+// The header fields a group module's `Command.make` sets, which its root table entry carries
+// (`runtime/groups.ts` `Header`): today the name only.
+interface GroupHeader {
+  readonly name: string;
+}
+
+const headerOf = (group: PlannedGroup): GroupHeader => ({ name: group.name });
+
 const groupFile = (
   group: PlannedGroup,
   built: Commands,
@@ -1278,7 +1290,7 @@ const groupFile = (
         _tag: "Const",
         exported: true,
         name: I("group"),
-        value: pipe(fn("Command.make", str(group.name)), [
+        value: pipe(fn("Command.make", str(headerOf(group).name)), [
           fn("Command.withSubcommands", arr(subcommands)),
         ]),
       },
@@ -1351,6 +1363,18 @@ const globalSettings: readonly string[] = [
   "Describe.describeFlag",
 ];
 
+// One table row per top-level group: its header and a thunk importing its module by a literal
+// specifier, so the module loads only when `Groups.root` selects it (design 4.1 Lazy root).
+const tableEntry = (group: PlannedGroup) =>
+  specifier(`./${group.segment}.ts`, "unprintable-name").pipe(
+    Effect.map((from) =>
+      obj([
+        ["load", arrow([], dynamicImport(from))],
+        ["name", str(headerOf(group).name)],
+      ]),
+    ),
+  );
+
 const rootFile = (
   topLevel: readonly PlannedGroup[],
   built: Commands,
@@ -1362,8 +1386,7 @@ const rootFile = (
     const { domain, emitted, statements } = built;
     const author = yield* authorCommands(config);
     const prefix = str(envPrefixOf(config));
-    const subcommands = [
-      ...topLevel.map((group) => member(ident(I(cliAlias(group))), M("group"))),
+    const others = [
       ...emitted.map((command) => ident(I(command.identifier))),
       ...author.names.map((name) => ident(I(name))),
     ];
@@ -1373,17 +1396,47 @@ const rootFile = (
         fn("Auth.credentialFileSetting", str(credential.scheme)),
       ),
     ];
+    // The loaded groups come first, then the untagged and author commands, as the eager order was.
+    const subcommands =
+      others.length === 0 ? path("groups") : fn("Arr.appendAll", path("groups"), arr(others));
+    const header = (children: Expr) =>
+      pipe(fn("Command.make", str(config.binName)), [
+        fn("Command.withSubcommands", children),
+        fn("Command.withGlobalFlags", arr(settings)),
+      ]);
+    const entries = yield* Effect.all(topLevel.map(tableEntry));
+    // With no top-level group there is nothing to load, and an empty table would infer `unknown`
+    // requirements, so the root is the header over the other commands.
+    const lazy: Statement[] =
+      topLevel.length === 0
+        ? [
+            {
+              _tag: "Const",
+              exported: true,
+              name: I("root"),
+              value: arrow([], fn("Effect.succeed", header(arr(others)))),
+            },
+          ]
+        : [
+            { _tag: "Const", exported: true, name: I("table"), value: arr(entries) },
+            {
+              _tag: "Const",
+              exported: true,
+              name: I("root"),
+              value: arrow(
+                [{ name: I("args"), type: typeReadonlyArray(typeKeyword("string")) }],
+                fn(
+                  "Groups.root",
+                  path("table"),
+                  arrow([{ name: I("groups") }], header(subcommands)),
+                  path("args"),
+                ),
+              ),
+            },
+          ];
     const all: Statement[] = [
       ...statements,
-      {
-        _tag: "Const",
-        exported: true,
-        name: I("root"),
-        value: pipe(fn("Command.make", str(config.binName)), [
-          fn("Command.withSubcommands", arr(subcommands)),
-          fn("Command.withGlobalFlags", arr(settings)),
-        ]),
-      },
+      ...lazy,
       {
         _tag: "Const",
         exported: true,
@@ -1397,18 +1450,16 @@ const rootFile = (
         ),
       },
     ];
-    yield* checkDistinct([...declaredNames(all), ...author.names]);
+    // `args` and `groups` are the root's parameters: a command of either name would be shadowed.
+    yield* checkDistinct([...declaredNames(all), ...author.names, "args", "groups"]);
 
     const imports = yield* moduleImports(all, [
       ...api,
       { from: "../api/security.ts", kind: "Named", name: "security" },
       { from: "../api/servers.ts", kind: "Named", name: "servers" },
+      { from: "../runtime/groups.ts", kind: "Namespace", name: "Groups" },
+      { from: "effect/Array", kind: "Namespace", name: "Arr" },
       ...domainBindings(domain),
-      ...topLevel.map((group) => ({
-        from: `./${group.segment}.ts`,
-        kind: "Namespace" as const,
-        name: cliAlias(group),
-      })),
       ...author.bindings,
     ]);
     const content = yield* printModule({ imports, statements: all });
@@ -1428,8 +1479,10 @@ const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
  * constructors, three-state booleans, a handler that builds the body, calls the operation's one
  * `api/` builder, in its primary command's module, with `inputKeys` and runs `Output.send`), its
  * describe binding and help notes, and `group`, so an alias is a full command for its operation;
- * and `cli/root.ts` with the untagged commands, the root command and its global settings, the
- * author-owned commands, and `services`. Files are sorted by path. An operation the layer cannot
+ * and `cli/root.ts` with the untagged commands, the header table that loads each top-level group
+ * by a literal `import()`, `root` building the root command and its global settings through
+ * `Groups.root` from the arguments, the author-owned commands, and `services`. Files are sorted by
+ * path. An operation the layer cannot
  * express is refused alone (`CliRefusal`), and a group left with no command and no emitted child
  * group is not emitted.
  */
