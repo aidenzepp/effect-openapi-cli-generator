@@ -14,9 +14,11 @@ import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
- * when known, and the document's full `openapi` value.
+ * when known, and the document's full `openapi` value. `nonStandard` carries the author config's
+ * opt-in switches of the same name; absent is strict (design 6.1, D-OQ1).
  */
 export interface BodySite {
+  readonly nonStandard?: { readonly deepObjectBrackets?: boolean };
   readonly openapi: string;
   readonly operation?: typeof DiagnosticOperation.Type;
   readonly pointer: string;
@@ -204,6 +206,7 @@ interface Finding {
   readonly hint?: string;
   readonly message: string;
   readonly at: CanonicalKey;
+  readonly related?: readonly CanonicalKey[];
   readonly severity: "notice" | "refusal";
 }
 
@@ -517,6 +520,7 @@ interface PlainNested {
 interface PlainRule extends PlainNested {
   contentEncoding?: Transfer;
   nested?: readonly PlainNested[];
+  nonStandard?: "deepObjectBrackets";
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
 }
@@ -1429,15 +1433,102 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
     `Remove contentType, or set it to ${expected}`,
   );
 
+const isCompound = (types: readonly string[]): boolean =>
+  types.some((name) => name === "object" || name === "array");
+
+const typesOf = (nodes: readonly Located[]): readonly string[] => {
+  const type = firstLocated(nodes, (node) => node.type)?.value;
+
+  return type === undefined ? [] : Arr.ensure(type);
+};
+
+// PRM-27 (design 6.1): a deepObject value is nested when its schema is an array, or declares a
+// property or additionalProperties schema whose type is or includes object or array. An untyped
+// member is not nested.
+const isNested = (
+  walk: Walk,
+  schema: CanonicalKey | undefined,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* nested() {
+    if (schema === undefined) {
+      return false;
+    }
+
+    const nodes = yield* flatten(walk, schema);
+    if (typesOf(nodes).includes("array")) {
+      return true;
+    }
+
+    const members = nodes.flatMap(({ at, node }) => [
+      ...Object.keys(node.properties ?? {}).map((name) => childKey(at, "properties", name)),
+      ...(Schema.is(ObjectValue)(node.additionalProperties)
+        ? [childKey(at, "additionalProperties")]
+        : []),
+    ]);
+    for (const member of members) {
+      if (isCompound(typesOf(yield* flatten(walk, member)))) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+const compoundNested = (home: CanonicalKey, input: RuleInput): Finding => ({
+  ...refusal(
+    "PRM-27/compound-nested",
+    "style-values",
+    "Encoding style deepObject under form-urlencoded",
+    `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
+    home,
+    "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
+  ),
+  related: [input.actual],
+});
+
+const bracketChoice = (input: RuleInput): Finding =>
+  notice(
+    "PRM-27/bracket-author-choice",
+    "style-values",
+    "Encoding style deepObject under form-urlencoded",
+    `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
+    input.actual,
+  );
+
+// What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
+// bracket convention (the author config's switch, never defaulted or inferred).
+const deepObjectOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> =>
+  Effect.gen(function* deepObject() {
+    if (serialization?.style !== "deepObject" || !(yield* isNested(ctx.walk, input.schema))) {
+      return "none";
+    }
+
+    return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
+  });
+
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
-// names the table's type, which changes nothing on the wire.
-const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
+// names the table's type, which changes nothing on the wire. A deepObject over a nested value
+// refuses the alternative unless the author config opts into brackets (PRM-27).
+const formRule = (
+  ctx: Context,
+  home: CanonicalKey,
+  input: RuleInput,
+): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
     const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
+    }
+
+    const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);
+    if (deepObject === "refuse") {
+      return { findings: [...typing.findings, compoundNested(home, input)], rule: undefined };
     }
 
     const explicit = typing.serialization === undefined && node.contentType !== undefined;
@@ -1471,7 +1562,18 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       rule.serialization = typing.serialization;
     }
 
-    return { findings: [...typing.findings, ...formIgnored(node, input.actual)], rule };
+    if (deepObject === "mark") {
+      rule.nonStandard = "deepObjectBrackets";
+    }
+
+    return {
+      findings: [
+        ...typing.findings,
+        ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...formIgnored(node, input.actual),
+      ],
+      rule,
+    };
   });
 
 // Positional encoding applies to multipart only (MED-07, MED-08), so a form alternative ignores it.
@@ -1511,7 +1613,7 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
     for (const input of propertyInputs(media, members, true)) {
-      const result = yield* formRule(ctx, input);
+      const result = yield* formRule(ctx, media.home, input);
       findings.push(...result.findings);
       if (result.rule === undefined) {
         return refusedParts(findings);
@@ -1654,8 +1756,9 @@ const toDiagnostics = (
         fields.operation = ctx.site.operation;
       }
 
-      if (ctx.reference !== undefined) {
-        fields.related = [item.at];
+      const related = [...(ctx.reference === undefined ? [] : [item.at]), ...(item.related ?? [])];
+      if (related.length > 0) {
+        fields.related = related;
       }
 
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
