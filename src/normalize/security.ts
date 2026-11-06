@@ -5,10 +5,12 @@ import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, unescapeToken, formatPointer } from "../model/pointer.ts";
+import { implicitComponent } from "../resolve/index.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { escapeToken, unescapeToken, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { follow, nodeIn } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -131,9 +133,9 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
   return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
 };
 
-const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
+const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
   Effect.runSync(
-    evaluatePointer(resolution.value, pointer).pipe(
+    nodeIn(resolution, at).pipe(
       Effect.map(Option.some),
       Effect.orElseSucceed(() => Option.none<Json>()),
     ),
@@ -325,7 +327,7 @@ const modelScheme = (name: string, site: Site, fields: Option.Option<SchemeField
 };
 
 const buildScheme = (resolution: Resolution, name: string, pointer: string): Built => {
-  const target = referenceAt(resolution, pointer)?.target.pointer ?? pointer;
+  const target = follow(resolution, { document: resolution.document, pointer });
 
   return modelScheme(
     name,
@@ -400,7 +402,8 @@ export const normalizeSecuritySchemes = (
   author?: AuthorSecurity,
 ): Effect.Effect<SchemeNormalization> =>
   Effect.gen(function* normalize() {
-    const names = nodeAt(resolution, "/components/securitySchemes").pipe(
+    const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
+    const names = nodeAt(resolution, schemes).pipe(
       Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
       Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
     );
@@ -502,9 +505,10 @@ const effectiveList = (
     { pointer: "/security", rows: ["SEC-01", "SEC-03"] },
   ];
   for (const source of candidates) {
-    const list = nodeAt(resolution, source.pointer).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)),
-    );
+    const list = nodeAt(resolution, {
+      document: resolution.document,
+      pointer: source.pointer,
+    }).pipe(Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)));
     if (Option.isSome(list)) {
       return { list: list.value, source };
     }

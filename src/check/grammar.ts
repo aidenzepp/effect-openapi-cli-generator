@@ -2,7 +2,9 @@ import { Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
-import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.ts";
+import { keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { escapeToken, formatPointer, parseFragment, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
@@ -211,7 +213,9 @@ interface Operation {
   readonly pointer: string;
 }
 
+// An object and where it sits: the document of the set that holds it, and its pointer there.
 interface Place {
+  readonly document: CanonicalKey["document"];
   readonly node: JsonObject;
   readonly pointer: string;
 }
@@ -262,20 +266,28 @@ const listOf = (value: Json | undefined): readonly Json[] => (isArray(value) ? v
 
 const isReference = (node: JsonObject): boolean => Predicate.isString(node.$ref);
 
-// An object at a use site, followed through its Reference Object to the end of the chain.
+// An object at a use site, followed through its Reference Object to the end of the chain, which
+// is read from the document of the set that holds it.
 const locate = (
   resolution: Resolution,
-  pointer: string,
+  site: CanonicalKey,
   node: Json | undefined,
 ): Place | undefined => {
-  const reference = referenceAt(resolution, pointer);
-  const target =
-    reference === undefined ? node : nodeAt(resolution.value, reference.target.pointer);
+  const at = resolution.references.get(keyOf(site))?.target ?? site;
+  const document = resolution.documents.get(at.document);
+  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
+  const target = at === site ? node : read;
 
   return isObject(target)
-    ? { node: target, pointer: reference === undefined ? pointer : reference.target.pointer }
+    ? { document: at.document, node: target, pointer: at.pointer }
     : undefined;
 };
+
+// The site at `pointer` in the entry document.
+const entrySite = (resolution: Resolution, pointer: string): CanonicalKey => ({
+  document: resolution.document,
+  pointer,
+});
 
 const isToken = (name: string): boolean =>
   Option.isSome(Schema.decodeUnknownOption(HeaderName)(name));
@@ -356,7 +368,7 @@ const requiresAt = (
   name: string,
   depth: number,
 ): Answer => {
-  const key = `${place.pointer}\u0000${name}`;
+  const key = `${place.document}#${place.pointer}\u0000${name}`;
   const known = search.memo.get(key);
   const walking = search.active.get(key);
   search.steps += 1;
@@ -381,7 +393,10 @@ const requiresAt = (
     listOf(place.node[keyword]).flatMap((member, index) => {
       const located = locate(
         resolution,
-        childPointer(childPointer(place.pointer, keyword), String(index)),
+        {
+          document: place.document,
+          pointer: childPointer(childPointer(place.pointer, keyword), String(index)),
+        },
         member,
       );
 
@@ -504,7 +519,7 @@ const schemaFindings = (
     schemaFindings(resolution, value, childPointer(pointer, token));
 
   return [
-    ...ownSchemaFindings(resolution, { node, pointer }),
+    ...ownSchemaFindings(resolution, { document: resolution.document, node, pointer }),
     ...schemaMembers.flatMap((keyword) => below(keyword, node[keyword])),
     ...schemaLists.flatMap((keyword) =>
       listOf(node[keyword]).flatMap((member, index) =>
@@ -800,9 +815,10 @@ const pathItems = (resolution: Resolution): readonly PathItem[] =>
   entriesOf(isObject(resolution.value) ? resolution.value.paths : undefined).flatMap(
     ([key, value]) => {
       const use = childPointer("/paths", key);
-      const located = locate(resolution, use, value);
+      const located = locate(resolution, entrySite(resolution, use), value);
 
-      return located === undefined
+      // A path item in another document of the set is not walked: the checks read entry sites.
+      return located === undefined || located.document !== resolution.document
         ? []
         : [{ key, node: located.node, pointer: located.pointer, use }];
     },
@@ -921,7 +937,10 @@ const schemeNode = (resolution: Resolution, name: string): JsonObject | undefine
     return undefined;
   }
 
-  return locate(resolution, key.value.pointer, nodeAt(resolution.value, key.value.pointer))?.node;
+  const document = resolution.documents.get(key.value.document);
+  const node = document === undefined ? undefined : nodeAt(document, key.value.pointer);
+
+  return locate(resolution, key.value, node)?.node;
 };
 
 interface Requirement {

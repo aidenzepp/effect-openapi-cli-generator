@@ -33,12 +33,19 @@ export const stringMember = (value: Json, name: string): string | undefined => {
 };
 
 /**
+ * A retrieval URI in normal form with its fragment stripped: the resource a document is in the set
+ * as.
+ */
+export const retrievalBase = (retrieval: string): string =>
+  stripFragment(resolveUri(retrieval, retrieval) ?? retrieval);
+
+/**
  * The base URI of a document's non-schema objects (design 3.3): the retrieval URI for 3.0 and 3.1;
  * for 3.2 the `$self` value resolved against the retrieval URI with its fragment stripped, else the
  * retrieval URI. `undefined` when `$self` does not resolve to a URI.
  */
 export const documentBase = (line: Line, retrieval: string, root: Json): string | undefined => {
-  const normalized = stripFragment(resolveUri(retrieval, retrieval) ?? retrieval);
+  const normalized = retrievalBase(retrieval);
   const self = line === "3.2" ? stringMember(root, "$self") : undefined;
   if (self === undefined) {
     return normalized;

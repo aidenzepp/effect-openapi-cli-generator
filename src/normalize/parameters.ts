@@ -4,12 +4,12 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
-import { referenceAt } from "../resolve/index.ts";
-import type { Resolution } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
+import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -539,23 +539,22 @@ const contractReason = (
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
 
-const schemaKeyAt = (resolution: Resolution, pointer: string): string =>
-  referenceAt(resolution, pointer)?.defsKey ??
-  defsKey(resolution.document, { document: resolution.document, pointer });
+const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
+  referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
 
 // The schema key of a content entry's media type object, which 3.2 lets be a reference.
 const mediaSchemaKey = (
   resolution: Resolution,
-  mediaPointer: string,
+  mediaSite: CanonicalKey,
 ): Effect.Effect<Option.Option<string>> => {
-  const home = referenceAt(resolution, mediaPointer)?.target.pointer ?? mediaPointer;
+  const home = follow(resolution, mediaSite);
 
-  return evaluatePointer(resolution.value, home).pipe(
+  return nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(MediaTypeObject)),
     Effect.map((media) =>
       media.schema === undefined
         ? Option.none()
-        : Option.some(schemaKeyAt(resolution, `${home}/schema`)),
+        : Option.some(schemaKeyAt(resolution, childKey(home, "schema"))),
     ),
     Effect.orElseSucceed(() => Option.none<string>()),
   );
@@ -632,9 +631,9 @@ const sorted = (rows: readonly string[]): readonly string[] =>
 
 interface Source {
   readonly node: ParameterNode;
-  readonly reference: ReturnType<typeof referenceAt>;
+  readonly reference: ResolvedReference | undefined;
   readonly related: readonly Related[];
-  readonly target: Related;
+  readonly target: CanonicalKey;
 }
 
 const read = (
@@ -642,13 +641,11 @@ const read = (
   site: ParameterSite,
 ): Effect.Effect<Source, ParameterNotReadable> => {
   const unreadable = new ParameterNotReadable({ pointer: site.pointer, reason: "not-a-parameter" });
-  const reference = referenceAt(resolution, site.pointer);
-  const target = reference?.target ?? { document: resolution.document, pointer: site.pointer };
-  if (target.document !== resolution.document) {
-    return Effect.fail(unreadable);
-  }
+  const use = { document: resolution.document, pointer: site.pointer };
+  const reference = referenceIn(resolution, use);
+  const target = follow(resolution, use);
 
-  return evaluatePointer(resolution.value, target.pointer).pipe(
+  return nodeIn(resolution, target).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(ParameterObject)),
     Effect.mapError(() => unreadable),
     Effect.map((node) => ({
@@ -666,9 +663,7 @@ const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> =
     return Effect.succeed(Option.none());
   }
 
-  const pointer = `${source.target.pointer}/content/${escapeToken(mediaType)}`;
-
-  return mediaSchemaKey(resolution, pointer).pipe(
+  return mediaSchemaKey(resolution, childKey(source.target, "content", mediaType)).pipe(
     Effect.map((key) => Option.some([mediaType, key] as const)),
   );
 };
@@ -720,7 +715,7 @@ const build = (
   const { node, reference, target } = source;
   const origin = { document: resolution.document, pointer: site.pointer };
   const schemaKey =
-    plan.kind === "content" ? plan.schemaKey : schemaKeyAt(resolution, `${target.pointer}/schema`);
+    plan.kind === "content" ? plan.schemaKey : schemaKeyAt(resolution, childKey(target, "schema"));
 
   return Schema.decodeUnknownEffect(Parameter)({
     deprecated: node.deprecated ?? false,

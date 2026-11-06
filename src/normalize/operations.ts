@@ -28,6 +28,7 @@ import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { follow, nodeIn } from "./document-set.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -186,8 +187,9 @@ const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
   return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();
 };
 
-// The object at a use site, followed through its Reference Object to the end of the chain. A target
-// outside the entry document is not read here (a set of one in Milestone 1).
+// The path item at a use site, followed through its Reference Object to the end of the chain. A
+// path item in another document of the set is not read here: the sites of its operations would sit
+// in that document, and assembly walks the entry's sites only.
 const locate = (resolution: Resolution, use: string): Option.Option<Located> => {
   const reference = referenceAt(resolution, use);
   if (reference !== undefined && reference.target.document !== resolution.document) {
@@ -288,9 +290,12 @@ interface ParameterEntry {
   readonly pointer: string;
 }
 
+// A parameter's identity, read from the document of the set its reference chain ends in.
 const parameterKey = (resolution: Resolution, pointer: string): string => {
-  const identity = locate(resolution, pointer).pipe(
-    Option.flatMap((located) => decodeOption(ParameterIdentity, located.node)),
+  const target = follow(resolution, { document: resolution.document, pointer });
+  const exit = Effect.runSyncExit(nodeIn(resolution, target));
+  const identity = (Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none<Json>()).pipe(
+    Option.flatMap((node) => decodeOption(ParameterIdentity, node)),
   );
 
   // An unreadable entry gets a key of its own so `normalizeParameter` reports it.

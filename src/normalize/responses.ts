@@ -5,10 +5,10 @@ import { Diagnostic } from "../model/diagnostic.ts";
 import { ResponseCase } from "../model/entities.ts";
 import type { MediaAlternative } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
-import { referenceAt } from "../resolve/index.ts";
-import type { Resolution } from "../resolve/index.ts";
-import { evaluatePointer, childPointer } from "../model/pointer.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.
@@ -90,20 +90,17 @@ type PlainAlternative = Plain<typeof MediaAlternative.Encoded>;
 
 type PlainCase = Plain<typeof ResponseCase.Encoded>;
 
+// A finding at its own location, in whichever document of the set holds it.
 interface Finding {
+  readonly at: CanonicalKey;
   readonly code: Code;
-  readonly pointer: string;
 }
 
-// The location a use site stands for: the end of its reference chain, or the site itself.
-const follow = (resolution: Resolution, pointer: string): string =>
-  referenceAt(resolution, pointer)?.target.pointer ?? pointer;
-
-const schemaRefAt = (resolution: Resolution, pointer: string) => {
-  const reference = referenceAt(resolution, pointer);
+const schemaRefAt = (resolution: Resolution, site: CanonicalKey) => {
+  const reference = referenceIn(resolution, site);
   const key =
     reference === undefined
-      ? defsKey(resolution.document, { document: resolution.document, pointer })
+      ? defsKey(resolution.document, site)
       : (reference.defsKey ?? defsKey(resolution.document, reference.target));
 
   return { key };
@@ -178,20 +175,20 @@ const keyRow = (key: ResponseCase["key"]): string => {
 
 const alternativeOf = (
   resolution: Resolution,
-  responsePointer: string,
+  response: CanonicalKey,
   mediaType: string,
   findings: Finding[],
 ): Effect.Effect<Option.Option<PlainAlternative>> =>
   Effect.gen(function* alternative() {
-    const site = childPointer(childPointer(responsePointer, "content"), mediaType);
+    const site = childKey(response, "content", mediaType);
     if (!isMediaRange(mediaType)) {
-      findings.push({ code: "RSP-05/invalid-media-type", pointer: site });
+      findings.push({ at: site, code: "RSP-05/invalid-media-type" });
 
       return Option.none();
     }
 
-    const pointer = follow(resolution, site);
-    const media = yield* evaluatePointer(resolution.value, pointer).pipe(
+    const home = follow(resolution, site);
+    const media = yield* nodeIn(resolution, home).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(MediaObject)),
       Effect.orDie,
     );
@@ -199,16 +196,16 @@ const alternativeOf = (
       codec: codecOf(mediaType),
       encoding: [],
       mediaType,
-      origin: { document: resolution.document, pointer },
+      origin: home,
       prefixEncoding: [],
       rows: ["RSP-05"],
     };
     if (media.itemSchema !== undefined) {
-      plain.itemSchema = schemaRefAt(resolution, childPointer(pointer, "itemSchema"));
+      plain.itemSchema = schemaRefAt(resolution, childKey(home, "itemSchema"));
     }
 
     if (media.schema !== undefined) {
-      plain.schema = schemaRefAt(resolution, childPointer(pointer, "schema"));
+      plain.schema = schemaRefAt(resolution, childKey(home, "schema"));
     }
 
     return Option.some(plain);
@@ -216,23 +213,18 @@ const alternativeOf = (
 
 const headersOf = (
   headers: readonly string[],
-  responsePointer: string,
+  response: CanonicalKey,
   findings: Finding[],
 ): PlainCase["headers"] => {
   const names: PlainCase["headers"][number][] = [];
   for (const name of headers) {
+    const at = childKey(response, "headers", name);
     if (name.toLowerCase() === "content-type") {
-      findings.push({
-        code: "RSP-09/ignored-content-type",
-        pointer: childPointer(childPointer(responsePointer, "headers"), name),
-      });
+      findings.push({ at, code: "RSP-09/ignored-content-type" });
     } else if (isHeaderName(name)) {
       names.push({ name });
     } else {
-      findings.push({
-        code: "RSP-09/invalid-header-name",
-        pointer: childPointer(childPointer(responsePointer, "headers"), name),
-      });
+      findings.push({ at, code: "RSP-09/invalid-header-name" });
     }
   }
 
@@ -241,7 +233,7 @@ const headersOf = (
 
 const docsOf = (
   response: typeof ResponseObject.Type,
-  site: ReturnType<typeof referenceAt>,
+  site: ResolvedReference | undefined,
 ): PlainCase["docs"] => {
   const description = site?.description ?? response.description;
   const summary = site?.summary ?? response.summary;
@@ -259,26 +251,26 @@ const docsOf = (
 
 const caseOf = (
   resolution: Resolution,
-  responsesPointer: string,
+  responses: CanonicalKey,
   text: string,
   key: ResponseCase["key"],
   findings: Finding[],
 ): Effect.Effect<PlainCase> =>
   Effect.gen(function* responseCase() {
-    const site = childPointer(responsesPointer, text);
-    const pointer = follow(resolution, site);
-    const response = yield* evaluatePointer(resolution.value, pointer).pipe(
+    const site = childKey(responses, text);
+    const home = follow(resolution, site);
+    const response = yield* nodeIn(resolution, home).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(ResponseObject)),
       Effect.orDie,
     );
     const alternatives = Arr.getSomes(
       yield* Effect.all(
         Object.keys(response.content ?? {}).map((mediaType) =>
-          alternativeOf(resolution, pointer, mediaType, findings),
+          alternativeOf(resolution, home, mediaType, findings),
         ),
       ),
     );
-    const headers = headersOf(Object.keys(response.headers ?? {}), pointer, findings);
+    const headers = headersOf(Object.keys(response.headers ?? {}), home, findings);
     const rows = [
       keyRow(key),
       "RSP-01",
@@ -288,10 +280,10 @@ const caseOf = (
 
     return {
       alternatives,
-      docs: docsOf(response, referenceAt(resolution, site)),
+      docs: docsOf(response, referenceIn(resolution, site)),
       headers,
       key,
-      origin: { document: resolution.document, pointer: site },
+      origin: site,
       rows,
     };
   });
@@ -307,11 +299,11 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
   );
   const fields: Plain<typeof Diagnostic.Encoded> = {
     code: finding.code,
-    document: resolution.document,
+    document: finding.at.document,
     element: rule.element,
     message: rule.message,
     openapi,
-    pointer: finding.pointer,
+    pointer: finding.at.pointer,
     row,
     scope: "element",
     severity: rule.severity,
@@ -324,8 +316,11 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
   return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
 };
 
-const responseKeys = (resolution: Resolution, pointer: string): Effect.Effect<readonly string[]> =>
-  evaluatePointer(resolution.value, pointer).pipe(
+const responseKeys = (
+  resolution: Resolution,
+  responses: CanonicalKey,
+): Effect.Effect<readonly string[]> =>
+  nodeIn(resolution, responses).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(ResponsesObject)),
     Effect.map(Object.keys),
     Effect.orElseSucceed((): readonly string[] => []),
@@ -339,7 +334,8 @@ const responseKeys = (resolution: Resolution, pointer: string): Effect.Effect<re
  * no token are refused at element scope, and a `Content-Type` header is ignored with a notice
  * (`RSP-09`). Headers are recorded by name only: they never change output. An absent Responses
  * Object has no cases, and `x-` keys are NZ-5's to account for. Schemas are referenced by `$defs`
- * key, an inline one by `defsKey` of its canonical pointer.
+ * key, an inline one by `defsKey` of its canonical pointer. A response or media type a reference
+ * takes into another document of the set is read there, and its findings name that document.
  */
 export const normalizeResponses = (
   resolution: Resolution,
@@ -348,15 +344,16 @@ export const normalizeResponses = (
   Effect.gen(function* normalize() {
     const findings: Finding[] = [];
     const cases: PlainCase[] = [];
-    for (const text of yield* responseKeys(resolution, pointer)) {
+    const responses = { document: resolution.document, pointer };
+    for (const text of yield* responseKeys(resolution, responses)) {
       const key = classifyKey(text);
       if (key === "invalid" || key === "out-of-range") {
         findings.push({
+          at: childKey(responses, text),
           code: key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range",
-          pointer: childPointer(pointer, text),
         });
       } else if (key !== "extension") {
-        cases.push(yield* caseOf(resolution, pointer, text, key, findings));
+        cases.push(yield* caseOf(resolution, responses, text, key, findings));
       }
     }
 
