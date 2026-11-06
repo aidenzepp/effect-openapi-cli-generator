@@ -12,7 +12,9 @@ import { PackageEmitError } from "./emit/package.ts";
 import type { EmittedFile, GeneratorSource } from "./emit/package.ts";
 import type { PrinterError } from "./emit/printer.ts";
 import { checkSpecText } from "./check/index.ts";
-import { defaultLimits, loadBytes, LoadRefusal } from "./load/index.ts";
+import { defaultLimits, loadBytes } from "./load/index.ts";
+import type { LoadRefusal } from "./load/index.ts";
+import { duplicateUri } from "./load/document-set.ts";
 import type { DocumentSet } from "./load/document-set.ts";
 import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { decodeAuthorConfig } from "./model/author-config.ts";
@@ -180,22 +182,10 @@ const readConfig = (
     ),
   );
 
-const duplicateEntry = (document: Document, path: string) =>
-  Schema.decodeUnknownEffect(Diagnostic)({
-    code: "REF-16/duplicate-uri",
-    document,
-    element: "document",
-    hint: path,
-    message: "Two documents in the set share a retrieval URI.",
-    openapi: "unknown",
-    pointer: "",
-    row: "REF-16",
-    scope: "document",
-    severity: "refusal",
-    specSection: "https://spec.openapis.org/oas/v3.2.1.html#establishing-the-base-uri",
-  }).pipe(
-    Effect.orDie,
-    Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))),
+// The set's documents other than the entry, in set order, each with the hash of the bytes it parsed.
+const memberInputs = (entry: Document, documents: DocumentSet | undefined) =>
+  [...(documents?.documents ?? [])].flatMap(([document, member]) =>
+    document === entry ? [] : [{ document, sha256: member.sha256 }],
   );
 
 // The real path of `path`, or undefined when it has none.
@@ -224,7 +214,7 @@ export const setMembers = (
         const entryPath =
           entry.source._tag === "File" ? yield* realPathOf(entry.source.path) : undefined;
         if (entryPath === undefined || entryPath !== (yield* realPathOf(member.path))) {
-          return yield* duplicateEntry(document, member.path);
+          return yield* duplicateUri({ path: member.path, uri: document });
         }
       } else {
         const line = yield* Effect.option(lineOf(member.value));
@@ -592,6 +582,7 @@ export const generate = (
       diagnostics,
       inputs: [
         { document, sha256: sha256Hex(bytes) },
+        ...memberInputs(document, input.documents),
         { document: configDocument, sha256: sha256Hex(author.bytes) },
       ],
       // The names plan reports renames as notices only; it carries no from/to pairs yet.

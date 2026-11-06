@@ -1,7 +1,8 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { makeDocumentSet, maxDocuments } from "../../src/load/document-set.ts";
@@ -15,6 +16,8 @@ const uri = Schema.decodeUnknownSync(DocumentUri);
 const pet = fixture("pet.json");
 
 const owner = fixture("owner.yaml");
+
+const hash = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
 const run = (pairs: readonly DocumentPair[]) =>
   makeDocumentSet(pairs).pipe(Effect.provide(BunFileSystem.layer));
@@ -35,6 +38,17 @@ describe("document set: --document pairs", () => {
       "https://example.com/owner.yaml",
     ]);
     expect(set.documents.get(uri("https://example.com/pet.json"))?.path).toBe(pet);
+  });
+
+  test("each member records the sha256 of the exact bytes it parsed", async () => {
+    const set = await Effect.runPromise(
+      run([
+        { path: pet, uri: "https://example.com/pet.json" },
+        { path: owner, uri: "https://example.com/owner.yaml" },
+      ]),
+    );
+    expect(set.documents.get(uri("https://example.com/pet.json"))?.sha256).toBe(hash(pet));
+    expect(set.documents.get(uri("https://example.com/owner.yaml"))?.sha256).toBe(hash(owner));
   });
 
   test("a JSON member and a YAML member both load", async () => {
