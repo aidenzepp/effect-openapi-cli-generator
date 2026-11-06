@@ -1,0 +1,233 @@
+{
+  "info": {
+    "title": "Encoding rule rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.2.1",
+  "paths": {
+    "/declared": {
+      "post": {
+        "operationId": "declared-upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "file": {
+                  "headers": {
+                    "Content-Transfer-Encoding": {
+                      "schema": {
+                        "enum": ["base64"],
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "schema": {
+                "properties": {
+                  "file": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/form": {
+      "post": {
+        "operationId": "form-create",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  },
+                  "gone": {
+                    "type": ["string", "null"]
+                  },
+                  "meta": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "zone": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/names": {
+      "post": {
+        "operationId": "names-upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "doc": {
+                    "contentMediaType": "application/octet-stream"
+                  },
+                  "naïve": {
+                    "type": "string"
+                  },
+                  "x\"y": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/parts": {
+      "post": {
+        "operationId": "parts-upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "blob": {},
+                  "count": {
+                    "type": "integer"
+                  },
+                  "encoded": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  },
+                  "flag": {
+                    "type": "boolean"
+                  },
+                  "meta": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "nums": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "ratio": {
+                    "type": "number"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/styled": {
+      "post": {
+        "operationId": "styled-upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "tags": {
+                  "explode": true,
+                  "style": "form"
+                }
+              },
+              "schema": {
+                "properties": {
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}
