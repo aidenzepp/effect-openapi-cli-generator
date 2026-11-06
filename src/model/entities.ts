@@ -243,6 +243,8 @@ export class SecurityScheme extends Schema.Class<SecurityScheme>("SecurityScheme
   name: Schema.NonEmptyString,
   origin: Origin,
   rows,
+  // Where the scheme came from; an author-supplied one must not reach help or the report unmarked.
+  source: Schema.Literals(["spec", "author-supplied"]),
 }) {}
 
 /**

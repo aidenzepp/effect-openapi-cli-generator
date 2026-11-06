@@ -83,6 +83,7 @@ const schemePlain = {
   name: "bearerAuth",
   origin,
   rows,
+  source: "spec",
 };
 
 const scheme = Schema.decodeUnknownSync(SecurityScheme)(schemePlain);
