@@ -1,0 +1,9 @@
+{
+  "package": {
+    "name": "pth-witness-cli",
+    "version": "0.1.0"
+  },
+  "binName": "pth",
+  "envPrefix": "PTH",
+  "allowInsecure": true
+}
