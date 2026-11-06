@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Order, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { emitApi } from "../../src/emit/api.ts";
@@ -21,8 +21,9 @@ import { resolve } from "../../src/resolve/index.ts";
 
 // The bracket convention (design 6.1, D-OQ1 (b)) is a model marker, `nonStandard:
 // "deepObjectBrackets"`, on a query parameter's `StyleSerialization` or a form property's
-// `EncodingRule`. No normalizer sets it yet (m2-br4, m2-br5), so these fixtures mark the
-// normalized model by hand. A marked entry emits `brackets: true`; an unmarked one emits M1 text.
+// `EncodingRule`. Only the author config switch sets it: with `nonStandard.deepObjectBrackets` on,
+// normalize marks the nested deepObject entries, and a marked entry emits `brackets: true`. The
+// comparison model is the same model with its markers removed, so it emits the M1 text.
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -41,11 +42,21 @@ const document = Schema.decodeUnknownSync(DocumentUri)("file:///golden/openapi.j
 
 const configDocument = Schema.decodeUnknownSync(DocumentUri)("file:///golden/author-config.json");
 
-const config = await Effect.runPromise(
-  decodeAuthorConfig(decodeJson(JSON.parse(read("author-config.json"))), {
-    document: configDocument,
-  }),
+const goldenConfig = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))(
+  JSON.parse(read("author-config.json")),
 );
+
+// The switch is never defaulted or inferred: each run names it in the author config.
+const configWith = (deepObjectBrackets: boolean) =>
+  Effect.runPromise(
+    decodeAuthorConfig(decodeJson({ ...goldenConfig, nonStandard: { deepObjectBrackets } }), {
+      document: configDocument,
+    }),
+  );
+
+const config = await configWith(true);
+
+const configOff = await configWith(false);
 
 const filter = {
   properties: { owner: { properties: { name: { type: "string" } }, type: "object" } },
@@ -102,74 +113,49 @@ const spec: Schema.Json = {
   },
 };
 
-const nonStandard = "deepObjectBrackets" as const;
-
-type Encoded = typeof Api.Encoded;
-
-type EncodedOperation = Encoded["operations"][number];
-
-// The `filter` form encoding rules of one operation's body, marked.
-const markBody = (body: EncodedOperation["body"]) =>
-  body === undefined
-    ? {}
-    : {
-        body: {
-          ...body,
-          alternatives: body.alternatives.map((alternative) => ({
-            ...alternative,
-            encoding: alternative.encoding.map((rule) =>
-              rule.target.kind === "property" && rule.target.name === "filter"
-                ? { ...rule, nonStandard }
-                : rule,
-            ),
-          })),
-        },
-      };
-
-// The marked model: the `filter` query parameter and every form `filter` encoding rule, edited in
-// the model's encoded form and decoded back, so the marked model passes the model's own schema.
-const mark = (api: Api): Api => {
-  const encoded = Schema.encodeSync(Api)(api);
-
-  return Schema.decodeUnknownSync(Api)({
-    ...encoded,
-    operations: encoded.operations.map((operation) => ({
-      ...operation,
-      ...markBody(operation.body),
-      parameters: operation.parameters.map((parameter) =>
-        parameter.wireName === "filter" && parameter.serialization.kind === "style"
-          ? { ...parameter, serialization: { ...parameter.serialization, nonStandard } }
-          : parameter,
+// The marked model with every marker removed, round-tripped through the model's encoded form so the
+// result passes the model's own schema. Only the bracket markers are keyed `nonStandard`.
+const unmark = (api: Api): Api =>
+  Schema.decodeUnknownSync(Api)(
+    JSON.parse(
+      JSON.stringify(Schema.encodeSync(Api)(api), (key: string, value: Schema.Json) =>
+        key === "nonStandard" ? undefined : value,
       ),
-    })),
-  });
-};
+    ),
+  );
 
 const generated = await Effect.runPromise(
   Effect.gen(function* generated() {
     const resolution = yield* resolve({ document, line: "3.1", value: spec });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api: markedApi } = yield* normalize(resolution, { config, configDocument });
+    const off = yield* normalize(resolution, { config: configOff, configDocument });
     const schemas = yield* normalizeSchemas(resolution);
     const planOf = (model: Api) => planNames(model, { config, configDocument, strict: false });
-    const plan = yield* planOf(api);
-    const context = { config, configDocument, document, openapi: api.openapi };
+    const context = { config, configDocument, document, openapi: markedApi.openapi };
     const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
-    const roots = api.operations.flatMap((operation) =>
+    const roots = markedApi.operations.flatMap((operation) =>
       (operation.body?.alternatives ?? []).flatMap((alternative) =>
         alternative.schema === undefined ? [] : [alternative.schema.key],
       ),
     );
-    const domain = yield* emitDomainSchemas(schemas.validation.definitions, roots, plan.domain);
-    const plain = yield* emitApi({ api, boundOrigins: bound, plan });
-    // The name plan carries each command's operation, so the marked model is planned too.
-    const markedApi = mark(api);
-    const marked = yield* emitApi({
-      api: markedApi,
-      boundOrigins: bound,
-      plan: yield* planOf(markedApi),
-    });
+    const domain = yield* emitDomainSchemas(
+      schemas.validation.definitions,
+      roots,
+      (yield* planOf(markedApi)).domain,
+    );
+    // The name plan carries each command's operation, so each model is planned on its own.
+    const emitOf = (model: Api) =>
+      Effect.gen(function* emitModel() {
+        return yield* emitApi({ api: model, boundOrigins: bound, plan: yield* planOf(model) });
+      });
+    const plainApi = unmark(markedApi);
 
-    return { domain, marked, plain };
+    return {
+      domain,
+      marked: yield* emitOf(markedApi),
+      off: { diagnostics: off.diagnostics, files: yield* emitOf(off.api) },
+      plain: yield* emitOf(plainApi),
+    };
   }),
 );
 
@@ -221,6 +207,21 @@ describe("emitApi: the non-standard bracket marker", () => {
   test("unmarked entries emit no brackets", () => {
     expect(items(generated.plain)).toContain('Serialize.deepObject("filter"');
     for (const file of generated.plain) {
+      expect(file.content).not.toContain("brackets");
+    }
+  });
+
+  test("the switch off refuses every nested deepObject entry and marks none", () => {
+    const refused = generated.off.diagnostics
+      .filter((diagnostic) => diagnostic.code === "PRM-27/compound-nested")
+      .map((diagnostic) => diagnostic.pointer.split("/").slice(0, 4).join("/"));
+
+    expect(Arr.sort(Arr.dedupe(refused), Order.String)).toEqual([
+      "/paths/~1choices/post",
+      "/paths/~1forms/post",
+      "/paths/~1items/get",
+    ]);
+    for (const file of generated.off.files) {
       expect(file.content).not.toContain("brackets");
     }
   });
