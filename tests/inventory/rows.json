@@ -1,0 +1,3827 @@
+[
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-03",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "DOC-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-05",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "DOC-08",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "CMP-01",
+      "CMP-02",
+      "CMP-03",
+      "CMP-04",
+      "CMP-06",
+      "CMP-07",
+      "CMP-08",
+      "CMP-11",
+      "CMP-12",
+      "CMP-13",
+      "CMP-14"
+    ],
+    "disposition": "implemented",
+    "id": "DOC-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "DOC-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "DOC-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "DOC-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-17",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-18",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "DOC-19",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-22",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-23",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DOC-24",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "VAL-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "VAL-02",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "VAL-03",
+    "versions": ["3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "VAL-04",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "VAL-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-03",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-15",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "INF-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SRV-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-04",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": ["SRV-07", "SRV-08", "SRV-10", "SRV-11", "SRV-12", "SRV-13"],
+    "disposition": "implemented",
+    "id": "SRV-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SRV-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SRV-12",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-13",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SRV-14",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SRV-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-17",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SRV-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SRV-19",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SRV-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "CMP-02",
+      "CMP-03",
+      "CMP-04",
+      "CMP-06",
+      "CMP-07",
+      "CMP-08",
+      "CMP-11",
+      "CMP-12",
+      "CMP-13",
+      "CMP-14"
+    ],
+    "disposition": "implemented",
+    "id": "CMP-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CMP-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CMP-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CMP-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-11",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-12",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "CMP-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "CMP-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-06",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "PTH-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "PTH-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-17",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-19",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-22",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-23",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-24",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": ["SRV-15"],
+    "disposition": "implemented",
+    "id": "PTH-25",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-26",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-27",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PTH-28",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PTH-29",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "OPR-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "OPR-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "OPR-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "OPR-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OPR-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-10",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-11",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "OPR-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OPR-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "SEC-01",
+      "SEC-02",
+      "SEC-03",
+      "SEC-04",
+      "SEC-05",
+      "SEC-06",
+      "SEC-07",
+      "SEC-08",
+      "SEC-09",
+      "SEC-10",
+      "SEC-11",
+      "SEC-12",
+      "SEC-13",
+      "SEC-14"
+    ],
+    "disposition": "implemented",
+    "id": "OPR-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": ["SRV-15"],
+    "disposition": "implemented",
+    "id": "OPR-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXD-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXD-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXD-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-03",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-06",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "TAG-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXT-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXT-02",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "PRM-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "PRM-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "PRM-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-17",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-19",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-22",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-23",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-24",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-25",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-26",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-27",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-28",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-29",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-30",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-31",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-32",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-33",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "PRM-34",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "PRM-35",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-08",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-09",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-10",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-11",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-12",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-17",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-19",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-22",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-23",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-24",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-25",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-26",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-27",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-28",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-29",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-30",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-31",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-32",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-33",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-34",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-35",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-36",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-37",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-38",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-39",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-40",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-41",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-42",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "STY-43",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-44",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "STY-45",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "RQB-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "RQB-07",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-09",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RQB-10",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-03",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "MED-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "MED-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-08",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "MED-09",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-10",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "MED-11",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-12",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "MED-13",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-14",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-15",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-16",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-17",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-18",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-19",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-20",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-22",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-23",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-24",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "MED-25",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-26",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "MED-27",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-01",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-02",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-03",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-04",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-05",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-06",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "BIN-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-08",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-09",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-14",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-15",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-16",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-17",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-18",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-19",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-20",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-22",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-23",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-24",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-25",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-26",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-27",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-28",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-29",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-30",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-31",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-32",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "ENC-33",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-34",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-35",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-36",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-37",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-38",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "ENC-39",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "ENC-40",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "ENC-41",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "RSS-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "RSS-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSS-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "RSP-02",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "RSP-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "RSP-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "RSP-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "RSP-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "HDR-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "HDR-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "HDR-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "HDR-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "HDR-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "HDR-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "HDR-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-15",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-16",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-17",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "HDR-18",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-06",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-11",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "EXM-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "LNK-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CBK-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CBK-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "CBK-03",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "REF-03",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "REF-04",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-05",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-06",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-07",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-08",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "REF-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-10",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-11",
+    "versions": ["3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-12",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-14",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "REF-17",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "REF-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "SCO-02",
+      "SCO-03",
+      "SCO-04",
+      "SCO-05",
+      "SCO-07",
+      "SCO-08",
+      "SCO-09",
+      "SCO-10",
+      "S30-02",
+      "S30-03",
+      "S30-04",
+      "S30-05",
+      "S30-06",
+      "S30-07",
+      "S30-08",
+      "S30-09",
+      "S30-10",
+      "S30-11",
+      "S30-12",
+      "S30-13",
+      "S30-14",
+      "S30-15",
+      "S30-16",
+      "S30-17",
+      "S30-18",
+      "S30-19",
+      "S30-20",
+      "S30-21",
+      "S30-22",
+      "S30-23",
+      "S30-24",
+      "S30-26",
+      "S30-27",
+      "S30-28",
+      "S30-29",
+      "S30-30",
+      "S30-31",
+      "S30-32",
+      "S30-33",
+      "S30-36",
+      "SCH-01",
+      "SCH-02",
+      "SCH-03",
+      "SCH-04",
+      "SCH-05",
+      "SCH-06",
+      "SCH-07",
+      "SCH-09",
+      "SCH-10",
+      "SCH-11",
+      "SCH-12",
+      "SCH-13",
+      "SCH-14",
+      "SCH-15",
+      "SCH-16",
+      "SCH-17",
+      "SCH-18",
+      "SCH-19",
+      "SCH-20",
+      "SCH-21",
+      "SCH-22",
+      "SCH-23",
+      "SCH-24",
+      "SCH-25",
+      "SCH-26",
+      "SCH-27",
+      "SCH-28",
+      "SCH-29",
+      "SCH-30",
+      "SCH-31",
+      "SCH-32",
+      "SCH-33",
+      "SCH-34",
+      "SCH-35",
+      "SCH-36",
+      "SCH-37",
+      "SCH-38",
+      "SCH-39",
+      "SCH-40",
+      "SCH-41",
+      "SCH-42",
+      "SCH-43",
+      "SCH-44",
+      "SCH-45",
+      "SCH-46",
+      "SCH-49",
+      "SCH-50",
+      "SCH-51",
+      "SCH-52",
+      "SCH-54",
+      "SCH-55",
+      "SCH-56",
+      "SCH-57",
+      "SCH-58",
+      "SCH-59",
+      "SCH-62",
+      "SCH-63",
+      "SCH-64",
+      "SCH-65",
+      "SCH-66",
+      "FMT-01",
+      "FMT-02",
+      "FMT-03",
+      "FMT-04",
+      "FMT-05",
+      "FMT-06",
+      "FMT-07",
+      "FMT-08",
+      "FMT-09",
+      "FMT-10",
+      "FMT-11",
+      "FMT-12",
+      "FMT-13",
+      "FMT-14",
+      "FMT-15",
+      "FMT-16",
+      "FMT-17",
+      "FMT-18",
+      "FMT-19",
+      "FMT-20",
+      "FMT-21",
+      "FMT-22",
+      "FMT-23",
+      "FMT-24",
+      "FMT-25",
+      "FMT-26",
+      "FMT-27",
+      "FMT-28",
+      "DSC-01",
+      "DSC-02",
+      "DSC-03",
+      "DSC-04",
+      "DSC-05",
+      "DSC-06",
+      "DSC-07",
+      "DSC-08",
+      "DSC-09",
+      "DSC-10",
+      "DSC-11"
+    ],
+    "disposition": "implemented",
+    "id": "SCO-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCO-02",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCO-03",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCO-04",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCO-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCO-06",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCO-07",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCO-08",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCO-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCO-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "S30-01",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-02",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-03",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-04",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-05",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-06",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-07",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-08",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-09",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-10",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-11",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-12",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-13",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-14",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-15",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-16",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-17",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-18",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-19",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-20",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-21",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-22",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-23",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-24",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "S30-25",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [
+      "FMT-01",
+      "FMT-02",
+      "FMT-03",
+      "FMT-04",
+      "FMT-05",
+      "FMT-06",
+      "FMT-07",
+      "FMT-08",
+      "FMT-09",
+      "FMT-10",
+      "FMT-11",
+      "FMT-12",
+      "FMT-13",
+      "FMT-14",
+      "FMT-15",
+      "FMT-16",
+      "FMT-17",
+      "FMT-18",
+      "FMT-19",
+      "FMT-20",
+      "FMT-21",
+      "FMT-22",
+      "FMT-23",
+      "FMT-24",
+      "FMT-25",
+      "FMT-26",
+      "FMT-27",
+      "FMT-28"
+    ],
+    "disposition": "implemented",
+    "id": "S30-26",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-27",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-28",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [
+      "DSC-01",
+      "DSC-02",
+      "DSC-03",
+      "DSC-04",
+      "DSC-05",
+      "DSC-06",
+      "DSC-07",
+      "DSC-08",
+      "DSC-09",
+      "DSC-10",
+      "DSC-11"
+    ],
+    "disposition": "implemented",
+    "id": "S30-29",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "S30-30",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-31",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-32",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "S30-33",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "S30-34",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "S30-35",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "S30-36",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": ["DOC-05", "SCO-04"],
+    "disposition": "implemented",
+    "id": "SCH-01",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-02",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-03",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-04",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-05",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-06",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-07",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-08",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-09",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-10",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-11",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-12",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-13",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-14",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-15",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-16",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-17",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-18",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-19",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-20",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-21",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-22",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-23",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-24",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-25",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-26",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-27",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-28",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-29",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-30",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-31",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-32",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-33",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-34",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-35",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-36",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-37",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-38",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-39",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-40",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-41",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-42",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-43",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-44",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-45",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-46",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-47",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-48",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-49",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-50",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-51",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-52",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-53",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "FMT-01",
+      "FMT-02",
+      "FMT-03",
+      "FMT-04",
+      "FMT-05",
+      "FMT-06",
+      "FMT-07",
+      "FMT-08",
+      "FMT-09",
+      "FMT-10",
+      "FMT-11",
+      "FMT-12",
+      "FMT-13",
+      "FMT-14",
+      "FMT-15",
+      "FMT-16",
+      "FMT-17",
+      "FMT-18",
+      "FMT-19",
+      "FMT-20",
+      "FMT-21",
+      "FMT-22",
+      "FMT-23",
+      "FMT-24",
+      "FMT-25",
+      "FMT-26",
+      "FMT-27",
+      "FMT-28"
+    ],
+    "disposition": "implemented",
+    "id": "SCH-54",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-55",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-56",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-57",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "DSC-01",
+      "DSC-02",
+      "DSC-03",
+      "DSC-04",
+      "DSC-05",
+      "DSC-06",
+      "DSC-07",
+      "DSC-08",
+      "DSC-09",
+      "DSC-10",
+      "DSC-11"
+    ],
+    "disposition": "implemented",
+    "id": "SCH-58",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-59",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-60",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SCH-61",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-62",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SCH-63",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-64",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-65",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SCH-66",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": ["BIN-02"],
+    "disposition": "implemented",
+    "id": "FMT-06",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": ["BIN-01"],
+    "disposition": "implemented",
+    "id": "FMT-07",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-10",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-11",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-12",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-13",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-14",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-15",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-16",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-17",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-18",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-19",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-20",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-21",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-22",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-23",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-24",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-25",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-26",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-27",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "FMT-28",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-04",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "DSC-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "DSC-09",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "DSC-10",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "DSC-11",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-07",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "XML-08",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SSC-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SSC-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [
+      "OAF-01",
+      "OAF-02",
+      "OAF-03",
+      "OAF-04",
+      "OAF-05",
+      "OAF-06",
+      "OAF-07",
+      "OAF-08",
+      "OAF-09",
+      "OAF-10",
+      "OAF-11",
+      "OAF-12"
+    ],
+    "disposition": "implemented",
+    "id": "SSC-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-09",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-10",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-11",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-13",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-15",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-16",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SSC-17",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-18",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-19",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SSC-20",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "informational",
+    "id": "SSC-21",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OAF-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-06",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-09",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-10",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "OAF-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "OAF-12",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-01",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-02",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-03",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-04",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-05",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-06",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-07",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-08",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-09",
+    "versions": ["3.0.4", "3.1.2"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-10",
+    "versions": ["3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-11",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "refused",
+    "id": "SEC-12",
+    "versions": ["3.0.4"]
+  },
+  {
+    "coveredBy": [],
+    "disposition": "implemented",
+    "id": "SEC-13",
+    "versions": ["3.1.2", "3.2.1"]
+  },
+  {
+    "coveredBy": ["PTH-29"],
+    "disposition": "implemented",
+    "id": "SEC-14",
+    "versions": ["3.0.4", "3.1.2", "3.2.1"]
+  }
+]
