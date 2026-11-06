@@ -496,3 +496,135 @@ describe("naming extensions: aliases", () => {
     );
   });
 });
+
+describe("naming extensions: a tag and an extension group of one folded name merge", () => {
+  test("a tag group and an x-forge group folding equal are one group with the tag's key", () => {
+    const result = plan([
+      { method: "GET", operationId: "zones_list", path: "/zones", tags: ["Zones"] },
+      { forge: { group: ["zones"], method: "pause" }, operationId: "x", path: "/pause" },
+    ]);
+
+    expect(named(result)).toEqual([
+      { alias: undefined, path: "zones list", sources: { command: "operationId", group: "tag" } },
+      { alias: undefined, path: "zones pause", sources: { command: "x-forge", group: "x-forge" } },
+    ]);
+    expect(result.groups.map((group) => [group.name, group.tag, group.segment])).toEqual([
+      ["zones", "Zones", "zones"],
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("an extension chain nests under the merged tag group", () => {
+    const result = plan([
+      { forge: { group: ["zones", "settings"], method: "pause" }, path: "/pause" },
+      { method: "GET", operationId: "zones_list", path: "/zones", tags: ["Zones"] },
+    ]);
+
+    expect(paths(result)).toEqual(["zones list", "zones settings pause"]);
+    expect(result.groups.map((group) => [group.name, group.tag, group.parent])).toEqual([
+      ["zones", "Zones", undefined],
+      ["settings", "zones.settings", "Zones"],
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("command names inside the merged group follow the collision rules", () => {
+    const result = plan([
+      { method: "GET", operationId: "zones_pause", path: "/zones", tags: ["Zones"] },
+      { forge: { group: ["zones"], method: "pause" }, operationId: "x", path: "/pause" },
+    ]);
+
+    expect(commands(result)).toEqual([]);
+    expect(refusals(result).map((diagnostic) => diagnostic.code)).toEqual([
+      "OPR-06/command-collision",
+      "OPR-06/command-collision",
+    ]);
+  });
+
+  test("two tags folding equal still collide", () => {
+    const result = plan([
+      { operationId: "a", path: "/a", tags: ["Zones"] },
+      { operationId: "b", path: "/b", tags: ["zones"] },
+    ]);
+
+    expect(new Set(refusals(result).map((diagnostic) => diagnostic.code))).toEqual(
+      new Set(["TAG-02/segment-collision"]),
+    );
+  });
+});
+
+describe("author config aliases", () => {
+  const aliased: OperationInput = {
+    aliases: [{ forge: { group: ["zones"], method: "pause" } }],
+    method: "PATCH",
+    operationId: "zones_status_edit",
+    path: "/zones/{id}/status",
+    tags: ["zones"],
+  };
+
+  test("config aliases replace x-forge-aliases, named with source config", () => {
+    const result = plan(
+      [aliased],
+      makeConfig({
+        zones_status_edit: { aliases: [{ group: "zones.settings", method: "freeze" }] },
+      }),
+    );
+
+    expect(named(result)).toEqual([
+      {
+        alias: undefined,
+        path: "zones status-edit",
+        sources: { command: "operationId", group: "tag" },
+      },
+      { alias: 0, path: "zones settings freeze", sources: { command: "config", group: "config" } },
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("an empty config list drops the extension aliases", () => {
+    const result = plan([aliased], makeConfig({ zones_status_edit: { aliases: [] } }));
+
+    expect(paths(result)).toEqual(["zones status-edit"]);
+  });
+
+  test("absent config aliases, the extension aliases add", () => {
+    const result = plan([aliased], makeConfig({ zones_status_edit: { command: "edit" } }));
+
+    expect(paths(result)).toEqual(["zones edit", "zones pause"]);
+  });
+
+  test("a method-only alias sits at the root; a group-only alias takes the operationId fold", () => {
+    const result = plan(
+      [aliased],
+      makeConfig({
+        zones_status_edit: { aliases: [{ method: "freeze" }, { group: ["regions"] }] },
+      }),
+    );
+
+    expect(named(result)).toEqual([
+      { alias: 0, path: "freeze", sources: { command: "config", group: "none" } },
+      {
+        alias: undefined,
+        path: "zones status-edit",
+        sources: { command: "operationId", group: "tag" },
+      },
+      {
+        alias: 1,
+        path: "regions zones-status-edit",
+        sources: { command: "operationId", group: "config" },
+      },
+    ]);
+  });
+
+  test("a config alias colliding with its own primary refuses the operation", () => {
+    const result = plan(
+      [aliased],
+      makeConfig({ zones_status_edit: { aliases: [{ group: "zones", method: "status-edit" }] } }),
+    );
+
+    expect(commands(result)).toEqual([]);
+    expect(refusals(result).map((diagnostic) => diagnostic.code)).toContain(
+      "OPR-06/command-collision",
+    );
+  });
+});

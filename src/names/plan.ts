@@ -76,8 +76,9 @@ export interface NameSources {
 
 /**
  * One generated command; `configKey` is the author-config key that renames the operation's
- * primary command. `alias` is the `x-forge-aliases` index of an alias command; an operation's
- * commands are its primary followed by its aliases, each sending the same request (design 4.4).
+ * primary command. `alias` is an alias command's index in the author-config `aliases`, when given,
+ * else in `x-forge-aliases`; an operation's commands are its primary followed by its aliases, each
+ * sending the same request (design 4.4).
  */
 export interface PlannedCommand {
   readonly alias?: number;
@@ -156,13 +157,17 @@ export const overrideSite = (config: AuthorConfig, operation: Operation): Overri
 
 const templateExpression = /\{(?<name>[^{}]+)\}/gu;
 
+export type ConfigAlias = NonNullable<OperationOverride["aliases"]>[number];
+
 /**
  * Who names one planned command: the operation itself, through the author config and its own
- * extensions, or one of its `x-forge-aliases` entries, through that entry's keys only.
+ * extensions, one of its `x-forge-aliases` entries, through that entry's keys only, or one of its
+ * author-config `aliases`, which replace the extension's.
  */
 export type Namer =
   | { readonly _tag: "Primary"; readonly override: OperationOverride | undefined }
-  | { readonly _tag: "Alias"; readonly alias: typeof NamingAlias.Type };
+  | { readonly _tag: "Alias"; readonly alias: typeof NamingAlias.Type }
+  | { readonly _tag: "ConfigAlias"; readonly alias: ConfigAlias };
 
 export interface SourcedName {
   readonly folded: Folded<string>;
@@ -193,14 +198,29 @@ const foldOperationId = (
   return foldKebab(leads ? idWords.slice(group.length).join(" ") : operationId);
 };
 
+// The name without a naming key: the `operationId` fold, else the route form.
+const foldedDefault = (
+  operation: Operation,
+  groupLabel: string | undefined,
+): Result.Result<SourcedName, EmptyFold> => {
+  if (operation.operationId === undefined) {
+    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
+
+    return sourced(foldKebab(`${operation.key.method} ${route}`), "route");
+  }
+
+  return sourced(foldOperationId(operation.operationId, groupLabel), "operationId");
+};
+
 /**
  * The command name before collision checks (design 4.4), per source: for the primary, the author
  * config, else `x-forge-method-name`, else `x-fern-sdk-method-name`, else the `operationId` fold
  * with the group-word drop, else `<method>` and the path's literal words with `by-<param>` for each
  * template expression, in template order. An alias takes its own Forge, else Fern, method name,
- * else the fold of its own `operationId`, never the operation's. An extension name folds without
- * the drop. The route form applies only without an `operationId`, never when its fold is empty.
- * `groupLabel` is the unfolded name of the command's innermost group.
+ * else the fold of its own `operationId`, never the operation's. An author-config alias takes its
+ * own method, else the operation's `operationId` fold or route form. An extension or config name
+ * folds without the drop. The route form applies only without an `operationId`, never when its fold
+ * is empty. `groupLabel` is the unfolded name of the command's innermost group.
  */
 export const commandName = (
   operation: Operation,
@@ -218,6 +238,14 @@ export const commandName = (
     return sourced(foldOperationId(alias.operationId ?? "", groupLabel), "operationId");
   }
 
+  if (namer._tag === "ConfigAlias") {
+    const { method } = namer.alias;
+
+    return method === undefined
+      ? foldedDefault(operation, groupLabel)
+      : sourced(foldKebab(method), "config");
+  }
+
   const { override } = namer;
   if (override?.command !== undefined) {
     return sourced(foldKebab(override.command), "config");
@@ -232,13 +260,7 @@ export const commandName = (
     return sourced(foldKebab(naming.fern.method), "x-fern");
   }
 
-  if (operation.operationId === undefined) {
-    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
-
-    return sourced(foldKebab(`${operation.key.method} ${route}`), "route");
-  }
-
-  return sourced(foldOperationId(operation.operationId, groupLabel), "operationId");
+  return foldedDefault(operation, groupLabel);
 };
 
 /**

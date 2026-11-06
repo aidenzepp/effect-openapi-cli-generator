@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
@@ -363,17 +363,18 @@ const extensionNode = (
 
 /**
  * The group chain of a naming extension's segments, top level first (design 4.4): each segment
- * folds to one name, nested under the previous one, with no `tag.parent` lookup. A node is keyed by
- * its folded names joined with `.` and shared by every chain that reaches it; its file segment is
- * the fold of that key, so a key equal to a tag name has the tag's file segment and the two
- * collide (`TAG-02/segment-collision`) instead of sharing a module.
+ * folds to one name, nested under the previous one, with no `tag.parent` lookup. Groups are keyed
+ * by their folded names joined with `.` whatever the source: a key that `tagAt` gives a tag group
+ * for is that group (the tag's key and description kept), and otherwise a node keyed by the folded
+ * names is shared by every chain that reaches it.
  */
-const makeExtensionChains = () => {
+const makeExtensionChains = (tagAt: (key: string) => GroupNode | undefined) => {
   const nodes = new Map<string, Result.Result<GroupNode, ChainError>>();
 
   return (segments: readonly string[]): Result.Result<readonly GroupNode[], ChainError> => {
     const chain: GroupNode[] = [];
-    let parent: string | undefined = undefined;
+    let parentKey: string | undefined = undefined;
+    let parentTag: string | undefined = undefined;
     for (const label of segments) {
       const name = foldKebab(label);
       if (Result.isFailure(name)) {
@@ -381,19 +382,54 @@ const makeExtensionChains = () => {
       }
 
       const key: string =
-        parent === undefined ? name.success.name : `${parent}.${name.success.name}`;
-      const node = nodes.get(key) ?? extensionNode(key, label, name.success, parent);
+        parentKey === undefined ? name.success.name : `${parentKey}.${name.success.name}`;
+      const tagged = tagAt(key);
+      const node: Result.Result<GroupNode, ChainError> =
+        tagged === undefined
+          ? (nodes.get(key) ?? extensionNode(key, label, name.success, parentTag))
+          : Result.succeed(tagged);
       nodes.set(key, node);
       if (Result.isFailure(node)) {
         return Result.fail(node.failure);
       }
 
       chain.push(node.success);
-      parent = key;
+      parentKey = key;
+      parentTag = node.success.tag;
     }
 
     return Result.succeed(chain);
   };
+};
+
+// Every tag group's folded key (its chain's names joined with `.`): the declared tags, each
+// operation's first tag and every author-config group. The first tag of a key wins; any other
+// tag of that key still collides with it.
+const tagKeys = (
+  api: Api,
+  sites: Iterable<OverrideSite>,
+  tag: (tag: string) => Chain,
+): ReadonlyMap<string, GroupNode> => {
+  const names = [
+    ...api.tags.map((declared) => declared.name),
+    ...api.operations.flatMap((operation) => operation.tags.slice(0, 1)),
+    ...[...sites].flatMap((site) =>
+      site.override?.group === undefined ? [] : [site.override.group],
+    ),
+  ];
+  const keys = new Map<string, GroupNode>();
+  for (const name of names) {
+    const chain = tag(name);
+    const node = Result.isSuccess(chain) ? chain.success.at(-1) : undefined;
+    if (Result.isSuccess(chain) && node !== undefined) {
+      const key = chain.success.map((link) => link.name).join(".");
+      if (!keys.has(key)) {
+        keys.set(key, node);
+      }
+    }
+  }
+
+  return keys;
 };
 
 type Chain = Result.Result<readonly GroupNode[], ChainError>;
@@ -448,13 +484,80 @@ const primaryGroup = (operation: Operation, site: OverrideSite, chains: Chains):
     : { chain: chains.tag(tag), pointer, source: "tag" };
 };
 
+interface AliasEntry {
+  readonly alias: number;
+  readonly choice: GroupChoice;
+  readonly commandHint: string | undefined;
+  readonly groupHint: string | undefined;
+  readonly namePointer: string;
+  readonly namer: Namer;
+}
+
+const rootChoice = (pointer: string): GroupChoice => ({
+  chain: Result.succeed([]),
+  pointer,
+  source: "none",
+});
+
+/**
+ * An operation's alias commands (design 4.4): the author config's `aliases` when given, which
+ * replace `x-forge-aliases` (`[]` drops them), else each usable `x-forge-aliases` entry. An alias
+ * is named by its own keys only: without a group of its own it sits at the root.
+ */
+const aliasesOf = (
+  operation: Operation,
+  site: OverrideSite,
+  chains: Chains,
+): readonly AliasEntry[] => {
+  const configured = site.override?.aliases;
+  if (configured !== undefined) {
+    const { pointer } = operation.origin;
+
+    return configured.map((alias, index) => {
+      const hint = `${site.configKey}.aliases[${index}]`;
+      const { group } = alias;
+      const segments = Predicate.isString(group) ? group.split(".") : group;
+
+      return {
+        alias: index,
+        choice:
+          segments === undefined
+            ? rootChoice(pointer)
+            : { chain: chains.extension(segments), pointer, source: "config" },
+        commandHint: hint,
+        groupHint: hint,
+        namePointer: pointer,
+        namer: { _tag: "ConfigAlias", alias },
+      };
+    });
+  }
+
+  return (operation.naming?.aliases ?? []).map((alias) => {
+    const namePointer = `${operation.origin.pointer}/x-forge-aliases/${alias.index}`;
+
+    return {
+      alias: alias.index,
+      choice:
+        extensionGroup(alias.forge, "x-forge", chains) ??
+        extensionGroup(alias.fern, "x-fern", chains) ??
+        rootChoice(namePointer),
+      commandHint: undefined,
+      groupHint: undefined,
+      namePointer,
+      namer: { _tag: "Alias", alias },
+    };
+  });
+};
+
 const groupOperations = (
   api: Api,
   options: PlanOptions,
   sites: ReadonlyMap<Operation, OverrideSite>,
   collector: Collector,
 ): readonly Candidate[] => {
-  const chains: Chains = { extension: makeExtensionChains(), tag: makeChains(api) };
+  const tag = makeChains(api);
+  const keys = tagKeys(api, sites.values(), tag);
+  const chains: Chains = { extension: makeExtensionChains((key) => keys.get(key)), tag };
   const candidates: Candidate[] = [];
   for (const operation of api.operations) {
     const site = sites.get(operation) ?? overrideSite(options.config, operation);
@@ -475,26 +578,7 @@ const groupOperations = (
       namePointer: operation.origin.pointer,
       namer: { _tag: "Primary", override } satisfies Namer,
     };
-    // An alias is named by its own keys only: without a group of its own it sits at the root.
-    const aliases = (operation.naming?.aliases ?? []).map((alias) => {
-      const namePointer = `${operation.origin.pointer}/x-forge-aliases/${alias.index}`;
-      const choice = extensionGroup(alias.forge, "x-forge", chains) ??
-        extensionGroup(alias.fern, "x-fern", chains) ?? {
-          chain: Result.succeed([]),
-          pointer: namePointer,
-          source: "none" as const,
-        };
-
-      return {
-        alias: alias.index,
-        choice,
-        commandHint: undefined,
-        groupHint: undefined,
-        namePointer,
-        namer: { _tag: "Alias", alias } satisfies Namer,
-      };
-    });
-    for (const { choice, ...entry } of [primary, ...aliases]) {
+    for (const { choice, ...entry } of [primary, ...aliasesOf(operation, site, chains)]) {
       if (Result.isFailure(choice.chain)) {
         collector.report(
           operation,

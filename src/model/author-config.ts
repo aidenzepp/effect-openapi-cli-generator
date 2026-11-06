@@ -56,7 +56,31 @@ const AddedSecurity = Schema.Struct({
 
 const ParameterOverride = Schema.Struct({ flag: Schema.optionalKey(Schema.NonEmptyString) });
 
+// An alias group, like the naming extensions' group keys (design 4.4): a dotted string split at
+// `.`, or an array whose elements are kept whole; no segment is empty.
+const aliasGroup = Schema.Union([
+  Schema.NonEmptyString.pipe(
+    Schema.check(
+      Schema.makeFilter((group: string) => group.split(".").every((segment) => segment !== "")),
+    ),
+  ),
+  Schema.NonEmptyArray(Schema.NonEmptyString),
+]);
+
+// One alias command for an operation, named by a group and/or a method like the extension keys.
+const ConfigAlias = Schema.Struct({
+  group: Schema.optionalKey(aliasGroup),
+  method: Schema.optionalKey(Schema.NonEmptyString),
+}).check(
+  Schema.makeFilter(
+    (alias) =>
+      alias.group !== undefined || alias.method !== undefined || "an alias names something",
+  ),
+);
+
+// `aliases` replaces the operation's `x-forge-aliases`; an empty list drops them.
 const OperationOverride = Schema.Struct({
+  aliases: Schema.optionalKey(Schema.Array(ConfigAlias)),
   command: Schema.optionalKey(Schema.NonEmptyString),
   group: Schema.optionalKey(Schema.NonEmptyString),
   parameters: Schema.optionalKey(
