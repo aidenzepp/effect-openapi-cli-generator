@@ -33,6 +33,10 @@ const stdinDocument = "stdin:";
 
 const GeneratorPackage = Schema.Struct({ version: Schema.String });
 
+const FailureReason = Schema.Struct({ reason: Schema.String });
+
+const FailureSubject = Schema.Struct({ subject: Schema.String });
+
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
 const decodeDocument = Schema.decodeUnknownEffect(DocumentUri);
@@ -108,8 +112,10 @@ const configOf = (configPath: string) =>
     return { document: yield* decodeDocument(url.href), path: configPath };
   });
 
-// One line for a failure that is not a diagnostic (design 8.1).
-const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
+/**
+ * One line for a failure that is not a diagnostic (design 8.1).
+ */
+export const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
   if (error._tag === "RunLockHeld") {
     return "error: another run holds the output directory's lock";
   }
@@ -120,9 +126,20 @@ const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>)
       : `refused: unsupported openapi version ${sanitizeField(JSON.stringify(error.openapi))}`;
   }
 
-  return error._tag === "WriteRefused"
-    ? `error: the output was not written (${error.reason})`
-    : `error: generation failed (${error._tag})`;
+  if (error._tag === "WriteRefused") {
+    return `error: the output was not written (${error.reason})`;
+  }
+
+  const reason = Option.match(Schema.decodeUnknownOption(FailureReason)(error), {
+    onNone: () => "",
+    onSome: (found) => ` reason ${sanitizeField(found.reason)}`,
+  });
+  const subject = Option.match(Schema.decodeUnknownOption(FailureSubject)(error), {
+    onNone: () => "",
+    onSome: (found) => ` subject ${sanitizeField(JSON.stringify(found.subject))}`,
+  });
+
+  return `error: generation failed (${error._tag})${reason}${subject}`;
 };
 
 // Every failure prints and exits 1: a refusal as its diagnostic lines, anything else as one line.
