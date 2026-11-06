@@ -52,9 +52,9 @@ beforeAll(async () => {
     nodePath.join(consumer, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
   );
-  // Offline: the tarball's pinned dependencies resolve from Bun's cache; no registry fetch.
+  // Prefer-offline: the tarball's pinned dependencies resolve from Bun's cache when present.
   await succeeds(
-    ["bun", "add", "--offline", "--ignore-scripts", nodePath.join(consumer, tarballName)],
+    ["bun", "add", "--prefer-offline", "--ignore-scripts", nodePath.join(consumer, tarballName)],
     consumer,
   );
 }, 120_000);

@@ -70,7 +70,7 @@ export interface BinRun {
 }
 
 /**
- * A heavy step (offline install, type-check, build) that exited non-zero, with its output.
+ * A heavy step (install, type-check, build) that exited non-zero, with its output.
  */
 export class GeneratedCliStepFailed extends Data.TaggedError("GeneratedCliStepFailed")<{
   readonly exitCode: number | null;
@@ -149,9 +149,10 @@ const heavy = (
   });
 
 /**
- * Installs the package's dependencies from Bun's cache only (`--offline`: a missing package fails
- * the `install` step instead of being fetched), then type-checks and builds it with the package's
- * own `typecheck` and `build` scripts. Each step runs under `tools/memguard.sh`, one at a time.
+ * Installs the package's dependencies preferring Bun's cache (`--prefer-offline`: cached packages
+ * resolve locally, only what is missing is fetched), then type-checks and builds it with the
+ * package's own `typecheck` and `build` scripts. Each step runs under `tools/memguard.sh`, one at a
+ * time.
  */
 export const preparePackage = (
   generated: GeneratedPackage,
@@ -159,7 +160,7 @@ export const preparePackage = (
   heavy("install", generated.dir, [
     process.execPath,
     "install",
-    "--offline",
+    "--prefer-offline",
     "--no-save",
     "--ignore-scripts",
   ]).pipe(

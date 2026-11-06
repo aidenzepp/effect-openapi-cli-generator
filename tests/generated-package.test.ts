@@ -8,7 +8,7 @@ import { generateFixture, preparePackage, runBin } from "./support/generated-cli
 import type { GeneratedPackage } from "./support/generated-cli.ts";
 
 // The generated package is a real package: its own scripts build it, its bin runs, and it packs
-// and installs (offline, from Bun's cache) into a consumer whose symlinked bin runs.
+// and installs (preferring Bun's cache) into a consumer whose symlinked bin runs.
 
 const golden = nodePath.resolve(import.meta.dir, "fixtures/golden/users-update");
 
@@ -67,7 +67,7 @@ const exercise = (generated: GeneratedPackage) =>
     const direct = yield* runBin(generated, { args: ["--help"], timeoutMs: 30_000 });
     const directVersion = yield* runBin(generated, { args: ["--version"], timeoutMs: 30_000 });
 
-    // Pack the built package and install the tarball into a consumer, offline.
+    // Pack the built package and install the tarball into a consumer, preferring Bun's cache.
     const packDir = nodePath.join(generated.root, "pack");
     nodeFs.mkdirSync(packDir);
     guarded(generated.dir, [process.execPath, "pm", "pack", "--destination", packDir]);
@@ -82,7 +82,7 @@ const exercise = (generated: GeneratedPackage) =>
     guarded(consumer, [
       process.execPath,
       "add",
-      "--offline",
+      "--prefer-offline",
       "--ignore-scripts",
       nodePath.join(packDir, tarball),
     ]);
@@ -114,7 +114,7 @@ const exercise = (generated: GeneratedPackage) =>
     };
   });
 
-test("the golden package builds with its own script, runs, packs and installs offline", async () => {
+test("the golden package builds with its own script, runs, packs and installs", async () => {
   const observed = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* check() {

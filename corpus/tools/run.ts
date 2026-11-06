@@ -256,7 +256,7 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
     yield* spawn(
       entry.id,
       "install",
-      [bun, "install", "--offline", "--no-save", "--ignore-scripts"],
+      [bun, "install", "--prefer-offline", "--no-save", "--ignore-scripts"],
       {
         cwd: jsonDir,
       },
