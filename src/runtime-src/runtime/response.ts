@@ -51,6 +51,13 @@ const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | 
     .toLowerCase();
 
 /**
+ * The characters `sanitize` in `output.ts` removes (C0 except LF and TAB, DEL, C1, format
+ * characters, U+2028, U+2029, lone surrogates). `output.ts` imports this module, so the set is
+ * restated here rather than imported.
+ */
+const unsafeText = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
+
+/**
  * The first `maxRequestIdLength` UTF-16 units of `text`, never ending in half a surrogate pair.
  */
 const boundRequestId = (text: string): string => {
@@ -62,8 +69,8 @@ const boundRequestId = (text: string): string => {
 };
 
 /**
- * The declared request-id header, credentials scrubbed and then bounded (audit F6): bounding
- * first could cut a credential so that the remaining prefix no longer matches.
+ * The declared request-id header, credentials scrubbed, then sanitized, then bounded (audit F6):
+ * bounding first could cut a credential so that the remaining prefix no longer matches.
  */
 const requestIdOf = (
   table: ResponseTable,
@@ -76,7 +83,9 @@ const requestIdOf = (
 
   const header = Option.getOrUndefined(Headers.get(response.headers, table.requestIdHeader));
 
-  return header === undefined ? undefined : boundRequestId(scrub(header, credentials));
+  return header === undefined
+    ? undefined
+    : boundRequestId(scrub(header.replaceAll(unsafeText, ""), credentials));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {

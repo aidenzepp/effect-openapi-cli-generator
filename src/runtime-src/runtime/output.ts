@@ -284,7 +284,7 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
 };
 
 /**
- * The excerpt of an error body: credential values scrubbed, then sanitized, then bounded to
+ * The excerpt of an error body: sanitized, then credential values scrubbed, then bounded to
  * `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
  * `ApiResponseError` refuses an excerpt over 64 KiB (audit F6).
  */
@@ -292,7 +292,7 @@ export const boundedExcerpt = (
   text: string,
   maxBytes: number,
   credentials: readonly Credential[],
-): string => truncateUtf8(sanitize(scrub(text, credentials)), maxBytes);
+): string => truncateUtf8(scrub(sanitize(text), credentials), maxBytes);
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
 // larger than the limit, so each chunk is cut at the remaining budget instead.
@@ -373,7 +373,7 @@ const isKnownError = (error: unknown): error is KnownError =>
 const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
 
 const singleLine = (text: string, credentials: readonly Credential[]): string =>
-  oneLine(sanitize(scrub(text, credentials)));
+  oneLine(scrub(sanitize(text), credentials));
 
 /**
  * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
@@ -515,7 +515,7 @@ const renderCause = <E>(
 
     return text === undefined
       ? Effect.failCause(cause)
-      : reportOnce(sanitize(scrub(text, credentials)), failure.value);
+      : reportOnce(scrub(sanitize(text), credentials), failure.value);
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
