@@ -11,7 +11,7 @@ import type {
   PlannedGroup,
   PlannedPositional,
 } from "../names/index.ts";
-import type { FieldEncoding } from "../runtime-src/runtime/input.ts";
+import type { FieldEncoding, NumericKind } from "../runtime-src/runtime/input.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
 import {
   buildsParameter,
@@ -19,6 +19,7 @@ import {
   formParts,
   inputKeys,
   isScalarArraySchema,
+  scalarTypeOf,
   takesJsonContent,
 } from "./api.ts";
 import type { FormPart } from "./api.ts";
@@ -424,6 +425,26 @@ const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
     return array.success;
   });
 
+// The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
+// 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
+// `content` parameter is one value whatever its schema, so it has none.
+const numericKindOf = (parameter: Parameter, context: CommandContext) =>
+  Effect.gen(function* numeric() {
+    let kind: NumericKind | undefined;
+    if (parameter.serialization.kind === "style") {
+      const type = scalarTypeOf(context.defs, parameter.schema.key);
+      if (Result.isFailure(type)) {
+        return yield* refuse("unresolved-schema", type.failure);
+      }
+
+      if (type.success === "integer" || type.success === "number") {
+        kind = type.success;
+      }
+    }
+
+    return kind;
+  });
+
 const parameterDescription = (parameter: Parameter): string =>
   parameter.docs.description ?? parameter.docs.summary ?? "";
 
@@ -454,8 +475,13 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
+    const numeric = yield* numericKindOf(parameter, context);
+    const head =
+      numeric === undefined
+        ? fn("Argument.String", str(positional.name))
+        : fn("Input.numericArgument", str(positional.name), str(numeric));
     const described = describedBy(parameterDescription(parameter));
-    const value = pipe(fn("Argument.String", str(positional.name)), [
+    const value = pipe(head, [
       ...(array ? [fn("Argument.atLeast", num(1))] : []),
       ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
     ]);
@@ -550,8 +576,13 @@ const fieldDescription = (
 // A parameter flag's constructor. A `content` parameter's value (any location, `querystring`
 // included) is JSON data under JSON media and form querystring media (design 6.1), decoded the way
 // a non-flattened JSON field flag is, and the operator's string under any other media; a boolean
-// styled parameter is negatable.
-const parameterFlagHead = (flag: PlannedFlag, parameter: Parameter): Expr => {
+// styled parameter is negatable, and an `integer` or `number` one (per item for an array) is checked
+// against its grammar.
+const parameterFlagHead = (
+  flag: PlannedFlag,
+  parameter: Parameter,
+  numeric: NumericKind | undefined,
+): Expr => {
   const { location, serialization } = parameter;
   if (serialization.kind === "content") {
     return takesJsonContent(location, serialization.mediaType)
@@ -559,7 +590,13 @@ const parameterFlagHead = (flag: PlannedFlag, parameter: Parameter): Expr => {
       : fn("Flag.String", str(flag.name));
   }
 
-  return flag.boolean ? fn("Flag.Boolean", str(flag.name)) : fn("Flag.String", str(flag.name));
+  if (flag.boolean) {
+    return fn("Flag.Boolean", str(flag.name));
+  }
+
+  return numeric === undefined
+    ? fn("Flag.String", str(flag.name))
+    : fn("Input.numericFlag", str(flag.name), str(numeric));
 };
 
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
@@ -586,7 +623,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       }
 
       const array = styled && (yield* isArrayParameter(parameter, context));
-      const head = parameterFlagHead(flag, parameter);
+      const head = parameterFlagHead(flag, parameter, yield* numericKindOf(parameter, context));
       const presence = parameter.required ? [] : [path("Flag.optional")];
       const steps = [
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),

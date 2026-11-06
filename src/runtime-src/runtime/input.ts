@@ -10,7 +10,7 @@ import {
   Stdio,
   Stream,
 } from "effect";
-import { CliError, Flag } from "effect/cli";
+import { Argument, CliError, Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
@@ -473,6 +473,49 @@ const asCliError = (error: UsageError): CliError.CliError =>
 export const int64Flag = (name: string) =>
   Flag.String(name).pipe(
     Flag.mapEffect((raw) => jsonNumber(raw, name).pipe(Effect.mapError(asCliError))),
+  );
+
+/**
+ * The scalar type an `integer` or `number` parameter's text is checked against (design 6.1).
+ */
+export type NumericKind = "integer" | "number";
+
+const numericGrammar = {
+  integer: (text: string) => int64Digits.test(text),
+  number: isJsonNumberText,
+} satisfies Record<NumericKind, (text: string) => boolean>;
+
+const numericCause = {
+  integer: "is not an integer",
+  number: "is not a JSON number",
+} satisfies Record<NumericKind, string>;
+
+// The one check behind `numericFlag` and `numericArgument`: the text unchanged, or a value-free
+// error built by `refuse` from the cause.
+const numericText =
+  (kind: NumericKind, refuse: (cause: string) => UsageError) =>
+  (text: string): Effect.Effect<string, CliError.CliError> =>
+    numericGrammar[kind](text)
+      ? Effect.succeed(text)
+      : Effect.fail(asCliError(refuse(numericCause[kind])));
+
+/**
+ * The flag for an `integer` or `number` parameter: its text checked against the JSON integer or
+ * number grammar and returned unchanged, so `9007199254740993` and `1.50` reach the wire as given.
+ * A text outside the grammar fails the flag with an error that names `--name` and never the text.
+ */
+export const numericFlag = (name: string, kind: NumericKind) =>
+  Flag.String(name).pipe(Flag.mapEffect(numericText(kind, (cause) => usage(name, cause))));
+
+/**
+ * The positional argument for an `integer` or `number` path parameter, checked as `numericFlag`
+ * is. A text outside the grammar fails with an error that names `<name>` and never the text.
+ */
+export const numericArgument = (name: string, kind: NumericKind) =>
+  Argument.String(name).pipe(
+    Argument.mapEffect(
+      numericText(kind, (cause) => new UsageError({ message: `<${name}>: ${cause}` })),
+    ),
   );
 
 const isObject = (value: JsonNode | undefined): value is JsonObject =>
