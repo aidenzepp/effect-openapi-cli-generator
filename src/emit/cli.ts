@@ -13,7 +13,14 @@ import type {
 } from "../names/index.ts";
 import type { FieldEncoding } from "../runtime-src/runtime/input.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { buildsParameter, encodesByKey, formParts, inputKeys, isScalarArraySchema } from "./api.ts";
+import {
+  buildsParameter,
+  encodesByKey,
+  formParts,
+  inputKeys,
+  isScalarArraySchema,
+  takesJsonContent,
+} from "./api.ts";
 import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
@@ -540,11 +547,16 @@ const fieldDescription = (
     return fileDescription(schema);
   });
 
-// A parameter flag's constructor: a `querystring` value is JSON data (design 6.1), decoded the way
-// a non-flattened JSON field flag is; a boolean styled parameter is negatable.
+// A parameter flag's constructor. A `content` parameter's value (any location, `querystring`
+// included) is JSON data under JSON media and form querystring media (design 6.1), decoded the way
+// a non-flattened JSON field flag is, and the operator's string under any other media; a boolean
+// styled parameter is negatable.
 const parameterFlagHead = (flag: PlannedFlag, parameter: Parameter): Expr => {
-  if (parameter.location === "querystring") {
-    return fn("Input.jsonFlag", str(flag.name));
+  const { location, serialization } = parameter;
+  if (serialization.kind === "content") {
+    return takesJsonContent(location, serialization.mediaType)
+      ? fn("Input.jsonFlag", str(flag.name))
+      : fn("Flag.String", str(flag.name));
   }
 
   return flag.boolean ? fn("Flag.Boolean", str(flag.name)) : fn("Flag.String", str(flag.name));
@@ -567,11 +579,13 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
         return yield* refuse("unplanned-parameter", `${source.location}:${source.wireName}`);
       }
 
-      if (parameter.required && flag.boolean) {
+      // A `content` parameter is one value, whatever its schema: never negatable, never repeated.
+      const styled = parameter.serialization.kind === "style";
+      if (styled && parameter.required && flag.boolean) {
         return yield* refuse("unsupported-flag", flag.name);
       }
 
-      const array = yield* isArrayParameter(parameter, context);
+      const array = styled && (yield* isArrayParameter(parameter, context));
       const head = parameterFlagHead(flag, parameter);
       const presence = parameter.required ? [] : [path("Flag.optional")];
       const steps = [
