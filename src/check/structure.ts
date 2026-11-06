@@ -208,13 +208,12 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
         )
       : [];
   const entries = [
-    ...fixed.map((name) => [name, childPointer(item.pointer, name)] as const),
-    ...additional,
+    ...fixed.map((name) => [name, childPointer(item.pointer, name), false] as const),
+    ...additional.map(([name, pointer]) => [name, pointer, true] as const),
   ];
 
-  return entries.flatMap(([name, pointer]) => {
+  return entries.flatMap(([name, pointer, additionalKey]) => {
     const node = nodeAt(resolution.value, pointer);
-    const additionalKey = !fixed.includes(name);
 
     return isObject(node)
       ? [
