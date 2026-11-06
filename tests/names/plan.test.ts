@@ -149,6 +149,7 @@ const makeApi = (input: ApiInput): Api =>
       name: scheme.name,
       origin: origin(`/components/securitySchemes/${escape(scheme.name)}`),
       rows: [],
+      source: "spec",
     })),
     servers: [],
     tags: input.tags ?? [],

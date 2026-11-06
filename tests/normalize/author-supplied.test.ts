@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Schema } from "effect";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { normalize } from "../../src/normalize/index.ts";
 import { normalizeSecurityPolicy, normalizeSecuritySchemes } from "../../src/normalize/security.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -150,5 +151,30 @@ describe("author-supplied security", () => {
     ]);
     see(schemes.schemes).toEqual([]);
     see(schemes.unusable).toEqual(["key"]);
+  });
+
+  test("normalize() applies security.add to a spec that declares no security", () => {
+    const { api } = Effect.runSync(
+      resolve({
+        document: entry,
+        line: "3.1",
+        value: {
+          info: { title: "t", version: "1" },
+          openapi: "3.1.1",
+          paths: { "/bare": { get: ok } },
+        },
+      }).pipe(
+        Effect.flatMap((resolution) =>
+          normalize(resolution, { config: configOf(added), configDocument: configUri }),
+        ),
+      ),
+    );
+
+    see(api.operations[0]?.security.alternatives).toEqual([
+      { uses: [{ scheme: "key", scopes: [] }] },
+    ]);
+    see(api.securitySchemes.map((scheme) => [scheme.name, scheme.source])).toEqual([
+      ["key", "author-supplied"],
+    ]);
   });
 });

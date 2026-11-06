@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import {
   CookieName,
   DocumentUri,
@@ -244,9 +244,7 @@ export class SecurityScheme extends Schema.Class<SecurityScheme>("SecurityScheme
   origin: Origin,
   rows,
   // Where the scheme came from; an author-supplied one must not reach help or the report unmarked.
-  source: Schema.Literals(["spec", "author-supplied"]).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed("spec")),
-  ),
+  source: Schema.Literals(["spec", "author-supplied"]),
 }) {}
 
 /**

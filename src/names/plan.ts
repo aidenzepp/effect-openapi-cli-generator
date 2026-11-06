@@ -295,7 +295,11 @@ export const credentialNames = (
   envPrefix: string,
   scheme: SecurityScheme,
 ): Option.Option<{ readonly env: string; readonly flag: string; readonly slug: string }> => {
-  const definition = runtimeScheme(scheme, own(config.security, scheme.name)?.env);
+  const configured = own(config.security, scheme.name);
+  const definition = runtimeScheme(
+    scheme,
+    configured !== undefined && "env" in configured ? configured.env : undefined,
+  );
   if (definition === undefined) {
     return Option.none();
   }

@@ -94,6 +94,7 @@ const securityScheme = {
   name: "bearerAuth",
   origin,
   rows,
+  source: "spec",
 };
 
 const securityPolicy = {
