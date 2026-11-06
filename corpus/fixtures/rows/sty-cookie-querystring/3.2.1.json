@@ -1,0 +1,179 @@
+{
+  "components": {
+    "securitySchemes": {
+      "cookieKey": {
+        "in": "cookie",
+        "name": "token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Cookie, querystring and style rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.2.1",
+  "paths": {
+    "/auth-cookies": {
+      "get": {
+        "operationId": "auth-cookies-get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "session",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "cookieKey": []
+          }
+        ]
+      }
+    },
+    "/cookies": {
+      "get": {
+        "operationId": "cookies-get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "session",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "allowReserved": true,
+            "in": "cookie",
+            "name": "reserved",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "prefs",
+            "schema": {
+              "type": "string"
+            },
+            "style": "cookie"
+          },
+          {
+            "in": "cookie",
+            "name": "tags",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "cookie"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/qs-form": {
+      "get": {
+        "operationId": "qs-form-get",
+        "parameters": [
+          {
+            "content": {
+              "application/x-www-form-urlencoded": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "in": "querystring",
+            "name": "filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/qs-json": {
+      "get": {
+        "operationId": "qs-json-get",
+        "parameters": [
+          {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "in": "querystring",
+            "name": "selector"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/search": {
+      "get": {
+        "operationId": "search-get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}
