@@ -19,7 +19,7 @@ import type { ResolveLimits, Resolution } from "../resolve/index.ts";
 import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { normalizeBody } from "./bodies.ts";
-import type { BodyNodeBudget, BodyNotReadable } from "./bodies.ts";
+import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
 import { normalizeParameter } from "./parameters.ts";
 import type { ParameterNotReadable, ParameterOutcome } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
@@ -465,11 +465,14 @@ const assembleBody = (
       }
     }
 
-    const outcome = yield* normalizeBody(
-      shared.resolution,
-      { openapi: shared.context.openapi, operation, pointer },
-      shared.limits,
-    );
+    // The author config's bracket switch reaches the body as it reaches the parameters.
+    const { nonStandard } = shared.context.config;
+    const site: Plain<BodySite> = { openapi: shared.context.openapi, operation, pointer };
+    if (nonStandard !== undefined) {
+      site.nonStandard = nonStandard;
+    }
+
+    const outcome = yield* normalizeBody(shared.resolution, site, shared.limits);
 
     return outcome._tag === "Implemented"
       ? { body: outcome.body, diagnostics: outcome.diagnostics, refusedRequired: false }

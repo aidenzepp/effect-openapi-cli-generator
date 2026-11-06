@@ -16,8 +16,8 @@ import {
 } from "../../src/report/index.ts";
 
 // The report's `nonStandard` list (design 8.1, revision 19) is read from the normalized model's
-// marker (`nonStandard: "deepObjectBrackets"`), which only the author config switch sets. No
-// normalizer sets it yet (m2-br4, m2-br5), so this model is marked by hand, as m2-br3's is.
+// marker (`nonStandard: "deepObjectBrackets"`), which only the author config switch sets. These
+// models are normalized with `nonStandard.deepObjectBrackets` named on and off.
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -36,11 +36,15 @@ const document = Schema.decodeUnknownSync(DocumentUri)("file:///golden/openapi.j
 
 const configDocument = Schema.decodeUnknownSync(DocumentUri)("file:///golden/author-config.json");
 
-const config = await Effect.runPromise(
-  decodeAuthorConfig(decodeJson(JSON.parse(read("author-config.json"))), {
-    document: configDocument,
-  }),
+const goldenConfig = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))(
+  JSON.parse(read("author-config.json")),
 );
+
+// The switch is never defaulted or inferred: each model names it in the author config.
+const configWith = (deepObjectBrackets: boolean) =>
+  decodeAuthorConfig(decodeJson({ ...goldenConfig, nonStandard: { deepObjectBrackets } }), {
+    document: configDocument,
+  });
 
 const filter = {
   properties: { owner: { properties: { name: { type: "string" } }, type: "object" } },
@@ -51,8 +55,8 @@ const formSchema = { properties: { filter, title: { type: "string" } }, type: "o
 
 const formEncoding = { filter: { explode: true, style: "deepObject" } };
 
-// `/choices` (form and JSON bodies), `/forms` (form body) and `/items` (query `filter`); the model
-// below holds them in the reverse order, so the list's order is the report's to make.
+// `/choices` (form and JSON bodies), `/forms` (form body) and `/items` (query `filter` and a plain
+// `page`); the models below hold them in the reverse order, so the list's order is the report's.
 const spec: Schema.Json = {
   ...golden,
   paths: {
@@ -88,6 +92,7 @@ const spec: Schema.Json = {
         operationId: "items-list",
         parameters: [
           { explode: true, in: "query", name: "filter", schema: filter, style: "deepObject" },
+          { in: "query", name: "page", schema: { type: "string" } },
         ],
         responses: { "200": { description: "ok" } },
         tags: ["items"],
@@ -98,61 +103,27 @@ const spec: Schema.Json = {
 
 type Encoded = typeof Api.Encoded;
 
-const plain = await Effect.runPromise(
-  Effect.gen(function* build() {
-    const resolution = yield* resolve({ document, line: "3.1", value: spec });
+const normalizedWith = (deepObjectBrackets: boolean) =>
+  Effect.runPromise(
+    Effect.gen(function* build() {
+      const config = yield* configWith(deepObjectBrackets);
+      const resolution = yield* resolve({ document, line: "3.1", value: spec });
+      const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
+      const encoded: Encoded = Schema.encodeSync(Api)(api);
+      const reversed = Schema.decodeUnknownSync(Api)({
+        ...encoded,
+        operations: Arr.reverse(encoded.operations),
+      });
 
-    const { api } = yield* normalize(resolution, { config, configDocument });
-    const encoded: Encoded = Schema.encodeSync(Api)(api);
-
-    return Schema.decodeUnknownSync(Api)({
-      ...encoded,
-      operations: Arr.reverse(encoded.operations),
-    });
-  }),
-);
-
-const nonStandard = "deepObjectBrackets" as const;
-
-// Marks the `filter` query parameter and every form `filter` encoding rule in the model's encoded
-// form and decodes it back, so the marked model passes the model's own schema.
-const markBody = (body: NonNullable<Encoded["operations"][number]["body"]>) => ({
-  ...body,
-  alternatives: body.alternatives.map((alternative) => ({
-    ...alternative,
-    encoding: alternative.encoding.map((rule) =>
-      rule.target.kind === "property" && rule.target.name === "filter"
-        ? { ...rule, nonStandard }
-        : rule,
-    ),
-  })),
-});
-
-const markOperation = (operation: Encoded["operations"][number]) => {
-  const { body, ...rest } = operation;
-  const parameters = operation.parameters.map((parameter) =>
-    parameter.wireName === "filter" && parameter.serialization.kind === "style"
-      ? { ...parameter, serialization: { ...parameter.serialization, nonStandard } }
-      : parameter,
+      return { api: reversed, diagnostics };
+    }),
   );
 
-  return body === undefined
-    ? { ...rest, parameters }
-    : { ...rest, body: markBody(body), parameters };
-};
+// The switch on: normalize marks the `filter` query parameter and each form `filter` rule.
+const { api: marked } = await normalizedWith(true);
 
-const mark = (api: Api, only?: readonly string[]): Api => {
-  const encoded: Encoded = Schema.encodeSync(Api)(api);
-
-  return Schema.decodeUnknownSync(Api)({
-    ...encoded,
-    operations: encoded.operations.map((operation) =>
-      only === undefined || only.includes(operation.operationId ?? "")
-        ? markOperation(operation)
-        : operation,
-    ),
-  });
-};
+// The switch off: the nested deepObject entries are refused, so nothing is marked.
+const { api: strict, diagnostics: strictDiagnostics } = await normalizedWith(false);
 
 const documents = [document, configDocument];
 
@@ -179,9 +150,9 @@ const reportOf = (api: Api) =>
 
 describe("the report's nonStandard list", () => {
   test("a model with no marker lists none, and the key is still present", () => {
-    expect(nonStandardEntries(plain, documents)).toEqual([]);
+    expect(nonStandardEntries(strict, documents)).toEqual([]);
 
-    const text = Effect.runSync(printGenerationReport(reportOf(plain)));
+    const text = Effect.runSync(printGenerationReport(reportOf(strict)));
 
     expect(JSON.parse(text)).toHaveProperty("nonStandard", []);
   });
@@ -199,32 +170,37 @@ describe("the report's nonStandard list", () => {
   });
 
   test("one entry per marked element, with the choice, key, use site and row", () => {
-    const entries = nonStandardEntries(mark(plain, ["items-list"]), documents);
+    const entries = nonStandardEntries(marked, documents);
+    const query = entries.filter((entry) => entry.pointer.startsWith("/paths/~1items/get"));
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      choice: "deepObjectBrackets",
-      configKey: "nonStandard.deepObjectBrackets",
-      document,
-      row: "PRM-27",
-    });
-    expect(entries[0]?.pointer.startsWith("/paths/~1items/get")).toBe(true);
+    expect(query).toHaveLength(1);
+    for (const entry of entries) {
+      expect(entry).toMatchObject({
+        choice: "deepObjectBrackets",
+        configKey: "nonStandard.deepObjectBrackets",
+        document,
+        row: "PRM-27",
+      });
+    }
   });
 
   test("marked query parameters and form encoding entries are listed, unmarked ones are not", () => {
-    const entries = nonStandardEntries(mark(plain, ["forms-create"]), documents);
+    const pointers = nonStandardEntries(marked, documents).map((entry) => entry.pointer);
+    const under = (prefix: string) => pointers.filter((pointer) => pointer.startsWith(prefix));
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.pointer.startsWith("/paths/~1forms/post")).toBe(true);
+    expect(under("/paths/~1forms/post")).toHaveLength(1);
+    expect(under("/paths/~1choices/post")).toHaveLength(1);
+    expect(pointers.filter((pointer) => pointer.includes("application~1json"))).toEqual([]);
+    expect(pointers.filter((pointer) => pointer.includes("/parameters/1"))).toEqual([]);
   });
 
   test("entries come in diagnostic order, not model order", () => {
-    const entries = nonStandardEntries(mark(plain), documents);
+    const entries = nonStandardEntries(marked, documents);
     const pointers = entries.map((entry) => entry.pointer);
     const sorted = Arr.sort(pointers, Order.String);
 
     expect(pointers).toHaveLength(3);
-    expect(plain.operations.map((operation) => operation.operationId)).toEqual([
+    expect(marked.operations.map((operation) => operation.operationId)).toEqual([
       "items-list",
       "forms-create",
       "choices-create",
@@ -236,12 +212,24 @@ describe("the report's nonStandard list", () => {
   });
 
   test("the printed report carries the entries and decodes against the schema", () => {
-    const api = mark(plain, ["items-list"]);
-    const text = Effect.runSync(printGenerationReport(reportOf(api)));
+    const text = Effect.runSync(printGenerationReport(reportOf(marked)));
     const report = Schema.decodeUnknownSync(GenerationReport)(JSON.parse(text));
 
-    expect(report.nonStandard).toEqual([
-      entryAt(nonStandardEntries(api, documents)[0]?.pointer ?? ""),
+    expect(report.nonStandard).toEqual(
+      nonStandardEntries(marked, documents).map((entry) => entryAt(entry.pointer)),
+    );
+  });
+
+  test("the switch off refuses the nested deepObject entries instead of listing them", () => {
+    const refused = strictDiagnostics
+      .filter((diagnostic) => diagnostic.code === "PRM-27/compound-nested")
+      .map((diagnostic) => diagnostic.pointer.split("/").slice(0, 4).join("/"));
+
+    expect(Arr.sort(Arr.dedupe(refused), Order.String)).toEqual([
+      "/paths/~1choices/post",
+      "/paths/~1forms/post",
+      "/paths/~1items/get",
     ]);
+    expect(nonStandardEntries(strict, documents)).toEqual([]);
   });
 });
