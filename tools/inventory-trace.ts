@@ -70,6 +70,7 @@ export interface Report {
   readonly id: string;
   readonly half?: string;
   readonly status: Status;
+  readonly via?: readonly string[];
 }
 
 /**
@@ -109,16 +110,38 @@ const judge = (titles: readonly Title[]): "covered" | "todo" | "missing" => {
   return titles.every((title) => title.todo) ? "todo" : "covered";
 };
 
-/**
- * Report every row, in `rows.json` order, by the rulings of task fe518093.
- */
-export const traceRows = (input: {
+interface TraceInput {
   readonly rows: typeof Rows.Type;
   readonly deferred: typeof Deferred.Type;
   readonly splits: typeof SplitRows.Type;
   readonly titles: readonly Title[];
-}): readonly Report[] =>
-  input.rows.flatMap((row): readonly Report[] => {
+  readonly only?: RegExp | undefined;
+}
+
+/**
+ * How a delegation target resolves: covered, passed through (whole-deferred), or not resolved.
+ */
+type Outcome = "covered" | "pass" | "unresolved" | "cycle";
+
+interface Target {
+  readonly outcome: Outcome;
+  readonly target: string;
+}
+
+interface Resolution {
+  readonly outcome: Outcome;
+  readonly passed: readonly string[];
+}
+
+/**
+ * Report every row, in `rows.json` order, by the rulings of task fe518093. `only` filters the
+ * rows reported; delegation targets resolve over every row and every test.
+ */
+export const traceRows = (input: TraceInput): readonly Report[] => {
+  const wholeDeferred = (id: string): boolean =>
+    input.deferred.some((entry) => entry.row === id && entry.deferred === "whole");
+
+  const base = (row: (typeof Rows.Type)[number]): readonly Report[] => {
     if (row.disposition === "informational") {
       return [{ id: row.id, status: "informational" }];
     }
@@ -148,7 +171,92 @@ export const traceRows = (input: {
         status: status === "missing" && row.coveredBy.length > 0 ? "delegated" : status,
       },
     ];
-  });
+  };
+
+  const byId = new Map(input.rows.map((row) => [row.id, row]));
+
+  const resolve = (row: (typeof Rows.Type)[number], stack: readonly string[]): Resolution => {
+    const outcomes = row.coveredBy.map((target): Target => {
+      if (wholeDeferred(target)) {
+        return { outcome: "pass", target };
+      }
+
+      const next = byId.get(target);
+
+      if (next === undefined) {
+        return { outcome: "unresolved", target };
+      }
+
+      if (stack.includes(target)) {
+        return { outcome: "cycle", target };
+      }
+
+      const reports = base(next);
+
+      if (reports.some((report) => report.status === "delegated")) {
+        return { outcome: resolve(next, [...stack, target]).outcome, target };
+      }
+
+      return {
+        outcome: reports.every((r) => r.status === "covered" || r.status === "deferred")
+          ? "covered"
+          : "unresolved",
+        target,
+      };
+    });
+    const passed = outcomes
+      .filter((entry) => entry.outcome === "pass")
+      .map((entry) => entry.target);
+
+    if (outcomes.some((entry) => entry.outcome === "cycle")) {
+      return { outcome: "cycle", passed };
+    }
+
+    if (!outcomes.every((entry) => entry.outcome === "covered" || entry.outcome === "pass")) {
+      return { outcome: "unresolved", passed };
+    }
+
+    if (passed.length < outcomes.length) {
+      return { outcome: "covered", passed };
+    }
+
+    return {
+      outcome: input.deferred.some((entry) => entry.row === row.id) ? "pass" : "unresolved",
+      passed,
+    };
+  };
+
+  return input.rows
+    .filter((row) => input.only?.test(row.id) ?? true)
+    .flatMap((row): readonly Report[] => {
+      const reports = base(row);
+
+      if (!reports.some((report) => report.status === "delegated")) {
+        return reports;
+      }
+
+      const resolved = resolve(row, [row.id]);
+
+      if (resolved.outcome === "covered" && resolved.passed.length > 0) {
+        return [{ id: row.id, status: "covered", via: resolved.passed }];
+      }
+
+      if (resolved.outcome === "covered") {
+        return [{ id: row.id, status: "covered" }];
+      }
+
+      if (resolved.outcome === "pass") {
+        return [{ id: row.id, status: "deferred" }];
+      }
+
+      // A cycle, or every target whole-deferred with the row unlisted, is missing.
+      const allPassed = resolved.passed.length === row.coveredBy.length;
+
+      return [
+        { id: row.id, status: resolved.outcome === "cycle" || allPassed ? "missing" : "delegated" },
+      ];
+    });
+};
 
 const unresolved = (status: Status, allowTodo: boolean): boolean =>
   status === "missing" || (!allowTodo && (status === "todo" || status === "delegated"));
@@ -211,7 +319,9 @@ const readJson = <S extends Schema.Top & { readonly DecodingServices: never }>(
   );
 
 const line = (report: Report): string =>
-  `${report.id}${report.half === undefined ? "" : ` (${report.half})`} ${report.status}`;
+  `${report.id}${report.half === undefined ? "" : ` (${report.half})`} ${report.status}${
+    report.via === undefined ? "" : ` (deferred: ${report.via.join(", ")})`
+  }`;
 
 const trace = Effect.gen(function* run() {
   const fs = yield* FileSystem.FileSystem;
@@ -243,7 +353,8 @@ const trace = Effect.gen(function* run() {
   );
   const reports = traceRows({
     deferred,
-    rows: rows.filter((row) => options.only?.test(row.id) ?? true),
+    only: options.only,
+    rows,
     splits,
     titles: sources.flatMap(titlesOf),
   });

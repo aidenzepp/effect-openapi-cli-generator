@@ -147,10 +147,10 @@ describe("inventory-trace statuses", () => {
   test("a row with a coveredBy clause and no test of its own is delegated", () => {
     const { lines } = trace({
       rows: [{ coveredBy: ["ZZZ-02"], id: "ZZZ-01" }, { id: "ZZZ-02" }],
-      tests: { "a.test.ts": titled("ZZZ-02: x") },
+      tests: { "a.test.ts": todo("ZZZ-02: x") },
     });
 
-    expect(lines).toEqual(["ZZZ-01 delegated", "ZZZ-02 covered"]);
+    expect(lines).toEqual(["ZZZ-01 delegated", "ZZZ-02 todo"]);
   });
 });
 
@@ -235,7 +235,7 @@ describe("inventory-trace exit statuses", () => {
   const tests = { "a.test.ts": `${titled("ZZZ-01: x")}\n${todo("ZZZ-02: y")}` };
   const missing = { rows: [{ id: "ZZZ-01" }, { id: "ZZZ-03" }], tests };
   const todos = { rows: [{ id: "ZZZ-01" }, { id: "ZZZ-02" }], tests };
-  const delegated = { rows: [{ id: "ZZZ-01" }, { coveredBy: ["ZZZ-01"], id: "ZZZ-04" }], tests };
+  const delegated = { rows: [{ id: "ZZZ-02" }, { coveredBy: ["ZZZ-02"], id: "ZZZ-04" }], tests };
 
   test("report mode exits 0 on a missing row", () => {
     const { code, lines } = trace(missing);
@@ -277,5 +277,124 @@ describe("inventory-trace exit statuses", () => {
     expect(run(makeRoot(), "--root", makeRoot()).code).toBe(1);
     expect(run(makeRoot(), "--bogus").code).toBe(2);
     expect(run(makeRoot(), "--allow-todo").code).toBe(2);
+  });
+});
+
+describe("inventory-trace delegated rows", () => {
+  const chain = [{ coveredBy: ["ZZZ-02"], id: "ZZZ-01" }, { id: "ZZZ-02" }];
+  const wholeDeferred = [{ deferred: "whole", row: "OAF-01" }];
+
+  test("a delegation chain with one uncovered target stays delegated, gated by --check only", () => {
+    const tree = { rows: chain, tests: { "a.test.ts": todo("ZZZ-02: x") } };
+
+    expect(trace(tree).lines).toEqual(["ZZZ-01 delegated", "ZZZ-02 todo"]);
+    expect(trace(tree, "--check").code).toBe(1);
+    expect(trace(tree, "--check", "--allow-todo").code).toBe(0);
+  });
+
+  test("the same chain once the target has a test is covered", () => {
+    const { code, lines } = trace(
+      { rows: chain, tests: { "a.test.ts": titled("ZZZ-02: x") } },
+      "--check",
+    );
+
+    expect(lines).toEqual(["ZZZ-01 covered", "ZZZ-02 covered"]);
+    expect(code).toBe(0);
+  });
+
+  test("a chain of two delegations resolves through the last target", () => {
+    const rows = [
+      { coveredBy: ["ZZZ-02"], id: "ZZZ-01" },
+      { coveredBy: ["ZZZ-03"], id: "ZZZ-02" },
+      { id: "ZZZ-03" },
+    ];
+
+    expect(trace({ rows }).lines).toEqual([
+      "ZZZ-01 delegated",
+      "ZZZ-02 delegated",
+      "ZZZ-03 missing",
+    ]);
+    expect(trace({ rows, tests: { "a.test.ts": titled("ZZZ-03: x") } }).lines).toEqual([
+      "ZZZ-01 covered",
+      "ZZZ-02 covered",
+      "ZZZ-03 covered",
+    ]);
+  });
+
+  test("a delegation cycle is missing", () => {
+    const tree = {
+      rows: [
+        { coveredBy: ["ZZZ-02"], id: "ZZZ-01" },
+        { coveredBy: ["ZZZ-01"], id: "ZZZ-02" },
+      ],
+    };
+
+    expect(trace(tree).lines).toEqual(["ZZZ-01 missing", "ZZZ-02 missing"]);
+    expect(trace(tree, "--check", "--allow-todo").code).toBe(1);
+  });
+
+  test("a whole-deferred target passes through and the row is covered, naming it", () => {
+    const { code, lines } = trace(
+      {
+        deferred: wholeDeferred,
+        rows: [
+          { coveredBy: ["OAF-01", "ZZZ-02"], id: "ZZZ-01" },
+          { id: "OAF-01" },
+          { id: "ZZZ-02" },
+        ],
+        tests: { "a.test.ts": titled("ZZZ-02: x") },
+      },
+      "--check",
+    );
+
+    expect(lines).toEqual([
+      "ZZZ-01 covered (deferred: OAF-01)",
+      "OAF-01 deferred",
+      "ZZZ-02 covered",
+    ]);
+    expect(code).toBe(0);
+  });
+
+  test("with the deferral removed the target is required again and the row is delegated", () => {
+    const rows = [
+      { coveredBy: ["OAF-01", "ZZZ-02"], id: "ZZZ-01" },
+      { id: "OAF-01" },
+      { id: "ZZZ-02" },
+    ];
+    const tests = { "a.test.ts": titled("ZZZ-02: x") };
+
+    expect(trace({ rows, tests }).lines).toEqual([
+      "ZZZ-01 delegated",
+      "OAF-01 missing",
+      "ZZZ-02 covered",
+    ]);
+    expect(trace({ rows, tests: { "a.test.ts": titled("ZZZ-02: x", "OAF-01: y") } }).lines).toEqual(
+      ["ZZZ-01 covered", "OAF-01 covered", "ZZZ-02 covered"],
+    );
+  });
+
+  test("a row whose every target is whole-deferred is deferred when listed and missing when not", () => {
+    const rows = [{ coveredBy: ["OAF-01"], id: "ZZZ-01" }, { id: "OAF-01" }];
+    const entry = { deferred: "whole", row: "ZZZ-01" };
+
+    expect(trace({ deferred: [...wholeDeferred, entry], rows }, "--check").lines).toEqual([
+      "ZZZ-01 deferred",
+      "OAF-01 deferred",
+    ]);
+    expect(trace({ deferred: wholeDeferred, rows }, "--check").code).toBe(1);
+    expect(trace({ deferred: wholeDeferred, rows }).lines).toEqual([
+      "ZZZ-01 missing",
+      "OAF-01 deferred",
+    ]);
+  });
+
+  test("--only on a delegated row still resolves a target outside the filter", () => {
+    const { lines } = trace(
+      { rows: chain, tests: { "a.test.ts": titled("ZZZ-02: x") } },
+      "--only",
+      "^ZZZ-01$",
+    );
+
+    expect(lines).toEqual(["ZZZ-01 covered"]);
   });
 });
