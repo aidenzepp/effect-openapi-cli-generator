@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
-import { homedir } from "node:os";
 import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, FileSystem, Layer, Order, Path, Schema } from "effect";
@@ -12,6 +11,7 @@ import { DocumentUri } from "../src/model/brands.ts";
 import { GenerationReport } from "../src/report/index.ts";
 import { Description } from "../src/runtime-src/runtime/describe.ts";
 import { sha256Hex } from "../src/write/manifest.ts";
+import { pinnedSpec } from "./support/pinned-spec.ts";
 import { generateFixture, preparePackage, runBin } from "./support/generated-cli.ts";
 import type { GeneratedPackage } from "./support/generated-cli.ts";
 
@@ -26,14 +26,9 @@ const ceilingMib = process.env.MEMGUARD_MIB ?? "4096";
 
 const vp = nodePath.join(root, "node_modules/.bin/vp");
 
-const pinned = nodePath.join(
-  homedir(),
-  ".cache/effect-openapi-cli-generator/corpus/resend/0b2a456",
-);
+const { spec: specPath, twin: pinnedTwin } = await pinnedSpec("resend");
 
-const specPath = nodePath.join(pinned, "resend.json");
-
-const twinPath = nodePath.join(pinned, "resend.yaml");
+const twinPath = pinnedTwin ?? "";
 
 const configPath = nodePath.join(root, "corpus/config/resend.json");
 

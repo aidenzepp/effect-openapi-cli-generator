@@ -17,10 +17,10 @@ jobs:
           bun-version: "1.4.3"
       - run: bun install --frozen-lockfile
       - run: bun run check
-      - run: env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy bun run test
       - uses: actions/cache@v4
         with:
           path: ~/.cache/effect-openapi-cli-generator
           key: corpus-${{ hashFiles('corpus/corpus.json') }}
+      - run: env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy bun run test
       - run: env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy bun run corpus
       - run: env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy bun run coverage

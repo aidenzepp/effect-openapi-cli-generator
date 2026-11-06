@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { homedir } from "node:os";
 import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import { startCaptureServer } from "./fixtures/capture-server.ts";
 import type { HeaderList } from "./fixtures/capture-server.ts";
+import { pinnedSpec } from "./support/pinned-spec.ts";
 import { generateFixture, preparePackage } from "./support/generated-cli.ts";
 import type { GeneratedPackage } from "./support/generated-cli.ts";
 
@@ -14,10 +14,7 @@ import type { GeneratedPackage } from "./support/generated-cli.ts";
 
 const root = nodePath.resolve(import.meta.dir, "..");
 
-const specPath = nodePath.join(
-  homedir(),
-  ".cache/effect-openapi-cli-generator/corpus/resend/0b2a456/resend.json",
-);
+const { spec: specPath } = await pinnedSpec("resend");
 
 const configPath = nodePath.join(root, "corpus/config/resend.json");
 
