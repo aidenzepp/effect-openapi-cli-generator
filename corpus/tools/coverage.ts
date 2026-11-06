@@ -125,12 +125,13 @@ const carries = (command: Command, element: WalkElement): boolean => {
  *
  * - An operation is accounted for by a command at its `(document, pointer)`, or by an operation- or
  *   document-scope refusal.
- * - An element under an operation is accounted for when a command for THAT operation carries it: a
- *   parameter by flag pointer, request media and response keys by value as the spec spells them, a
- *   security alternative by scheme set, a server by URL.
+ * - An element under an operation is accounted for when every command for THAT operation (its primary
+ *   name and each `x-forge-aliases` alias, design 8.3 Aliases) carries it: a parameter by flag
+ *   pointer, request media and response keys by value as the spec spells them, a security
+ *   alternative by scheme set, a server by URL.
  * - An inherited element (path-item parameter, path-item or root server, root security alternative)
- *   is accounted for when every operation that inherits it is refused or has a command that carries
- *   it; with no inheriting operation it affects no request.
+ *   is accounted for when every operation that inherits it is refused or every command of it
+ *   carries it; with no inheriting operation it affects no request.
  * - An element-scope refusal covers its pointer and descendants; an operation-scope refusal its
  *   subtree and that operation's inherited elements; a document-scope refusal its document.
  * - A notice covers only the element at its exact pointer, never an operation; such elements are
@@ -185,8 +186,16 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
           record.document === label(element.document) &&
           (record.scope === "document" || within(element.pointer, record.pointer)),
       );
-    const carried = (operation: Operation, element: WalkElement): boolean =>
-      refused(operation) || commandsOf(operation).some((command) => carries(command, element));
+    // Every command of the operation (its primary name and each alias) must carry the element; an
+    // operation with no command carries nothing.
+    const carried = (operation: Operation, element: WalkElement): boolean => {
+      const commands = commandsOf(operation);
+
+      return (
+        refused(operation) ||
+        (commands.length > 0 && commands.every((command) => carries(command, element)))
+      );
+    };
 
     // Accounted for by a command or a refusal, without notices.
     const generated = (element: WalkElement): boolean => {
