@@ -3,7 +3,7 @@ import type { Command } from "effect/cli";
 import { Flag, GlobalFlag } from "effect/cli";
 import { Servers } from "./base-url.ts";
 
-const Location = Schema.Literals(["body", "cookie", "header", "path", "query"]);
+const Location = Schema.Literals(["body", "cookie", "header", "path", "query", "querystring"]);
 
 /**
  * The per-flag binding a generated command declares: where the value goes on the wire.

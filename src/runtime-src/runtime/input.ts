@@ -522,8 +522,19 @@ export const jsonFlag = (name: string) =>
     ),
   );
 
-const replace = (_key: string, value: JsonNode): JsonNode | RawJson =>
-  value instanceof JsonNumber ? bunJson.rawJSON(value.text) : value;
+// A `JsonNumber` whose text is not a JSON number throws here, before `JSON.rawJSON` could write it
+// as some other JSON primitive; the merge's catch turns that into a value-free failure.
+const replace = (_key: string, value: JsonNode): JsonNode | RawJson => {
+  if (!(value instanceof JsonNumber)) {
+    return value;
+  }
+
+  if (!isJsonNumberText(value.text)) {
+    throw new SyntaxError("a JSON number has no JSON text form");
+  }
+
+  return bunJson.rawJSON(value.text);
+};
 
 const segmentsOf = (pointer: string): readonly string[] | undefined =>
   pointer.startsWith("/")
@@ -665,23 +676,30 @@ const sourceOf = (options: {
     : Effect.succeed(Option.none());
 };
 
-/**
- * The JSON request body from `--body` or `--body-file` and the field flags (design 4.5). Field
- * flags are keyed by RFC 6901 pointer from the body root and override the body; the objects they
- * touch have no prototype, so `__proto__`, `constructor` and `prototype` are ordinary own keys.
- * The merged value is asserted against `schema`, never decoded, and the merged value is what is
- * sent. Without a field flag the operator's bytes are sent verbatim. With no input at all a
- * required body is `{}` (still asserted) and an optional one is empty. Failures name a flag and
- * never a value or a path.
- */
-export const mergeBody = (options: {
+interface BodyOptions {
   readonly body: Option.Option<string>;
   readonly bodyFile: Option.Option<string>;
   readonly fields: Fields;
   readonly required: boolean;
   readonly schema: Schema.Top;
-}): Effect.Effect<
-  HttpBody.HttpBody,
+}
+
+// What the merge of the body sources settled on: no body, the operator's bytes as given, or the
+// merged value with its text. Every variant that carries text was asserted against the schema.
+type Merged =
+  | { readonly _tag: "Empty" }
+  | { readonly _tag: "Verbatim"; readonly bytes: Uint8Array; readonly text: string }
+  | { readonly _tag: "Merged"; readonly text: string; readonly value: JsonNode };
+
+// The merge `mergeBody` and `structuredBody` share; `flag` names the source a failure blames, and
+// `parse` is the bounded, number-preserving parse that blames it.
+const mergeSources = (
+  options: BodyOptions,
+): Effect.Effect<
+  {
+    readonly merged: Merged;
+    readonly parse: (text: string) => Effect.Effect<JsonNode, UsageError>;
+  },
   UsageError,
   FileSystem.FileSystem | Stdio.Stdio | StdinClaim
 > =>
@@ -700,6 +718,10 @@ export const mergeBody = (options: {
             catch: () => usage(flag, "is not valid JSON"),
             try: () => bunJson.parse(text, reviver),
           });
+    const settled = (merged: Merged) => ({
+      merged,
+      parse: (text: string) => parse(text, revive),
+    });
     const assert = (text: string) =>
       parse(text).pipe(
         Effect.filterOrFail(Schema.is(options.schema), () =>
@@ -709,18 +731,20 @@ export const mergeBody = (options: {
 
     if (Option.isNone(source) && overrides.length === 0) {
       if (!options.required) {
-        return HttpBody.empty;
+        return settled({ _tag: "Empty" });
       }
 
       yield* assert("{}");
 
-      return HttpBody.uint8Array(encoder.encode("{}"));
+      return settled({ _tag: "Merged", text: "{}", value: bare() });
     }
 
     if (Option.isSome(source) && overrides.length === 0) {
-      yield* assert(yield* decodeText(source.value.bytes, flag));
+      const text = yield* decodeText(source.value.bytes, flag);
 
-      return HttpBody.uint8Array(source.value.bytes);
+      yield* assert(text);
+
+      return settled({ _tag: "Verbatim", bytes: source.value.bytes, text });
     }
 
     const base = Option.isSome(source)
@@ -757,8 +781,55 @@ export const mergeBody = (options: {
 
     yield* assert(text);
 
-    return HttpBody.uint8Array(encoder.encode(text));
+    return settled({ _tag: "Merged", text, value: base });
   });
+
+/**
+ * The JSON request body from `--body` or `--body-file` and the field flags (design 4.5). Field
+ * flags are keyed by RFC 6901 pointer from the body root and override the body; the objects they
+ * touch have no prototype, so `__proto__`, `constructor` and `prototype` are ordinary own keys.
+ * The merged value is asserted against `schema`, never decoded, and the merged value is what is
+ * sent. Without a field flag the operator's bytes are sent verbatim. With no input at all a
+ * required body is `{}` (still asserted) and an optional one is empty. Failures name a flag and
+ * never a value or a path.
+ */
+export const mergeBody = (
+  options: BodyOptions,
+): Effect.Effect<HttpBody.HttpBody, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  mergeSources(options).pipe(
+    Effect.map(({ merged }) => {
+      if (merged._tag === "Empty") {
+        return HttpBody.empty;
+      }
+
+      return HttpBody.uint8Array(
+        merged._tag === "Verbatim" ? merged.bytes : encoder.encode(merged.text),
+      );
+    }),
+  );
+
+/**
+ * A structured request body (`application/x-www-form-urlencoded`) as the JSON value its encoder
+ * takes, merged from the same sources by the same rules and failures as `mergeBody`. Numbers whose
+ * text `JSON.parse` would change stay a `JsonNumber`, and objects have no prototype. With no input
+ * an optional body is `undefined` and a required one is `{}`.
+ */
+export const structuredBody = (
+  options: BodyOptions,
+): Effect.Effect<
+  JsonNode | undefined,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  mergeSources(options).pipe(
+    Effect.flatMap(({ merged, parse }) => {
+      if (merged._tag === "Empty") {
+        return Effect.undefined;
+      }
+
+      return merged._tag === "Merged" ? Effect.succeed(merged.value) : parse(merged.text);
+    }),
+  );
 
 /**
  * The `Content-Type` a declared key sends: the key itself, or any concrete string when the key is a

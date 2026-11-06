@@ -49,8 +49,9 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text and form
- * request bodies are `unsupported-body` until their merge exists, and so is a multipart body the
+ * The plan, model or author config holds something the `cli/` layer cannot express. Text bodies,
+ * and a form body beside other media types, are `unsupported-body` until their merge exists, and
+ * so is a multipart body the
  * runtime writer cannot send exactly (`formParts` names why); an XML body is opaque `--body-file`
  * bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
  * with no call-expression form today: an integer field whose width the walk cannot settle, and a
@@ -605,11 +606,15 @@ const wholeBody = (
 const isOpaque = (alternative: MediaAlternative): boolean =>
   alternative.codec === "binary" || alternative.codec === "xml";
 
+// A lone form-urlencoded body is merged from the JSON body sources into the value the `api/`
+// builder encodes (`Input.structuredBody`); a form alternative beside other media types is not
+// merged yet (m2-em9). `lone` is set when the body has no other alternative to choose.
 const alternativeBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
   required: boolean,
   context: CommandContext,
+  lone = false,
 ) =>
   Effect.gen(function* body() {
     const sources: Entry[] = [
@@ -623,7 +628,8 @@ const alternativeBody = (
       };
     }
 
-    if (alternative.codec !== "json") {
+    const structured = lone && alternative.codec === "form";
+    if (alternative.codec !== "json" && !structured) {
       return yield* refuse("unsupported-body", `${alternative.codec}:${alternative.mediaType}`);
     }
 
@@ -675,7 +681,7 @@ const alternativeBody = (
     return {
       domain: [schemaName],
       value: fn(
-        "Input.mergeBody",
+        structured ? "Input.structuredBody" : "Input.mergeBody",
         obj([
           ...sources,
           ["fields", obj(fields)],
@@ -798,7 +804,7 @@ const bodyPlan = (
     }
 
     if (!choosesType) {
-      const single = yield* alternativeBody(command, first, body.required, context);
+      const single = yield* alternativeBody(command, first, body.required, context, true);
       const parameter = isOpaque(first) ? "loaded" : "merged";
 
       return Option.some({
