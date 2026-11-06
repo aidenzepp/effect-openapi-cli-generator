@@ -235,6 +235,11 @@ describe("model entities", () => {
     ).toBe(false);
   });
 
+  test("an encoding rule's transfer encoding is base64 or absent", () => {
+    expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64" })).toBe(true);
+    expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64url" })).toBe(false);
+  });
+
   test("a cookie or header apiKey name must be a token", () => {
     const cookie = (name: string) => ({
       ...securityScheme,

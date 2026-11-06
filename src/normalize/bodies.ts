@@ -376,7 +376,7 @@ const memberSchema = (members: Members, target: Target): CanonicalKey | undefine
     : members.prefixItems[target.index];
 
 interface Facts {
-  readonly contentEncoding: string | undefined;
+  readonly contentEncoding: { readonly at: CanonicalKey; readonly value: string } | undefined;
   readonly format: string | undefined;
   readonly items: Facts | undefined;
   readonly type: readonly string[];
@@ -408,7 +408,7 @@ const factsOf = (
     const type = firstLocated(nodes, (node) => node.type)?.value;
 
     return {
-      contentEncoding: firstLocated(nodes, (node) => node.contentEncoding)?.value,
+      contentEncoding: firstLocated(nodes, (node) => node.contentEncoding),
       format: firstLocated(nodes, (node) => node.format)?.value,
       items: itemFacts,
       type: type === undefined ? [] : Arr.ensure(type),
@@ -515,6 +515,7 @@ interface PlainNested {
 }
 
 interface PlainRule extends PlainNested {
+  contentEncoding?: Transfer;
   nested?: readonly PlainNested[];
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
@@ -616,6 +617,7 @@ const typingOf = (
   ctx: Context,
   input: RuleInput,
   node: EncodingNode,
+  facts: Effect.Effect<Facts, BodyNodeBudget>,
 ): Effect.Effect<Typing, BodyNodeBudget> =>
   Effect.gen(function* typing() {
     const given = explicitStyle(node);
@@ -640,7 +642,7 @@ const typingOf = (
     }
 
     if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema));
+      const fallback = defaultFor(ctx.line, yield* facts);
 
       return {
         contentType: [fallback.type],
@@ -853,6 +855,129 @@ const nestingOf = (
     };
   });
 
+// --- Transfer encoding (design 6.3: ENC-37 to ENC-39) ---
+
+type Transfer = "base64";
+
+interface TransferResult {
+  readonly encoding: Transfer | undefined;
+  readonly finding: Finding | undefined;
+  readonly row: string | undefined;
+}
+
+const noTransfer: TransferResult = { encoding: undefined, finding: undefined, row: undefined };
+
+const base64Transfer = (row: string): TransferResult => ({
+  encoding: "base64",
+  finding: undefined,
+  row,
+});
+
+const transferAnchor = (line: Line): string =>
+  line === "3.2"
+    ? "content-transfer-encoding-and-contentencoding"
+    : "encoding-multipart-media-types";
+
+// Transfer encodings are case-insensitive tokens (RFC 2045 6.1).
+const isBase64 = (value: string): boolean => value.toLowerCase() === "base64";
+
+// What one schema declares: 3.0 `format: byte` (ENC-38), 3.1+ `contentEncoding` (ENC-37). Only
+// base64 has a writer, so any other `contentEncoding` refuses the part.
+const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResult | undefined => {
+  if (line === "3.0") {
+    return facts.format === "byte" ? base64Transfer("ENC-38") : undefined;
+  }
+
+  const declared = facts.contentEncoding;
+  if (declared === undefined) {
+    return undefined;
+  }
+
+  return isBase64(declared.value)
+    ? base64Transfer("ENC-37")
+    : {
+        ...noTransfer,
+        finding: refusal(
+          "ENC-37/unsupported-content-encoding",
+          transferAnchor(line),
+          "Multipart part contentEncoding",
+          `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is not base64, the one transfer encoding a part is sent with.`,
+          childKey(declared.at, "contentEncoding"),
+          "Use contentEncoding base64, or remove it to send the part as is",
+        ),
+      };
+};
+
+// A part's transfer encoding, from its schema or, for a repeated part, its items. A nested part
+// has no field to hold one, so it is refused rather than sent unencoded.
+const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResult => {
+  const label = targetLabel(input.target);
+  const found =
+    declaredTransfer(ctx.line, label, facts) ??
+    (facts.items === undefined ? undefined : declaredTransfer(ctx.line, label, facts.items)) ??
+    noTransfer;
+  if (input.depth === 0 || found.row === undefined) {
+    return found;
+  }
+
+  return {
+    ...noTransfer,
+    finding: refusal(
+      `${found.row}/nested-transfer-encoding`,
+      transferAnchor(ctx.line),
+      "Transfer encoding of a nested part",
+      `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
+      input.actual,
+    ),
+  };
+};
+
+const TransferHeaderSchema = Schema.Struct({
+  const: Schema.optionalKey(Schema.Unknown),
+  enum: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+});
+
+const transferHeaderOf = (node: EncodingNode): string | undefined =>
+  Object.keys(node.headers ?? {}).find(
+    (name) => name.toLowerCase() === "content-transfer-encoding",
+  );
+
+// A header schema keyword admits base64 when it is absent or lists it among its string values.
+const admitsBase64 = (values: readonly string[] | undefined): boolean =>
+  values === undefined || values.some(isBase64);
+
+// ENC-39: a declared Content-Transfer-Encoding header whose schema rules out the part's base64.
+const transferConflict = (
+  ctx: Context,
+  input: RuleInput,
+  name: string,
+): Effect.Effect<Finding | undefined> =>
+  Effect.gen(function* conflict() {
+    const header = follow(ctx.resolution, childKey(input.actual, "headers", name));
+    const at = follow(ctx.resolution, childKey(header, "schema"));
+    const schema = yield* nodeIn(ctx.resolution, at).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(TransferHeaderSchema)),
+      Effect.orElseSucceed((): typeof TransferHeaderSchema.Type => ({})),
+    );
+    const isString = Schema.is(Schema.String);
+    const declared = {
+      const: schema.const === undefined ? undefined : [schema.const].filter(isString),
+      enum: schema.enum?.filter(isString),
+    };
+    const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
+
+    return keyword === undefined
+      ? undefined
+      : refusal(
+          "ENC-39/conflicting-transfer-encoding",
+          transferAnchor(ctx.line),
+          "Encoding header Content-Transfer-Encoding",
+          `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
+          childKey(at, keyword),
+          "Remove the header, or let its schema admit base64",
+        );
+  });
+
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
 const buildRule = (
   ctx: Context,
@@ -861,12 +986,29 @@ const buildRule = (
 ): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
-    const typing = yield* typingOf(ctx, input, node);
+    const facts = yield* factsOf(ctx.walk, input.schema);
+    const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
     }
 
+    const transfer = transferOf(ctx, input, facts);
+    if (transfer.finding !== undefined) {
+      return { findings: [...typing.findings, transfer.finding], rule: undefined };
+    }
+
     const headers = yield* headersOf(ctx.resolution, input.actual, node);
+    const transferHeader = transferHeaderOf(node);
+    const conflict =
+      transfer.encoding === undefined ||
+      headers.headers === undefined ||
+      transferHeader === undefined
+        ? undefined
+        : yield* transferConflict(ctx, input, transferHeader);
+    if (conflict !== undefined) {
+      return { findings: [...typing.findings, ...headers.findings, conflict], rule: undefined };
+    }
+
     const nesting = yield* nestingOf(ctx, input, node, buildAll);
     const findings = [...typing.findings, ...headers.findings, ...nesting.findings];
     if (headers.headers === undefined || nesting.refused) {
@@ -881,9 +1023,14 @@ const buildRule = (
         ...typing.rows,
         ...nesting.rows,
         ...(headers.headers.length === 0 ? [] : ["ENC-03"]),
+        ...(transfer.row === undefined ? [] : [transfer.row]),
       ]),
       target: input.target,
     };
+    if (transfer.encoding !== undefined) {
+      rule.contentEncoding = transfer.encoding;
+    }
+
     if (nesting.nested.length > 0) {
       rule.nested = nesting.nested;
     }
@@ -1288,7 +1435,7 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
 const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
-    const typing = yield* typingOf(ctx, input, node);
+    const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
     }
