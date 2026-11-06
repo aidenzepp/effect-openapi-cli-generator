@@ -806,3 +806,22 @@ describe("finalCatch", () => {
     expect(stderr).toBe("");
   });
 });
+
+describe("a credential split by invisible characters is scrubbed (security review)", () => {
+  test.each(["\u202E", "\u200B", "\u0001"])(
+    "renderError and the excerpt redact a credential split by %#",
+    async (split) => {
+      const echo = `x CANARY-SECRET${split}-123 y`;
+      const rendered = renderError(
+        responseError({ bodyExcerpt: echo, requestId: echo, status: 401 }),
+        [bearer],
+      );
+      const excerpt = await excerptWith(echo, defaultMaxErrorBytes, [bearer]);
+
+      for (const output of [rendered, excerpt]) {
+        expect(output).not.toContain("CANARY");
+        expect(output).toContain("<redacted:bearer>");
+      }
+    },
+  );
+});

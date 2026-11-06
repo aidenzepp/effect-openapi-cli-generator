@@ -87,4 +87,20 @@ describe("request id from the declared header (design 7.1, DM2-5)", () => {
 
     expect(result).toBe(response);
   });
+
+  test.each(["\u202E", "\u200B", "\u0001"])(
+    "a credential split by U+%#: invisible character is still scrubbed",
+    async (split) => {
+      const credential: Credential = {
+        definition: { kind: "http", scheme: "bearer" },
+        scheme: "bearer",
+        value: Redacted.make("secretvalue"),
+      };
+      const error = await fail(scripted(404, { "x-request-id": `id-secret${split}value` }), [
+        credential,
+      ]);
+
+      expect(error.requestId).toBe("id-<redacted:bearer>");
+    },
+  );
 });

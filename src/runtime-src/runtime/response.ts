@@ -85,7 +85,7 @@ const requestIdOf = (
 
   return header === undefined
     ? undefined
-    : boundRequestId(scrub(header, credentials).replaceAll(unsafeText, ""));
+    : boundRequestId(scrub(header.replaceAll(unsafeText, ""), credentials));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
