@@ -1,5 +1,5 @@
-import { Array as Arr, Data, Effect, Order, Schema } from "effect";
-import type { FileSystem, Path, PlatformError, Stream } from "effect";
+import { Array as Arr, Data, Effect, FileSystem, Option, Order, Schema } from "effect";
+import type { Path, PlatformError, Stream } from "effect";
 import { stringLiteral } from "./emit/escape.ts";
 import { emitApi } from "./emit/api.ts";
 import type { ApiEmitError } from "./emit/api.ts";
@@ -12,8 +12,8 @@ import { PackageEmitError } from "./emit/package.ts";
 import type { EmittedFile, GeneratorSource } from "./emit/package.ts";
 import type { PrinterError } from "./emit/printer.ts";
 import { checkSpecText } from "./check/index.ts";
-import { defaultLimits, loadBytes } from "./load/index.ts";
-import type { LoadRefusal } from "./load/index.ts";
+import { defaultLimits, loadBytes, LoadRefusal } from "./load/index.ts";
+import type { DocumentSet } from "./load/document-set.ts";
 import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { decodeAuthorConfig } from "./model/author-config.ts";
 import type { AuthorConfig } from "./model/author-config.ts";
@@ -31,7 +31,7 @@ import { boundOrigins } from "./normalize/servers.ts";
 import { makeGenerationReport, printGenerationReport } from "./report/index.ts";
 import type { GenerationReportValue } from "./report/index.ts";
 import { resolve } from "./resolve/index.ts";
-import type { Resolution } from "./resolve/index.ts";
+import type { Resolution, ResolveMember } from "./resolve/index.ts";
 import { diagnoseDocument } from "./validate/index.ts";
 import type {
   SchemaManifestError,
@@ -44,7 +44,7 @@ import { writeFiles } from "./write/index.ts";
 import type { WriteNotice, WriteRefused } from "./write/index.ts";
 import type { RunLockHeld, RunLockUnavailable } from "./write/lock.ts";
 import { sha256Hex } from "./write/manifest.ts";
-import { specSectionUrl } from "./model/spec-section.ts";
+import { patchVersion, specSectionUrl } from "./model/spec-section.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -60,12 +60,16 @@ export type SpecSource =
     };
 
 /**
- * One generator run: the specification, its retrieval URI, the output directory, `--strict`, and
- * the generator's own `package.json` and `tsconfig.json` (the emitted pins and the report's
- * version), which the caller reads.
+ * One generator run: the specification, its retrieval URI, the other documents `$ref` may resolve
+ * over, the output directory, `--strict`, and the generator's own `package.json` and
+ * `tsconfig.json` (the emitted pins and the report's version), which the caller reads.
  */
 export interface GenerateInput {
   readonly document: Document;
+  /**
+   * The document set (`--document`, `--ref-root`; design 3.3). Absent, the set is the entry alone.
+   */
+  readonly documents?: DocumentSet;
   readonly generator: GeneratorSource;
   readonly outDir: string;
   readonly source: SpecSource;
@@ -134,6 +138,8 @@ const emitHints: Readonly<Record<CliRefusal["reason"], string | undefined>> = {
 
 const GeneratorVersion = Schema.Struct({ version: Schema.String });
 
+const DeclaredOpenapi = Schema.Struct({ openapi: Schema.String });
+
 const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
 
 const isDocumentRefusal = (diagnostic: Diagnostic): boolean =>
@@ -172,6 +178,108 @@ const readConfig = (
       ),
     ),
   );
+
+const duplicateEntry = (document: Document, path: string) =>
+  Schema.decodeUnknownEffect(Diagnostic)({
+    code: "REF-16/duplicate-uri",
+    document,
+    element: "document",
+    hint: path,
+    message: "Two documents in the set share a retrieval URI.",
+    openapi: "unknown",
+    pointer: "",
+    row: "REF-16",
+    scope: "document",
+    severity: "refusal",
+    specSection: "https://spec.openapis.org/oas/v3.2.1.html#establishing-the-base-uri",
+  }).pipe(
+    Effect.orDie,
+    Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))),
+  );
+
+// The real path of `path`, or undefined when it has none.
+const realPathOf = (path: string) =>
+  Effect.gen(function* real() {
+    const fs = yield* FileSystem.FileSystem;
+
+    return Option.getOrUndefined(yield* Effect.option(fs.realPath(path)));
+  });
+
+/**
+ * The set's documents other than the entry, in set order, each with the line it declares (the
+ * entry's when it declares none the generator reads). A member under the entry's own retrieval URI
+ * is the entry when it is the same file, as when `--ref-root` holds the entry; under that URI any
+ * other file is refused as `REF-16/duplicate-uri`, never chosen between.
+ */
+export const setMembers = (
+  entry: { readonly document: Document; readonly source: SpecSource },
+  documents: DocumentSet | undefined,
+): Effect.Effect<readonly ResolveMember[], LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* members() {
+    const found: ResolveMember[] = [];
+
+    for (const [document, member] of documents?.documents ?? []) {
+      if (document === entry.document) {
+        const entryPath =
+          entry.source._tag === "File" ? yield* realPathOf(entry.source.path) : undefined;
+        if (entryPath === undefined || entryPath !== (yield* realPathOf(member.path))) {
+          return yield* duplicateEntry(document, member.path);
+        }
+      } else {
+        const line = yield* Effect.option(lineOf(member.value));
+        found.push(
+          Option.isSome(line)
+            ? { document, line: line.value, value: member.value }
+            : { document, value: member.value },
+        );
+      }
+    }
+
+    return found;
+  });
+
+const pathItemSite = /^\/paths\/[^/]+$/u;
+
+/**
+ * Design 3.3, `PTH-10`: a Path Item under `paths` whose `$ref` ends in another document of the set
+ * is refused at element scope. Assembly and the spec-text checks walk the entry's sites only, so
+ * without this its operations would be left out with no diagnostic.
+ */
+export const otherDocumentPathItems = (
+  resolution: Resolution,
+): Effect.Effect<readonly Diagnostic[]> => {
+  const openapi = Option.match(Schema.decodeUnknownOption(DeclaredOpenapi)(resolution.value), {
+    onNone: () => patchVersion[resolution.line],
+    onSome: (found) => found.openapi,
+  });
+  const references = [...resolution.references.values()].filter(
+    (reference) =>
+      reference.kind === "pathItem" &&
+      reference.site.document === resolution.document &&
+      pathItemSite.test(reference.site.pointer) &&
+      reference.target.document !== resolution.document,
+  );
+
+  return Effect.all(
+    references.map((reference) =>
+      Schema.decodeUnknownEffect(Diagnostic)({
+        code: "PTH-10/other-document",
+        document: resolution.document,
+        element: "Path Item",
+        hint: "Path Items are read from the entry document only; move this one into it.",
+        message:
+          "The Path Item is a reference into another document of the set; its operations are not generated.",
+        openapi,
+        pointer: reference.site.pointer,
+        related: [reference.target],
+        row: "PTH-10",
+        scope: "element",
+        severity: "refusal",
+        specSection: specSectionUrl(resolution.line, "path-item-ref"),
+      }).pipe(Effect.orDie),
+    ),
+  );
+};
 
 const sameKey = (operation: Operation, method: string, path: string): boolean =>
   operation.key.method === method && operation.key.path === path;
@@ -267,6 +375,7 @@ const acceptedServers = (api: Api): readonly string[] =>
 interface Analysis {
   readonly api: Api;
   readonly diagnostics: readonly Diagnostic[];
+  readonly order: readonly Document[];
   readonly resolution: Resolution;
 }
 
@@ -280,8 +389,12 @@ const analyze = (
 ) =>
   Effect.gen(function* analyzeGen() {
     const { document } = input;
+    const members = yield* setMembers(input, input.documents).pipe(
+      Effect.mapError((refusal) => refused("document")([refusal.diagnostic])),
+    );
+    const documents = [document, ...members.map((member) => member.document), configDocument];
     const order = (diagnostics: readonly Diagnostic[]) =>
-      sortDiagnostics([document, configDocument], distinctDiagnostics(diagnostics));
+      sortDiagnostics(documents, distinctDiagnostics(diagnostics));
     const loaded = yield* loadBytes(bytes, { document }).pipe(
       Effect.mapError((refusal) => refused("document")([refusal.diagnostic])),
     );
@@ -295,11 +408,12 @@ const analyze = (
       return yield* refused("document")(order(validated));
     }
 
-    const resolution = yield* resolve({ document, line, value: loaded.value }).pipe(
+    const resolution = yield* resolve({ document, line, members, value: loaded.value }).pipe(
       Effect.mapError((refusal) => refused("document")(order([...validated, refusal.diagnostic]))),
     );
     const checked = yield* checkSpecText(resolution);
-    const early = [...validated, ...resolution.diagnostics, ...checked];
+    const outside = yield* otherDocumentPathItems(resolution);
+    const early = [...validated, ...resolution.diagnostics, ...checked, ...outside];
     if (early.some(isDocumentRefusal)) {
       return yield* refused("document")(order(early));
     }
@@ -311,14 +425,14 @@ const analyze = (
       return yield* refused("document")(diagnostics);
     }
 
-    const analysis: Analysis = { api, diagnostics, resolution };
+    const analysis: Analysis = { api, diagnostics, order: documents, resolution };
 
     return analysis;
   });
 
 /**
- * Generates a CLI package (design 3, D-AD14): load, validate, resolve, check, normalize, plan
- * names, emit `domain/`, `api/`, `cli/` and the scaffold, then write every file and
+ * Generates a CLI package (design 3, D-AD14): load, validate, resolve over the document set, check,
+ * normalize, plan names, emit `domain/`, `api/`, `cli/` and the scaffold, then write every file and
  * `generation-report.json` in one run. A document-scope refusal stops before emission and writes
  * nothing; an operation or element refusal leaves that element out and writes the rest; under
  * `strict` any refusal writes nothing. Each `CliRefusal` becomes an `EMT-1` diagnostic (design
@@ -338,6 +452,7 @@ export const generate = (
     const {
       api,
       diagnostics: analyzed,
+      order,
       resolution,
     } = yield* analyze(input, bytes, author.value, configDocument);
     // Each servers table binds the origins of its own level only (design 6.4), so a credential
@@ -350,7 +465,7 @@ export const generate = (
       strict: input.strict,
     });
     const planned = sortDiagnostics(
-      [document, configDocument],
+      order,
       distinctDiagnostics([...analyzed, ...bound.diagnostics, ...plan.diagnostics]),
     );
     if (planned.some(isDocumentRefusal)) {
@@ -371,10 +486,7 @@ export const generate = (
     });
     const cli = yield* emitCli({ api, config: author.value, plan });
     const emitted = yield* Effect.all(cli.refusals.map((refusal) => emitRefusal(api, refusal)));
-    const diagnostics = sortDiagnostics(
-      [document, configDocument],
-      distinctDiagnostics([...planned, ...emitted]),
-    );
+    const diagnostics = sortDiagnostics(order, distinctDiagnostics([...planned, ...emitted]));
     if (input.strict && diagnostics.some(isRefusal)) {
       return yield* refused("strict")(diagnostics);
     }
