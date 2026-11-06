@@ -38,11 +38,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "commandPath [things, get] from x-fern metadata",
-        "commandPath": ["things-get"],
-        "vendorExtensionIgnored": true,
+        "commandPath": ["things", "get"],
+        "commandSources": { "group": "x-fern", "command": "operationId" },
         "informational": "EXT"
       },
-      "designSection": "§2.3 EXT; §4.4; §10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "norm-path-parameters-positional-for-list-and-bulk",
@@ -2601,11 +2601,12 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "commandPath [cloud-api,user-accounts,deep,reports,get-report]",
-        "commandPath": ["reports-get"],
+        "commandPath": ["cloud-api", "user-accounts", "deep", "reports", "get-report"],
+        "commandSources": { "group": "x-fern", "command": "x-fern" },
         "informational": "EXT",
         "inputNotMutated": true
       },
-      "designSection": "§10 D-CUS2; §4.4"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-group-from-first-tag",
@@ -2653,9 +2654,11 @@
         "outcome": "implemented",
         "priorOutcome": "empty aliases removed the command",
         "commandPathCount": 1,
+        "commandPath": ["get"],
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-forge-aliases" },
         "informational": "EXT"
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-no-operation-id-derived-from-route",
@@ -2818,11 +2821,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-number",
@@ -2836,11 +2839,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-object",
@@ -2854,11 +2857,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-empty-array",
@@ -2872,11 +2875,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-empty",
@@ -2890,11 +2893,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-dots",
@@ -2908,11 +2911,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-array-with-number",
@@ -2926,11 +2929,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-metadata-malformed-array-with-empty",
@@ -2944,11 +2947,11 @@
       "expected": {
         "outcome": "implemented",
         "priorOutcome": "refusal at /x-fern-sdk-group-name",
-        "extensionNotRead": true,
+        "notice": { "code": "EXT-01/naming-invalid", "pointer": "/x-fern-sdk-group-name" },
         "informational": "EXT",
         "commandPath": ["get"]
       },
-      "designSection": "§10 D-CUS2"
+      "designSection": "§4.4 Naming extensions; §10 D-NAME4"
     },
     {
       "id": "cmd-unsafe-token-folded-slash",

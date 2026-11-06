@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import type { Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type { NamingAlias, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
 import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
@@ -61,15 +61,34 @@ export interface PlannedFlag {
 }
 
 /**
- * One generated command; `configKey` is the author-config key that renames it.
+ * Where a command's group or command name came from (design 8.1 `commandNames`): `none` is a root
+ * command's group.
+ */
+export type NameSource = "config" | "none" | "operationId" | "route" | "tag" | "x-fern" | "x-forge";
+
+/**
+ * The sources of one command's group and command name.
+ */
+export interface NameSources {
+  readonly command: NameSource;
+  readonly group: NameSource;
+}
+
+/**
+ * One generated command; `configKey` is the author-config key that renames the operation's
+ * primary command. `alias` is an alias command's index in the author-config `aliases`, when given,
+ * else in `x-forge-aliases`; an operation's commands are its primary followed by its aliases, each
+ * sending the same request (design 4.4).
  */
 export interface PlannedCommand {
+  readonly alias?: number;
   readonly configKey: string;
   readonly flags: readonly PlannedFlag[];
   readonly identifier: SafeIdentifierValue;
   readonly name: string;
   readonly operation: Operation;
   readonly positionals: readonly PlannedPositional[];
+  readonly sources: NameSources;
 }
 
 /**
@@ -94,7 +113,7 @@ export interface PlannedCredential {
   readonly scheme: string;
 }
 
-type OperationOverride = NonNullable<
+export type OperationOverride = NonNullable<
   NonNullable<NonNullable<AuthorConfig["naming"]>["operations"]>[string]
 >;
 
@@ -138,36 +157,110 @@ export const overrideSite = (config: AuthorConfig, operation: Operation): Overri
 
 const templateExpression = /\{(?<name>[^{}]+)\}/gu;
 
+export type ConfigAlias = NonNullable<OperationOverride["aliases"]>[number];
+
 /**
- * The command name before collision checks (design 4.4): the override, else the `operationId` fold
- * with a leading word run equal to the group's words dropped, else `<method>` and the path's
- * literal words with `by-<param>` for each template expression, in template order. The route form
- * applies only without an `operationId`, never when its fold is empty. A drop that would leave
- * nothing is not made.
+ * Who names one planned command: the operation itself, through the author config and its own
+ * extensions, one of its `x-forge-aliases` entries, through that entry's keys only, or one of its
+ * author-config `aliases`, which replace the extension's.
  */
-export const commandName = (
-  operation: Operation,
-  override: OperationOverride | undefined,
-  groupTag: string | undefined,
+export type Namer =
+  | { readonly _tag: "Primary"; readonly override: OperationOverride | undefined }
+  | { readonly _tag: "Alias"; readonly alias: typeof NamingAlias.Type }
+  | { readonly _tag: "ConfigAlias"; readonly alias: ConfigAlias };
+
+export interface SourcedName {
+  readonly folded: Folded<string>;
+  readonly source: NameSource;
+}
+
+const sourced = (
+  folded: Result.Result<Folded<string>, EmptyFold>,
+  source: NameSource,
+): Result.Result<SourcedName, EmptyFold> =>
+  Result.isFailure(folded)
+    ? Result.fail(folded.failure)
+    : Result.succeed({ folded: folded.success, source });
+
+// The `operationId` fold: a leading word run equal to the group's words is dropped, unless the
+// drop would leave nothing.
+const foldOperationId = (
+  operationId: string,
+  groupLabel: string | undefined,
 ): Result.Result<Folded<string>, EmptyFold> => {
-  if (override?.command !== undefined) {
-    return foldKebab(override.command);
-  }
-
-  if (operation.operationId === undefined) {
-    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
-
-    return foldKebab(`${operation.key.method} ${route}`);
-  }
-
-  const idWords = words(operation.operationId);
-  const group = groupTag === undefined ? [] : words(groupTag).map((word) => word.toLowerCase());
+  const idWords = words(operationId);
+  const group = groupLabel === undefined ? [] : words(groupLabel).map((word) => word.toLowerCase());
   const leads =
     group.length > 0 &&
     idWords.length > group.length &&
     group.every((word, index) => idWords[index]?.toLowerCase() === word);
 
-  return foldKebab(leads ? idWords.slice(group.length).join(" ") : operation.operationId);
+  return foldKebab(leads ? idWords.slice(group.length).join(" ") : operationId);
+};
+
+// The name without a naming key: the `operationId` fold, else the route form.
+const foldedDefault = (
+  operation: Operation,
+  groupLabel: string | undefined,
+): Result.Result<SourcedName, EmptyFold> => {
+  if (operation.operationId === undefined) {
+    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
+
+    return sourced(foldKebab(`${operation.key.method} ${route}`), "route");
+  }
+
+  return sourced(foldOperationId(operation.operationId, groupLabel), "operationId");
+};
+
+/**
+ * The command name before collision checks (design 4.4), per source: for the primary, the author
+ * config, else `x-forge-method-name`, else `x-fern-sdk-method-name`, else the `operationId` fold
+ * with the group-word drop, else `<method>` and the path's literal words with `by-<param>` for each
+ * template expression, in template order. An alias takes its own Forge, else Fern, method name,
+ * else the fold of its own `operationId`, never the operation's. An author-config alias takes its
+ * own method, else the operation's `operationId` fold or route form. An extension or config name
+ * folds without the drop. The route form applies only without an `operationId`, never when its fold
+ * is empty. `groupLabel` is the unfolded name of the command's innermost group.
+ */
+export const commandName = (
+  operation: Operation,
+  namer: Namer,
+  groupLabel: string | undefined,
+): Result.Result<SourcedName, EmptyFold> => {
+  if (namer._tag === "Alias") {
+    const { alias } = namer;
+    const method = alias.forge?.method ?? alias.fern?.method;
+    if (method !== undefined) {
+      return sourced(foldKebab(method), alias.forge?.method === undefined ? "x-fern" : "x-forge");
+    }
+
+    // A usable alias has a method name or its own operationId (m2-nmx1); an empty input refuses.
+    return sourced(foldOperationId(alias.operationId ?? "", groupLabel), "operationId");
+  }
+
+  if (namer._tag === "ConfigAlias") {
+    const { method } = namer.alias;
+
+    return method === undefined
+      ? foldedDefault(operation, groupLabel)
+      : sourced(foldKebab(method), "config");
+  }
+
+  const { override } = namer;
+  if (override?.command !== undefined) {
+    return sourced(foldKebab(override.command), "config");
+  }
+
+  const { naming } = operation;
+  if (naming?.forge?.method !== undefined) {
+    return sourced(foldKebab(naming.forge.method), "x-forge");
+  }
+
+  if (naming?.fern?.method !== undefined) {
+    return sourced(foldKebab(naming.fern.method), "x-fern");
+  }
+
+  return foldedDefault(operation, groupLabel);
 };
 
 /**
