@@ -239,17 +239,18 @@ describe("emitCli: cookie and querystring parameters", () => {
   });
 });
 
-// Blocked outside this slice (src/runtime-src/runtime/input.ts): the builder takes the form body as
-// `Serialize.Json | undefined`, and no runtime function yields that from `--body`, `--body-file`
-// and the field flags; `Input.mergeBody` yields an `HttpBody`. The command is refused today.
+// The builder takes the form body as `Serialize.Json | undefined`; `Input.structuredBody` merges
+// `--body`, `--body-file` and the field flags into that value.
 describe("emitCli: form-urlencoded bodies", () => {
-  test.todo("a form body is built from the JSON body sources and handed to the builder", async () => {
+  test("a form body is built from the JSON body sources and handed to the builder", async () => {
     const { cli, users } = await cliOf(optional);
     const create = statement(users, "sessionsCreate");
 
     expect(cli.refusals).toEqual([]);
     expect(create).toContain("body: Input.bodyFlag");
     expect(create).toContain("bodyFile: Input.bodyFileFlag");
+    expect(create).toContain("Input.structuredBody(");
+    expect(create).not.toContain("Input.mergeBody(");
     expect(create).toContain("Users.sessionsCreate({ body:");
   });
 });
@@ -297,18 +298,17 @@ const typeCheck = async (variant: Variant, name: string) => {
   });
 };
 
-// Blocked outside this slice, besides the form body above: `Describe.Binding` takes no
-// `querystring` location (src/runtime-src/runtime/describe.ts), and `Input.jsonFlag` yields a
-// `JsonNode`, whose `JsonNumber` is not a `Serialize.Json` (src/runtime-src/runtime/input.ts).
+// `Describe.Binding` takes the `querystring` location, and the `JsonNode` that `Input.jsonFlag`
+// and `Input.structuredBody` yield is a `Serialize.Json`.
 describe("emitCli: the emitted cli module against its api module and the runtime", () => {
-  test.todo("optional cookie and querystring, required form body: the hand-off type-checks", async () => {
+  test("optional cookie and querystring, required form body: the hand-off type-checks", async () => {
     const result = await typeCheck(optional, "optional");
 
     expect(new TextDecoder().decode(result.stdout)).toBe("");
     expect(result.exitCode).toBe(0);
   }, 120_000);
 
-  test.todo("required cookie and querystring, optional form body: the hand-off type-checks", async () => {
+  test("required cookie and querystring, optional form body: the hand-off type-checks", async () => {
     const result = await typeCheck(required, "required");
 
     expect(new TextDecoder().decode(result.stdout)).toBe("");
