@@ -58,6 +58,7 @@ export class ApiEmitError extends Data.TaggedError("ApiEmitError")<{
     | "unknown-scheme"
     | "unprintable-name"
     | "unresolved-schema"
+    | "unsupported-encoding"
     | "unsupported-parameter"
     | "unsupported-scheme";
   readonly subject: string;
@@ -256,6 +257,7 @@ const documentLabel = (entry: string, document: string): string => {
 };
 
 interface ParameterParts {
+  readonly cookie?: Expr;
   readonly field: Field;
   readonly header?: Expr;
   readonly path?: Expr;
@@ -271,15 +273,110 @@ const queryStyles: ReadonlySet<string> = new Set([
   "spaceDelimited",
 ]);
 
-const parameterParts = (
+interface ObjectSchemas {
+  readonly properties: ReadonlyMap<string, Schema.Json>;
+  readonly required: ReadonlySet<string>;
+}
+
+const maxPartNodes = 1024;
+
+// The properties and `required` names of an object root (a multipart or form body, a form
+// querystring): its own, then those of its `allOf` members, in document order, each node read once.
+const objectSchemas = (defs: Defs, key: string): ObjectSchemas => {
+  const properties = new Map<string, Schema.Json>();
+  const required = new Set<string>();
+  const seen = new Set<JsonNode>();
+  const pending: (Schema.Json | undefined)[] = [own(defs, key)];
+  while (pending.length > 0 && seen.size < maxPartNodes) {
+    const node = settle(defs, pending.pop(), key);
+    if (Result.isFailure(node) || seen.has(node.success)) {
+      continue;
+    }
+
+    seen.add(node.success);
+
+    const declared = own(node.success, "properties");
+    for (const [name, schema] of isNode(declared) ? Object.entries(declared) : []) {
+      if (!properties.has(name)) {
+        properties.set(name, schema);
+      }
+    }
+
+    const names = own(node.success, "required");
+    for (const name of Array.isArray(names) ? names.filter(Predicate.isString) : []) {
+      required.add(name);
+    }
+
+    const members: Schema.Json | undefined = own(node.success, "allOf");
+    if (Array.isArray(members)) {
+      pending.push(...Arr.reverse(members.filter(isNode)));
+    }
+  }
+
+  return { properties, required };
+};
+
+const cookieStyles: ReadonlySet<string> = new Set(["cookie", "form"]);
+
+const formMedia = "application/x-www-form-urlencoded";
+
+interface ParameterContext {
+  readonly defs: Defs;
+  readonly line: Api["line"];
+  readonly memo: Map<string, boolean>;
+}
+
+// A `querystring` parameter (design 6.1): its value is JSON data the runtime serializes by its one
+// media type. Form content declares the object's properties, in document order, with no Encoding
+// fields (a Parameter's `content` carries none), so pair order and the declared names hold.
+const querystringParts = (
   entry: InputKey,
   defs: Defs,
-  memo: Map<string, boolean>,
 ): Effect.Effect<ParameterParts, ApiEmitError> =>
   Effect.gen(function* parts() {
     const { key, parameter } = entry;
     const { serialization } = parameter;
+    if (serialization.kind !== "content") {
+      return yield* refuse("unsupported-parameter", `querystring:${parameter.wireName}`);
+    }
+
+    const json = typeRef(I("Serialize"), [M("Json")]);
+    const field: Field = {
+      key,
+      optional: !parameter.required,
+      type: parameter.required ? json : optionalOf(json),
+    };
+    const { mediaType } = serialization;
+    const options: (readonly [string, Expr])[] = [["required", bool(parameter.required)]];
+    if (essence(mediaType) === formMedia) {
+      const { properties } = objectSchemas(defs, serialization.schema.key);
+      options.push([
+        "properties",
+        arr([...properties.keys()].map((name) => arr([str(name), obj([])]))),
+      ]);
+    }
+
+    const value = member(ident(I("input")), yield* memberName(key));
+
+    return {
+      field,
+      query: fn("querystring", [str(parameter.wireName), str(mediaType), value, obj(options)]),
+    };
+  });
+
+const parameterParts = (
+  entry: InputKey,
+  context: ParameterContext,
+): Effect.Effect<ParameterParts, ApiEmitError> =>
+  Effect.gen(function* parts() {
+    const { defs, memo } = context;
+    const { key, parameter } = entry;
+    const { serialization } = parameter;
     const subject = `${parameter.location}:${parameter.wireName}`;
+    if (parameter.location === "querystring") {
+      return yield* querystringParts(entry, defs);
+    }
+
     if (serialization.kind !== "style") {
       return yield* refuse("unsupported-parameter", subject);
     }
@@ -334,6 +431,18 @@ const parameterParts = (
       return { field, header: fn("header", [wire, value, options]) };
     }
 
+    if (parameter.location === "cookie" && cookieStyles.has(style)) {
+      const options = obj([
+        ["allowReserved", bool(allowReserved)],
+        ["explode", bool(explode)],
+        ["line", str(context.line)],
+        ["required", required],
+        ["style", str(style)],
+      ]);
+
+      return { cookie: fn("cookie", [wire, value, options]), field };
+    }
+
     return yield* refuse("unsupported-parameter", subject);
   });
 
@@ -346,49 +455,6 @@ export interface FormPart {
   readonly flag: PlannedFlag;
   readonly name: string;
 }
-
-interface PartSchemas {
-  readonly properties: ReadonlyMap<string, Schema.Json>;
-  readonly required: ReadonlySet<string>;
-}
-
-const maxPartNodes = 1024;
-
-// The properties and `required` names of a multipart root: its own, and those of its `allOf`
-// members, each node read once.
-const partSchemas = (defs: Defs, key: string): PartSchemas => {
-  const properties = new Map<string, Schema.Json>();
-  const required = new Set<string>();
-  const seen = new Set<JsonNode>();
-  const pending: (Schema.Json | undefined)[] = [own(defs, key)];
-  while (pending.length > 0 && seen.size < maxPartNodes) {
-    const node = settle(defs, pending.pop(), key);
-    if (Result.isFailure(node) || seen.has(node.success)) {
-      continue;
-    }
-
-    seen.add(node.success);
-
-    const declared = own(node.success, "properties");
-    for (const [name, schema] of isNode(declared) ? Object.entries(declared) : []) {
-      if (!properties.has(name)) {
-        properties.set(name, schema);
-      }
-    }
-
-    const names = own(node.success, "required");
-    for (const name of Array.isArray(names) ? names.filter(Predicate.isString) : []) {
-      required.add(name);
-    }
-
-    const members: Schema.Json | undefined = own(node.success, "allOf");
-    if (Array.isArray(members)) {
-      pending.push(...members.filter(isNode));
-    }
-  }
-
-  return { properties, required };
-};
 
 // Whether a part's schema, or its array's `items`, declares `contentEncoding`.
 const isEncoded = (defs: Defs, schema: Schema.Json | undefined, key: string): boolean => {
@@ -422,7 +488,7 @@ interface PartContext {
   readonly alternative: MediaAlternative;
   readonly defs: Defs;
   readonly key: string;
-  readonly schemas: PartSchemas;
+  readonly schemas: ObjectSchemas;
 }
 
 // The reason a body's multipart alternative is not one the writer sends, or `undefined`.
@@ -515,7 +581,7 @@ export const formParts = (
   }
 
   const key = alternative.schema?.key ?? "";
-  const context: PartContext = { alternative, defs, key, schemas: partSchemas(defs, key) };
+  const context: PartContext = { alternative, defs, key, schemas: objectSchemas(defs, key) };
   const parts: OrderedPart[] = [];
   for (const flag of command.flags) {
     if (isPartFlag(flag, alternative.mediaType)) {
@@ -544,16 +610,79 @@ interface BodyParts {
   readonly fields: readonly Field[];
 }
 
+// One form-urlencoded property's Encoding Object fields: those its rule sets, `style` only when a
+// query style (design 6.3). An explicit Encoding `contentType` has no runtime input yet.
+const formEncoding = (
+  alternative: MediaAlternative,
+  name: string,
+): Effect.Effect<Expr, ApiEmitError> => {
+  const serialization = alternative.encoding.find(
+    (rule) => rule.target.kind === "property" && rule.target.name === name,
+  )?.serialization;
+  const entries: (readonly [string, Expr])[] = [];
+  if (serialization?.allowReserved !== undefined) {
+    entries.push(["allowReserved", bool(serialization.allowReserved)]);
+  }
+
+  if (serialization?.explode !== undefined) {
+    entries.push(["explode", bool(serialization.explode)]);
+  }
+
+  const style = serialization?.style;
+  if (style !== undefined && !queryStyles.has(style)) {
+    return Effect.fail(refuse("unsupported-encoding", `${alternative.mediaType}:${name}`));
+  }
+
+  if (style !== undefined) {
+    entries.push(["style", str(style)]);
+  }
+
+  return Effect.succeed(obj(entries));
+};
+
+// A form-urlencoded body is JSON data or `undefined` for no body input, encoded by
+// `Serialize.urlEncoded` over the schema's properties in document order (design 4.5, 6.3).
+const urlEncodedParts = (
+  alternative: MediaAlternative,
+  required: boolean,
+  defs: Defs,
+): Effect.Effect<BodyParts, ApiEmitError> =>
+  Effect.gen(function* parts() {
+    const names = [...objectSchemas(defs, alternative.schema?.key ?? "").properties.keys()];
+    const properties = yield* Effect.all(
+      names.map((name) =>
+        formEncoding(alternative, name).pipe(Effect.map((encoding) => arr([str(name), encoding]))),
+      ),
+    );
+    const options = obj([
+      ["properties", arr(properties)],
+      ["required", bool(required)],
+    ]);
+    const value = member(ident(I("input")), M("body"));
+
+    return {
+      entry: ["body", fn("urlEncoded", [str(alternative.mediaType), value, options])],
+      fields: [
+        { key: "body", optional: false, type: optionalOf(typeRef(I("Serialize"), [M("Json")])) },
+      ],
+    };
+  });
+
 // The body is always present in `Input` when the operation declares one: an optional body with
 // no input is `HttpBody.empty`, which `Serialize.request` sends without `Content-Type`. The
 // content type is an input when the operator chooses it: several alternatives, or a range key.
-// A multipart body the writer can send is its part values, streamed by `Serialize.formData`.
-const bodyParts = (command: PlannedCommand, defs: Defs): BodyParts => {
+// A multipart body the writer can send is its part values, streamed by `Serialize.formData`; a
+// lone form-urlencoded one its JSON value, encoded by `Serialize.urlEncoded`.
+const bodyParts = (command: PlannedCommand, defs: Defs): Effect.Effect<BodyParts, ApiEmitError> => {
   const { operation } = command;
   const alternatives = operation.body?.alternatives ?? [];
   const [first] = alternatives;
   if (first === undefined) {
-    return { fields: [] };
+    return Effect.succeed({ fields: [] });
+  }
+
+  if (alternatives.length === 1 && first.codec === "form" && !isRange(first.mediaType)) {
+    return urlEncodedParts(first, operation.body?.required ?? false, defs);
   }
 
   const input = ident(I("input"));
@@ -565,16 +694,19 @@ const bodyParts = (command: PlannedCommand, defs: Defs): BodyParts => {
       ["required", bool(operation.body?.required ?? false)],
     ]);
 
-    return {
+    return Effect.succeed({
       entry: ["body", fn("formData", [value, options])],
       fields: [{ key: "body", optional: false, type: typeRef(I("Serialize"), [M("FormFields")]) }],
-    };
+    });
   }
 
   const body: Field = { key: "body", optional: false, type: typeRef(I("Serialize"), [M("Body")]) };
   const types = mediaTypes(alternatives);
   if (alternatives.length === 1 && !isRange(first.mediaType)) {
-    return { entry: ["body", fn("body", [str(first.mediaType), value])], fields: [body] };
+    return Effect.succeed({
+      entry: ["body", fn("body", [str(first.mediaType), value])],
+      fields: [body],
+    });
   }
 
   const contentType: Field = {
@@ -585,10 +717,10 @@ const bodyParts = (command: PlannedCommand, defs: Defs): BodyParts => {
       : typeUnion(types.map((type) => typeLiteral(type))),
   };
 
-  return {
+  return Effect.succeed({
     entry: ["body", fn("body", [member(input, M("contentType")), value])],
     fields: [body, contentType],
-  };
+  });
 };
 
 const serverEntry = (server: Server): Expr => {
@@ -640,11 +772,9 @@ const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
     return arr(alternatives.map(strings));
   });
 
-interface CommandContext {
+interface CommandContext extends ParameterContext {
   readonly bound: ApiEmitInput["boundOrigins"];
-  readonly defs: Defs;
   readonly document: (uri: string) => string;
-  readonly memo: Map<string, boolean>;
   readonly schemes: ReadonlySet<string>;
 }
 
@@ -661,9 +791,10 @@ const commandStatements = (
     const mediaName = yield* identifier(`${name}Media`);
     const securityName = yield* identifier(`${name}Security`);
     const parameters = yield* Effect.forEach(inputKeys(operation), (entry) =>
-      parameterParts(entry, context.defs, context.memo),
+      parameterParts(entry, context),
     );
-    const body = bodyParts(command, context.defs);
+    const body = yield* bodyParts(command, context.defs);
+    const cookies = parameters.flatMap((part) => (part.cookie === undefined ? [] : [part.cookie]));
     const parts: (readonly [string, Expr])[] = [
       [
         "headers",
@@ -680,6 +811,11 @@ const commandStatements = (
     ];
     if (body.entry !== undefined) {
       parts.push(body.entry);
+    }
+
+    // Only an operation with cookie parameters names `cookies`, so M1 output is unchanged (C16).
+    if (cookies.length > 0) {
+      parts.push(["cookies", arr(cookies)]);
     }
 
     const fields = [...body.fields, ...parameters.map((part) => part.field)];
@@ -903,6 +1039,7 @@ export const emitApi = (
         onSome: (store) => store.$defs,
       }),
       document: (uri) => documentLabel(api.entry, uri),
+      line: api.line,
       memo: new Map(),
       schemes: new Set(plan.credentials.map((credential) => credential.scheme)),
     };
