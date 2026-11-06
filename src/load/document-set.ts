@@ -1,5 +1,4 @@
-import { Effect, Schema } from "effect";
-import type { FileSystem } from "effect";
+import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
 import { pathToFileURL } from "node:url";
 import { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
@@ -37,7 +36,9 @@ export const maxDocuments = 32;
 const messages = {
   "REF-16/document-limit": "The document set holds more documents than the limit allows.",
   "REF-16/duplicate-uri": "Two documents in the set share a retrieval URI.",
+  "REF-16/outside-root": "A reference-root entry resolves outside the reference root.",
   "REF-16/relative-uri": "A document's retrieval URI is not an absolute URI.",
+  "REF-16/unreadable-root": "The reference root or one of its entries cannot be read.",
 } as const;
 
 const decodeUri = Schema.decodeUnknownOption(DocumentUri);
@@ -106,13 +107,111 @@ const loadPair = (
   );
 };
 
+export interface DocumentSetOptions {
+  /**
+   * A directory whose JSON and YAML files are preloaded (`--ref-root`, design 3.3, P10).
+   */
+  readonly refRoot?: string;
+}
+
+const refRootExtensions: ReadonlySet<string> = new Set([".json", ".yaml", ".yml"]);
+
+const unreadable = (path: string) => refuse("REF-16/unreadable-root", { path, uri: "" });
+
+const outsideRoot = (path: string) => refuse("REF-16/outside-root", { path, uri: "" });
+
 /**
- * Loads every pair through the bounded loader, in order, into a set keyed by retrieval URI. The
+ * Resolves `relative` beneath `root` and returns the real path of the result. The lexical
+ * `Path.resolveWithin` check refuses `..` escapes and absolute inputs; the `realPath` re-check
+ * refuses a symlink whose target lies outside the real root.
+ */
+export const resolveUnderRoot = (
+  root: string,
+  relative: string,
+): Effect.Effect<string, LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* resolve() {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const lexical = path.resolve(root, relative);
+    const within = path.resolveWithin(root, relative);
+
+    if (Option.isNone(within)) {
+      return yield* outsideRoot(lexical);
+    }
+
+    const real = yield* fs.realPath(within.value).pipe(Effect.catch(() => unreadable(lexical)));
+    const realRoot = yield* fs.realPath(root).pipe(Effect.catch(() => unreadable(root)));
+
+    return Option.isSome(path.resolveWithin(realRoot, path.relative(realRoot, real)))
+      ? real
+      : yield* outsideRoot(lexical);
+  }).pipe(Effect.provide(Path.layer));
+
+const preloadFile = (documents: Map<Document, SetMember>, real: string) => {
+  const pair: DocumentPair = { path: real, uri: pathToFileURL(real).href };
+
+  return documents.size >= maxDocuments
+    ? refuse("REF-16/document-limit", pair)
+    : loadPair(documents, pair).pipe(
+        Effect.flatMap(([uri, member]) =>
+          Effect.sync(() => {
+            documents.set(uri, member);
+          }),
+        ),
+      );
+};
+
+const preloadRoot = (
+  documents: Map<Document, SetMember>,
+  root: string,
+): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* preload() {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const realRoot = yield* resolveUnderRoot(root, ".");
+    const seenDirectories = new Set<string>([realRoot]);
+    const seenFiles = new Set<string>();
+
+    const walk = (directory: string): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> =>
+      Effect.gen(function* visit() {
+        const names = yield* fs
+          .readDirectory(directory)
+          .pipe(Effect.catch(() => unreadable(directory)));
+
+        for (const name of Arr.sort(names, Order.String)) {
+          const real = yield* resolveUnderRoot(
+            realRoot,
+            path.relative(realRoot, path.join(directory, name)),
+          );
+          const info = yield* fs.stat(real).pipe(Effect.catch(() => unreadable(real)));
+
+          if (info.type === "Directory" && !seenDirectories.has(real)) {
+            seenDirectories.add(real);
+            yield* walk(real);
+          } else if (
+            info.type === "File" &&
+            refRootExtensions.has(path.extname(real).toLowerCase()) &&
+            !seenFiles.has(real)
+          ) {
+            seenFiles.add(real);
+            yield* preloadFile(documents, real);
+          }
+        }
+      });
+
+    yield* walk(realRoot);
+  }).pipe(Effect.provide(Path.layer));
+
+/**
+ * Loads every pair through the bounded loader, in order, then the files under `options.refRoot`
+ * (sorted, each keyed by the `file:` URL of its real path), into a set keyed by retrieval URI. All
+ * documents count toward one budget and share one duplicate check. The
  * first refusal ends the load; every refusal is a document-scope diagnostic whose `hint` is the
  * offending pair's path, never the file's content.
  */
 export const makeDocumentSet = (
   pairs: readonly DocumentPair[],
+  options: DocumentSetOptions = {},
 ): Effect.Effect<DocumentSet, LoadRefusal, FileSystem.FileSystem> =>
   Effect.gen(function* load() {
     const overflow = pairs[maxDocuments];
@@ -127,6 +226,10 @@ export const makeDocumentSet = (
       const [uri, member] = yield* loadPair(documents, pair);
 
       documents.set(uri, member);
+    }
+
+    if (options.refRoot !== undefined) {
+      yield* preloadRoot(documents, options.refRoot);
     }
 
     return { documents };
