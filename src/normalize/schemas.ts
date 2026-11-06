@@ -13,14 +13,16 @@ import {
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
 import { defsKey, keyOf } from "../resolve/canonical.ts";
-import { defaultLimits } from "../resolve/index.ts";
-import type { Resolution, ResolveLimits } from "../resolve/index.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { defaultLimits, nodeAt } from "../resolve/index.ts";
+import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
 import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { isObject, isArray, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
+import { nodeIn } from "./document-set.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -394,6 +396,34 @@ const layoutOf = (budget: Budget, value: Json): Layout => {
   return layout;
 };
 
+// The layout kind each non-schema reference target starts a walk at.
+const targetKinds: Partial<Record<ReferenceKind, Kind>> = {
+  callback: "callback",
+  header: "header",
+  mediaType: "mediaType",
+  parameter: "header",
+  pathItem: "pathItem",
+  requestBody: "requestBody",
+  response: "response",
+};
+
+// The layout of each other document of the set, walked from the objects references reach there,
+// so only the schema roots a reference brings into the entry's operations are stored.
+const memberLayouts = (budget: Budget, resolution: Resolution): ReadonlyMap<Document, Layout> => {
+  const layouts = new Map<Document, Layout>();
+  for (const { kind, target } of resolution.references.values()) {
+    const start = targetKinds[kind];
+    const value = resolution.documents.get(target.document);
+    if (target.document !== resolution.document && start !== undefined && value !== undefined) {
+      const layout = layouts.get(target.document) ?? { budget, roots: [], structural: new Set() };
+      layouts.set(target.document, layout);
+      walkLayout(layout, start, nodeAt(value, target.pointer) ?? null, target.pointer);
+    }
+  }
+
+  return layouts;
+};
+
 // ---------------------------------------------------------------------------------------------
 // The store: every schema root and every schema `$ref` target, converted to draft 2020-12.
 
@@ -407,16 +437,16 @@ const rewriteReferences = (
   budget: Budget,
   resolution: Resolution,
   node: Json,
-  pointer: string,
+  at: CanonicalKey,
 ): Json => {
   const where = resolution.line === "3.0" ? positions30 : positions2020;
-  const tokens = tokensOf(pointer);
+  const tokens = tokensOf(at.pointer);
   if (tokens === undefined) {
     return node;
   }
 
   return transformSchema(budget, node, tokens, where, (current, path) => {
-    const site = { document: resolution.document, pointer: formatPointer(path) };
+    const site = { document: at.document, pointer: formatPointer(path) };
     const reference =
       stringMember(current, "$ref") === undefined
         ? undefined
@@ -495,25 +525,27 @@ const factsOf = (node: Json): SchemaFacts => {
   };
 };
 
-// The source pointer of every stored key: Schema Object roots under `defsKey` of their use site,
-// and schema `$ref` targets under the resolver's key unless the target is not a schema.
-const sitesOf = (budget: Budget, resolution: Resolution): ReadonlyMap<string, string> => {
+// The source of every stored key: Schema Object roots under `defsKey` of their use site, in the
+// entry and in the objects references reach in other documents, and schema `$ref` targets in any
+// document under the resolver's key unless the target is not a schema.
+const sitesOf = (budget: Budget, resolution: Resolution): ReadonlyMap<string, CanonicalKey> => {
   const entry: Document = resolution.document;
   const layout = layoutOf(budget, resolution.value);
-  const sites = new Map(
-    layout.roots.map((pointer): [string, string] => [
-      defsKey(entry, { document: entry, pointer }),
-      pointer,
-    ]),
-  );
+  const members = memberLayouts(budget, resolution);
+  const roots = [
+    ...layout.roots.map((pointer): CanonicalKey => ({ document: entry, pointer })),
+    ...[...members].flatMap(([document, found]) =>
+      found.roots.map((pointer): CanonicalKey => ({ document, pointer })),
+    ),
+  ];
+  const sites = new Map(roots.map((root): [string, CanonicalKey] => [defsKey(entry, root), root]));
   for (const { defsKey: key, kind, target } of resolution.references.values()) {
+    const structural =
+      target.document === entry ? layout.structural : members.get(target.document)?.structural;
     const lifted =
-      kind === "schema" &&
-      key !== undefined &&
-      target.document === entry &&
-      !layout.structural.has(target.pointer);
+      kind === "schema" && key !== undefined && structural?.has(target.pointer) !== true;
     if (lifted) {
-      sites.set(key, target.pointer);
+      sites.set(key, target);
     }
   }
 
@@ -523,15 +555,15 @@ const sitesOf = (budget: Budget, resolution: Resolution): ReadonlyMap<string, st
 const storeFrom = (
   budget: Budget,
   resolution: Resolution,
-  sites: ReadonlyMap<string, string>,
+  sites: ReadonlyMap<string, CanonicalKey>,
 ): Effect.Effect<StoredSchemas, SchemaBudgetExceeded | SchemaImportDefect> =>
   Effect.forEach(sortedKeys(sites), (key) => {
-    const pointer = sites.get(key) ?? "";
+    const at = sites.get(key) ?? { document: resolution.document, pointer: "" };
 
-    return Effect.option(evaluatePointer(resolution.value, pointer)).pipe(
+    return Effect.option(nodeIn(resolution, at)).pipe(
       Effect.map(Option.getOrElse((): Json => ({}))),
       Effect.flatMap((node) =>
-        convert(resolution.line, key, rewriteReferences(budget, resolution, node, pointer)),
+        convert(resolution.line, key, rewriteReferences(budget, resolution, node, at)),
       ),
       Effect.map((converted): [string, Json] => [key, converted]),
     );
@@ -1330,9 +1362,13 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
 const reportedPath = (edit: SchemaEdit, rule: Rule): readonly string[] =>
   rule.severity === "refusal" && edit.action === "remove" ? edit.path.slice(0, -1) : edit.path;
 
+// A diagnostic's identity for deduplication: its code at its document and pointer.
+const identityOf = (code: string, at: { readonly document: string; readonly pointer: string }) =>
+  `${code} ${at.document}#${at.pointer}`;
+
 const diagnosticsOf = (
   resolution: Resolution,
-  sites: ReadonlyMap<string, string>,
+  sites: ReadonlyMap<string, CanonicalKey>,
   edits: readonly SchemaEdit[],
 ): Effect.Effect<readonly Diagnostic[]> => {
   const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
@@ -1340,28 +1376,28 @@ const diagnosticsOf = (
     Option.getOrElse(() => "unknown"),
   );
   const seen = new Set(
-    resolution.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.pointer}`),
+    resolution.diagnostics.map((diagnostic) => identityOf(diagnostic.code, diagnostic)),
   );
   const pending: Effect.Effect<Diagnostic>[] = [];
   const report = (
     code: string,
-    pointer: string,
+    at: CanonicalKey,
     rule: Rule | undefined,
     keyword?: string,
   ): void => {
     const [row = "", name = ""] = code.split("/");
-    const identity = `${code} ${pointer}`;
+    const identity = identityOf(code, at);
     if (rule !== undefined && !seen.has(identity)) {
       seen.add(identity);
 
       const decoded = Schema.decodeUnknownEffect(Diagnostic)({
         code,
-        document: resolution.document,
+        document: at.document,
         element:
           name === "not-asserted" && keyword !== undefined ? `Schema ${keyword}` : rule.element,
         message: rule.message,
         openapi,
-        pointer,
+        pointer: at.pointer,
         row,
         scope: "element",
         severity: rule.severity,
@@ -1372,22 +1408,27 @@ const diagnosticsOf = (
   };
   for (const edit of edits) {
     const rule = rules.get(edit.code.split("/")[1] ?? "");
+    const site = sites.get(edit.key) ?? { document: resolution.document, pointer: "" };
+    const value = resolution.documents.get(site.document) ?? null;
     const pointer =
-      rule === undefined
-        ? ""
-        : sourcePointer(resolution.value, sites.get(edit.key) ?? "", reportedPath(edit, rule));
-    report(edit.code, pointer, rule, edit.action === "remove" ? edit.path.at(-1) : undefined);
+      rule === undefined ? "" : sourcePointer(value, site.pointer, reportedPath(edit, rule));
+    report(
+      edit.code,
+      { document: site.document, pointer },
+      rule,
+      edit.action === "remove" ? edit.path.at(-1) : undefined,
+    );
   }
 
   for (const reference of resolution.references.values()) {
     if (reference.kind === "schema" && reference.defsKey === undefined) {
       const row = resolution.line === "3.0" ? "REF-02" : "SCH-03";
-      report(`${row}/non-schema-target`, reference.site.pointer, rules.get("non-schema-target"));
+      report(`${row}/non-schema-target`, reference.site, rules.get("non-schema-target"));
     }
   }
 
   return Effect.all(pending).pipe(
-    Effect.map((diagnostics) => sortDiagnostics([resolution.document], diagnostics)),
+    Effect.map((diagnostics) => sortDiagnostics([...resolution.documents.keys()], diagnostics)),
   );
 };
 

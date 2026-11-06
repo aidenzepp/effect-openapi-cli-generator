@@ -3,13 +3,14 @@ import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body } from "../model/entities.ts";
-import { defsKey } from "../resolve/canonical.ts";
-import { defaultLimits, referenceAt } from "../resolve/index.ts";
+import { defsKey, keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { defaultLimits } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
+import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -202,7 +203,7 @@ interface Finding {
   readonly element: string;
   readonly hint?: string;
   readonly message: string;
-  readonly pointer: string;
+  readonly at: CanonicalKey;
   readonly severity: "notice" | "refusal";
 }
 
@@ -211,10 +212,10 @@ const refusal = (
   anchor: string,
   element: string,
   message: string,
-  pointer: string,
+  at: CanonicalKey,
   hint?: string,
 ): Finding => {
-  const base: Finding = { anchor, code, element, message, pointer, severity: "refusal" };
+  const base: Finding = { anchor, at, code, element, message, severity: "refusal" };
 
   return hint === undefined ? base : { ...base, hint };
 };
@@ -224,8 +225,8 @@ const notice = (
   anchor: string,
   element: string,
   message: string,
-  pointer: string,
-): Finding => ({ anchor, code, element, message, pointer, severity: "notice" });
+  at: CanonicalKey,
+): Finding => ({ anchor, at, code, element, message, severity: "notice" });
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -233,30 +234,27 @@ const sorted = (rows: readonly string[]): readonly string[] =>
 // --- Schema inspection (design 6.3, MED-27: only `$ref` and `allOf` are followed) ---
 
 interface Located {
+  readonly at: CanonicalKey;
   readonly node: SchemaNodeValue;
-  readonly pointer: string;
 }
 
-const settle = (resolution: Resolution, start: string): string => {
+// Follows schema references to the schema they end at, in whichever document of the set holds it.
+const settle = (resolution: Resolution, start: CanonicalKey): CanonicalKey => {
   let current = start;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const reference = referenceAt(resolution, current);
-    if (
-      reference === undefined ||
-      reference.kind !== "schema" ||
-      reference.target.document !== resolution.document
-    ) {
+    const reference = referenceIn(resolution, current);
+    if (reference === undefined || reference.kind !== "schema") {
       return current;
     }
 
-    current = reference.target.pointer;
+    current = reference.target;
   }
 
   return current;
 };
 
-const nodeAt = (resolution: Resolution, pointer: string): Effect.Effect<SchemaNodeValue> =>
-  evaluatePointer(resolution.value, pointer).pipe(
+const nodeAt = (resolution: Resolution, at: CanonicalKey): Effect.Effect<SchemaNodeValue> =>
+  nodeIn(resolution, at).pipe(
     Effect.map((json) => Schema.decodeUnknownOption(SchemaNode)(json)),
     Effect.map(Option.getOrElse((): SchemaNodeValue => ({}))),
     Effect.orElseSucceed((): SchemaNodeValue => ({})),
@@ -290,26 +288,29 @@ const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
 
 // The schema and its `allOf` members in document order, each distinct schema once, so a graph
 // that reuses members costs its size and a cycle ends at the first repeat.
-const flatten = (walk: Walk, start: string): Effect.Effect<readonly Located[], BodyNodeBudget> =>
+const flatten = (
+  walk: Walk,
+  start: CanonicalKey,
+): Effect.Effect<readonly Located[], BodyNodeBudget> =>
   Effect.gen(function* walkMembers() {
     const seen = new Set<string>();
     const found: Located[] = [];
     const pending = [start];
     let next = pending.pop();
     while (next !== undefined) {
-      const pointer = settle(walk.resolution, next);
+      const at = settle(walk.resolution, next);
       walk.spent += 1;
       if (walk.spent > walk.maxNodes) {
         return yield* budgetFailure(walk);
       }
 
-      if (!seen.has(pointer)) {
-        seen.add(pointer);
+      if (!seen.has(keyOf(at))) {
+        seen.add(keyOf(at));
 
-        const node = yield* nodeAt(walk.resolution, pointer);
-        found.push({ node, pointer });
+        const node = yield* nodeAt(walk.resolution, at);
+        found.push({ at, node });
 
-        const members = (node.allOf ?? []).map((_, index) => `${pointer}/allOf/${index}`);
+        const members = (node.allOf ?? []).map((_, index) => childKey(at, "allOf", String(index)));
         pending.push(...Arr.reverse(members));
       }
 
@@ -322,11 +323,11 @@ const flatten = (walk: Walk, start: string): Effect.Effect<readonly Located[], B
 const firstLocated = <T>(
   nodes: readonly Located[],
   read: (node: SchemaNodeValue) => T | undefined,
-): { readonly pointer: string; readonly value: T } | undefined => {
+): { readonly at: CanonicalKey; readonly value: T } | undefined => {
   for (const located of nodes) {
     const value = read(located.node);
     if (value !== undefined) {
-      return { pointer: located.pointer, value };
+      return { at: located.at, value };
     }
   }
 
@@ -334,24 +335,24 @@ const firstLocated = <T>(
 };
 
 interface Members {
-  readonly items: string | undefined;
-  readonly prefixItems: readonly string[];
-  readonly properties: readonly (readonly [string, string])[];
+  readonly items: CanonicalKey | undefined;
+  readonly prefixItems: readonly CanonicalKey[];
+  readonly properties: readonly (readonly [string, CanonicalKey])[];
 }
 
 const noMembers: Members = { items: undefined, prefixItems: [], properties: [] };
 
 // The declared properties (document order, first definition wins) and item schemas of a schema.
-const membersOf = (walk: Walk, pointer: string): Effect.Effect<Members, BodyNodeBudget> =>
+const membersOf = (walk: Walk, schema: CanonicalKey): Effect.Effect<Members, BodyNodeBudget> =>
   Effect.gen(function* members() {
-    const nodes = yield* flatten(walk, pointer);
+    const nodes = yield* flatten(walk, schema);
     const seen = new Set<string>();
-    const properties: (readonly [string, string])[] = [];
+    const properties: (readonly [string, CanonicalKey])[] = [];
     for (const located of nodes) {
       for (const name of Object.keys(located.node.properties ?? {})) {
         if (!seen.has(name)) {
           seen.add(name);
-          properties.push([name, `${located.pointer}/properties/${escapeToken(name)}`]);
+          properties.push([name, childKey(located.at, "properties", name)]);
         }
       }
     }
@@ -360,16 +361,16 @@ const membersOf = (walk: Walk, pointer: string): Effect.Effect<Members, BodyNode
     const items = firstLocated(nodes, (node) => node.items);
 
     return {
-      items: items === undefined ? undefined : `${items.pointer}/items`,
+      items: items === undefined ? undefined : childKey(items.at, "items"),
       prefixItems:
         prefix === undefined
           ? []
-          : prefix.value.map((_, index) => `${prefix.pointer}/prefixItems/${index}`),
+          : prefix.value.map((_, index) => childKey(prefix.at, "prefixItems", String(index))),
       properties,
     };
   });
 
-const memberSchema = (members: Members, target: Target): string | undefined =>
+const memberSchema = (members: Members, target: Target): CanonicalKey | undefined =>
   target.kind === "property"
     ? members.properties.find(([name]) => name === target.name)?.[1]
     : members.prefixItems[target.index];
@@ -390,20 +391,20 @@ const noFacts: Facts = {
 
 const factsOf = (
   walk: Walk,
-  pointer: string | undefined,
+  schema: CanonicalKey | undefined,
   depth = 0,
 ): Effect.Effect<Facts, BodyNodeBudget> =>
   Effect.gen(function* facts() {
-    if (pointer === undefined) {
+    if (schema === undefined) {
       return noFacts;
     }
 
-    const nodes = yield* flatten(walk, pointer);
+    const nodes = yield* flatten(walk, schema);
     const items = firstLocated(nodes, (node) => node.items);
     const itemFacts =
       items === undefined || depth > 0
         ? undefined
-        : yield* factsOf(walk, `${items.pointer}/items`, depth + 1);
+        : yield* factsOf(walk, childKey(items.at, "items"), depth + 1);
     const type = firstLocated(nodes, (node) => node.type)?.value;
 
     return {
@@ -525,11 +526,11 @@ interface RuleResult {
 }
 
 interface RuleInput {
-  readonly actual: string;
+  readonly actual: CanonicalKey;
   readonly depth: 0 | 1;
   readonly honorsStyle: boolean;
   readonly node: EncodingNode | undefined;
-  readonly schemaPointer: string | undefined;
+  readonly schema: CanonicalKey | undefined;
   readonly target: Target;
 }
 
@@ -575,7 +576,7 @@ const styleRows = (style: PlainSerialization): readonly string[] => [
   "ENC-13",
 ];
 
-const styleIgnored = (actual: string): Finding =>
+const styleIgnored = (actual: CanonicalKey): Finding =>
   notice(
     "ENC-12/style-ignored",
     "encoding-style",
@@ -584,7 +585,7 @@ const styleIgnored = (actual: string): Finding =>
     actual,
   );
 
-const contentTypeIgnored = (actual: string): Finding =>
+const contentTypeIgnored = (actual: CanonicalKey): Finding =>
   notice(
     "ENC-13/content-type-ignored",
     "fixed-fields-for-rfc6570-style-serialization",
@@ -599,7 +600,7 @@ const invalidContentType = (input: RuleInput): Finding =>
     "encoding-content-type",
     "Encoding contentType",
     `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
-    `${input.actual}/contentType`,
+    childKey(input.actual, "contentType"),
   );
 
 interface Typing {
@@ -639,7 +640,7 @@ const typingOf = (
     }
 
     if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schemaPointer));
+      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema));
 
       return {
         contentType: [fallback.type],
@@ -672,18 +673,14 @@ const typingOf = (
 
 const headerRequired = (
   resolution: Resolution,
-  actual: string,
+  actual: CanonicalKey,
   name: string,
-): Effect.Effect<boolean> => {
-  const pointer = `${actual}/headers/${escapeToken(name)}`;
-  const home = referenceAt(resolution, pointer)?.target.pointer ?? pointer;
-
-  return evaluatePointer(resolution.value, home).pipe(
+): Effect.Effect<boolean> =>
+  nodeIn(resolution, follow(resolution, childKey(actual, "headers", name))).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
     Effect.map((header) => header.required ?? false),
     Effect.orElseSucceed(() => false),
   );
-};
 
 interface Headers {
   readonly findings: readonly Finding[];
@@ -693,14 +690,14 @@ interface Headers {
 // ENC-03, ENC-11: part headers; a `Content-Type` entry is ignored, a bad name refuses the part.
 const headersOf = (
   resolution: Resolution,
-  actual: string,
+  actual: CanonicalKey,
   node: EncodingNode,
 ): Effect.Effect<Headers> =>
   Effect.gen(function* headers() {
     const findings: Finding[] = [];
     const kept: PlainHeader[] = [];
     for (const name of Object.keys(node.headers ?? {})) {
-      const pointer = `${actual}/headers/${escapeToken(name)}`;
+      const at = childKey(actual, "headers", name);
       if (name.toLowerCase() === "content-type") {
         findings.push(
           notice(
@@ -708,7 +705,7 @@ const headersOf = (
             "encoding-headers",
             "Encoding header Content-Type",
             "The specification says a Content-Type entry in headers SHALL be ignored; the part type comes from contentType.",
-            pointer,
+            at,
           ),
         );
       } else if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
@@ -718,7 +715,7 @@ const headersOf = (
             "encoding-headers",
             "Encoding header name",
             `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
-            pointer,
+            at,
           ),
         );
 
@@ -732,19 +729,19 @@ const headersOf = (
   });
 
 interface NestedEntry {
-  readonly actual: string;
+  readonly actual: CanonicalKey;
   readonly node: EncodingNode;
   readonly target: Target;
 }
 
-const nestedEntries = (node: EncodingNode, actual: string): readonly NestedEntry[] => [
+const nestedEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] => [
   ...Object.entries(node.encoding ?? {}).map(([name, child]): NestedEntry => ({
-    actual: `${actual}/encoding/${escapeToken(name)}`,
+    actual: childKey(actual, "encoding", name),
     node: child,
     target: { kind: "property", name },
   })),
   ...(node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
-    actual: `${actual}/prefixEncoding/${index}`,
+    actual: childKey(actual, "prefixEncoding", String(index)),
     node: child,
     target: { index, kind: "position" },
   })),
@@ -763,8 +760,12 @@ const toNested = (rule: PlainRule): PlainNested => {
   return nested;
 };
 
-const nestingRefusal = (code: string, element: string, message: string, actual: string): Finding =>
-  refusal(code, "nested-encoding", element, message, actual);
+const nestingRefusal = (
+  code: string,
+  element: string,
+  message: string,
+  actual: CanonicalKey,
+): Finding => refusal(code, "nested-encoding", element, message, actual);
 
 interface Nesting {
   readonly findings: readonly Finding[];
@@ -823,15 +824,15 @@ const nestingOf = (
           "ENC-09/nested-item-encoding",
           "Nested itemEncoding",
           "A nested itemEncoding has no place in the model.",
-          `${input.actual}/itemEncoding`,
+          childKey(input.actual, "itemEncoding"),
         ),
       );
     }
 
     const children =
-      entries.length === 0 || input.schemaPointer === undefined
+      entries.length === 0 || input.schema === undefined
         ? noMembers
-        : yield* membersOf(ctx.walk, input.schemaPointer);
+        : yield* membersOf(ctx.walk, input.schema);
     const built = yield* buildAll(
       ctx,
       entries.map((entry): RuleInput => ({
@@ -839,7 +840,7 @@ const nestingOf = (
         depth: 1,
         honorsStyle: false,
         node: entry.node,
-        schemaPointer: memberSchema(children, entry.target),
+        schema: memberSchema(children, entry.target),
         target: entry.target,
       })),
     );
@@ -875,7 +876,7 @@ const buildRule = (
     const rule: PlainRule = {
       contentType: typing.contentType,
       headers: headers.headers,
-      origin: { document: ctx.resolution.document, pointer: input.actual },
+      origin: input.actual,
       rows: sorted([
         ...typing.rows,
         ...nesting.rows,
@@ -936,70 +937,65 @@ const stopAlternative = (...findings: readonly Finding[]): AlternativeResult => 
   findings,
 });
 
-const schemaKeyAt = (resolution: Resolution, pointer: string): string =>
-  referenceAt(resolution, pointer)?.defsKey ??
-  defsKey(resolution.document, { document: resolution.document, pointer });
+const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
+  referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
 
-const formRefusal = (line: Line, pointer: string): Finding =>
+const formRefusal = (line: Line, at: CanonicalKey): Finding =>
   refusal(
     line === "3.2" ? "ENC-28/not-implemented" : "ENC-27/not-implemented",
     "encoding-the-x-www-form-urlencoded-media-type",
     "Request body application/x-www-form-urlencoded",
     "This construct is read but not implemented in Milestone 1.",
-    pointer,
+    at,
     "Milestone 2 implements this",
   );
 
 // The slice names `S30-24/multipart-extra-fields` for 3.0, but the Diagnostic codec's row pattern
 // (`^[A-Z]+-[0-9]+$`, src/model/diagnostic.ts) rejects the digits in `S30`, so 3.0 reports SCH-13
 // too until that pattern admits them; then restore the 3.0 code here and in the test.
-const extraFieldsRefusal = (pointer: string): Finding =>
+const extraFieldsRefusal = (at: CanonicalKey): Finding =>
   refusal(
     "SCH-13/multipart-extra-fields",
     "json-schema-keywords",
     "Multipart schema additionalProperties",
     "A schema-valued additionalProperties on a multipart body root would add parts the declared properties do not name.",
-    pointer,
+    at,
     "D-ENC1 decides extra multipart fields; until then this map is refused and the declared parts stay",
   );
 
-const encodingIgnored = (line: Line, pointer: string): Finding =>
+const encodingIgnored = (line: Line, at: CanonicalKey): Finding =>
   line === "3.2"
     ? notice(
         "MED-14/encoding-ignored",
         "encoding-usage-and-restrictions",
         "Media type encoding fields",
         "Encoding fields SHALL be ignored for media types other than multipart and form-urlencoded.",
-        pointer,
+        at,
       )
     : notice(
         "MED-10/encoding-ignored",
         "media-type-encoding",
         "Media type encoding",
         "The encoding field applies to multipart and form-urlencoded request bodies only, so it is ignored here.",
-        pointer,
+        at,
       );
 
 interface Media {
-  readonly home: string;
+  readonly home: CanonicalKey;
   readonly node: MediaNode;
 }
 
 const readMedia = (
   resolution: Resolution,
-  mediaPointer: string,
+  mediaSite: CanonicalKey,
 ): Effect.Effect<Media, BodyNotReadable> => {
   const unreadable = new BodyNotReadable({
-    pointer: mediaPointer,
+    pointer: mediaSite.pointer,
     reason: "media-type-not-an-object",
   });
-  const reference = referenceAt(resolution, mediaPointer);
-  const home = reference?.target.pointer ?? mediaPointer;
-  if (reference !== undefined && reference.target.document !== resolution.document) {
-    return Effect.fail(unreadable);
-  }
+  const home = follow(resolution, mediaSite);
 
-  return evaluatePointer(resolution.value, home).pipe(
+  return nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(MediaTypeObject)),
     Effect.mapError(() => unreadable),
     Effect.map((node) => ({ home, node })),
@@ -1047,9 +1043,9 @@ const refusedParts = (findings: readonly Finding[]): Parts => ({
 // The schema-valued additionalProperties of a multipart root, found through `$ref` and `allOf`.
 const extraFields = (
   ctx: Context,
-  schemaPointer: string,
+  schema: CanonicalKey,
 ): Effect.Effect<readonly Finding[], BodyNodeBudget> =>
-  flatten(ctx.walk, schemaPointer).pipe(
+  flatten(ctx.walk, schema).pipe(
     Effect.map((nodes) => {
       const found = firstLocated(nodes, (node) =>
         Schema.is(ObjectValue)(node.additionalProperties) ? true : undefined,
@@ -1057,7 +1053,7 @@ const extraFields = (
 
       return found === undefined
         ? []
-        : [extraFieldsRefusal(`${found.pointer}/additionalProperties`)];
+        : [extraFieldsRefusal(childKey(found.at, "additionalProperties"))];
     }),
   );
 
@@ -1096,7 +1092,7 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
   const declared = new Set(members.properties.map(([name]) => name));
   const findings: Finding[] = [];
   for (const name of Object.keys(media.node.encoding ?? {})) {
-    const actual = `${media.home}/encoding/${escapeToken(name)}`;
+    const actual = childKey(media.home, "encoding", name);
     if (!declared.has(name) && line !== "3.2") {
       return {
         findings: [
@@ -1139,24 +1135,24 @@ const partInputs = (
   const byName = node.encoding ?? {};
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
-  const properties = members.properties.map(([name, schemaPointer]): RuleInput => {
+  const properties = members.properties.map(([name, schema]): RuleInput => {
     const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
 
     return {
-      actual: explicit === undefined ? schemaPointer : `${home}/encoding/${escapeToken(name)}`,
+      actual: explicit === undefined ? schema : childKey(home, "encoding", name),
       depth: 0,
       honorsStyle,
       node: explicit,
-      schemaPointer,
+      schema,
       target: { kind: "property", name },
     };
   });
   const positions = prefix.map((entry, index): RuleInput => ({
-    actual: `${home}/prefixEncoding/${index}`,
+    actual: childKey(home, "prefixEncoding", String(index)),
     depth: 0,
     honorsStyle,
     node: entry,
-    schemaPointer: members.prefixItems[index],
+    schema: members.prefixItems[index],
     target: { index, kind: "position" },
   }));
   const remaining: RuleInput[] =
@@ -1164,11 +1160,11 @@ const partInputs = (
       ? []
       : [
           {
-            actual: `${home}/itemEncoding`,
+            actual: childKey(home, "itemEncoding"),
             depth: 0,
             honorsStyle,
             node: item,
-            schemaPointer: node.itemSchema === undefined ? members.items : `${home}/itemSchema`,
+            schema: node.itemSchema === undefined ? members.items : childKey(home, "itemSchema"),
             target: { index: prefix.length, kind: "position" },
           },
         ];
@@ -1189,10 +1185,9 @@ const multipartParts = (
       return refusedParts([blocker]);
     }
 
-    const schemaPointer = media.node.schema === undefined ? undefined : `${media.home}/schema`;
-    const members =
-      schemaPointer === undefined ? noMembers : yield* membersOf(ctx.walk, schemaPointer);
-    const extra = schemaPointer === undefined ? [] : yield* extraFields(ctx, schemaPointer);
+    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+    const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
     const keys = unknownKeys(line, media, members);
     if (keys.refused) {
       return refusedParts([...extra, ...keys.findings]);
@@ -1230,12 +1225,12 @@ const ignoredParts = (line: Line, media: Media): Parts => {
 
 const normalizeAlternative = (
   ctx: Context,
-  bodyPointer: string,
+  body: CanonicalKey,
   key: string,
 ): Effect.Effect<AlternativeResult, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* alternative() {
     const { line, resolution } = ctx;
-    const mediaPointer = `${bodyPointer}/content/${escapeToken(key)}`;
+    const mediaSite = childKey(body, "content", key);
     if (Option.isNone(Schema.decodeUnknownOption(MediaRange)(key))) {
       return stopAlternative(
         refusal(
@@ -1243,7 +1238,7 @@ const normalizeAlternative = (
           "media-types",
           "Request body content key",
           `The content key ${JSON.stringify(sanitize(key))} is not a media type or range.`,
-          mediaPointer,
+          mediaSite,
         ),
       );
     }
@@ -1251,10 +1246,10 @@ const normalizeAlternative = (
     const base = baseType(key);
     const codec = codecOf(base);
     if (codec === "form") {
-      return stopAlternative(formRefusal(line, mediaPointer));
+      return stopAlternative(formRefusal(line, mediaSite));
     }
 
-    const media = yield* readMedia(resolution, mediaPointer);
+    const media = yield* readMedia(resolution, mediaSite);
     const { home, node } = media;
     const parts =
       codec === "multipart" ? yield* multipartParts(ctx, media, base) : ignoredParts(line, media);
@@ -1268,7 +1263,7 @@ const normalizeAlternative = (
       codec,
       encoding: parts.encoding,
       mediaType: key,
-      origin: { document: resolution.document, pointer: home },
+      origin: home,
       prefixEncoding: parts.prefixEncoding,
       rows: alternativeRows(
         line,
@@ -1278,11 +1273,11 @@ const normalizeAlternative = (
       ),
     };
     if (node.schema !== undefined && !opaque) {
-      result.schema = { key: schemaKeyAt(resolution, `${home}/schema`) };
+      result.schema = { key: schemaKeyAt(resolution, childKey(home, "schema")) };
     }
 
     if (node.itemSchema !== undefined && !opaque) {
-      result.itemSchema = { key: schemaKeyAt(resolution, `${home}/itemSchema`) };
+      result.itemSchema = { key: schemaKeyAt(resolution, childKey(home, "itemSchema")) };
     }
 
     if (parts.itemEncoding !== undefined) {
@@ -1311,7 +1306,8 @@ interface DiagnosticFields {
 }
 
 // The use site is the operation's request body; when it is a reference, the element's own
-// location in the target is `related[0]` (design 8.1).
+// location in the target is `related[0]` (design 8.1). Otherwise the element names its own
+// location, in whichever document of the set holds it.
 const toDiagnostics = (
   ctx: Context,
   findings: readonly Finding[],
@@ -1320,11 +1316,11 @@ const toDiagnostics = (
     findings.map((item) => {
       const fields: DiagnosticFields = {
         code: item.code,
-        document: ctx.resolution.document,
+        document: ctx.reference === undefined ? item.at.document : ctx.resolution.document,
         element: item.element,
         message: item.message,
         openapi: ctx.site.openapi,
-        pointer: ctx.reference === undefined ? item.pointer : ctx.site.pointer,
+        pointer: ctx.reference === undefined ? item.at.pointer : ctx.site.pointer,
         row: item.code.slice(0, item.code.indexOf("/")),
         scope: "element",
         severity: item.severity,
@@ -1339,20 +1335,20 @@ const toDiagnostics = (
       }
 
       if (ctx.reference !== undefined) {
-        fields.related = [{ document: ctx.resolution.document, pointer: item.pointer }];
+        fields.related = [item.at];
       }
 
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
     }),
   ).pipe(Effect.orDie);
 
-const emptyContent = (line: Line, pointer: string): Finding =>
+const emptyContent = (line: Line, at: CanonicalKey): Finding =>
   refusal(
     "RQB-07/empty-content",
     line === "3.0" ? "request-body-object" : "request-body-content",
     "Request body content",
     "The request body declares no media type, so nothing can be sent.",
-    pointer,
+    at,
   );
 
 /**
@@ -1369,13 +1365,10 @@ export const normalizeBody = (
 ): Effect.Effect<BodyOutcome, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* normalize() {
     const unreadable = new BodyNotReadable({ pointer: site.pointer, reason: "not-a-request-body" });
-    const reference = referenceAt(resolution, site.pointer);
-    const target = reference?.target ?? { document: resolution.document, pointer: site.pointer };
-    if (target.document !== resolution.document) {
-      return yield* unreadable;
-    }
-
-    const node = yield* evaluatePointer(resolution.value, target.pointer).pipe(
+    const use = { document: resolution.document, pointer: site.pointer };
+    const reference = referenceIn(resolution, use);
+    const target = follow(resolution, use);
+    const node = yield* nodeIn(resolution, target).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
       Effect.mapError(() => unreadable),
     );
@@ -1384,14 +1377,12 @@ export const normalizeBody = (
     const required = node.required ?? false;
     const keys = Object.keys(node.content);
     if (keys.length === 0) {
-      const empty = emptyContent(resolution.line, `${target.pointer}/content`);
+      const empty = emptyContent(resolution.line, childKey(target, "content"));
 
       return { _tag: "Refused", diagnostics: yield* toDiagnostics(ctx, [empty]), required };
     }
 
-    const results = yield* Effect.all(
-      keys.map((key) => normalizeAlternative(ctx, target.pointer, key)),
-    );
+    const results = yield* Effect.all(keys.map((key) => normalizeAlternative(ctx, target, key)));
     const diagnostics = yield* toDiagnostics(
       ctx,
       results.flatMap((result) => result.findings),

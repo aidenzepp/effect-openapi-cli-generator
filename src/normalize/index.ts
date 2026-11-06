@@ -147,7 +147,7 @@ export const normalize = (
       servers,
     );
     const api = yield* Schema.decodeUnknownEffect(Api)({
-      documents: [resolution.document],
+      documents: [...resolution.documents.keys()],
       entry: resolution.document,
       info: docsOf(fields?.info),
       informational: yield* collectInformational(resolution),

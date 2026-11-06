@@ -2,7 +2,8 @@ import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
 import { PathTemplate } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { methodTokens } from "../model/method-tokens.ts";
-import { referenceAt } from "../resolve/index.ts";
+import { keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
@@ -162,18 +163,27 @@ const componentSections = {
   "3.2": [...sections30, "pathItems", "mediaTypes"],
 } as const;
 
-// An object at a use site, followed through its Reference Object to the end of the chain.
+interface Place {
+  readonly document: CanonicalKey["document"];
+  readonly node: JsonObject;
+  readonly pointer: string;
+}
+
+// An object at a use site in the entry document, followed through its Reference Object to the end
+// of the chain, which is read from the document of the set that holds it.
 const locate = (
   resolution: Resolution,
   pointer: string,
   node: Json | undefined,
-): { readonly node: JsonObject; readonly pointer: string } | undefined => {
-  const reference = referenceAt(resolution, pointer);
-  const target =
-    reference === undefined ? node : nodeAt(resolution.value, reference.target.pointer);
+): Place | undefined => {
+  const site = { document: resolution.document, pointer };
+  const at = resolution.references.get(keyOf(site))?.target ?? site;
+  const document = resolution.documents.get(at.document);
+  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
+  const target = at === site ? node : read;
 
   return isObject(target)
-    ? { node: target, pointer: reference === undefined ? pointer : reference.target.pointer }
+    ? { document: at.document, node: target, pointer: at.pointer }
     : undefined;
 };
 
@@ -190,7 +200,8 @@ const pathItems = (resolution: Resolution): readonly PathItem[] => {
     const use = childPointer("/paths", key);
     const located = locate(resolution, use, value);
 
-    return located === undefined
+    // A path item in another document of the set is not walked: the checks read entry sites.
+    return located === undefined || located.document !== resolution.document
       ? []
       : [{ key, node: located.node, pointer: located.pointer, use }];
   });
