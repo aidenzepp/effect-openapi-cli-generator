@@ -47,12 +47,19 @@ import {
   Servers,
   serverVariableSetting,
 } from "./base-url.ts";
+import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import { redirectLoop, withUserAgent } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import { dropTrailingFragment, longestFormBytes, scrub } from "./redact.ts";
-import { classify, mapClientError, matchResponse, toApiResponseError } from "./response.ts";
+import {
+  classify,
+  isBodiless,
+  mapClientError,
+  matchResponse,
+  toApiResponseError,
+} from "./response.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -793,7 +800,8 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
 /**
  * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path
  * template (the display name when it has no `operationId`), its declared media, its security
- * requirement and, when the operation declares one, the request-id header chosen at generation.
+ * requirement, when the operation declares one, the request-id header chosen at generation, and,
+ * when the operation or its path item overrides the root servers, its effective servers table.
  */
 export interface OperationMeta {
   readonly media: MediaDeclaration;
@@ -802,6 +810,7 @@ export interface OperationMeta {
   readonly pathTemplate: string;
   readonly requestIdHeader?: string | undefined;
   readonly security: SecurityRequirement;
+  readonly servers?: ServersTable | undefined;
 }
 
 /**
@@ -857,12 +866,15 @@ const withheldNotice = (credentials: readonly Credential[]): string => {
 };
 
 /**
- * A response body read that fails part-way is a truncated body (exit 5).
+ * A response body read that fails part-way is a truncated body (exit 5). A bodiless response
+ * (`isBodiless`) is the empty body and is never read.
  */
 const bodyOf = (
   response: HttpClientResponse.HttpClientResponse,
 ): Stream.Stream<Uint8Array, ResponseStreamError> =>
-  Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+  isBodiless(response)
+    ? Stream.empty
+    : Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
 
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
@@ -873,12 +885,14 @@ const declaredMedia = (meta: OperationMeta, status: number): readonly string[] =
 /**
  * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
  * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
- * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from `Servers`)
+ * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
+ * operation's effective servers: its meta's override, else the root table from `Servers`)
  * joined to the builder's path and query; `Accept` from the declared response media or
  * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
  * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
  * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink; any
+ * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink (a
+ * bodiless one, `isBodiless`, writes nothing and reads nothing); any
  * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
  * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
  */
@@ -887,12 +901,16 @@ export const send =
   (request: HttpClientRequest.HttpClientRequest) =>
     Effect.gen(function* sendRequest() {
       const operation = displayName(meta);
-      const selection = yield* select({
-        baseUrl: yield* baseUrlSetting,
-        server: yield* serverSetting,
-        serverVariables: yield* serverVariableSetting,
-      });
-      const baseUrl = yield* resolve(selection);
+      const servers = meta.servers ?? (yield* Servers).table;
+      const selection = yield* select(
+        {
+          baseUrl: yield* baseUrlSetting,
+          server: yield* serverSetting,
+          serverVariables: yield* serverVariableSetting,
+        },
+        servers,
+      );
+      const baseUrl = yield* resolve(selection, servers);
       const [path, query] = splitTarget(request.url);
       const accepted = yield* acceptValue(meta.media, accept);
       const located = HttpClientRequest.setUrl(request, requestUrl(baseUrl, path, query));
@@ -905,7 +923,6 @@ export const send =
       yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
 
       const { table: security } = yield* Schemes;
-      const { table: servers } = yield* Servers;
       const baseOrigin = new URL(baseUrl).origin;
       const origins = credentialOrigins({
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
@@ -942,13 +959,15 @@ export const send =
                   ),
                 ),
               onSuccess: (ok) =>
-                writeBody({
-                  bytes: bodyOf(ok),
-                  mediaType: dispatchResponse(
-                    declaredMedia(meta, ok.status),
-                    Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
-                  ),
-                }),
+                isBodiless(ok)
+                  ? Effect.void
+                  : writeBody({
+                      bytes: bodyOf(ok),
+                      mediaType: dispatchResponse(
+                        declaredMedia(meta, ok.status),
+                        Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
+                      ),
+                    }),
             }),
           ),
         ),

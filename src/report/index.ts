@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
+import type { SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
@@ -12,6 +13,11 @@ const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/
  */
 export const GenerationReport = Schema.Struct({
   acceptedServers: Schema.Array(Schema.String),
+  // Present only when the author config added a scheme (D-OQ3 (b)): the scheme and the key that
+  // added it.
+  authorSuppliedSchemes: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ key: Schema.String, name: Schema.String })),
+  ),
   generator: Schema.Struct({ version: Schema.String }),
   inputs: Schema.Array(Schema.Struct({ document: DocumentUri, sha256: Sha256 })),
   notices: Schema.Array(Diagnostic),
@@ -32,6 +38,7 @@ export interface GenerationReportInput {
   readonly diagnostics: readonly Diagnostic[];
   readonly inputs: GenerationReportValue["inputs"];
   readonly renames: GenerationReportValue["renames"];
+  readonly schemes?: readonly SecurityScheme[];
   readonly version: string;
 }
 
@@ -50,14 +57,22 @@ export type GeneratorOutcome =
 /**
  * Splits the diagnostics by severity into the report value, keeping their order.
  */
-export const makeGenerationReport = (input: GenerationReportInput): GenerationReportValue => ({
-  acceptedServers: input.acceptedServers,
-  generator: { version: input.version },
-  inputs: input.inputs,
-  notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
-  refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
-  renames: input.renames,
-});
+export const makeGenerationReport = (input: GenerationReportInput): GenerationReportValue => {
+  const added = (input.schemes ?? [])
+    .filter((scheme) => scheme.source === "author-supplied")
+    .map((scheme) => ({ key: `security.add.schemes.${scheme.name}`, name: scheme.name }));
+
+  const report: GenerationReportValue = {
+    acceptedServers: input.acceptedServers,
+    generator: { version: input.version },
+    inputs: input.inputs,
+    notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
+    refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
+    renames: input.renames,
+  };
+
+  return added.length === 0 ? report : { ...report, authorSuppliedSchemes: added };
+};
 
 /**
  * Prints the report file: the value is encoded through `GenerationReport`, so a bad digest fails

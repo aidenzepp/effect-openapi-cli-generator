@@ -7,6 +7,7 @@ import { renderError } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseTable } from "../../src/runtime-src/runtime/response.ts";
 import {
   classify,
+  isBodiless,
   mapClientError,
   matchResponse,
   toApiResponseError,
@@ -59,6 +60,24 @@ describe("matchResponse precedence", () => {
 
   test("no key and no default is undeclared", () => {
     expect(matchResponse({ "200": [] }, 500)).toBe("undeclared");
+  });
+});
+
+const answer = (method: "GET" | "HEAD", status: number) =>
+  HttpClientResponse.fromWeb(
+    HttpClientRequest.make(method)("https://api.example.com/users/1"),
+    new Response(null, { status }),
+  );
+
+describe("isBodiless", () => {
+  // fetch never yields a final 1xx and `Response` refuses one, so 1xx is not constructed here.
+  test("a HEAD answer, a 204 and a 304 carry no body; other answers do", () => {
+    expect(isBodiless(answer("HEAD", 200))).toBe(true);
+    expect(isBodiless(answer("HEAD", 404))).toBe(true);
+    expect(isBodiless(answer("GET", 204))).toBe(true);
+    expect(isBodiless(answer("GET", 304))).toBe(true);
+    expect(isBodiless(answer("GET", 200))).toBe(false);
+    expect(isBodiless(answer("GET", 404))).toBe(false);
   });
 });
 

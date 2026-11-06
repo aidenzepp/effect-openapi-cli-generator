@@ -42,6 +42,17 @@ export const matchResponse = (responses: ResponseTable["responses"], status: num
   return declares(responses, "default") ? "default" : "undeclared";
 };
 
+/**
+ * A response that by definition carries no body (RFC 9110 9.3.2, 15.2, 15.3.5, 15.4.5): the answer
+ * to a HEAD, any 1xx, a 204 or a 304. Its `Content-Length` describes another representation and is
+ * not enforced; nothing is read.
+ */
+export const isBodiless = (response: HttpClientResponse.HttpClientResponse): boolean =>
+  response.request.method === "HEAD" ||
+  (response.status >= 100 && response.status < 200) ||
+  response.status === 204 ||
+  response.status === 304;
+
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 
 const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | undefined =>

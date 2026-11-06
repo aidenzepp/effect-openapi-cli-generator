@@ -30,9 +30,14 @@ export class InvalidInstanceLocation extends Data.TaggedError("InvalidInstanceLo
 
 const decodePointer = Schema.decodeUnknownEffect(JsonPointer);
 
+// The library marks the location of a property name, as `propertyNames` checks it, as `#*`.
+const fragmentOf = (instanceLocation: string): string =>
+  instanceLocation.slice(instanceLocation.startsWith("#*") ? 2 : 1);
+
 /**
- * Strips the `#` and percent-decodes an error's `instanceLocation` into a JSON Pointer (design 3.2
- * Error locations). Custom code: the library reports URI fragments, the model compares pointers.
+ * Strips the `#` (or the `#*` of a property name) and percent-decodes an error's
+ * `instanceLocation` into a JSON Pointer (design 3.2 Error locations). Custom code: the library
+ * reports URI fragments, the model compares pointers.
  */
 export const decodeLocation = (
   instanceLocation: string,
@@ -40,7 +45,7 @@ export const decodeLocation = (
   instanceLocation.startsWith("#")
     ? Effect.try({
         catch: () => new InvalidInstanceLocation({ location: instanceLocation }),
-        try: () => decodeURIComponent(instanceLocation.slice(1)),
+        try: () => decodeURIComponent(fragmentOf(instanceLocation)),
       }).pipe(
         Effect.flatMap(decodePointer),
         Effect.mapError(() => new InvalidInstanceLocation({ location: instanceLocation })),

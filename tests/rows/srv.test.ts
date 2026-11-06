@@ -260,10 +260,23 @@ describe("SRV rows through the built CLI", () => {
         expect([given.targets, omitted.targets]).toEqual([["/v2/pets"], ["/v1/pets"]]);
       }, 60_000);
 
-      // The runtime reads only the root servers table; the operation and path item servers reach
-      // the package as `--describe` metadata alone.
-      test.todo(`SRV-15: mixed-get and mixed-put with --server 0 request /v1/mixed (the root server) vs /oplevel/mixed and /pathlevel/mixed (${line})`, () =>
-        Promise.resolve());
+      test(`SRV-15: --server 0 selects from the operation's servers, else the path item's (${line})`, async () => {
+        const get = await first(line, "mixed-get");
+        const put = await first(line, "mixed-put");
+
+        expect([get.exitCode, put.exitCode]).toEqual([0, 0]);
+        expect([get.targets, put.targets]).toEqual([["/oplevel/mixed"], ["/pathlevel/mixed"]]);
+      }, 60_000);
+
+      test(`SRV-15: an unaccepted operation server is no default; the error names --base-url (${line})`, async () => {
+        const observed = await run(line, ["mixed-get"]);
+
+        expect({ exitCode: observed.exitCode, targets: observed.targets }).toEqual({
+          exitCode: 2,
+          targets: [],
+        });
+        expect(observed.stderr).toContain("--base-url");
+      }, 60_000);
 
       test(`SRV-20: the path is appended to the base, never resolved against it (${line})`, async () => {
         const observed = await run(line, ["--base-url", `${origin}/base`, "pets-list"]);

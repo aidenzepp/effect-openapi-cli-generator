@@ -19,7 +19,7 @@ import type { Refusal } from "./disagreements.ts";
 import { lineOf, schemaUri } from "./dispatch.ts";
 import { groupErrors } from "./locations.ts";
 import { surrogateRefusal, surrogateSites } from "./surrogates.ts";
-import type { InvalidInstanceLocation } from "./locations.ts";
+import type { ErrorGroup, InvalidInstanceLocation } from "./locations.ts";
 import type { Line, UnsupportedOpenApiVersion } from "./dispatch.ts";
 import type { Json } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
@@ -166,6 +166,13 @@ export interface Diagnosis {
 
 const Declared = Schema.Struct({ openapi: Schema.String });
 
+// The 3.2 schema bars the uppercase fixed method names as `additionalOperations` keys. The text
+// bars them in any capitalization (PTH-24), so the structure check refuses every spelling alike.
+const fixedMethodKeyKeyword = "#/$defs/path-item/properties/additionalOperations/propertyNames/not";
+
+const isFixedMethodKey = (group: ErrorGroup): boolean =>
+  group.deepest.every((unit) => unit.absoluteKeywordLocation.endsWith(fixedMethodKeyKeyword));
+
 const sch01 = Option.fromNullishOr(knownDisagreements.find((entry) => entry.row === "SCH-01"));
 
 /**
@@ -200,7 +207,7 @@ export const diagnoseDocument = (
 
     const rewritten = yield* rewriteDialect(document);
     const result = yield* validateDocument(rewritten.copy);
-    const groups = yield* groupErrors(result.errors);
+    const groups = (yield* groupErrors(result.errors)).filter((group) => !isFixedMethodKey(group));
     const rewriteNotices = yield* Effect.all(
       rewritten.occurrences.map((pointer) =>
         Option.match(sch01, {

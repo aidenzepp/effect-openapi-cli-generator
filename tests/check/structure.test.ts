@@ -439,6 +439,25 @@ describe("additionalOperations keys", () => {
     });
   }
 
+  test("PTH-24: a key spelled like the fixed field beside it is refused, not read as that field", () => {
+    for (const key of ["post", "POST"]) {
+      const found = check(
+        "3.2",
+        paths({
+          "/a": {
+            additionalOperations: { [key]: op({ operationId: "x" }) },
+            post: op({ operationId: "y" }),
+          },
+        }),
+      );
+
+      expect(found.map((diagnostic) => [diagnostic.code, diagnostic.scope])).toEqual([
+        ["PTH-24/fixed-method-key", "operation"],
+      ]);
+      expect(pointerOf(found[0])).toBe(`/paths/~1a/additionalOperations/${key}`);
+    }
+  });
+
   test("an allowlisted token is clean and is reported with its own capitalization", () => {
     expect(check("3.2", extra("PROPFIND"))).toEqual([]);
     expect(check("3.2", extra("FETCH"))[0]?.operation?.method).toBe("FETCH");
