@@ -165,12 +165,17 @@ const expandVariables = (
 /**
  * Choose the base: `--base-url`, then `<PREFIX>_BASE_URL`, then `--server` with
  * `--server-variable`, then the accepted default. With none of them the error names `--base-url`.
- * Table-dependent causes are checked here, not in the flags, because a flag's `mapEffect` cannot
- * read the `Servers` service.
+ * `--server` and the default read the effective table (design 6.4): `effective`, the operation's
+ * or path item's override, else the root table from `Servers`. Table-dependent causes are checked
+ * here, not in the flags, because a flag's `mapEffect` cannot read the `Servers` service.
  */
-export const select = (input: SelectionInput): Effect.Effect<Selection, UsageError, Servers> =>
+export const select = (
+  input: SelectionInput,
+  effective?: ServersTable,
+): Effect.Effect<Selection, UsageError, Servers> =>
   Effect.gen(function* choose() {
-    const { table, envPrefix } = yield* Servers;
+    const { table: root, envPrefix } = yield* Servers;
+    const table = effective ?? root;
     if (Option.isSome(input.baseUrl)) {
       const baseUrl = yield* validateBaseUrl("--base-url", input.baseUrl.value);
 
@@ -281,19 +286,22 @@ const normalizeOrigin = (origin: string): string =>
   URL.canParse(origin) ? new URL(origin).origin : origin;
 
 /**
- * The base URL a request is built on. An operator base is returned as validated. A server
- * selection is expanded, checked like an operator base (scheme, userinfo, query, fragment), parsed
- * with the same `URL` parser the client uses, and its origin must be in the bound set; otherwise a
- * `UsageError` names `--server` or `--server-variable`, before any connection. The operator's way
- * to an unbound host is `--base-url`.
+ * The base URL a request is built on. An operator base is returned as validated. A server selection
+ * is expanded, checked like an operator base (scheme, userinfo, query, fragment), parsed with the
+ * same `URL` parser the client uses, and its origin must be in the bound set of the effective table
+ * (`effective`, else the root's); otherwise a `UsageError` names `--server` or `--server-variable`,
+ * before any connection. The operator's way to an unbound host is `--base-url`.
  */
-export const resolve = (selection: Selection): Effect.Effect<string, UsageError, Servers> =>
+export const resolve = (
+  selection: Selection,
+  effective?: ServersTable,
+): Effect.Effect<string, UsageError, Servers> =>
   Effect.gen(function* resolveBase() {
     if (selection.provenance === "operator") {
       return selection.baseUrl;
     }
 
-    const { table } = yield* Servers;
+    const table = effective ?? (yield* Servers).table;
     const flag = serverFlag(selection.server);
     const expanded = yield* expandTemplate(selection.server, selection.variables);
     if (/[{}]/u.test(expanded)) {
