@@ -832,40 +832,92 @@ export const structuredBody = (
   );
 
 /**
- * The `Content-Type` a declared key sends: the key itself, or any concrete string when the key is a
- * range (`image/*`), where the operator names the type.
+ * The `Content-Type` a declared request media key sends: the key itself, or any concrete string
+ * when the key is a range (`image/*`), where the operator names the type.
  */
-type SentType<K extends string> = K extends `${string}*${string}` ? string : K;
+export type SentType<K> = K extends `${string}*${string}` ? string : K;
+
+/**
+ * The request body alternative `--content-type` chose (design 6.6): the declared key, the
+ * `Content-Type` it sends, and the body value for that key. A union over the keys of `V`, so the
+ * key narrows the body.
+ */
+export type Chosen<V> = {
+  readonly [P in keyof V & string]: {
+    readonly body: V[P];
+    readonly contentType: SentType<P>;
+    readonly key: P;
+  };
+}[keyof V & string];
+
+/**
+ * The body flags of one request media key that do not apply to it, each mapped to whether the
+ * operator supplied it.
+ */
+export type ForeignFlags = Readonly<Record<string, boolean>>;
+
+/**
+ * The unevaluated body effect of each declared request media key.
+ */
+interface BodyAlternatives {
+  readonly [key: string]: Effect.Effect<unknown, unknown, unknown>;
+}
 
 /**
  * The request body for the media key `--content-type` selects (design 6.6). `alternatives` maps
- * each declared request media key to its unevaluated body effect; only the chosen one is run, so
- * the others' flag refusals never fire and stdin is read at most once. Returns the body and the
- * `Content-Type` to send. A key the media declaration lists without an alternative is a defect of
- * the generated code, not of the operator.
+ * each declared request media key to its unevaluated body effect, whose value type is that key's
+ * own; only the chosen one is run, so the others' flag refusals never fire and stdin is read at
+ * most once. `foreign` lists, per key, the body flags that do not apply to it: one the operator
+ * supplied is a `UsageError` (exit 2) before any alternative runs, so no input is dropped silently.
+ * Returns the chosen key, the `Content-Type` to send, and the body. A key the media declaration
+ * lists without an alternative is a defect of the generated code, not of the operator.
  */
-export const selectBody = <K extends string, E, R>(options: {
-  readonly alternatives: { readonly [P in K]: Effect.Effect<HttpBody.HttpBody, E, R> };
+export const selectBody = <A extends BodyAlternatives>(options: {
+  readonly alternatives: A;
   readonly chosen: Option.Option<string>;
+  readonly foreign?: { readonly [P in keyof A & string]?: ForeignFlags };
   readonly media: MediaDeclaration;
 }): Effect.Effect<
-  { readonly body: HttpBody.HttpBody; readonly contentType: SentType<K> },
-  UsageError | E,
-  R
+  Chosen<{ readonly [P in keyof A]: Effect.Success<A[P]> }>,
+  UsageError | Effect.Error<A[keyof A]>,
+  Effect.Services<A[keyof A]>
 > =>
   Effect.gen(function* select() {
     const picked = yield* Negotiate.selectRequestMedia(options.media, options.chosen);
-    const declared: { readonly [key: string]: Effect.Effect<HttpBody.HttpBody, E, R> } =
-      options.alternatives;
-    const alternative = Object.hasOwn(declared, picked.key) ? declared[picked.key] : undefined;
+    const declared: BodyAlternatives = options.alternatives;
+    const entry = Object.hasOwn(declared, picked.key) ? declared[picked.key] : undefined;
 
-    if (alternative === undefined) {
+    if (entry === undefined) {
       return yield* Effect.die(
         new Error("selectBody: a declared request media key has no body alternative"),
       );
     }
 
-    // SAFETY: selectRequestMedia returns the declared key itself, or a concrete type inside a declared range.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- selectRequestMedia returns the declared key's own type, or a concrete type inside a declared range
-    return { body: yield* alternative, contentType: picked.contentType as SentType<K> };
+    // SAFETY: `entry` is one of the values of `A`, so its failures and services are among theirs.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an entry of `A` fails and requires within the union over `A`'s values
+    const alternative = entry as Effect.Effect<
+      unknown,
+      Effect.Error<A[keyof A]>,
+      Effect.Services<A[keyof A]>
+    >;
+
+    const foreign: { readonly [key: string]: ForeignFlags | undefined } = options.foreign ?? {};
+    const flags = Object.hasOwn(foreign, picked.key) ? foreign[picked.key] : undefined;
+    const misplaced = Object.entries(flags ?? {}).find(([, given]) => given)?.[0];
+
+    if (misplaced !== undefined) {
+      return yield* Effect.fail(
+        new UsageError({
+          flag: misplaced,
+          message: `--${misplaced}: does not apply to --content-type ${picked.key}`,
+        }),
+      );
+    }
+
+    const chosen = { body: yield* alternative, contentType: picked.contentType, key: picked.key };
+
+    // SAFETY: selectRequestMedia returns a declared key of `A` and its own content type (the key, or
+    // a concrete type inside a declared range), and `alternative` is that key's entry.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the picked key, its content type and its entry's value form one member of `Chosen`
+    return chosen as Chosen<{ readonly [P in keyof A]: Effect.Success<A[P]> }>;
   });

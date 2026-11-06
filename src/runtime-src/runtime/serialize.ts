@@ -3,7 +3,7 @@ import type { Stream } from "effect";
 import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
-import type { RawJson } from "./input.ts";
+import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 
 /**
@@ -1003,6 +1003,25 @@ export const body = (mediaType: string, value: Body): RequestBody => ({
   expand: bodyOf(mediaType, value),
   mediaType,
 });
+
+export type { Chosen, SentType } from "./input.ts";
+
+/**
+ * The encoders of a body with several media alternatives, one per declared key: each takes the
+ * key's body value and the `Content-Type` it sends, and returns that key's `RequestBody` (`body`,
+ * `urlEncoded` or `formData`).
+ */
+export type Alternatives<V> = {
+  readonly [P in keyof V & string]: (body: V[P], contentType: SentType<P>) => RequestBody;
+};
+
+/**
+ * The `RequestBody` of the alternative `Input.selectBody` already chose: the table's encoder for
+ * `chosen.key`. It selects nothing and has no default of its own. A multipart entry keeps
+ * `formData`'s `ownsContentType`, so `request` sends the writer's boundary.
+ */
+export const alternatives = <V>(chosen: Chosen<V>, table: Alternatives<V>): RequestBody =>
+  table[chosen.key](chosen.body, chosen.contentType);
 
 /**
  * A file part's bytes and the filename its `Content-Disposition` carries.
