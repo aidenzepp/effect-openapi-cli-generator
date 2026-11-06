@@ -75,6 +75,47 @@ beforeAll(async () => {
   ready.resolve(await Effect.runPromise(prepare));
 }, 600_000);
 
+// The same server with one cookie parameter that stays refused: style form, explode false, on 3.2.
+const refusedCookie = Promise.withResolvers<GeneratedPackage>();
+
+const refusedCookieSpec = file("cookie-refused.json");
+
+writeFileSync(
+  refusedCookieSpec,
+  `${JSON.stringify({
+    info: { title: "Refused cookie fixture", version: "1.0.0" },
+    openapi: "3.2.0",
+    paths: {
+      "/cookie": {
+        get: {
+          operationId: "values-cookie",
+          parameters: [
+            {
+              explode: false,
+              in: "cookie",
+              name: "flavor",
+              schema: { type: "string" },
+              style: "form",
+            },
+          ],
+          responses: { "200": { description: "Recorded." } },
+          tags: ["values"],
+        },
+      },
+    },
+    servers: [{ url: "http://127.0.0.1:80" }],
+  })}\n`,
+);
+
+beforeAll(async () => {
+  const prepare = generateFixture({ configPath, specPath: refusedCookieSpec }).pipe(
+    Effect.tap(preparePackage),
+    Scope.provide(scope),
+    Effect.provide(layer),
+  );
+  refusedCookie.resolve(await Effect.runPromise(prepare));
+}, 600_000);
+
 afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -216,9 +257,10 @@ describe("I2 header and cookie values are refused before any connection", () => 
     }, 60_000);
   }
 
-  // Milestone 1 refuses cookie parameters at generation, so no cookie parameter value is ever sent.
-  test("a cookie parameter is refused at generation and has no flag", async () => {
-    const generated = await ready.promise;
+  // A cookie parameter with style form and explode false stays refused (STY-35 on 3.2), so it has
+  // no flag and no value of it is ever sent.
+  test("a refused cookie parameter (form, explode false) has no flag and is never sent", async () => {
+    const generated = await refusedCookie.promise;
     const report = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -228,20 +270,39 @@ describe("I2 header and cookie values are refused before any connection", () => 
         }),
       ),
     )(readFileSync(nodePath.join(generated.dir, "generation-report.json"), "utf-8"));
-    const observed = await refusedBeforeConnecting(["values", "cookie", "--flavor", "ts9-a\rb"]);
+    const result = await Effect.runPromise(
+      runBin(generated, {
+        args: ["--base-url", A, "values", "cookie", "--flavor", "ts9-a\rb"],
+        env: canaryEnv,
+        timeoutMs: 30_000,
+      }).pipe(Effect.provide(layer)),
+    );
 
     expect({
       cookieRefusals: report.refusals.filter((refusal) => refusal.wire === "flavor"),
-      observed,
+      exitCode: result.exitCode,
     }).toEqual({
       cookieRefusals: [
         {
-          code: "STY-33/not-implemented",
+          code: "STY-35/cookie-explode-false",
           pointer: "/paths/~1cookie/get/parameters/0",
           wire: "flavor",
         },
       ],
-      observed: refused,
+      exitCode: 2,
+    });
+  }, 600_000);
+
+  // The credential cookie belongs to the security scheme, so no cookie parameter flag carries it.
+  test("the apiKey cookie credential is not a flag of a generated cookie parameter", async () => {
+    const help = await run(["values", "cookie", "--help"]);
+
+    expect({
+      credential: help.stdout.includes("--session"),
+      flavor: help.stdout.includes("--flavor"),
+    }).toEqual({
+      credential: false,
+      flavor: true,
     });
   }, 60_000);
 });

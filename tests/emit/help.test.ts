@@ -354,16 +354,18 @@ describe("operationHelp", () => {
     ]);
   });
 
-  test("two refused cookie parameters from normalizeParameter are each listed by wire name", () => {
+  test("two refused cookie parameters (form, explode false) from normalizeParameter are each listed by wire name", () => {
     const parameters = ["session", "csrf"].map((name) => ({
+      explode: false,
       in: "cookie",
       name,
       schema: { type: "string" },
+      style: "form",
     }));
     const value = {
       components: {},
       info: { title: "t", version: "1" },
-      openapi: "3.1.1",
+      openapi: "3.2.0",
       paths: {
         "/users/{id}": {
           patch: { parameters, responses: { "200": { description: "ok" } } },
@@ -373,14 +375,14 @@ describe("operationHelp", () => {
     const resolution = Effect.runSync(
       resolve({
         document: Schema.decodeUnknownSync(DocumentUri)(origin.document),
-        line: "3.1",
+        line: "3.2",
         value,
       }),
     );
     const diagnostics = parameters.flatMap((_, index) => {
       const outcome = Effect.runSync(
         normalizeParameter(resolution, {
-          openapi: "3.1.1",
+          openapi: "3.2.0",
           operation: { method: "PATCH", path: "/users/{id}" },
           pointer: `/paths/~1users~1{id}/patch/parameters/${index}`,
         }),
