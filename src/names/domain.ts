@@ -33,16 +33,24 @@ export const fixedNamespaces: ReadonlySet<string> = new Set([
 
 /**
  * The names `cli/root.ts` holds besides the slice's fixed namespaces: the `services` layer it
- * defines (`Layer.mergeAll` of `BaseUrl`, `Auth` and `Input` layers) and the `servers` and
- * `security` tables it reads from `api/servers.ts` and `api/security.ts`.
+ * defines (`Layer.mergeAll` of `BaseUrl`, `Auth` and `Input` layers), the `servers` and
+ * `security` tables it reads from `api/servers.ts` and `api/security.ts`, and the lazy root's
+ * `table` of group loaders, `root` function and its `args` and `groups` parameters, with the
+ * `Groups` runtime namespace and the `Arr` array namespace it imports.
  */
 export const rootModuleNames: ReadonlySet<string> = new Set([
+  "Arr",
   "Auth",
   "BaseUrl",
+  "Groups",
   "Layer",
+  "args",
+  "groups",
+  "root",
   "security",
   "servers",
   "services",
+  "table",
 ]);
 
 // `domain/schemas.ts` imports `Schema`; a cli module imports the fixed namespaces beside the
