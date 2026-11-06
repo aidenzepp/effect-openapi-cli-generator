@@ -141,7 +141,7 @@ const failureOf = (exit: Exit.Exit<GenerateResult, unknown>): typeof RunFailure.
 
 const paths = decodeRecord(goldenSpec.paths);
 
-// The golden spec plus one operation whose only request body is `text/plain`.
+// The golden spec plus one operation whose only request body is `text/event-stream`.
 const withTextBody: Schema.Json = {
   ...goldenSpec,
   paths: {
@@ -149,7 +149,10 @@ const withTextBody: Schema.Json = {
     "/notes": {
       post: {
         operationId: "notes-create",
-        requestBody: { content: { "text/plain": { schema: { type: "string" } } }, required: true },
+        requestBody: {
+          content: { "text/event-stream": { schema: { type: "string" } } },
+          required: true,
+        },
         responses: { "204": { description: "Stored." } },
         tags: ["notes"],
       },
@@ -311,7 +314,7 @@ describe("generate", () => {
     ).toBe(0);
   });
 
-  test("a text/plain request body is refused as EMT-1/unsupported-body; the rest is written", async () => {
+  test("a text/event-stream request body is refused as EMT-1/unsupported-body; the rest is written", async () => {
     const observed = await run({ spec: withTextBody }, (exit, { out }) =>
       Effect.all({
         cliNotes: readOut(out, "src/cli/notes.ts"),
