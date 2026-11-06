@@ -13,6 +13,9 @@ type Properties = Serialize.UrlEncodedOptions["properties"];
 const declared = (value: { readonly [property: string]: Json }, encoding: FormEncoding = {}) =>
   Object.keys(value).map((name) => [name, encoding] as const);
 
+// An object whose keys are in the given order, which a sorted literal cannot spell.
+const inOrder = (...entries: readonly (readonly [string, Json])[]) => Object.fromEntries(entries);
+
 const encode = (
   value: { readonly [property: string]: Json },
   properties: Properties = declared(value),
@@ -183,8 +186,20 @@ describe("form-urlencoded pairs", () => {
     ).toBe("b=2");
   });
 
-  test("a property the form does not declare is refused", async () => {
-    await expectUsage(Serialize.urlEncode({ a: "1", z: "2" }, { properties: [["a", {}]] }));
+  test("an undeclared key is appended after the declared ones", async () => {
+    expect(await encode(inOrder(["z", "2"], ["a", "1"]), [["a", {}]])).toBe("a=1&z=2");
+  });
+
+  test("undeclared array and object keys follow the default table, nulls are omitted", async () => {
+    expect(
+      await encode(inOrder(["n", null], ["o", { k: 1 }], ["a", "1"], ["l", ["x", "y"]]), [
+        ["a", { style: "form" }],
+      ]),
+    ).toBe("a=1&o=%7B%22k%22%3A1%7D&l=x&l=y");
+  });
+
+  test("undeclared keys keep their input order", async () => {
+    expect(await encode(inOrder(["y", "1"], ["x", "2"], ["w", "3"]), [])).toBe("y=1&x=2&w=3");
   });
 });
 

@@ -1177,7 +1177,8 @@ const contentPairs = (name: string, value: Json) =>
  * declared property in document order, joined by `&`. A property with Encoding `style`, `explode`
  * or `allowReserved` is expanded as a query parameter is; one with none of them by its default
  * `contentType`. Binary reaches a form only as text already encoded by its `contentEncoding`. A
- * property the form does not declare is refused.
+ * key the form does not declare follows the declared ones in input order, by the default
+ * `contentType` rules (design 4.5).
  */
 export const urlEncode = (
   value: JsonObject,
@@ -1185,14 +1186,12 @@ export const urlEncode = (
 ): Effect.Effect<string, UsageError> =>
   Effect.gen(function* formExpansion() {
     const declared = new Set(options.properties.map(([name]) => name));
-
-    if (Object.keys(value).some((name) => !declared.has(name))) {
-      return yield* refuse("the form body has a property its schema does not declare");
-    }
-
+    const undeclared = Object.keys(value)
+      .filter((name) => !declared.has(name))
+      .map((name) => [name, {}] as const);
     const pairs: string[] = [];
 
-    for (const [name, encoding] of options.properties) {
+    for (const [name, encoding] of [...options.properties, ...undeclared]) {
       const property = Object.hasOwn(value, name) ? value[name] : undefined;
 
       if (property === undefined) {
