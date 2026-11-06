@@ -23,8 +23,7 @@ import { resolve } from "../../src/resolve/index.ts";
 // A sequential (NDJSON, JSON-seq) or text request body is the operator's bytes as given: `--body`
 // text or a `--body-file` stream through `Input.sequentialBody`, never parsed or asserted (design
 // 6.3 Sequential uploads). The api builder's `Serialize.body` sets the declared media type as
-// `Content-Type`. An SSE body, and a sequential or text alternative beside other media, stay
-// refused.
+// `Content-Type`. An SSE body stays refused, alone or beside other media.
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -137,24 +136,26 @@ describe("emitCli: sequential and text request bodies", () => {
     expect(text).toBe("");
   });
 
-  test("an NDJSON alternative beside another media type is still refused", async () => {
+  test("an SSE alternative beside an NDJSON one is still refused", async () => {
     const { cli } = await events({
-      "application/json": { schema: item },
       "application/x-ndjson": { schema: item },
+      "text/event-stream": { schema: { type: "string" } },
     });
 
     expect(refusalsOf(cli)).toEqual([
-      { reason: "unsupported-body", subject: "ndjson:application/x-ndjson" },
+      { reason: "unsupported-body", subject: "sse:text/event-stream" },
     ]);
   });
 
-  test("a text alternative beside another media type is still refused", async () => {
+  test("an SSE alternative beside a text one is still refused", async () => {
     const { cli } = await events({
-      "application/json": { schema: item },
+      "text/event-stream": { schema: { type: "string" } },
       "text/plain": { schema: { type: "string" } },
     });
 
-    expect(refusalsOf(cli)).toEqual([{ reason: "unsupported-body", subject: "text:text/plain" }]);
+    expect(refusalsOf(cli)).toEqual([
+      { reason: "unsupported-body", subject: "sse:text/event-stream" },
+    ]);
   });
 });
 

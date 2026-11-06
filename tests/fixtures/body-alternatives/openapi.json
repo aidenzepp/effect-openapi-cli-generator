@@ -1,0 +1,188 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Body alternatives", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [
+    { "name": "messages", "description": "Discord-shaped: one body as JSON, a form or multipart." },
+    { "name": "files", "description": "OpenAI-shaped: multipart listed before JSON." },
+    { "name": "images", "description": "JSON beside raw bytes." },
+    { "name": "events", "description": "JSON beside NDJSON." },
+    { "name": "lone", "description": "One request media type each." }
+  ],
+  "components": {
+    "schemas": {
+      "Message": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "ids": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "MessageParts": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" },
+          "file": { "type": "string", "contentMediaType": "application/octet-stream" }
+        },
+        "required": ["file"]
+      },
+      "Upload": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "contentMediaType": "application/octet-stream" },
+          "purpose": { "type": "string" }
+        },
+        "required": ["file", "purpose"]
+      },
+      "UploadLink": {
+        "type": "object",
+        "properties": { "purpose": { "type": "string" }, "url": { "type": "string" } },
+        "required": ["purpose"]
+      },
+      "Image": {
+        "type": "object",
+        "properties": { "url": { "type": "string" } }
+      },
+      "Event": {
+        "type": "object",
+        "properties": { "name": { "type": "string" } }
+      }
+    }
+  },
+  "paths": {
+    "/channels/{id}/messages": {
+      "post": {
+        "operationId": "messages-create",
+        "summary": "Post a message.",
+        "tags": ["messages"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Message" } },
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/Message" },
+              "encoding": { "tags": { "explode": false } }
+            },
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/MessageParts" },
+              "encoding": {
+                "content": { "contentType": "text/plain" },
+                "file": { "contentType": "application/octet-stream" }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Posted." } }
+      }
+    },
+    "/files": {
+      "post": {
+        "operationId": "files-upload",
+        "summary": "Upload a file.",
+        "tags": ["files"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/Upload" },
+              "encoding": {
+                "file": { "contentType": "application/octet-stream" },
+                "purpose": { "contentType": "text/plain" }
+              }
+            },
+            "application/json": { "schema": { "$ref": "#/components/schemas/UploadLink" } }
+          }
+        },
+        "responses": { "204": { "description": "Uploaded." } }
+      }
+    },
+    "/images/{id}": {
+      "put": {
+        "operationId": "images-put",
+        "summary": "Replace an image.",
+        "tags": ["images"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Image" } },
+            "application/octet-stream": {
+              "schema": { "type": "string", "contentMediaType": "application/octet-stream" }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Replaced." } }
+      }
+    },
+    "/events": {
+      "post": {
+        "operationId": "events-send",
+        "summary": "Send events.",
+        "tags": ["events"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Event" } },
+            "application/x-ndjson": { "schema": { "$ref": "#/components/schemas/Event" } },
+            "text/plain": { "schema": { "type": "string" } }
+          }
+        },
+        "responses": { "204": { "description": "Sent." } }
+      }
+    },
+    "/lone/json": {
+      "post": {
+        "operationId": "lone-json",
+        "tags": ["lone"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Message" } }
+          }
+        },
+        "responses": { "204": { "description": "Done." } }
+      }
+    },
+    "/lone/form": {
+      "post": {
+        "operationId": "lone-form",
+        "tags": ["lone"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/Message" },
+              "encoding": { "tags": { "explode": false } }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Done." } }
+      }
+    },
+    "/lone/multipart": {
+      "post": {
+        "operationId": "lone-multipart",
+        "tags": ["lone"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/MessageParts" },
+              "encoding": {
+                "content": { "contentType": "text/plain" },
+                "file": { "contentType": "application/octet-stream" }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Done." } }
+      }
+    }
+  }
+}

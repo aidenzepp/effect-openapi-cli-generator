@@ -34,7 +34,7 @@ import {
   typeRef,
   typeUnion,
 } from "./printer.ts";
-import type { Expr, Field, Import, PrinterError, Statement, TypeExpr } from "./printer.ts";
+import type { Expr, Field, Import, Param, PrinterError, Statement, TypeExpr } from "./printer.ts";
 
 /**
  * What the `api/` layer is emitted from: the normalized `Api`, its name plan, and the bound origin
@@ -492,15 +492,8 @@ interface PartContext {
 }
 
 // The reason a body's multipart alternative is not one the writer sends, or `undefined`.
-const alternativeProblem = (
-  alternatives: readonly MediaAlternative[],
-  alternative: MediaAlternative,
-): string | undefined => {
+const alternativeProblem = (alternative: MediaAlternative): string | undefined => {
   const { mediaType } = alternative;
-  if (alternatives.length > 1) {
-    return `${mediaType} beside other request media`;
-  }
-
   if (isRange(mediaType) || essence(mediaType) !== "multipart/form-data") {
     return `a ${mediaType} request body`;
   }
@@ -559,23 +552,19 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
 
 /**
  * The parts a `multipart/form-data` command sends, in Encoding order, or the reason the runtime
- * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). Refused, not guessed: a
- * multipart alternative beside other request media or under a range key, another multipart
- * subtype, 3.2 positional parts, a nested part, part headers, a part style, a part whose
- * `contentType` is not one concrete media type, a `contentEncoding` part, and a required part the
- * names plan gave no flag.
+ * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
+ * command's request media alternatives; the part flags are those whose media lists it. Refused,
+ * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
+ * positional parts, a nested part, part headers, a part style, a part whose `contentType` is not
+ * one concrete media type, a `contentEncoding` part, and a required part the names plan gave no
+ * flag.
  */
 export const formParts = (
   command: PlannedCommand,
+  alternative: MediaAlternative,
   defs: Defs,
 ): Result.Result<readonly FormPart[], string> => {
-  const alternatives = command.operation.body?.alternatives ?? [];
-  const alternative = alternatives.find((candidate) => candidate.codec === "multipart");
-  if (alternative === undefined) {
-    return Result.fail("a multipart request body");
-  }
-
-  const problem = alternativeProblem(alternatives, alternative);
+  const problem = alternativeProblem(alternative);
   if (problem !== undefined) {
     return Result.fail(problem);
   }
@@ -606,6 +595,7 @@ export const formParts = (
 };
 
 interface BodyParts {
+  readonly declarations: readonly Statement[];
   readonly entry?: readonly [string, Expr];
   readonly fields: readonly Field[];
 }
@@ -640,88 +630,179 @@ const formEncoding = (
   return Effect.succeed(obj(entries));
 };
 
-// A form-urlencoded body is JSON data or `undefined` for no body input, encoded by
-// `Serialize.urlEncoded` over the schema's properties in document order (design 4.5, 6.3).
-const urlEncodedParts = (
+/**
+ * Whether a body with several media alternatives is encoded per alternative: one of them is form
+ * or multipart, so its bytes depend on the key the operator chose (design 6.6). The `api/` builder
+ * then takes the whole `Serialize.Chosen`, and the `cli/` command passes `Input.selectBody`'s
+ * choice to it unchanged.
+ */
+export const encodesByKey = (alternatives: readonly MediaAlternative[]): boolean =>
+  alternatives.length > 1 &&
+  alternatives.some(
+    (alternative) => alternative.codec === "form" || alternative.codec === "multipart",
+  );
+
+// How one alternative's body value is typed and sent: `encode` takes the value and the
+// `Content-Type` expressions; `typed` is whether it reads the second.
+interface Encoder {
+  readonly encode: (value: Expr, contentType: Expr) => Expr;
+  readonly type: TypeExpr;
+  readonly typed: boolean;
+}
+
+const bytesEncoder: Encoder = {
+  encode: (value, contentType) => fn("body", [contentType, value]),
+  type: typeRef(I("Serialize"), [M("Body")]),
+  typed: true,
+};
+
+// One alternative's encoder (design 4.5, 6.3). A form body is its JSON value, or `undefined` for
+// no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order.
+// A multipart body the writer can send is its part values, streamed by `Serialize.formData`. Any
+// other body is an `HttpBody` that `Serialize.body` sends. A multipart body the writer cannot send
+// has no encoder (`None`); `cli/` refuses its operation.
+const encoderOf = (
+  command: PlannedCommand,
   alternative: MediaAlternative,
-  required: boolean,
   defs: Defs,
-): Effect.Effect<BodyParts, ApiEmitError> =>
-  Effect.gen(function* parts() {
-    const names = [...objectSchemas(defs, alternative.schema?.key ?? "").properties.keys()];
-    const properties = yield* Effect.all(
-      names.map((name) =>
-        formEncoding(alternative, name).pipe(Effect.map((encoding) => arr([str(name), encoding]))),
-      ),
-    );
+): Effect.Effect<Option.Option<Encoder>, ApiEmitError> =>
+  Effect.gen(function* encoder() {
+    const required = bool(command.operation.body?.required ?? false);
+    if (alternative.codec === "form" && !isRange(alternative.mediaType)) {
+      const names = [...objectSchemas(defs, alternative.schema?.key ?? "").properties.keys()];
+      const properties = yield* Effect.all(
+        names.map((name) =>
+          formEncoding(alternative, name).pipe(
+            Effect.map((encoding) => arr([str(name), encoding])),
+          ),
+        ),
+      );
+      const options = obj([
+        ["properties", arr(properties)],
+        ["required", required],
+      ]);
+
+      return Option.some<Encoder>({
+        encode: (value, contentType) => fn("urlEncoded", [contentType, value, options]),
+        type: optionalOf(typeRef(I("Serialize"), [M("Json")])),
+        typed: true,
+      });
+    }
+
+    if (alternative.codec !== "multipart") {
+      return Option.some(bytesEncoder);
+    }
+
+    const parts = formParts(command, alternative, defs);
+    if (Result.isFailure(parts)) {
+      return Option.none();
+    }
+
     const options = obj([
-      ["properties", arr(properties)],
-      ["required", bool(required)],
+      ["parts", arr(parts.success.map((part) => arr([str(part.name), str(part.contentType)])))],
+      ["required", required],
     ]);
+
+    return Option.some<Encoder>({
+      encode: (value) => fn("formData", [value, options]),
+      type: typeRef(I("Serialize"), [M("FormFields")]),
+      typed: false,
+    });
+  });
+
+// A body encoded per alternative (`encodesByKey`): the `<Op>Bodies` interface maps each key the
+// builder sends to its value type, the input is the choice `Input.selectBody` made, and
+// `Serialize.alternatives` calls the chosen key's encoder, with annotated parameters. A multipart
+// alternative the writer cannot send is left out, so no builder sends multipart without its
+// boundary; `cli/` refuses that operation.
+const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifier.Type) =>
+  Effect.gen(function* chosen() {
+    const fields: Field[] = [];
+    const table: (readonly [string, Expr])[] = [];
+    for (const alternative of command.operation.body?.alternatives ?? []) {
+      const found = yield* encoderOf(command, alternative, defs);
+      if (Option.isNone(found)) {
+        continue;
+      }
+
+      const encoder = found.value;
+      const { mediaType } = alternative;
+      const sent = isRange(mediaType) ? typeKeyword("string") : typeLiteral(mediaType);
+      const params: Param[] = [{ name: I("body"), type: encoder.type }];
+      if (encoder.typed) {
+        params.push({ name: I("contentType"), type: sent });
+      }
+
+      fields.push({ key: mediaType, optional: false, type: encoder.type });
+      table.push([
+        mediaType,
+        arrow(params, encoder.encode(ident(I("body")), ident(I("contentType")))),
+      ]);
+    }
+
     const value = member(ident(I("input")), M("body"));
 
     return {
-      entry: ["body", fn("urlEncoded", [str(alternative.mediaType), value, options])],
+      declarations: [{ _tag: "Interface", fields, name }],
+      entry: ["body", fn("alternatives", [value, obj(table)])],
       fields: [
-        { key: "body", optional: false, type: optionalOf(typeRef(I("Serialize"), [M("Json")])) },
+        {
+          key: "body",
+          optional: false,
+          type: typeRef(I("Serialize"), [M("Chosen")], [typeRef(name)]),
+        },
       ],
-    };
+    } satisfies BodyParts;
   });
 
 // The body is always present in `Input` when the operation declares one: an optional body with
-// no input is `HttpBody.empty`, which `Serialize.request` sends without `Content-Type`. The
-// content type is an input when the operator chooses it: several alternatives, or a range key.
-// A multipart body the writer can send is its part values, streamed by `Serialize.formData`; a
-// lone form-urlencoded one its JSON value, encoded by `Serialize.urlEncoded`.
-const bodyParts = (command: PlannedCommand, defs: Defs): Effect.Effect<BodyParts, ApiEmitError> => {
-  const { operation } = command;
-  const alternatives = operation.body?.alternatives ?? [];
-  const [first] = alternatives;
-  if (first === undefined) {
-    return Effect.succeed({ fields: [] });
-  }
+// no input is `HttpBody.empty`, which `Serialize.request` sends without `Content-Type`. A lone
+// alternative is sent by its own encoder under its media type. The content type is an input when
+// the operator chooses it among bytes alternatives, or under a range key; a body with a form or
+// multipart alternative among several is encoded per key (`chosenParts`).
+const bodyParts = (
+  command: PlannedCommand,
+  defs: Defs,
+  bodies: typeof Identifier.Type,
+): Effect.Effect<BodyParts, ApiEmitError> =>
+  Effect.gen(function* parts() {
+    const alternatives = command.operation.body?.alternatives ?? [];
+    const [first] = alternatives;
+    if (first === undefined) {
+      return { declarations: [], fields: [] };
+    }
 
-  if (alternatives.length === 1 && first.codec === "form" && !isRange(first.mediaType)) {
-    return urlEncodedParts(first, operation.body?.required ?? false, defs);
-  }
+    if (encodesByKey(alternatives)) {
+      return yield* chosenParts(command, defs, bodies);
+    }
 
-  const input = ident(I("input"));
-  const value = member(input, M("body"));
-  const form = first.codec === "multipart" ? formParts(command, defs) : undefined;
-  if (form !== undefined && Result.isSuccess(form)) {
-    const options = obj([
-      ["parts", arr(form.success.map((part) => arr([str(part.name), str(part.contentType)])))],
-      ["required", bool(operation.body?.required ?? false)],
-    ]);
+    const input = ident(I("input"));
+    const value = member(input, M("body"));
+    if (alternatives.length === 1 && !isRange(first.mediaType)) {
+      const encoder = Option.getOrElse(yield* encoderOf(command, first, defs), () => bytesEncoder);
 
-    return Effect.succeed({
-      entry: ["body", fn("formData", [value, options])],
-      fields: [{ key: "body", optional: false, type: typeRef(I("Serialize"), [M("FormFields")]) }],
-    });
-  }
+      return {
+        declarations: [],
+        entry: ["body", encoder.encode(value, str(first.mediaType))],
+        fields: [{ key: "body", optional: false, type: encoder.type }],
+      };
+    }
 
-  const body: Field = { key: "body", optional: false, type: typeRef(I("Serialize"), [M("Body")]) };
-  const types = mediaTypes(alternatives);
-  if (alternatives.length === 1 && !isRange(first.mediaType)) {
-    return Effect.succeed({
-      entry: ["body", fn("body", [str(first.mediaType), value])],
-      fields: [body],
-    });
-  }
+    const types = mediaTypes(alternatives);
+    const contentType: Field = {
+      key: "contentType",
+      optional: false,
+      type: types.some(isRange)
+        ? typeKeyword("string")
+        : typeUnion(types.map((type) => typeLiteral(type))),
+    };
 
-  const contentType: Field = {
-    key: "contentType",
-    optional: false,
-    type: types.some(isRange)
-      ? typeKeyword("string")
-      : typeUnion(types.map((type) => typeLiteral(type))),
-  };
-
-  return Effect.succeed({
-    entry: ["body", fn("body", [member(input, M("contentType")), value])],
-    fields: [body, contentType],
+    return {
+      declarations: [],
+      entry: ["body", bytesEncoder.encode(value, member(input, M("contentType")))],
+      fields: [{ key: "body", optional: false, type: bytesEncoder.type }, contentType],
+    };
   });
-};
 
 const serverEntry = (server: Server): Expr => {
   const entries: (readonly [string, Expr])[] = [["url", str(server.template)]];
@@ -793,7 +874,7 @@ const commandStatements = (
     const parameters = yield* Effect.forEach(inputKeys(operation), (entry) =>
       parameterParts(entry, context),
     );
-    const body = yield* bodyParts(command, context.defs);
+    const body = yield* bodyParts(command, context.defs, yield* identifier(`${capitalized}Bodies`));
     const cookies = parameters.flatMap((part) => (part.cookie === undefined ? [] : [part.cookie]));
     const parts: (readonly [string, Expr])[] = [
       [
@@ -859,8 +940,10 @@ const commandStatements = (
       meta.push(["servers", serversTable(operation.servers, context.bound)]);
     }
 
-    const declarations: readonly Statement[] =
-      fields.length === 0 ? [] : [{ _tag: "Interface", fields, name: inputName }];
+    const declarations: readonly Statement[] = [
+      ...body.declarations,
+      ...(fields.length === 0 ? [] : [{ _tag: "Interface", fields, name: inputName } as const]),
+    ];
 
     return [
       ...declarations,
