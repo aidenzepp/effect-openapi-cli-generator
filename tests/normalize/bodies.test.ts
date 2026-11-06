@@ -199,7 +199,7 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
       {
         requestBodies: {
           Thing: {
-            content: { "application/json": {}, "application/x-www-form-urlencoded": {} },
+            content: { "application/json": {}, "multipart/form-data": {} },
             description: "Shared",
           },
         },
@@ -212,8 +212,9 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
     expect(String(outcome.body.origin.pointer)).toBe(site);
     expect(String(diagnostic.pointer)).toBe(site);
     expect(diagnostic.related?.map((related) => String(related.pointer))).toEqual([
-      "/components/requestBodies/Thing/content/application~1x-www-form-urlencoded",
+      "/components/requestBodies/Thing/content/multipart~1form-data",
     ]);
+    expect(diagnostic.code).toBe("ENC-33/missing-schema");
   });
 
   test("RQB-07 an empty content map leaves nothing to send and is refused", () => {
@@ -647,58 +648,50 @@ describe("SCO-10 XML bodies are opaque", () => {
   });
 });
 
-describe("ENC-27 ENC-28 form-urlencoded request bodies are not implemented in Milestone 1", () => {
+describe("ENC-27 ENC-28 form-urlencoded request bodies are form alternatives with a rule per property", () => {
   const form: Json = {
     content: { "application/x-www-form-urlencoded": { schema: object({ a: string }) } },
   };
 
-  test("3.0 and 3.1 report ENC-27 and 3.2 reports ENC-28, at element scope with the line's section", () => {
-    const expected = {
-      "3.0": "ENC-27/not-implemented",
-      "3.1": "ENC-27/not-implemented",
-      "3.2": "ENC-28/not-implemented",
-    } as const;
+  test("3.0 and 3.1 name ENC-27 and 3.2 names ENC-28, with the schema and one rule per property", () => {
+    const expected = { "3.0": "ENC-27", "3.1": "ENC-27", "3.2": "ENC-28" } as const;
     for (const line of lines) {
-      const outcome = refused(line, { ...form, required: true });
-      const diagnostic = only(outcome.diagnostics);
+      const outcome = implemented(line, { ...form, required: true });
+      const alternative = only(outcome.body.alternatives);
+      const rule = only(alternative.encoding);
 
-      expect(diagnostic.code).toBe(expected[line]);
-      expect(plain(diagnostic.row)).toBe(expected[line].slice(0, 6));
-      expect(diagnostic.scope).toBe("element");
-      expect(diagnostic.severity).toBe("refusal");
-      expect(plain(diagnostic.specSection)).toBe(
-        `https://spec.openapis.org/oas/v${specVersion[line]}.html#encoding-the-x-www-form-urlencoded-media-type`,
-      );
-      expect(diagnostic.hint).toContain("Milestone 2");
-      expect(String(diagnostic.pointer)).toBe(
+      expect(outcome.diagnostics).toEqual([]);
+      expect(outcome.body.required).toBe(true);
+      expect(alternative.codec).toBe("form");
+      expect(alternative.schema).toBeDefined();
+      expect(alternative.rows.map(String)).toContain(expected[line]);
+      expect(String(alternative.origin.pointer)).toBe(
         "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded",
       );
-      expect(diagnostic.openapi).toBe(openapi[line]);
-      expect(outcome.required).toBe(true);
+      expect(targetOf(rule)).toBe("a");
+      expect(rule.contentType.map(String)).toEqual(["text/plain"]);
+      expect(rule.serialization).toBeUndefined();
+      expect(alternative.prefixEncoding).toEqual([]);
     }
   });
 
-  test("the code names no milestone", () => {
-    for (const line of lines) {
-      expect(only(refused(line, form).diagnostics).code).not.toMatch(/milestone|m[0-9]/iu);
-    }
+  test("a media type with parameters or another case is the same form alternative", () => {
+    const alternative = alternativeOf("3.1", "Application/X-WWW-Form-Urlencoded; charset=UTF-8");
+
+    expect(alternative.codec).toBe("form");
+    expect(String(alternative.mediaType)).toBe("Application/X-WWW-Form-Urlencoded; charset=UTF-8");
   });
 
-  test("a media type with parameters or another case is the same refusal", () => {
-    const outcome = refused("3.1", {
-      content: { "Application/X-WWW-Form-Urlencoded; charset=UTF-8": {} },
-    });
-
-    expect(codes(outcome)).toEqual(["ENC-27/not-implemented"]);
-  });
-
-  test("a sibling alternative keeps the body, which only loses the form", () => {
+  test("a sibling alternative stays beside the form", () => {
     const outcome = implemented("3.1", {
       content: { "application/json": {}, "application/x-www-form-urlencoded": {} },
     });
 
-    expect(codes(outcome)).toEqual(["ENC-27/not-implemented"]);
-    expect(outcome.body.alternatives.map((alternative) => alternative.codec)).toEqual(["json"]);
+    expect(codes(outcome)).toEqual([]);
+    expect(outcome.body.alternatives.map((alternative) => alternative.codec)).toEqual([
+      "json",
+      "form",
+    ]);
   });
 });
 
