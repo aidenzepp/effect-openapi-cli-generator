@@ -49,15 +49,16 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text bodies,
- * and a form body beside other media types, are `unsupported-body` until their merge exists, and
- * so is a multipart body the
- * runtime writer cannot send exactly (`formParts` names why); an XML body is opaque `--body-file`
- * bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
- * with no call-expression form today: an integer field whose width the walk cannot settle, and a
- * required boolean parameter (absent would send `false`). `unsupported-parameter` is a boolean path
- * parameter, or a path array before another positional (a repeated argument would take the later
- * ones). Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
+ * The plan, model or author config holds something the `cli/` layer cannot express. An SSE body,
+ * and a form, text or sequential body beside other media types, are `unsupported-body` until their
+ * merge exists, and so is a multipart body the runtime writer cannot send exactly (`formParts`
+ * names why); an XML body is opaque `--body-file` bytes, like a binary one, and a lone text or
+ * sequential body is the operator's `--body` text or `--body-file` stream (design 6.3).
+ * `unsupported-flag` is a flag with no call-expression form today: an integer field whose width the
+ * walk cannot settle, and a required boolean parameter (absent would send `false`).
+ * `unsupported-parameter` is a boolean path parameter, or a path array before another positional (a
+ * repeated argument would take the later ones). Those three refuse one operation (`CliRefusal`);
+ * every other reason fails `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
   readonly reason:
@@ -606,9 +607,21 @@ const wholeBody = (
 const isOpaque = (alternative: MediaAlternative): boolean =>
   alternative.codec === "binary" || alternative.codec === "xml";
 
+// Bodies sent as the operator's bytes, as given: `--body` text or a `--body-file` stream, never
+// parsed or framed (design 6.3 Sequential uploads). Only a lone one is sent; beside other media
+// it is refused until the choice table takes it (m2-em9b).
+const isVerbatim = (alternative: MediaAlternative): boolean =>
+  alternative.codec === "ndjson" || alternative.codec === "jsonseq" || alternative.codec === "text";
+
+// Bodies the command hands to the builder as an `HttpBody`, not a JSON value.
+const isLoaded = (alternative: MediaAlternative): boolean =>
+  isOpaque(alternative) || isVerbatim(alternative);
+
 // A lone form-urlencoded body is merged from the JSON body sources into the value the `api/`
 // builder encodes (`Input.structuredBody`); a form alternative beside other media types is not
-// merged yet (m2-em9). `lone` is set when the body has no other alternative to choose.
+// merged yet (m2-em9). A lone text or sequential body is `Input.sequentialBody`; the builder's
+// `Serialize.body` sets its declared media type as `Content-Type`. `lone` is set when the body
+// has no other alternative to choose.
 const alternativeBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
@@ -625,6 +638,13 @@ const alternativeBody = (
       return {
         domain: [],
         value: fn("Input.binaryBody", obj([...sources, ["required", bool(required)]])),
+      };
+    }
+
+    if (lone && isVerbatim(alternative)) {
+      return {
+        domain: [],
+        value: fn("Input.sequentialBody", obj([...sources, ["required", bool(required)]])),
       };
     }
 
@@ -805,7 +825,7 @@ const bodyPlan = (
 
     if (!choosesType) {
       const single = yield* alternativeBody(command, first, body.required, context, true);
-      const parameter = isOpaque(first) ? "loaded" : "merged";
+      const parameter = isLoaded(first) ? "loaded" : "merged";
 
       return Option.some({
         args: [["body", ident(I(parameter))]],
