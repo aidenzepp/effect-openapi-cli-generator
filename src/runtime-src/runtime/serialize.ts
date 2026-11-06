@@ -17,6 +17,12 @@ export type Scalar = string | number | boolean | null | undefined;
 export type Value = Scalar | readonly Scalar[] | { readonly [member: string]: Scalar };
 
 /**
+ * A value at any depth: what a `deepObject` parameter or Encoding entry may receive. Only the
+ * bracket convention sends one deeper than `Value`; every other path refuses it.
+ */
+export type Nested = Scalar | readonly Nested[] | { readonly [member: string]: Nested };
+
+/**
  * The text form of a defined value: array items and object members in document order.
  */
 export type Text =
@@ -100,6 +106,17 @@ const memberTexts = (name: string, value: { readonly [member: string]: Scalar })
   );
 
 const isList = (value: Value): value is readonly Scalar[] => Array.isArray(value);
+
+const isNestedList = (value: Nested): value is readonly Nested[] => Array.isArray(value);
+
+const isScalar = (value: Nested): value is Scalar => !Predicate.isObjectOrArray(value);
+
+/**
+ * A value an RFC 6570 style can expand: a scalar, or an array or object of scalars.
+ */
+const isFlat = (value: Nested): value is Value =>
+  isScalar(value) ||
+  (isNestedList(value) ? value : Object.values(value)).every((member) => isScalar(member));
 
 const describe = (name: string, value: Value): Effect.Effect<Text | undefined, UsageError> => {
   if (isList(value)) {
@@ -402,6 +419,11 @@ type QueryStyle = "deepObject" | "form" | "pipeDelimited" | "spaceDelimited";
 export interface QueryOptions {
   readonly allowEmptyValue?: boolean;
   readonly allowReserved: boolean;
+  /**
+   * `deepObject` only: send nested values in the bracket convention (design 6.1, D-OQ1 (b)). Set
+   * only by the author config's `nonStandard.deepObjectBrackets`; absent is strict.
+   */
+  readonly brackets?: boolean;
   readonly explode: boolean;
   readonly required: boolean;
 }
@@ -516,27 +538,117 @@ const composePairs = (
   return [`${key}=${flat(text, codec.joiners[style])}`];
 };
 
-const isEmptyCompound = (value: Value) =>
-  isList(value) ? value.length === 0 : Predicate.isObject(value) && Object.keys(value).length === 0;
+const isEmptyCompound = (value: Nested) =>
+  isNestedList(value)
+    ? value.length === 0
+    : Predicate.isObject(value) && Object.keys(value).length === 0;
+
+/**
+ * Bracket paths stop here (design 6.1): deeper is refused, so the walk is bounded.
+ */
+const maxBracketDepth = 32;
+
+type Leaf = readonly [keys: readonly string[], text: string];
+
+/**
+ * Every leaf below `value` with its path of member names and indexes, in document order. An
+ * undefined member is omitted, as in the one-level form; a `null` member, an undefined or `null`
+ * item and a lone surrogate are refused. Depth is checked before descending.
+ */
+const bracketLeaves = (
+  name: string,
+  value: Nested,
+  keys: readonly string[],
+): Effect.Effect<readonly Leaf[], UsageError> =>
+  Effect.gen(function* bracketWalk() {
+    if (keys.length > maxBracketDepth) {
+      return yield* refuse(`parameter ${name} nests deeper than ${maxBracketDepth} levels`);
+    }
+
+    if (isScalar(value)) {
+      return [[keys, yield* itemText(name, value)]];
+    }
+
+    const children: readonly (readonly [string, Nested])[] = isNestedList(value)
+      ? value.map((item, index) => [String(index), item] as const)
+      : Object.entries(value).filter(([, member]) => member !== undefined);
+    const leaves: Leaf[] = [];
+
+    for (const [key, child] of children) {
+      leaves.push(...(yield* bracketLeaves(name, child, [...keys, yield* itemText(name, key)])));
+    }
+
+    return leaves;
+  });
+
+/**
+ * The bracket convention (design 6.1, D-OQ1 (b)): each leaf at path `k1 … kn` becomes
+ * `name[k1]…[kn]=v`, the whole name encoded as the one-level form encodes it. `undefined` when the
+ * value sends no pair. Two leaves whose names encode alike are refused: a server cannot tell them
+ * apart.
+ */
+const bracketPairs = (
+  name: string,
+  value: Nested,
+  codec: PairCodec,
+): Effect.Effect<readonly string[] | undefined, UsageError> =>
+  Effect.gen(function* bracketExpansion() {
+    if (isScalar(value)) {
+      return Predicate.isNullish(value)
+        ? undefined
+        : yield* refuse(`parameter ${name} is not an object or array, which brackets require`);
+    }
+
+    const leaves = yield* bracketLeaves(name, value, []);
+    const names = leaves.map(([keys]) =>
+      codec.name(`${name}${keys.map((key) => `[${key}]`).join("")}`),
+    );
+
+    if (new Set(names).size !== names.length) {
+      return yield* refuse(`parameter ${name} sends two leaves with one bracketed name`);
+    }
+
+    return leaves.length === 0
+      ? undefined
+      : leaves.map(([, text], index) => `${names[index]}=${codec.value(text)}`);
+  });
+
+const nothingSent = (
+  name: string,
+  value: Nested,
+  options: QueryOptions,
+): Effect.Effect<string | undefined, UsageError> => {
+  if (options.allowEmptyValue === true && isEmptyCompound(value)) {
+    return Effect.succeed(`${encodeUnreserved(name)}=`);
+  }
+
+  return options.required
+    ? refuse(`parameter ${name} is required and has no value`)
+    : Effect.undefined;
+};
 
 const queryStyled =
   (style: QueryStyle) =>
-  (name: string, value: Value, options: QueryOptions): QueryParameter => ({
+  (name: string, value: Nested, options: QueryOptions): QueryParameter => ({
     expand: Effect.gen(function* queryExpansion() {
       if (unpairedSurrogate.test(name)) {
         return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
       }
 
+      if (style === "deepObject" && options.brackets === true) {
+        const pairs = yield* bracketPairs(name, value, queryCodec(options.allowReserved));
+
+        return pairs === undefined ? yield* nothingSent(name, value, options) : pairs.join("&");
+      }
+
+      if (!isFlat(value)) {
+        return yield* refuse(`parameter ${name} holds a value nested deeper than one level`);
+      }
+
       const text = yield* toText(name, value, false);
 
       if (text === undefined) {
-        if (options.allowEmptyValue === true && isEmptyCompound(value)) {
-          return `${encodeUnreserved(name)}=`;
-        }
-
-        return options.required
-          ? yield* refuse(`parameter ${name} is required and has no value`)
-          : undefined;
+        return yield* nothingSent(name, value, options);
       }
 
       if (style === "deepObject" && text.kind !== "object") {
@@ -557,24 +669,27 @@ const queryStyled =
     style,
   });
 
+type QueryExpansion = (name: string, value: Value, options: QueryOptions) => QueryParameter;
+
 /**
  * Query `form`: RFC 6570 `{?name}` and `{?name*}`.
  */
-export const form = queryStyled("form");
+export const form: QueryExpansion = queryStyled("form");
 
 /**
  * Query `spaceDelimited`: a non-exploded list joined by an encoded space.
  */
-export const spaceDelimited = queryStyled("spaceDelimited");
+export const spaceDelimited: QueryExpansion = queryStyled("spaceDelimited");
 
 /**
  * Query `pipeDelimited`: a non-exploded list joined by an encoded pipe.
  */
-export const pipeDelimited = queryStyled("pipeDelimited");
+export const pipeDelimited: QueryExpansion = queryStyled("pipeDelimited");
 
 /**
  * Query `deepObject`: an object with scalar members as `name[key]=value`, brackets encoded.
- * `explode` has no effect.
+ * `explode` has no effect. A deeper value is refused unless `brackets` is set; then any object or
+ * array is sent in the bracket convention.
  */
 export const deepObject = queryStyled("deepObject");
 
@@ -1054,6 +1169,10 @@ export const formData = (fields: FormFields, options: FormDataOptions): RequestB
  */
 export interface FormEncoding {
   readonly allowReserved?: boolean;
+  /**
+   * With `style: deepObject` only: the bracket convention, as `QueryOptions.brackets`.
+   */
+  readonly brackets?: boolean;
   readonly explode?: boolean;
   readonly style?: QueryStyle;
 }
@@ -1133,13 +1252,6 @@ const hasStyle = (encoding: FormEncoding) =>
   encoding.allowReserved !== undefined;
 
 /**
- * A value an RFC 6570 style can expand: a scalar, or an array or object of scalars.
- */
-const isFlat = (value: Json): value is Json & Value =>
-  isJsonScalar(value) ||
-  (isJsonObject(value) ? Object.values(value) : value).every((member) => isJsonScalar(member));
-
-/**
  * The pairs one property sends. `members` marks pairs named by the value's members (an exploded
  * object or `deepObject`) rather than by the property itself.
  */
@@ -1165,6 +1277,12 @@ const styledPairs = (
       allowReserved: encoding.allowReserved ?? false,
       explode: encoding.explode ?? style === "form",
     };
+
+    if (style === "deepObject" && encoding.brackets === true) {
+      const pairs = yield* bracketPairs(name, value, formCodec(options.allowReserved));
+
+      return pairs === undefined ? noPairs : { members: true, pairs };
+    }
 
     if (!isFlat(value)) {
       return yield* refuse(`property ${name} holds a value nested deeper than one level`);
