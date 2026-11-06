@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Code"
+  short_description: "Preserve consequential knowledge in sourced JSDoc"
+  default_prompt: "Use $document-code to document or review TypeScript and TSX program units in this repository. Preserve consequential learned constraints as present-tense causal explanations for a first-time reader, document each fact at its owning surface, cite useful local and authoritative sources, and keep every JSDoc block multiline."

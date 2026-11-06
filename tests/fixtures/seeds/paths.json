@@ -1,0 +1,1588 @@
+{
+  "cases": [
+    {
+      "id": "path-reject-no-leading-slash",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "api-keys"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-02"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-double-slash-prefix",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "//a"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-empty-segment",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a//b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-query",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a?x=1"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-fragment",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a#f"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-backslash",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a\\b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-space",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-tab",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a\tb"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-newline",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a\nb"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-nul",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a\u0000b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-del",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a\u007fb"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-angle-open",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a<b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-angle-close",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a>b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-dot-segment",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/./b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-dotdot-segment",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/../b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-trailing-dotdot",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/.."
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-percent-dot-segment",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/%2e%2e/b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-malformed-percent",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a%zz"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-truncated-percent",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a%2"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-unclosed-brace",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/{x"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-stray-close-brace",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/x}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-empty-expression",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/{}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-nested-braces",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/{x{y}}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-duplicate-expression",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a/{x}/{x}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-square-bracket",
+      "source": "E06 src/core/normalize.ts:468-531 (malformed path case)",
+      "input": {
+        "path": "/a[b]"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-accept-colon",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a:b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-semicolon",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a;b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-at",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a@b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-comma",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a,b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-dollar",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a$b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-plus",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a+b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-equals",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a=b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-ampersand",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a&b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-valid-percent-escape",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a%41b"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-root",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-trailing-slash",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/a/"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-accept-mixed-literal-and-expression",
+      "source": "E06 src/core/normalize.ts:468-531 (prior refused static reserved characters; design §6.4 does not)",
+      "input": {
+        "path": "/files/{name}.json"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["name"]
+      },
+      "designSection": "§6.4"
+    },
+    {
+      "id": "path-reject-non-ascii-literal",
+      "source": "E06 src/core/normalize.ts:468-531 (decodeURIComponent check)",
+      "input": {
+        "path": "/café"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-accept-invalid-utf8-percent",
+      "source": "E06 src/core/normalize.ts:468-531 (decodeURIComponent check)",
+      "input": {
+        "path": "/a/%ff"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-slash-in-expression",
+      "source": "E06 src/core/normalize.ts:468-531 (placeholder pattern [^{}/]+)",
+      "input": {
+        "path": "/a/{b/c}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-api-keys",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/api-keys"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-api-keys-api_key_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/api-keys/{api_key_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["api_key_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-audiences",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/audiences"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-audiences-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/audiences/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations-automation_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations/{automation_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["automation_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations-automation_id-duplicate",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations/{automation_id}/duplicate"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["automation_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations-automation_id-runs",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations/{automation_id}/runs"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["automation_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations-automation_id-runs-run_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations/{automation_id}/runs/{run_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["automation_id", "run_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-automations-automation_id-stop",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/automations/{automation_id}/stop"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["automation_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id-cancel",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}/cancel"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id-clicked-links",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}/clicked-links"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id-duplicate",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}/duplicate"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id-recipients",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}/recipients"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-broadcasts-id-send",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/broadcasts/{id}/send"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contact-properties",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contact-properties"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contact-properties-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contact-properties/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-imports",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/imports"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-imports-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/imports/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-contact_id-segments",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/{contact_id}/segments"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["contact_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-contact_id-segments-segment_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/{contact_id}/segments/{segment_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["contact_id", "segment_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-contact_id-topics",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/{contact_id}/topics"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["contact_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-contacts-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/contacts/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains-claim",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains/claim"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains-domain_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains/{domain_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["domain_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains-domain_id-claim",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains/{domain_id}/claim"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["domain_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains-domain_id-claim-verify",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains/{domain_id}/claim/verify"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["domain_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-domains-domain_id-verify",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/domains/{domain_id}/verify"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["domain_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-batch",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/batch"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-metrics",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/metrics"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-receiving",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/receiving"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-receiving-email_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/receiving/{email_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-receiving-email_id-attachments",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/receiving/{email_id}/attachments"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-receiving-email_id-attachments-attachment_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/receiving/{email_id}/attachments/{attachment_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id", "attachment_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-email_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/{email_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-email_id-attachments",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/{email_id}/attachments"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-email_id-attachments-attachment_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/{email_id}/attachments/{attachment_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id", "attachment_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-email_id-cancel",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/{email_id}/cancel"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-emails-email_id-share",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/emails/{email_id}/share"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-events",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/events"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-events-send",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/events/send"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-events-identifier",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/events/{identifier}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["identifier"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-agent",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/agent"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-drafts",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/drafts"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-drafts-draft_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/drafts/{draft_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "draft_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-drafts-draft_id-send",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/drafts/{draft_id}/send"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "draft_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-labels",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/labels"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-labels-label_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/labels/{label_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "label_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-search",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/search"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-emails",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/emails"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-emails-email_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/emails/{email_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id", "email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-emails-email_id-forward",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/emails/{email_id}/forward"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id", "email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-emails-email_id-reply",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/emails/{email_id}/reply"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id", "email_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-labels",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/labels"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-inboxes-inbox_id-threads-thread_id-labels-label_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/inboxes/{inbox_id}/threads/{thread_id}/labels/{label_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["inbox_id", "thread_id", "label_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-logs",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/logs"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-logs-log_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/logs/{log_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["log_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-oauth-grants",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/oauth/grants"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-oauth-grants-oauth_grant_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/oauth/grants/{oauth_grant_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["oauth_grant_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-segments",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/segments"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-segments-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/segments/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-segments-id-contacts",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/segments/{id}/contacts"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-suppressions",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/suppressions"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-suppressions-batch-add",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/suppressions/batch/add"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-suppressions-batch-remove",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/suppressions/batch/remove"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-suppressions-suppression",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/suppressions/{suppression}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["suppression"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-templates",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/templates"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-templates-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/templates/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-templates-id-duplicate",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/templates/{id}/duplicate"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-templates-id-publish",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/templates/{id}/publish"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-topics",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/topics"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-topics-id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/topics/{id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-usage",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/usage"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": []
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id-events",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}/events"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id-events-event_id",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}/events/{event_id}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id", "event_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id-events-event_id-attempts",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}/events/{event_id}/attempts"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id", "event_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id-events-event_id-replay",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}/events/{event_id}/replay"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id", "event_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-resend-webhooks-webhook_id-signing-secret-rotate",
+      "source": "E06 pinned Resend corpus 0b2a456 resend.json (sha256 aa33334c); real-world path template",
+      "input": {
+        "path": "/webhooks/{webhook_id}/signing-secret/rotate"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["webhook_id"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-percent-dot-upper",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/%2E./b"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-reject-control-in-expression",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/{b\u0001}"
+      },
+      "expected": {
+        "outcome": "refused",
+        "rows": ["PTH-07"]
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "path-accept-non-ascii-expression-name",
+      "source": "b96c8946 SR:G1",
+      "input": {
+        "path": "/a/{café}"
+      },
+      "expected": {
+        "outcome": "accepted",
+        "parameterNames": ["café"]
+      },
+      "designSection": "§3.4"
+    }
+  ]
+}

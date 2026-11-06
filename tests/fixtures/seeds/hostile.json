@@ -1,0 +1,235 @@
+{
+  "cases": [
+    {
+      "id": "hostile-lone-high-surrogate",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [55296]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"\\uD800\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-lone-low-surrogate",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [56320]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"\\uDC00\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-surrogate-pair",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": {
+        "codeUnits": [55357, 56832]
+      },
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": false,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"\ud83d\ude00\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-template-interpolation",
+      "source": "E16 src/core/source-text.ts:11-24 (defect D4)",
+      "input": "a${b}c",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "quote": "double",
+        "source": "\"a${b}c\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-backtick-and-backslash",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "`\\",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "quote": "double",
+        "source": "\"`\\\\\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-carriage-return",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "a\rb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\rb\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-line-separators",
+      "source": "E16 src/core/source-text.ts:11-24",
+      "input": "\u2028\u2029",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"\\u2028\\u2029\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-jsdoc-comment-terminator",
+      "source": "E16 src/core/source-text.ts:41-47",
+      "input": "text */ more",
+      "expected": {
+        "kind": "string-literal",
+        "source": "\"text */ more\"",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "inJsDoc": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-jsdoc-line-leading-at",
+      "source": "E16 src/core/source-text.ts:41-47",
+      "input": "first line\n  @deprecated forged tag",
+      "expected": {
+        "kind": "string-literal",
+        "source": "\"first line\\n  @deprecated forged tag\"",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "inJsDoc": false
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-key-proto",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "__proto__",
+      "expected": {
+        "kind": "object-key",
+        "computed": true,
+        "ownProperty": true,
+        "source": "[\"__proto__\"]",
+        "quoted": true
+      },
+      "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-key-constructor",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "constructor",
+      "expected": {
+        "kind": "object-key",
+        "computed": false,
+        "ownProperty": true,
+        "source": "constructor",
+        "quoted": false
+      },
+      "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-key-prototype",
+      "source": "E16 design \u00a79 I1 (R:81699396 \u00a73.1 T2)",
+      "input": "prototype",
+      "expected": {
+        "kind": "object-key",
+        "computed": false,
+        "ownProperty": true,
+        "source": "prototype",
+        "quoted": false
+      },
+      "designSection": "\u00a79 I1"
+    },
+    {
+      "id": "hostile-printable-non-ascii",
+      "source": "b96c8946 MP:1",
+      "input": "caf\u00e9",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": false,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"caf\u00e9\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-format",
+      "source": "b96c8946 MP:1",
+      "input": "a\u200bb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u200Bb\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-del",
+      "source": "b96c8946 MP:1",
+      "input": "a\u007fb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u007Fb\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-c1",
+      "source": "b96c8946 MP:1",
+      "input": "a\u0085b",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u0085b\""
+      },
+      "designSection": "\u00a73.6"
+    },
+    {
+      "id": "hostile-escape-set-bidi",
+      "source": "b96c8946 MP:1",
+      "input": "a\u202eb",
+      "expected": {
+        "kind": "string-literal",
+        "asciiOnly": true,
+        "roundTrip": true,
+        "templateLiteral": false,
+        "source": "\"a\\u202Eb\""
+      },
+      "designSection": "\u00a73.6"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "package": { "name": "example-cli", "version": "1.0.0" },
+  "binName": "example",
+  "envPrefix": "EXAMPLE",
+  "servers": { "accepted": ["https://api.example.com/{version}"] },
+  "naming": {
+    "operations": {
+      "users-update": {
+        "command": "update",
+        "parameters": { "header:If-Match": { "flag": "if-match" } }
+      }
+    },
+    "byPointer": {}
+  },
+  "commands": { "module": "./custom/commands.ts", "names": ["login"] }
+}

@@ -1,0 +1,455 @@
+{
+  "cases": [
+    {
+      "id": "multipart-file-bytes-and-filename",
+      "source": "E46 tests/multipart.test.ts:132-182",
+      "input": {
+        "part": "document",
+        "path": "dir/document.bin",
+        "bytes": [0, 255, 128, 10, 13]
+      },
+      "expected": {
+        "requestCount": 1,
+        "contentTypePrefix": "multipart/form-data; boundary=",
+        "partBytes": [0, 255, 128, 10, 13],
+        "filename": "document.bin",
+        "bodyIsSingleStream": true,
+        "usesFormData": false
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-filename-is-basename-not-path",
+      "source": "E46 tests/multipart.test.ts:132-182",
+      "input": {
+        "part": "document",
+        "path": "/home/operator/private/dir/report.pdf"
+      },
+      "expected": {
+        "filename": "report.pdf",
+        "filenameContainsDirectory": false
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-stdin-filename-is-part-name",
+      "source": "E46 design §6.3 (prior test had no stdin case)",
+      "input": {
+        "part": "document",
+        "path": "-"
+      },
+      "expected": {
+        "filename": "document"
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-array-repeats-part-in-order",
+      "source": "E46 tests/multipart.test.ts:132-182",
+      "input": {
+        "part": "attachments",
+        "paths": ["a.bin", "b.txt"]
+      },
+      "expected": {
+        "partCount": 2,
+        "partName": "attachments",
+        "partOrder": ["a.bin", "b.txt"]
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-text-field-passes-as-given",
+      "source": "E46 tests/multipart.test.ts:132-182",
+      "input": {
+        "part": "title",
+        "value": "caption"
+      },
+      "expected": {
+        "value": "caption",
+        "hasFilename": false
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-name-escapes-lf-cr-quote",
+      "source": "E46 design §5 (spike S3 escaping rule)",
+      "input": {
+        "partName": "a\"b\nc\rd"
+      },
+      "expected": {
+        "nameInHeader": "a%22b%0D%0Ac%0D%0Ad"
+      },
+      "designSection": "§5"
+    },
+    {
+      "id": "multipart-filename-escapes-without-crlf-normalization",
+      "source": "E46 design §5 (spike S3 escaping rule)",
+      "input": {
+        "filename": "x\"y\nz\rw"
+      },
+      "expected": {
+        "filenameInHeader": "x%22y%0Az%0Dw"
+      },
+      "designSection": "§5"
+    },
+    {
+      "id": "multipart-part-content-type-verbatim",
+      "source": "E46 design §6.3 (Bun FormData appends a charset; the runtime must not)",
+      "input": {
+        "part": "meta",
+        "encodingContentType": "application/json"
+      },
+      "expected": {
+        "partContentType": "application/json"
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-optional-body-omitted-sends-nothing-body",
+      "source": "E46 tests/multipart.test.ts:184-247",
+      "input": {
+        "requestBodyRequired": false,
+        "flagsGiven": []
+      },
+      "expected": {
+        "requestCount": 1,
+        "bodyByteLength": 0,
+        "hasContentType": false
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "multipart-array-over-max-items-sends-nothing",
+      "source": "E46 tests/multipart.test.ts:184-247",
+      "input": {
+        "part": "attachments",
+        "maxItems": 2,
+        "paths": ["a.bin", "a.bin", "a.bin"]
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "requestCount": 0
+      },
+      "designSection": "§4.6"
+    },
+    {
+      "id": "multipart-missing-file-leaks-no-path",
+      "source": "E46 tests/multipart.test.ts:249-260",
+      "input": {
+        "part": "document",
+        "path": "private-missing-file"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesFlag": "--document",
+        "requestCount": 0,
+        "stderrContainsPath": false,
+        "stderrContainsRawFilesystemCause": false
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "auth-scheme-name-case-insensitive-bearer",
+      "source": "E46 tests/resend-builtins.test.ts:7-44",
+      "input": {
+        "type": "http",
+        "schemes": ["bearer", "Bearer", "bEaReR"]
+      },
+      "expected": {
+        "canonical": "bearer"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-scheme-name-case-insensitive-basic",
+      "source": "E46 tests/resend-builtins.test.ts:7-44",
+      "input": {
+        "type": "http",
+        "schemes": ["Basic", "BASIC"]
+      },
+      "expected": {
+        "canonical": "basic"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-http-digest-refused-per-alternative",
+      "source": "E46 tests/resend-builtins.test.ts:7-44",
+      "input": {
+        "type": "http",
+        "scheme": "digest"
+      },
+      "expected": {
+        "scope": "element",
+        "refused": true
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-bearer-header-and-redaction",
+      "source": "E46 tests/resend-builtins.test.ts:46-91",
+      "input": {
+        "type": "http",
+        "scheme": "bearer",
+        "credential": "opaque token/+=="
+      },
+      "expected": {
+        "authorization": "Bearer opaque token/+==",
+        "serializedFormContainsCredential": false
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-header-and-redaction",
+      "source": "E46 tests/resend-builtins.test.ts:46-91",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice",
+        "password": "secret"
+      },
+      "expected": {
+        "authorization": "Basic YWxpY2U6c2VjcmV0",
+        "serializedFormContainsCredential": false
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-password-may-contain-colon",
+      "source": "E46 tests/resend-builtins.test.ts:182-231",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice",
+        "password": "a:b"
+      },
+      "expected": {
+        "authorization": "Basic YWxpY2U6YTpi"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-username-colon-refused",
+      "source": "E46 tests/resend-builtins.test.ts:182-231",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice:admin",
+        "password": "secret"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-username-control-character-refused",
+      "source": "E46 tests/resend-builtins.test.ts:182-231",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice\u007f",
+        "password": "secret"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-apikey-header-explicit-name-verbatim-value",
+      "source": "E46 tests/resend-builtins.test.ts:93-148",
+      "input": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Custom-Key",
+        "credential": "value /;=+%"
+      },
+      "expected": {
+        "header": ["x-custom-key", "value /;=+%"],
+        "nameInRedactedHeaderNames": true,
+        "serializedFormContainsCredential": false
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-apikey-query-appended-existing-params-kept",
+      "source": "E46 tests/resend-builtins.test.ts:93-148",
+      "input": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "custom_key",
+        "credential": "value /;=+%",
+        "existingQuery": [["keep", "yes"]]
+      },
+      "expected": {
+        "queryPairs": [
+          ["keep", "yes"],
+          ["custom_key", "value /;=+%"]
+        ],
+        "nameInRedactedQueryNames": true
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-apikey-cookie-merged-after-existing-cookies",
+      "source": "E46 tests/resend-builtins.test.ts:93-148",
+      "input": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "key",
+        "credential": "value /;=+%",
+        "existingCookieHeader": "session=existing%20value; theme=dark"
+      },
+      "expected": {
+        "existingCookiesPreservedByteForByte": "session=existing%20value; theme=dark",
+        "credentialCookieLast": true,
+        "credentialCookie": "key=value%20%2F%3B%3D%2B%25"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-apikey-cookie-lone-surrogate-refused",
+      "source": "E46 tests/resend-builtins.test.ts:93-148",
+      "input": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "key",
+        "credentialCodeUnits": [55296]
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "requestCount": 0,
+        "outputContainsCredentialValue": false
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "path-dot-segment-refused",
+      "source": "E46 tests/resend-builtins.test.ts:150-180",
+      "input": {
+        "segments": [".", "..", "%2e", "%2E%2e"]
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "requestCount": 0
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "path-lone-surrogate-segment-refused",
+      "source": "E46 tests/resend-builtins.test.ts:150-180",
+      "input": {
+        "segmentCodeUnits": [55296]
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "requestCount": 0
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "path-segment-slash-encoded-and-base-concatenated",
+      "source": "E46 tests/resend-builtins.test.ts:150-180",
+      "input": {
+        "base": "https://example.test/api/",
+        "segments": ["files", "folder/report.json"]
+      },
+      "expected": {
+        "url": "https://example.test/api/files/folder%2Freport.json"
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "auth-basic-password-control-character-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "alice",
+        "password": "secret\n"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-non-latin-username-utf8",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "josé",
+        "password": "secret"
+      },
+      "expected": {
+        "authorization": "Basic am9zw6k6c2VjcmV0"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-astral-username-utf8",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "username": "😀",
+        "password": "private-secret"
+      },
+      "expected": {
+        "authorization": "Basic 8J+YgDpwcml2YXRlLXNlY3JldA=="
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "auth-basic-lone-surrogate-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "type": "http",
+        "scheme": "basic",
+        "usernameCodeUnits": [55296],
+        "password": "secret"
+      },
+      "expected": {
+        "tag": "UsageError",
+        "exitCode": 2,
+        "namesScheme": true,
+        "outputContainsCredentialValue": false,
+        "requestCount": 0
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "multipart-required-empty-body-close-delimiter",
+      "source": "b96c8946 SR:G10",
+      "input": {
+        "requestBodyRequired": true,
+        "flagsGiven": []
+      },
+      "expected": {
+        "requestCount": 1,
+        "contentTypePrefix": "multipart/form-data; boundary=",
+        "bodyIsCloseDelimiterOnly": true
+      },
+      "designSection": "§6.3"
+    }
+  ]
+}

@@ -1,0 +1,3914 @@
+{
+  "cases": [
+    {
+      "id": "norm-preserve-method-docs-parameter-order",
+      "source": "E43 tests/normalize.test.ts preserves HTTP method, docs, parameter order, values and input",
+      "input": {
+        "openapi": "3.1",
+        "path": "/parents/{parentId}/things/{itemId}",
+        "method": "post",
+        "parameters": ["path itemId", "path parentId", "query isReady:boolean"],
+        "operationId": "things_get",
+        "docs": ["summary", "description", "deprecated", "externalDocs"]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "method": "POST",
+        "parameterOrder": ["itemId", "parentId", "isReady"],
+        "pathParametersAreNamedPositionalsInTemplateOrder": ["parentId", "itemId"],
+        "wireNamesUnchanged": true,
+        "docsKept": true,
+        "inputNotMutated": true,
+        "priorFlagBindingNote": "design: path parameters are positional arguments, not flags"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-command-derived-from-operation-id-and-tag",
+      "source": "E43 tests/normalize.test.ts preserves HTTP method (command path: x-fern-sdk-group-name flips to tag plus operationId)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "operationId": "things_get",
+        "extensions": {
+          "x-fern-sdk-group-name": "things"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "commandPath [things, get] from x-fern metadata",
+        "commandPath": ["things-get"],
+        "vendorExtensionIgnored": true,
+        "informational": "EXT"
+      },
+      "designSection": "§2.3 EXT; §4.4; §10 D-CUS2"
+    },
+    {
+      "id": "norm-path-parameters-positional-for-list-and-bulk",
+      "source": "E43 tests/normalize.test.ts list and bulk actions keep all path parameters as flags (flips: path parameters are positionals)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things/{id}",
+        "method": "post",
+        "parameters": ["path id"],
+        "operationId": "things_list"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "binding flag",
+        "binding": "positional",
+        "metavar": "id",
+        "sameForActions": ["list", "bulk", "bulk-delete"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-operation-parameters-override-path-item",
+      "source": "E43 tests/normalize.test.ts operation parameters override path-item parameters",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "pathItemParameters": ["query q:string content text/plain"],
+        "parameters": ["query q:integer"]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "merge": "override by (name,in)",
+        "resultingSchemaType": "integer",
+        "oneParameterNamedQ": true
+      },
+      "designSection": "§2.2 Operation; PTH-28"
+    },
+    {
+      "id": "norm-duplicate-name-in-one-list",
+      "source": "E43 tests/normalize.test.ts operation parameters override path-item parameters (same list duplicate)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": ["query q:string", "query q:integer"]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-28",
+        "scope": "operation"
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-security-override-with-empty-list",
+      "source": "E43 tests/normalize.test.ts checks only selected requests and permits operation security override",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "rootSecurity": [
+          {
+            "token": []
+          }
+        ],
+        "operationSecurity": [],
+        "schemes": {
+          "token": {
+            "type": "http",
+            "scheme": "bearer"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "policy": {
+          "declared": true,
+          "alternatives": 0
+        },
+        "noCredentialsSent": true
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "norm-unselected-operation-malformed-parameter",
+      "source": "E43 tests/normalize.test.ts checks only selected requests (flips: no selection by x-forge-aliases; every operation is read)",
+      "input": {
+        "openapi": "3.1",
+        "otherOperation": {
+          "get": {
+            "operationId": "unused",
+            "parameters": [
+              {
+                "in": "header"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "ignored as not selected",
+        "row": "VAL-*",
+        "scope": "document",
+        "reason": "official-schema validation, a Parameter without name",
+        "pointer": "/paths/~1unused/get/parameters/0"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "norm-header-parameter-kept",
+      "source": "E43 tests/normalize.test.ts checks only selected requests (header parameter)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": ["header x:string"]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "location": "header",
+        "wireName": "x"
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "norm-callbacks-informational",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (callbacks; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "callbacks": {}
+      },
+      "expected": {
+        "outcome": "informational",
+        "priorOutcome": "refusal unsupported",
+        "row": "CBK-01",
+        "operationRemains": true,
+        "neverAffectsRequests": true
+      },
+      "designSection": "§2.2 Informational; §10 D-OQ2"
+    },
+    {
+      "id": "norm-security-scheme-present-implemented",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (security; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "operationSecurity": [
+          {
+            "token": []
+          }
+        ],
+        "schemes": {
+          "token": {
+            "type": "http",
+            "scheme": "bearer"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "policy": {
+          "declared": true,
+          "alternatives": 1
+        },
+        "credentialSource": ["--token-file", "env", "prompt"]
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "norm-query-parameter-object-form-explode",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (object query parameter; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": ["query q:object {a:string}"]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "style": "form",
+        "explode": true,
+        "note": "scalar-property object under form"
+      },
+      "designSection": "§6.1 query"
+    },
+    {
+      "id": "norm-query-parameter-object-deepobject-nested",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (nested compound value)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "style": "deepObject",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PRM-27",
+        "scope": "element",
+        "code": "PRM-27/compound-nested",
+        "operationRemainsWhenParameterOptional": true
+      },
+      "designSection": "§6.1"
+    },
+    {
+      "id": "norm-parameter-type-null-union",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (type [string, null]; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": ["string", "null"]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "nullable": true,
+        "nullMeansOmitted": true
+      },
+      "designSection": "§6.1 Type to text"
+    },
+    {
+      "id": "norm-parameter-style-deepobject-scalar",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (style deepObject; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "style": "deepObject",
+            "explode": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "encoding": "q%5Ba%5D=v"
+      },
+      "designSection": "§6.1 query"
+    },
+    {
+      "id": "norm-parameter-allow-reserved-query",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (allowReserved; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "allowReserved": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "reservedCharactersPassExcept": ["&", "=", "+", "#"]
+      },
+      "designSection": "§6.1 allowReserved in query"
+    },
+    {
+      "id": "norm-request-body-text-plain",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (text/plain body; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "requestBody": {
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal unsupported",
+        "codec": "text",
+        "flag": "--body"
+      },
+      "designSection": "§2.2 MediaAlternative; §4.5"
+    },
+    {
+      "id": "norm-response-links-informational",
+      "source": "E43 tests/normalize.test.ts rejects unsupported request boundaries (response links; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "links": {}
+          }
+        }
+      },
+      "expected": {
+        "outcome": "informational",
+        "priorOutcome": "refusal unsupported",
+        "row": "LNK-01"
+      },
+      "designSection": "§2.2 Informational"
+    },
+    {
+      "id": "norm-path-dot-segment",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a/../b; operation scope per design)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a/../b",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document"
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-path-percent-encoded-dot-segment",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a/%2E./b)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a/%2E./b",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation"
+      },
+      "designSection": "§3.4; §6.1"
+    },
+    {
+      "id": "norm-path-malformed-backslash",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a\\b)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a\\b",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-malformed-question-mark",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a?x)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a?x",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-malformed-fragment",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a#x)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a#x",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-malformed-space",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a b)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a b",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-malformed-unclosed-brace",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (/a/{bad)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a/{bad",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-malformed-empty-segment-authority-like",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (//host/a)",
+      "input": {
+        "openapi": "3.1",
+        "path": "//host/a",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-07",
+        "scope": "operation",
+        "priorScope": "document",
+        "reason": "path key outside the 3.2.1 path-template ABNF"
+      },
+      "designSection": "§3.4; §10 D-OQ4"
+    },
+    {
+      "id": "norm-path-template-without-parameter",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (missing parameter)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a/{id}",
+        "method": "post"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-03",
+        "scope": "operation"
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-path-parameter-not-required",
+      "source": "E43 tests/normalize.test.ts (design check: path params required true)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a/{id}",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refused",
+        "scope": "document",
+        "stage": "validate",
+        "rows": ["VAL-*"],
+        "rule": "PRM-06"
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-get-with-request-body-3-1",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (GET body; scope changes)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a",
+        "method": "get",
+        "requestBody": {
+          "application/json": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "OPR-10",
+        "scope": "element",
+        "code": "OPR-10/body-refused",
+        "priorScope": "operation",
+        "operationRemains": true,
+        "reason": "Bun fetch throws before connecting (spike S6)"
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "norm-get-with-request-body-3-0-notice",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (GET body under 3.0)",
+      "input": {
+        "openapi": "3.0",
+        "path": "/a",
+        "method": "get",
+        "requestBody": {
+          "application/json": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "row": "OPR-10",
+        "noBodyFlags": true,
+        "operationRemains": true
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "norm-delete-with-request-body-3-1",
+      "source": "E43 tests/normalize.test.ts (design extends GET case to DELETE)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/a",
+        "method": "delete",
+        "requestBody": {
+          "application/json": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "bodySent": true,
+        "row": "OPR-11"
+      },
+      "designSection": "§6.3"
+    },
+    {
+      "id": "norm-template-identical-paths",
+      "source": "E43 tests/normalize.test.ts rejects malformed paths (duplicate templates)",
+      "input": {
+        "openapi": "3.1",
+        "paths": ["/a/{id}", "/a/{other}"]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "PTH-04",
+        "scope": "operation",
+        "bothOperationsRefused": true
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-reusable-parameter-and-body-resolve",
+      "source": "E43 tests/normalize.test.ts resolves reusable parameters and bodies",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/B"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "bodyRequired": true,
+        "parameterQ": true,
+        "origin": "use site is the operation, related[0] is the target"
+      },
+      "designSection": "§3.3; §8.1"
+    },
+    {
+      "id": "norm-ref-sibling-3-1-non-doc-ignored",
+      "source": "E43 tests/normalize.test.ts resolves reusable parameters and rejects ref siblings (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q",
+            "required": false
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal unsupported",
+        "row": "REF-06",
+        "siblingIgnored": true
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "norm-ref-sibling-3-0-ignored",
+      "source": "E43 tests/normalize.test.ts resolves reusable parameters and rejects ref siblings (3.0, new case)",
+      "input": {
+        "openapi": "3.0",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q",
+            "description": "local"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "notice",
+        "row": "REF-05",
+        "siblingIgnored": true,
+        "targetDescriptionKept": true
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "norm-document-without-operations",
+      "source": "E43 tests/normalize.test.ts rejects empty selection and malformed root (empty selection; flips: no alias selection)",
+      "input": {
+        "openapi": "3.1",
+        "paths": {}
+      },
+      "expected": {
+        "priorOutcome": "refusal 'selected'",
+        "outcome": "implemented",
+        "operations": 0,
+        "refusals": 0,
+        "verdict": "accepted"
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "norm-root-invalid-null",
+      "source": "E43 tests/normalize.test.ts rejects empty selection and malformed root (null)",
+      "input": {
+        "root": null
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "DOC-*/VAL-*",
+        "oneOf": ["official-schema validation", "unsupported line"],
+        "noOperationsEmitted": true
+      },
+      "designSection": "§3.2; §2.4"
+    },
+    {
+      "id": "norm-root-invalid-empty-object",
+      "source": "E43 tests/normalize.test.ts rejects empty selection and malformed root (empty-object)",
+      "input": {
+        "root": {}
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "DOC-*/VAL-*",
+        "oneOf": ["official-schema validation", "unsupported line"],
+        "noOperationsEmitted": true
+      },
+      "designSection": "§3.2; §2.4"
+    },
+    {
+      "id": "norm-root-invalid-openapi-2-0",
+      "source": "E43 tests/normalize.test.ts rejects empty selection and malformed root (openapi-2-0)",
+      "input": {
+        "root": {
+          "openapi": "2.0"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "DOC-*/VAL-*",
+        "oneOf": ["official-schema validation", "unsupported line"],
+        "noOperationsEmitted": true
+      },
+      "designSection": "§3.2; §2.4"
+    },
+    {
+      "id": "norm-root-invalid-info-without-version",
+      "source": "E43 tests/normalize.test.ts rejects empty selection and malformed root (info-without-version)",
+      "input": {
+        "root": {
+          "openapi": "3.1.0",
+          "info": {
+            "title": "x"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "DOC-*/VAL-*",
+        "oneOf": ["official-schema validation", "unsupported line"],
+        "noOperationsEmitted": true
+      },
+      "designSection": "§3.2; §2.4"
+    },
+    {
+      "id": "norm-ref-doc-malformed-summary",
+      "source": "E43 tests/normalize.test.ts reports malformed reference documentation at the local pointer (summary)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q",
+            "summary": 42
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/paths/~1things/post/parameters/0/summary",
+        "pointerIsUseSite": true
+      },
+      "designSection": "§3.2; §8.1"
+    },
+    {
+      "id": "norm-ref-doc-malformed-description",
+      "source": "E43 tests/normalize.test.ts reports malformed reference documentation at the local pointer (description)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q",
+            "description": 42
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/paths/~1things/post/parameters/0/description",
+        "pointerIsUseSite": true
+      },
+      "designSection": "§3.2; §8.1"
+    },
+    {
+      "id": "norm-ref-doc-overrides-target",
+      "source": "E43 tests/normalize.test.ts reference documentation overrides target documentation",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Q",
+            "description": "Local description",
+            "summary": "Local summary"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "row": "REF-04",
+        "description": "Local description",
+        "summary": "Local summary"
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "norm-unknown-annotation-survives",
+      "source": "E43 tests/normalize.test.ts unknown JSON annotations survive boundary decoding without changing selection",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "extensions": {
+          "x-private": {
+            "nested": [false, 0, null]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "informational": "EXT",
+        "behaviorUnchanged": true
+      },
+      "designSection": "§2.3 EXT"
+    },
+    {
+      "id": "norm-effective-security-bearer",
+      "source": "E43 tests/normalize.test.ts effective security preserves overrides (bearer)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "rootSecurity": [
+          {
+            "token": []
+          }
+        ],
+        "schemes": {
+          "token": {
+            "type": "http",
+            "scheme": "Bearer"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "kind": "http bearer",
+        "schemeMatchedCaseInsensitively": true,
+        "row": "SSC-06"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "norm-security-authorization-header-parameter",
+      "source": "E43 tests/normalize.test.ts effective security rejects wire-field collisions (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "rootSecurity": [
+          {
+            "token": []
+          }
+        ],
+        "schemes": {
+          "token": {
+            "type": "http",
+            "scheme": "bearer"
+          }
+        },
+        "parameters": ["header Authorization"]
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal",
+        "row": "PRM-19",
+        "code": "PRM-19/ignored-header",
+        "parameterBecomesNoEntity": true
+      },
+      "designSection": "§2.2 Parameter"
+    },
+    {
+      "id": "norm-security-alternatives-with-anonymous",
+      "source": "E43 tests/normalize.test.ts effective security rejects alternatives (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "rootSecurity": [
+          {
+            "token": []
+          },
+          {}
+        ],
+        "schemes": {
+          "token": {
+            "type": "http",
+            "scheme": "bearer"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal 'alternatives'",
+        "policy": {
+          "alternatives": 2,
+          "anonymousAllowed": true
+        },
+        "runtimeChoice": "first alternative with every credential; {} only when none qualifies"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "norm-security-name-undeclared",
+      "source": "E43 tests/normalize.test.ts (design: undeclared scheme name)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "operationSecurity": [
+          {
+            "missing": []
+          }
+        ],
+        "schemes": {}
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "SEC-*",
+        "scope": "operation",
+        "reason": "no alternative remains after the undeclared name removes the only one",
+        "elementScopeWhenAnotherAlternativeRemains": true
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "norm-static-uri-syntax-semicolon",
+      "source": "E43 tests/normalize.test.ts rejects unsupported static URI syntax /users;active=true (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/users;active=true",
+        "method": "post",
+        "parameters": []
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal 'Static reserved URI syntax'",
+        "pathSentVerbatim": true,
+        "whyDesign": "pchar literals are legal in the 3.2.1 path-template ABNF; the writer rewrites nothing",
+        "residualQuestion": "%2F in a static segment is legal ABNF but a server may treat it as a separator; design does not name it"
+      },
+      "designSection": "§3.4; §6.1"
+    },
+    {
+      "id": "norm-static-uri-syntax-colon-after-template",
+      "source": "E43 tests/normalize.test.ts rejects unsupported static URI syntax /users/{id}:disable (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/users/{id}:disable",
+        "method": "post",
+        "parameters": ["path id"]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal 'Static reserved URI syntax'",
+        "pathSentVerbatim": true,
+        "whyDesign": "pchar literals are legal in the 3.2.1 path-template ABNF; the writer rewrites nothing",
+        "residualQuestion": "%2F in a static segment is legal ABNF but a server may treat it as a separator; design does not name it"
+      },
+      "designSection": "§3.4; §6.1"
+    },
+    {
+      "id": "norm-static-uri-syntax-percent-encoded-slash",
+      "source": "E43 tests/normalize.test.ts rejects unsupported static URI syntax /users/%2F (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/users/%2F",
+        "method": "post",
+        "parameters": []
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal 'Static reserved URI syntax'",
+        "pathSentVerbatim": true,
+        "whyDesign": "pchar literals are legal in the 3.2.1 path-template ABNF; the writer rewrites nothing",
+        "residualQuestion": "%2F in a static segment is legal ABNF but a server may treat it as a separator; design does not name it"
+      },
+      "designSection": "§3.4; §6.1"
+    },
+    {
+      "id": "norm-static-uri-syntax-at-sign",
+      "source": "E43 tests/normalize.test.ts rejects unsupported static URI syntax /users/@me (flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/users/@me",
+        "method": "post",
+        "parameters": []
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal 'Static reserved URI syntax'",
+        "pathSentVerbatim": true,
+        "whyDesign": "pchar literals are legal in the 3.2.1 path-template ABNF; the writer rewrites nothing",
+        "residualQuestion": "%2F in a static segment is legal ABNF but a server may treat it as a separator; design does not name it"
+      },
+      "designSection": "§3.4; §6.1"
+    },
+    {
+      "id": "norm-mixed-plain-and-named-operations",
+      "source": "E43 tests/normalize.test.ts mixed naming overrides and plain operations are stable under path reordering",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "path": "/custom",
+            "method": "post",
+            "operationId": "things_get"
+          },
+          {
+            "path": "/plain",
+            "method": "get"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPaths": [["things-get"], ["plain-get"]],
+        "untaggedOperationsAtRoot": true,
+        "routeDerivedNameFor": "/plain GET without operationId is <method> + literal path words"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-path-reordering-document-order",
+      "source": "E43 tests/normalize.test.ts mixed naming overrides and plain operations are stable under path reordering (flips)",
+      "input": {
+        "openapi": "3.1",
+        "reverseOrderOfPaths": true
+      },
+      "expected": {
+        "outcome": "property",
+        "priorOutcome": "model equal after reversing paths",
+        "operationContentIdenticalPerOperation": true,
+        "iterationFollowsDocumentOrder": true,
+        "sameBytesSameOutput": true,
+        "note": "design keeps document order (3.7); reversing paths changes order, not per-operation content"
+      },
+      "designSection": "§3.7"
+    },
+    {
+      "id": "norm-duplicate-command-fold",
+      "source": "E43 tests/normalize.test.ts mixed naming ... collision and rejects command duplicates",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "path": "/a",
+            "method": "post",
+            "operationId": "things_get"
+          },
+          {
+            "path": "/b",
+            "method": "post",
+            "operationId": "things/get"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CMD-collision",
+        "scope": "operation",
+        "code": "bothOperationsRefused",
+        "reason": "two commands fold equal in one group",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4 collision table"
+    },
+    {
+      "id": "norm-command-prefix-conflict",
+      "source": "E43 tests/normalize.test.ts rejects command duplicates and prefix conflicts (prefix)",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "tag": "things",
+            "operationId": "things-get"
+          },
+          {
+            "tag": "things",
+            "operationId": "things-get-child"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPaths": [
+          ["things", "get"],
+          ["things", "get-child"]
+        ]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-operation-id-duplicate",
+      "source": "E43 tests/normalize.test.ts rejects command duplicates (duplicate operationId)",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "path": "/a",
+            "method": "get",
+            "operationId": "x"
+          },
+          {
+            "path": "/b",
+            "method": "get",
+            "operationId": "x"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "OPR-07",
+        "scope": "document"
+      },
+      "designSection": "§3.4"
+    },
+    {
+      "id": "norm-flag-collision-base-url",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (base-url)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "base-url",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "runtime flag",
+        "priorSpelling": "base-url"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-body",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (body)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "body",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "runtime flag",
+        "priorSpelling": "body"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-body-file",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (body-file)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "body-file",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "runtime flag",
+        "priorSpelling": "body-file"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-help",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (help)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "help",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "help"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-h",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (h)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "h",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "h"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-version",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (version)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "version"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-v",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (v)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "v",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "v"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-completions",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (completions)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "completions",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "completions"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-log-level",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (log-level)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "log-level",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "Effect built-in",
+        "priorSpelling": "log-level"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-no-help",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (no-help)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "no-help",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "negation",
+        "priorSpelling": "no-help"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-no-version",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (no-version)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "no-version",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "hint": "rename via config",
+        "reason": "negation",
+        "priorSpelling": "no-version"
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-folded-baseUrl",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (baseUrl folds to base-url)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "baseUrl",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "base-url",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-collision-folded-bodyFile",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (bodyFile folds to body-file)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bodyFile",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "body-file",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-collision-folded-logLevel",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (logLevel folds to log-level)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "logLevel",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "log-level",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-collision-folded-noHelp",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (noHelp folds to no-help)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "noHelp",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "no-help",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-collision-folded-noVersion",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (noVersion folds to no-version)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "noVersion",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "no-version",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-not-reserved-wizard",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (wizard; flips: not in the design's reserved set)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wizard",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal",
+        "reserved": false
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-not-reserved-noWizard",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (wizard; flips: not in the design's reserved set)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "noWizard",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal",
+        "reserved": false
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "norm-flag-collision-two-folds",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (fooBar and foo_bar)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": ["query fooBar", "query foo_bar"]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "foldedFlag": "foo-bar",
+        "namesBothPointers": true
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "norm-flag-boolean-negation-collision",
+      "source": "E43 tests/normalize.test.ts rejects effective flag collisions (boolean active beside no-active; flips)",
+      "input": {
+        "openapi": "3.1",
+        "path": "/things",
+        "method": "post",
+        "parameters": ["query active:boolean", "query no-active"]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CLI-flag-collision",
+        "scope": "operation",
+        "priorOutcome": "implemented",
+        "reason": "no-<flag> negation of every boolean collides",
+        "hint": "rename via config"
+      },
+      "designSection": "§4.4 Booleans, collision table"
+    },
+    {
+      "id": "schema-nested-wire-keys-and-extras-policy",
+      "source": "E43 tests/schema.test.ts retains nested wire keys, extras policy and documentation without applying defaults",
+      "input": {
+        "schema": {
+          "type": "object",
+          "description": "outer",
+          "additionalProperties": false,
+          "required": ["__proto__"],
+          "properties": {
+            "__proto__": {
+              "type": "object",
+              "properties": {
+                "a/b": {
+                  "type": "string",
+                  "default": "x",
+                  "deprecated": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "wireNamesVerbatim": ["__proto__", "a/b"],
+        "__proto__IsOwnKey": true,
+        "additionalPropertiesOuter": false,
+        "additionalPropertiesInnerDefaultsToTrue": true,
+        "defaultNotApplied": true,
+        "docsKept": ["description", "deprecated"],
+        "inputNotMutated": true,
+        "emittedKeysSorted": true
+      },
+      "designSection": "§9 I1; §3.5"
+    },
+    {
+      "id": "schema-pointer-escaped-and-percent-encoded",
+      "source": "E43 tests/schema.test.ts resolves escaped and percent encoded own-property pointers",
+      "input": {
+        "ref": "#/defs/a~1b%7E0c",
+        "defs": {
+          "a/b~c": {
+            "type": "string"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "resolved",
+        "target": {
+          "type": "string"
+        },
+        "canonicalPointer": "/defs/a~1b~0c",
+        "useSitePreserved": true
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-pointer-proto-own-property",
+      "source": "E43 tests/schema.test.ts resolves ... pointers (__proto__ target)",
+      "input": {
+        "ref": "#/defs/__proto__",
+        "defs": {
+          "__proto__": {
+            "type": "boolean"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "resolved",
+        "kind": "boolean",
+        "ownPropertyOnly": true
+      },
+      "designSection": "§3.3; §9 I1"
+    },
+    {
+      "id": "schema-shared-reference-not-a-cycle",
+      "source": "E43 tests/schema.test.ts shared references are not cycles",
+      "input": {
+        "defs": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "a": {
+              "$ref": "#/defs/text"
+            },
+            "b": {
+              "$ref": "#/defs/text"
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "componentsStayReferenced": true,
+        "noInlining": true
+      },
+      "designSection": "§2.1 No inlining"
+    },
+    {
+      "id": "schema-recursive-schema-is-legal",
+      "source": "E43 tests/schema.test.ts shared references are not cycles but recursive references are (flips: schema cycles are legal)",
+      "input": {
+        "defs": {
+          "node": {
+            "type": "object",
+            "properties": {
+              "next": {
+                "$ref": "#/defs/node"
+              }
+            }
+          }
+        },
+        "schema": {
+          "$ref": "#/defs/node"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal",
+        "emission": "Schema.suspend, emitted once"
+      },
+      "designSection": "§3.3 Budgets"
+    },
+    {
+      "id": "schema-pure-alias-cycle",
+      "source": "E43 tests/schema.test.ts shared references are not cycles but recursive references are (pure alias loop)",
+      "input": {
+        "defs": {
+          "loop": {
+            "$ref": "#/defs/loop"
+          }
+        },
+        "schema": {
+          "$ref": "#/defs/loop"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "DOC-23",
+        "code": "DOC-23/alias-cycle",
+        "scope": "element"
+      },
+      "designSection": "§3.3 Budgets"
+    },
+    {
+      "id": "schema-ref-invalid-unresolvable",
+      "source": "E43 tests/schema.test.ts rejects invalid reference #/missing",
+      "input": {
+        "ref": "#/missing",
+        "documentSet": 1
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "REF-18",
+        "scope": "document",
+        "code": "REF-18/unresolvable",
+        "pointer": "use-site $ref"
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-ref-invalid-not-an-own-property",
+      "source": "E43 tests/schema.test.ts rejects invalid reference #/toString",
+      "input": {
+        "ref": "#/toString",
+        "documentSet": 1
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "REF-18",
+        "scope": "document",
+        "code": "REF-18/unresolvable",
+        "pointer": "use-site $ref"
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-ref-invalid-bad-pointer-escape",
+      "source": "E43 tests/schema.test.ts rejects invalid reference #/bad~2escape",
+      "input": {
+        "ref": "#/bad~2escape",
+        "documentSet": 1
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "REF-18",
+        "scope": "document",
+        "code": "REF-18/unresolvable",
+        "pointer": "use-site $ref"
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-ref-invalid-invalid-percent-encoding",
+      "source": "E43 tests/schema.test.ts rejects invalid reference #/%FF",
+      "input": {
+        "ref": "#/%FF",
+        "documentSet": 1
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "REF-18",
+        "scope": "document",
+        "code": "REF-18/unresolvable",
+        "pointer": "use-site $ref"
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-ref-external-uri-outside-set",
+      "source": "E43 tests/schema.test.ts rejects invalid reference https://example.test/schema",
+      "input": {
+        "ref": "https://example.test/schema",
+        "documentSet": 1
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "REF-15",
+        "scope": "document",
+        "hint": "never fetched; supply the document with --document",
+        "noNetwork": true
+      },
+      "designSection": "§3.3 Never fetch; §9 I6"
+    },
+    {
+      "id": "schema-ref-bare-hash-root",
+      "source": "E43 tests/schema.test.ts rejects invalid reference # (flips)",
+      "input": {
+        "ref": "#"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "SCH-03",
+        "scope": "element"
+      },
+      "designSection": "§3.3"
+    },
+    {
+      "id": "schema-nullable-3-0",
+      "source": "E43 tests/schema.test.ts supports version-sensitive nullability (3.0 nullable)",
+      "input": {
+        "line": "3.0",
+        "schema": {
+          "type": "string",
+          "nullable": true,
+          "enum": ["a", null]
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "nullable": true,
+        "enum": ["a", null]
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "schema-nullable-3-1-type-array",
+      "source": "E43 tests/schema.test.ts supports version-sensitive nullability (3.1 type array)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "type": ["null", "integer"],
+          "enum": [0, null]
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "kind": "integer",
+        "nullable": true,
+        "enum": [0, null]
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "schema-nullable-in-3-1-document",
+      "source": "E43 tests/schema.test.ts (nullable inside 3.1; SM-8)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal /schema/nullable",
+        "valueNotNullable": true,
+        "text": "nullable has no effect in OpenAPI 3.1; use type: [..., \"null\"]"
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "schema-type-null-3-1",
+      "source": "E43 tests/schema.test.ts supports version-sensitive nullability (type null)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "kind": "null"
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "schema-type-null-3-0",
+      "source": "E43 tests/schema.test.ts rejects ... (type null under 3.0)",
+      "input": {
+        "line": "3.0",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "reason": "draft-04 type enum has no null",
+        "pointer": "/schema/type"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "schema-type-array-3-0",
+      "source": "E43 tests/schema.test.ts rejects ... (type array under 3.0)",
+      "input": {
+        "line": "3.0",
+        "schema": {
+          "type": ["string", "null"]
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/schema/type"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "schema-array-with-items",
+      "source": "E43 tests/schema.test.ts supports version-sensitive nullability (array items)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "kind": "array",
+        "items": "boolean",
+        "nullable": false
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "schema-malformed-minimum-on-string",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (minimum-on-string)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "minimum": 1,
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/minimum",
+        "basis": "D-AD12 server-validated keyword that does not apply; the design does not name inapplicable-keyword handling"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-minlength-negative",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (minlength-negative)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "minLength": -1,
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/minLength",
+        "basis": "VAL-* schema violation (minLength is a non-negative integer)",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-additional-properties-number",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (additional-properties-number)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "additionalProperties": 2,
+          "type": "object"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/additionalProperties",
+        "basis": "VAL-* schema violation",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-required-missing-property",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (required-missing-property)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "required": ["missing"],
+          "type": "object"
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal at exact pointer",
+        "outcome": "implemented",
+        "requiredKeys": ["missing"],
+        "flags": []
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-required-duplicate",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (required-duplicate)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "properties": {
+            "a": {
+              "type": "string"
+            }
+          },
+          "required": ["a", "a"],
+          "type": "object"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/required/1",
+        "basis": "VAL-* schema violation (required items unique)",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-nullable-without-3-0",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (nullable-without-3-0)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/nullable",
+        "basis": "design §3.5: nullable in 3.1 is a notice, value not treated as nullable"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-type-duplicate",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (type-duplicate)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "type": ["string", "string", "number"]
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/type",
+        "basis": "VAL-* schema violation (type array items unique)",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-integer-enum-fraction",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (integer-enum-fraction)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "enum": [1.5],
+          "type": "integer"
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/enum/0",
+        "basis": "SM-R16: enum members outside the type are unreachable; dropped with a notice"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-string-enum-null",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (string-enum-null)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "enum": [null],
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/enum/0",
+        "basis": "SM-15/SM-R16: enum member outside declared type; dropped with a notice, never refused"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-enum-duplicate",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (enum-duplicate)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "enum": ["a", "a"],
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/enum/1",
+        "basis": "VAL-* schema violation (enum items unique)",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-object-enum",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (object-enum)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "enum": [{}],
+          "type": "object"
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal at exact pointer",
+        "outcome": "notice",
+        "tier": "server-validated",
+        "pointer": "/schema/enum"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-array-without-items",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (array-without-items)",
+      "input": {
+        "line": "3.0",
+        "openapi": "3.0.3",
+        "schema": {
+          "type": "array"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/items",
+        "basis": "S30-22 items present for type array (3.0 rule, element scope)",
+        "scope": "element",
+        "row": "S30-22"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-array-without-items-3-1",
+      "source": "S30-22 is a 3.0-only row; 3.1 follows JSON Schema 2020-12 where items is optional",
+      "input": {
+        "line": "3.1",
+        "openapi": "3.1.0",
+        "schema": {
+          "type": "array"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "basis": "3.1 items absent means any; S30-22 does not apply",
+        "scope": "element"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-properties-on-string",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (properties-on-string)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "properties": {},
+          "type": "string"
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal at exact pointer",
+        "outcome": "notice",
+        "tier": "vacuous",
+        "pointer": "/schema/properties"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-maximum-string",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (maximum-string)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "properties": {
+            "a/b": {
+              "maximum": "2",
+              "type": "number"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema/properties/a~1b/maximum",
+        "basis": "VAL-* schema violation (maximum is a number)",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-boolean-schema-3-0",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (boolean-schema-3-0)",
+      "input": {
+        "line": "3.0",
+        "schema": true
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "refusal at exact pointer",
+        "pointerIfRefused": "/schema",
+        "basis": "VAL-* schema violation under draft-04 3.0",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-malformed-minlength-without-type",
+      "source": "E43 tests/schema.test.ts rejects unsupported or malformed schema at exact pointer (minlength-without-type)",
+      "input": {
+        "line": "3.1",
+        "schema": {
+          "minLength": 1
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal at exact pointer",
+        "outcome": "implemented",
+        "refused": false
+      },
+      "designSection": "§3.2; §3.4; §10 D-AD12"
+    },
+    {
+      "id": "schema-ref-sibling-description-kept",
+      "source": "E43 tests/schema.test.ts rejects validation siblings on refs while retaining descriptive siblings",
+      "input": {
+        "line": "3.1",
+        "defs": {
+          "text": {
+            "description": "base",
+            "type": "string"
+          }
+        },
+        "schema": {
+          "$ref": "#/defs/text",
+          "description": "local"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "description": "local",
+        "row": "REF-08"
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "schema-ref-sibling-validation-3-1",
+      "source": "E43 tests/schema.test.ts rejects validation siblings on refs (flips: 3.1 siblings apply)",
+      "input": {
+        "line": "3.1",
+        "defs": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "schema": {
+          "$ref": "#/defs/text",
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal /schema/type",
+        "row": "REF-08",
+        "semantics": "2020-12 allOf with the target"
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "schema-ref-sibling-validation-3-0",
+      "source": "E43 tests/schema.test.ts rejects validation siblings on refs (3.0)",
+      "input": {
+        "line": "3.0",
+        "defs": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "schema": {
+          "$ref": "#/defs/text",
+          "type": "string"
+        }
+      },
+      "expected": {
+        "outcome": "notice",
+        "row": "REF-07",
+        "siblingIgnored": true
+      },
+      "designSection": "§3.3 Siblings"
+    },
+    {
+      "id": "schema-default-annotation-0",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": false,
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "schema-default-annotation-1",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": 0,
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "schema-default-annotation-2",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": "",
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "schema-default-annotation-3",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": null,
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "schema-default-annotation-4",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": [],
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "schema-default-annotation-5",
+      "source": "E43 tests/schema.test.ts default annotations do not become generated documentation or values",
+      "input": {
+        "schema": {
+          "default": {
+            "nested": [0, ""]
+          },
+          "description": "Defaults to the authored value."
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "docs": {
+          "description": "Defaults to the authored value."
+        },
+        "defaultNotInDocs": true,
+        "defaultRemovedFromCodeGenerationCopy": true,
+        "defaultNeverSent": true
+      },
+      "designSection": "§3.5 Code-generation copy"
+    },
+    {
+      "id": "cmd-vendor-extension-ignored-deep-group",
+      "source": "E43 tests/commands.test.ts normalizes arbitrary depth (flips: x-fern-sdk-* extensions do not change behavior)",
+      "input": {
+        "operationId": "reports_get",
+        "extensions": {
+          "x-fern-sdk-group-name": " CloudAPI.user_accounts.deep.Reports ",
+          "x-fern-sdk-method-name": "getReport"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "commandPath [cloud-api,user-accounts,deep,reports,get-report]",
+        "commandPath": ["reports-get"],
+        "informational": "EXT",
+        "inputNotMutated": true
+      },
+      "designSection": "§10 D-CUS2; §4.4"
+    },
+    {
+      "id": "cmd-group-from-first-tag",
+      "source": "E43 tests/commands.test.ts normalizes arbitrary depth (tag-based groups)",
+      "input": {
+        "tags": ["CloudAPI Users"],
+        "operationId": "users-list"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["cloud-api-users", "list"],
+        "rule": "kebab fold of the tag; leading word run equal to the group words dropped"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-group-nesting-3-2-tag-parent",
+      "source": "E43 tests/commands.test.ts normalizes arbitrary depth (3.2 tag.parent chains)",
+      "input": {
+        "line": "3.2",
+        "tags": [
+          {
+            "name": "child",
+            "parent": "root"
+          }
+        ],
+        "operationId": "child-get"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["root", "child", "get"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-aliases-ignored",
+      "source": "E43 tests/commands.test.ts aliases replace primary including empty aliases (flips: x-forge-aliases ignored)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-forge-aliases": []
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "empty aliases removed the command",
+        "commandPathCount": 1,
+        "informational": "EXT"
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-no-operation-id-derived-from-route",
+      "source": "E43 tests/commands.test.ts absent naming metadata derives from route (absent)",
+      "input": {
+        "method": "post",
+        "path": "/reports"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["post", "reports"],
+        "rule": "<method> + literal path words"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-single-word",
+      "source": "E43 tests/commands.test.ts absent naming metadata (operationId get)",
+      "input": {
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["get"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-slash",
+      "source": "E43 tests/commands.test.ts absent naming metadata (emails/send-batch)",
+      "input": {
+        "operationId": "emails/send-batch"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["emails-send-batch"],
+        "priorOutcome": "[emails, send-batch]",
+        "note": "slash is a word break in the fold, not a group separator"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-with-space",
+      "source": "E43 tests/commands.test.ts absent naming metadata (get user)",
+      "input": {
+        "operationId": "get user"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["get-user"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-with-dot",
+      "source": "E43 tests/commands.test.ts absent naming metadata (users.get)",
+      "input": {
+        "operationId": "users.get"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["users-get"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-not-string",
+      "source": "E43 tests/commands.test.ts absent naming metadata (operationId 5)",
+      "input": {
+        "operationId": 5
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/paths/~1reports/post/operationId"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "cmd-operation-id-empty",
+      "source": "E43 tests/commands.test.ts absent naming metadata (empty operationId)",
+      "input": {
+        "operationId": ""
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "OPR-06",
+        "code": "OPR-06/empty-name",
+        "scope": "operation",
+        "routeFallback": false,
+        "hintNamesConfigKey": true
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-group-final-segment-fallback",
+      "source": "E43 tests/commands.test.ts explicit groups retain the final-segment action fallback",
+      "input": {
+        "tags": ["reports"],
+        "operationId": "reports_get"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["reports", "get"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-group-dash-fallback",
+      "source": "E43 tests/commands.test.ts explicit groups (reports-fetch)",
+      "input": {
+        "tags": ["reports"],
+        "operationId": "reports-fetch"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["reports", "fetch"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "cmd-operation-id-reserved-word",
+      "source": "E43 tests/commands.test.ts explicit groups (operationId help)",
+      "input": {
+        "tags": ["reports"],
+        "operationId": "help"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "reservedWordFixedSuffixAppliedAndReported": true,
+        "suffixSpellingUnsettled": true,
+        "commandIsAsserted": "does not equal the bare reserved word"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-operation-id-colon",
+      "source": "E43 tests/commands.test.ts explicit groups (operation:foo)",
+      "input": {
+        "tags": ["reports"],
+        "operationId": "operation:foo"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["reports", "operation-foo"],
+        "rule": "colon is a word break"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-metadata-malformed-null",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group null; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": null
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-number",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group number; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": 1
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-object",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group object; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": {}
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-empty-array",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group empty-array; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": []
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-empty",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group empty; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": ""
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-dots",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group dots; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": "a..b"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-array-with-number",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group array-with-number; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": ["ok", 3]
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-metadata-malformed-array-with-empty",
+      "source": "E43 tests/commands.test.ts rejects malformed supplied metadata at its pointer (group array-with-empty; flips: extension not read)",
+      "input": {
+        "operationId": "get",
+        "extensions": {
+          "x-fern-sdk-group-name": ["ok", ""]
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal at /x-fern-sdk-group-name",
+        "extensionNotRead": true,
+        "informational": "EXT",
+        "commandPath": ["get"]
+      },
+      "designSection": "§10 D-CUS2"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-slash",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (a/b; flips: fold, never silently)",
+      "input": {
+        "tags": ["a/b"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "a/b"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-space",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (a b; flips: fold, never silently)",
+      "input": {
+        "tags": ["a b"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "a b"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-leading-dashes",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (--help; flips: fold, never silently)",
+      "input": {
+        "tags": ["--help"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "--help"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-proto",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (__proto__; flips: fold, never silently)",
+      "input": {
+        "tags": ["__proto__"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "__proto__"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-leading-digit",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (1abc; flips: fold, never silently)",
+      "input": {
+        "tags": ["1abc"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "1abc"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-accent",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (é; flips: fold, never silently)",
+      "input": {
+        "tags": ["é"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "é"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-semicolon",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (a;exit; flips: fold, never silently)",
+      "input": {
+        "tags": ["a;exit"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "a;exit"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-unsafe-token-folded-dot",
+      "source": "E43 tests/commands.test.ts unsafe tokens fail rather than being silently slugged (a.b; flips: fold, never silently)",
+      "input": {
+        "tags": ["a.b"],
+        "operationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented-with-reports",
+        "priorOutcome": "refusal invalid_input",
+        "visibleNameIsFolded": true,
+        "everyFoldedPrefixOrSuffixReported": true,
+        "emptyFoldRefuses": true,
+        "wireNamesNeverFolded": true,
+        "input": "a.b"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "cmd-only-own-metadata",
+      "source": "E43 tests/commands.test.ts only own metadata is considered",
+      "input": {
+        "prototypeProvidedOperationId": "get"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["post", "reports"],
+        "ownKeysOnly": true
+      },
+      "designSection": "§9 I1"
+    },
+    {
+      "id": "exe-name-slug-from-title",
+      "source": "E43 tests/commands.test.ts slugs display titles (CloudAPI User Accounts!)",
+      "input": {
+        "title": "CloudAPI User Accounts!"
+      },
+      "expected": {
+        "priorValue": "cloud-api-user-accounts",
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": "cloud-api-user-accounts",
+        "exitCode": 1
+      },
+      "designSection": "§2.3 INF"
+    },
+    {
+      "id": "exe-name-explicit-override",
+      "source": "E43 tests/commands.test.ts honors exact valid overrides",
+      "input": {
+        "title": "💥",
+        "config": {
+          "name": "my-api"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "name": "my-api"
+      },
+      "designSection": "§2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-empty",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('')",
+      "input": {
+        "config": {
+          "name": ""
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-MyApi",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('MyApi')",
+      "input": {
+        "config": {
+          "name": "MyApi"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-myunderscoreapi",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('my_api')",
+      "input": {
+        "config": {
+          "name": "my_api"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-1api",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('1api')",
+      "input": {
+        "config": {
+          "name": "1api"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-dotdotslashapi",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('../api')",
+      "input": {
+        "config": {
+          "name": "../api"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-help",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('help')",
+      "input": {
+        "config": {
+          "name": "help"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-h",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('h')",
+      "input": {
+        "config": {
+          "name": "h"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-version",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('version')",
+      "input": {
+        "config": {
+          "name": "version"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-v",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('v')",
+      "input": {
+        "config": {
+          "name": "v"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-completions",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('completions')",
+      "input": {
+        "config": {
+          "name": "completions"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-invalid-log-level",
+      "source": "E43 tests/commands.test.ts invalid explicit names identify the option ('log-level')",
+      "input": {
+        "config": {
+          "name": "log-level"
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "location": "/options/name",
+        "code": "invalid_options",
+        "reservedNameOrInvalidShape": true
+      },
+      "designSection": "§4.4 Reserved CLI names; §2.3 INF"
+    },
+    {
+      "id": "exe-name-wizard-not-reserved",
+      "source": "E43 tests/commands.test.ts invalid explicit names (wizard; flips)",
+      "input": {
+        "config": {
+          "name": "wizard"
+        }
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "refusal",
+        "reserved": false
+      },
+      "designSection": "§4.4 Reserved CLI names"
+    },
+    {
+      "id": "exe-title-unusable-emoji",
+      "source": "E43 tests/commands.test.ts unusable default title asks for an explicit name (💥)",
+      "input": {
+        "title": "💥"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": null,
+        "exitCode": 1,
+        "hintNamesConfigKey": true
+      },
+      "designSection": "§2.3 INF; §4.4"
+    },
+    {
+      "id": "exe-title-unusable-leading-digit",
+      "source": "E43 tests/commands.test.ts unusable default title asks for an explicit name (123 API)",
+      "input": {
+        "title": "123 API"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": null,
+        "exitCode": 1,
+        "hintNamesConfigKey": true
+      },
+      "designSection": "§2.3 INF; §4.4"
+    },
+    {
+      "id": "exe-title-unusable-reserved",
+      "source": "E43 tests/commands.test.ts unusable default title asks for an explicit name (Help)",
+      "input": {
+        "title": "Help"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "binNameDerivedFromTitle": false,
+        "hintSuggests": "help",
+        "exitCode": 1,
+        "hintNamesConfigKey": true
+      },
+      "designSection": "§2.3 INF; §4.4"
+    },
+    {
+      "id": "route-placeholder-command",
+      "source": "E43 tests/commands.test.ts route defaults preserve placeholders (/users/{id})",
+      "input": {
+        "method": "get",
+        "path": "/users/{id}"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["get", "users", "by-id"],
+        "rule": "<method> + literal path words + by-<param> per parameter",
+        "priorOutcome": "[users, by-id, get]"
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "route-static-sanitized",
+      "source": "E43 tests/commands.test.ts route defaults sanitize static names (/archive.json/123)",
+      "input": {
+        "method": "get",
+        "path": "/archive.json/123"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "commandPath": ["get", "archive-json", "123"],
+        "leadingDigitFixedPrefixReported": true,
+        "deterministic": true
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "route-operation-id-punctuation-only",
+      "source": "E43 tests/commands.test.ts route defaults (operationId !!!)",
+      "input": {
+        "method": "get",
+        "path": "/things",
+        "operationId": "!!!"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "operation",
+        "reason": "empty fold refuses",
+        "priorOutcome": "[things, get] fallback"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "route-operation-id-digits",
+      "source": "E43 tests/commands.test.ts route defaults (operationId 123)",
+      "input": {
+        "method": "get",
+        "path": "/things",
+        "operationId": "123"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "leadingDigitFixedPrefixAppliedAndReported": true,
+        "prefixSpellingUnsettled": true,
+        "matchesKebabRegex": "^[a-z][a-z0-9-]*$"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "route-operation-id-reserved-version",
+      "source": "E43 tests/commands.test.ts route defaults (operationId version)",
+      "input": {
+        "method": "get",
+        "path": "/things",
+        "operationId": "version"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "reservedWordSuffix": "fixed suffix, reported",
+        "note": "command names are subcommands; reserved flags apply to flags"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "ident-acronym-run",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (acronym-run)",
+      "input": {
+        "names": ["HTTPResponse"],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "property",
+        "matchesIdentifierRegex": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+        "avoidsReservedSet": true,
+        "deterministicAcrossRuns": true,
+        "note": "first call keeps the plain fold"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-same-fold-second-call",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (same-fold-second-call)",
+      "input": {
+        "names": ["HTTP response", "HTTP-response"],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "property",
+        "matchesIdentifierRegex": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+        "avoidsReservedSet": true,
+        "deterministicAcrossRuns": true,
+        "note": "second distinct input with the same fold gets numeric suffix, notice per rename",
+        "firstUnsuffixed": true,
+        "secondDiffersFromFirst": true,
+        "renameNoticeRecorded": true,
+        "scope": "none"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-leading-digit",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (leading-digit)",
+      "input": {
+        "names": ["123 get_URL"],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "property",
+        "matchesIdentifierRegex": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+        "avoidsReservedSet": true,
+        "deterministicAcrossRuns": true,
+        "note": "fixed prefix, reported"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-only-punctuation",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (only-punctuation)",
+      "input": {
+        "names": ["___"],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "api, api2",
+        "scope": "document",
+        "reason": "empty fold refuses (visible name); internal identifier case unsettled"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-empty-string",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (empty-string)",
+      "input": {
+        "names": [""],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "refusal",
+        "priorOutcome": "api, api2",
+        "scope": "document",
+        "reason": "empty fold refuses (visible name); internal identifier case unsettled"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-repeated-schema-name",
+      "source": "E43 tests/identifiers.test.ts source identifiers retain acronyms, separators, numeric prefixes and collision order (repeated-schema-name)",
+      "input": {
+        "names": ["Schema", "Schema"],
+        "suffix": "Command"
+      },
+      "expected": {
+        "outcome": "property",
+        "matchesIdentifierRegex": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+        "avoidsReservedSet": true,
+        "deterministicAcrossRuns": true,
+        "note": "second gets numeric suffix 2"
+      },
+      "designSection": "§4.4 Fold; SM-6"
+    },
+    {
+      "id": "ident-acronym-casing",
+      "source": "E43 tests/identifiers.test.ts (HTTPResponse -> hTTPResponseCommand)",
+      "input": {
+        "names": ["HTTPResponse"],
+        "casing": "camel"
+      },
+      "expected": {
+        "priorValue": "hTTPResponseCommand",
+        "outcome": "implemented",
+        "camel": "httpresponse",
+        "pascal": "Httpresponse",
+        "kebab": "httpresponse"
+      },
+      "designSection": "§4.4 Fold"
+    },
+    {
+      "id": "full-unconstrained-value",
+      "source": "E43 tests/full-request-features.test.ts unconstrained request values retain their JSON domains",
+      "input": {
+        "schema": {}
+      },
+      "expected": {
+        "outcome": "implemented",
+        "schemaSource": "Schema.Json",
+        "assertedWith": "Schema.Json"
+      },
+      "designSection": "§3.5; D-AD12"
+    },
+    {
+      "id": "full-primitive-union",
+      "source": "E43 tests/full-request-features.test.ts primitive type unions retain their JSON domains",
+      "input": {
+        "schema": {
+          "type": ["string", "number", "boolean", "null"]
+        }
+      },
+      "expected": {
+        "outcome": "property",
+        "unionOf": ["string", "number", "boolean", "null"],
+        "keepsJsonDomain": true,
+        "emittedSource": "unsettled literal text (printer spec X11)"
+      },
+      "designSection": "§3.5"
+    },
+    {
+      "id": "full-query-array-omitted",
+      "source": "E43 tests/full-request-features.test.ts form query arrays distinguish omission",
+      "input": {
+        "values": null,
+        "explode": false
+      },
+      "expected": {
+        "outcome": "implemented",
+        "params": [["other", "retained"]],
+        "row": "STY-*"
+      },
+      "designSection": "§6.1 Type to text"
+    },
+    {
+      "id": "full-query-array-empty",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (empty array; flips)",
+      "input": {
+        "values": [],
+        "explode": false,
+        "parameter": "optional"
+      },
+      "expected": {
+        "outcome": "implemented",
+        "priorOutcome": "UsageError",
+        "omitted": true,
+        "requiredParameterRaisesUsageError": true
+      },
+      "designSection": "§6.1 Type to text"
+    },
+    {
+      "id": "full-query-array-empty-required",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (empty array, required)",
+      "input": {
+        "values": [],
+        "explode": false,
+        "parameter": "required"
+      },
+      "expected": {
+        "outcome": "usage-error",
+        "exitCode": 2,
+        "noConnection": true
+      },
+      "designSection": "§6.1 Type to text; §9 I2"
+    },
+    {
+      "id": "full-query-array-one-empty-item",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (empty item)",
+      "input": {
+        "values": [""],
+        "explode": false
+      },
+      "expected": {
+        "outcome": "implemented",
+        "params": [
+          ["items", ""],
+          ["other", "retained"]
+        ]
+      },
+      "designSection": "§6.1 Type to text"
+    },
+    {
+      "id": "full-query-array-scalars",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (scalars)",
+      "input": {
+        "values": [false, 0, "x"],
+        "explode": false
+      },
+      "expected": {
+        "outcome": "implemented",
+        "params": [
+          ["items", "false,0,x"],
+          ["other", "retained"]
+        ]
+      },
+      "designSection": "§6.1 Type to text"
+    },
+    {
+      "id": "full-query-array-exploded",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (explode true)",
+      "input": {
+        "values": ["a,b", "c"],
+        "explode": true
+      },
+      "expected": {
+        "outcome": "implemented",
+        "params": [
+          ["items", "a,b"],
+          ["items", "c"],
+          ["other", "retained"]
+        ]
+      },
+      "designSection": "§6.1 query"
+    },
+    {
+      "id": "full-query-array-delimiter-ambiguous",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (comma in item, allowReserved)",
+      "input": {
+        "values": ["private,a"],
+        "explode": false,
+        "allowReserved": true
+      },
+      "expected": {
+        "outcome": "usage-error",
+        "exitCode": 2,
+        "noConnection": true,
+        "messageDoesNotContainValue": "private",
+        "row": "SM-R6",
+        "note": "design refuses only under allowReserved; without it the comma is percent-encoded"
+      },
+      "designSection": "§6.1 query; §7.5"
+    },
+    {
+      "id": "full-query-array-comma-percent-encoded",
+      "source": "E43 tests/full-request-features.test.ts form query arrays (comma in item, no allowReserved; flips)",
+      "input": {
+        "values": ["private,a"],
+        "explode": false,
+        "allowReserved": false
+      },
+      "expected": {
+        "priorOutcome": "UsageError",
+        "outcome": "implemented",
+        "wireValue": "private%2Ca",
+        "usageError": false
+      },
+      "designSection": "§6.1 query"
+    },
+    {
+      "id": "full-multi-type-union-enum",
+      "source": "E43 tests/full-request-features.test.ts multi-type union constraints fail explicitly (enum)",
+      "input": {
+        "schema": {
+          "enum": ["value", 1],
+          "type": ["string", "number"]
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal unsupported 'Constraints alongside multi-type unions'",
+        "outcome": "implemented",
+        "refused": false,
+        "enumAsserted": true
+      },
+      "designSection": "§10 D-AD12"
+    },
+    {
+      "id": "full-multi-type-union-min-length",
+      "source": "E43 tests/full-request-features.test.ts multi-type union constraints fail explicitly (min-length)",
+      "input": {
+        "schema": {
+          "minLength": 2,
+          "type": ["string", "number"]
+        }
+      },
+      "expected": {
+        "priorOutcome": "refusal unsupported 'Constraints alongside multi-type unions'",
+        "outcome": "implemented",
+        "refused": false,
+        "minLengthAppliesTo": "string"
+      },
+      "designSection": "§10 D-AD12"
+    },
+    {
+      "id": "full-webhooks-3-1-informational",
+      "source": "E43 tests/full-request-features.test.ts inbound webhooks are 3.1 object metadata, not outbound commands",
+      "input": {
+        "line": "3.1",
+        "webhooks": {
+          "incoming": {}
+        }
+      },
+      "expected": {
+        "outcome": "informational",
+        "row": "DOC-08",
+        "operationCount": 1,
+        "noCommand": true
+      },
+      "designSection": "§2.2 Informational; §10 D-OQ2"
+    },
+    {
+      "id": "full-webhooks-3-0",
+      "source": "E43 tests/full-request-features.test.ts inbound webhooks (3.0 document)",
+      "input": {
+        "line": "3.0",
+        "webhooks": {
+          "incoming": {}
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/webhooks"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "full-webhooks-array",
+      "source": "E43 tests/full-request-features.test.ts inbound webhooks (webhooks: [])",
+      "input": {
+        "line": "3.1",
+        "webhooks": []
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*",
+        "pointer": "/webhooks"
+      },
+      "designSection": "§3.2"
+    },
+    {
+      "id": "validate-apikey-in-body-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "openapi": "3.1",
+        "securitySchemes": {
+          "key": {
+            "type": "apiKey",
+            "in": "body",
+            "name": "k"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "validate-apikey-missing-name-refused",
+      "source": "b96c8946 SR:G9",
+      "input": {
+        "openapi": "3.1",
+        "securitySchemes": {
+          "key": {
+            "type": "apiKey",
+            "in": "header"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "scope": "document",
+        "row": "VAL-*"
+      },
+      "designSection": "§6.5"
+    },
+    {
+      "id": "cmd-command-equals-sibling-group-refused",
+      "source": "b96c8946 SR:G4",
+      "input": {
+        "openapi": "3.1",
+        "operations": [
+          {
+            "operationId": "things"
+          },
+          {
+            "tag": "things",
+            "operationId": "things-get"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "refusal",
+        "row": "CMD-collision",
+        "scope": "operation",
+        "refusedOperationIds": ["things"]
+      },
+      "designSection": "§4.4"
+    },
+    {
+      "id": "multipart-extra-fields-map-refused",
+      "source": "b96c8946 SR:G10",
+      "input": {
+        "openapi": "3.1",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "refusal",
+        "code": "SCH-13/multipart-extra-fields",
+        "scope": "element",
+        "operationKept": true
+      },
+      "designSection": "§10 D-ENC1"
+    }
+  ]
+}
