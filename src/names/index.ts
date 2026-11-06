@@ -2,7 +2,7 @@ import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
-import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
+import type { Api, NamingHint, Operation, SecurityScheme } from "../model/entities.ts";
 import { domainIdentifiers, fixedNamespaces, rootModuleNames } from "./domain.ts";
 import { SafeIdentifier, foldFileSegment, foldIdentifier, foldKebab } from "./fold.ts";
 import type { FoldNote, SafeFileSegmentValue, SafeIdentifierValue } from "./fold.ts";
@@ -25,10 +25,13 @@ import type {
   DraftContext,
   DraftFlag,
   Finding,
+  NameSource,
+  Namer,
   OverrideSite,
   PlannedCommand,
   PlannedCredential,
   PlannedGroup,
+  ReportOptions,
 } from "./plan.ts";
 import { reservedCliNames, reservedEnvSuffixes } from "./reserved.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
@@ -38,6 +41,8 @@ export { domainIdentifiers } from "./domain.ts";
 
 export type {
   FlagSource,
+  NameSource,
+  NameSources,
   PlannedCommand,
   PlannedCredential,
   PlannedFlag,
@@ -69,7 +74,10 @@ export interface NamePlan {
   readonly root: readonly PlannedCommand[];
 }
 
+// `tag` is the group's key: the tag name, or for a group from a naming extension its folded
+// segment names joined with `.`. `label` is the unfolded name the group-word drop compares.
 interface GroupNode {
+  readonly label: string;
   readonly name: string;
   readonly notes: readonly FoldNote[];
   readonly parent: string | undefined;
@@ -84,15 +92,24 @@ type ChainError =
   | "TAG-06/parent-depth"
   | "TAG-06/unknown-parent";
 
+// One command to plan: an operation's primary, or one of its aliases (`alias` is the index).
+// `namePointer` is where the command's name is declared; config hints name the primary only.
 interface Candidate {
+  readonly alias: number | undefined;
   readonly chain: readonly GroupNode[];
+  readonly commandHint: string | undefined;
   readonly container: string;
+  readonly groupHint: string | undefined;
+  readonly groupSource: NameSource;
+  readonly namePointer: string;
+  readonly namer: Namer;
   readonly operation: Operation;
   readonly site: OverrideSite;
   readonly tagPointer: string;
 }
 
 interface Named extends Candidate {
+  readonly commandSource: NameSource;
   readonly name: string;
   readonly notes: readonly FoldNote[];
 }
@@ -108,6 +125,9 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 const root = "";
 
 const maxParentHops = 64;
+
+const withHint = (hint: string | undefined, options: ReportOptions): ReportOptions =>
+  hint === undefined ? options : { ...options, hint };
 
 const push = <K, V>(map: Map<K, V[]>, key: K, value: V): void => {
   const list = map.get(key);
@@ -252,6 +272,7 @@ const groupNode = (
   }
 
   return Result.succeed({
+    label: tag,
     name: name.success.name,
     notes: name.success.notes,
     parent,
@@ -317,13 +338,123 @@ const makeChains = (api: Api) => {
   };
 };
 
+const extensionNode = (
+  key: string,
+  label: string,
+  name: { readonly name: string; readonly notes: readonly FoldNote[] },
+  parent: string | undefined,
+): Result.Result<GroupNode, ChainError> => {
+  const segment = foldFileSegment(key);
+  if (Result.isFailure(segment)) {
+    return Result.fail(
+      segment.failure._tag === "EmptyFold" ? "TAG-02/empty-name" : "TAG-02/unsafe-segment",
+    );
+  }
+
+  return Result.succeed({
+    label,
+    name: name.name,
+    notes: name.notes,
+    parent,
+    segment: segment.success,
+    tag: key,
+  });
+};
+
+/**
+ * The group chain of a naming extension's segments, top level first (design 4.4): each segment
+ * folds to one name, nested under the previous one, with no `tag.parent` lookup. A node is keyed by
+ * its folded names joined with `.` and shared by every chain that reaches it; its file segment is
+ * the fold of that key, so a key equal to a tag name has the tag's file segment and the two
+ * collide (`TAG-02/segment-collision`) instead of sharing a module.
+ */
+const makeExtensionChains = () => {
+  const nodes = new Map<string, Result.Result<GroupNode, ChainError>>();
+
+  return (segments: readonly string[]): Result.Result<readonly GroupNode[], ChainError> => {
+    const chain: GroupNode[] = [];
+    let parent: string | undefined = undefined;
+    for (const label of segments) {
+      const name = foldKebab(label);
+      if (Result.isFailure(name)) {
+        return Result.fail("TAG-02/empty-name");
+      }
+
+      const key: string =
+        parent === undefined ? name.success.name : `${parent}.${name.success.name}`;
+      const node = nodes.get(key) ?? extensionNode(key, label, name.success, parent);
+      nodes.set(key, node);
+      if (Result.isFailure(node)) {
+        return Result.fail(node.failure);
+      }
+
+      chain.push(node.success);
+      parent = key;
+    }
+
+    return Result.succeed(chain);
+  };
+};
+
+type Chain = Result.Result<readonly GroupNode[], ChainError>;
+
+interface GroupChoice {
+  readonly chain: Chain;
+  readonly pointer: string;
+  readonly source: NameSource;
+}
+
+interface Chains {
+  readonly extension: (segments: readonly string[]) => Chain;
+  readonly tag: (tag: string) => Chain;
+}
+
+const groupKeys = { "x-fern": "x-fern-sdk-group-name", "x-forge": "x-forge-group-name" } as const;
+
+const extensionGroup = (
+  hint: typeof NamingHint.Type | undefined,
+  source: keyof typeof groupKeys,
+  chains: Chains,
+): GroupChoice | undefined =>
+  hint?.group === undefined
+    ? undefined
+    : {
+        chain: chains.extension(hint.group),
+        pointer: `${hint.pointer}/${groupKeys[source]}`,
+        source,
+      };
+
+// The primary command's group, per design 4.4: the author config, else Forge, else Fern, else the
+// first tag and its 3.2 `parent` chain, else the root.
+const primaryGroup = (operation: Operation, site: OverrideSite, chains: Chains): GroupChoice => {
+  const configured = site.override?.group;
+  if (configured !== undefined) {
+    return { chain: chains.tag(configured), pointer: operation.origin.pointer, source: "config" };
+  }
+
+  const { naming } = operation;
+  const extension =
+    extensionGroup(naming?.forge, "x-forge", chains) ??
+    extensionGroup(naming?.fern, "x-fern", chains);
+  if (extension !== undefined) {
+    return extension;
+  }
+
+  const [tag] = operation.tags;
+  const pointer = `${operation.origin.pointer}/tags/0`;
+
+  return tag === undefined
+    ? { chain: Result.succeed([]), pointer, source: "none" }
+    : { chain: chains.tag(tag), pointer, source: "tag" };
+};
+
 const groupOperations = (
   api: Api,
   options: PlanOptions,
   sites: ReadonlyMap<Operation, OverrideSite>,
   collector: Collector,
 ): readonly Candidate[] => {
-  const chainOf = makeChains(api);
+  const chains: Chains = { extension: makeExtensionChains(), tag: makeChains(api) };
   const candidates: Candidate[] = [];
   for (const operation of api.operations) {
     const site = sites.get(operation) ?? overrideSite(options.config, operation);
@@ -336,21 +467,56 @@ const groupOperations = (
       continue;
     }
 
-    const tag = override?.group ?? operation.tags[0];
-    const tagPointer =
-      override?.group === undefined
-        ? `${operation.origin.pointer}/tags/0`
-        : operation.origin.pointer;
-    const chain = tag === undefined ? Result.succeed([]) : chainOf(tag);
-    if (Result.isFailure(chain)) {
-      collector.report(operation, chain.failure, "Tag", "The operation's group cannot be named.", {
-        hint: `${site.configKey}.group`,
-        pointer: tagPointer,
-      });
-      continue;
-    }
+    const primary = {
+      alias: undefined,
+      choice: primaryGroup(operation, site, chains),
+      commandHint: `${site.configKey}.command`,
+      groupHint: `${site.configKey}.group`,
+      namePointer: operation.origin.pointer,
+      namer: { _tag: "Primary", override } satisfies Namer,
+    };
+    // An alias is named by its own keys only: without a group of its own it sits at the root.
+    const aliases = (operation.naming?.aliases ?? []).map((alias) => {
+      const namePointer = `${operation.origin.pointer}/x-forge-aliases/${alias.index}`;
+      const choice = extensionGroup(alias.forge, "x-forge", chains) ??
+        extensionGroup(alias.fern, "x-fern", chains) ?? {
+          chain: Result.succeed([]),
+          pointer: namePointer,
+          source: "none" as const,
+        };
 
-    candidates.push({ chain: chain.success, container: tag ?? root, operation, site, tagPointer });
+      return {
+        alias: alias.index,
+        choice,
+        commandHint: undefined,
+        groupHint: undefined,
+        namePointer,
+        namer: { _tag: "Alias", alias } satisfies Namer,
+      };
+    });
+    for (const { choice, ...entry } of [primary, ...aliases]) {
+      if (Result.isFailure(choice.chain)) {
+        collector.report(
+          operation,
+          choice.chain.failure,
+          "Tag",
+          "The operation's group cannot be named.",
+          withHint(entry.groupHint, { pointer: choice.pointer }),
+        );
+        continue;
+      }
+
+      const chain = choice.chain.success;
+      candidates.push({
+        ...entry,
+        chain,
+        container: chain.at(-1)?.tag ?? root,
+        groupSource: choice.source,
+        operation,
+        site,
+        tagPointer: choice.pointer,
+      });
+    }
   }
 
   return candidates;
@@ -421,8 +587,7 @@ const checkGroups = (
   const reserved = (node: GroupNode): boolean =>
     reservedCliNames.has(node.name) || (node.parent === undefined && authorCommands.has(node.name));
   for (const candidate of candidates) {
-    const { operation, site, tagPointer } = candidate;
-    const hint = `${site.configKey}.group`;
+    const { groupHint: hint, operation, tagPointer } = candidate;
     for (const node of candidate.chain) {
       if ((bySegment.get(node.segment)?.length ?? 0) > 1) {
         collector.report(
@@ -430,19 +595,18 @@ const checkGroups = (
           "TAG-02/segment-collision",
           "Tag",
           "Two groups fold to one name.",
-          {
-            hint,
-            pointer: tagPointer,
-            related: collidingWith(node),
-          },
+          withHint(hint, { pointer: tagPointer, related: collidingWith(node) }),
         );
       }
 
       if (reserved(node)) {
-        collector.report(operation, "TAG-02/reserved-name", "Tag", "The group name is reserved.", {
-          hint,
-          pointer: tagPointer,
-        });
+        collector.report(
+          operation,
+          "TAG-02/reserved-name",
+          "Tag",
+          "The group name is reserved.",
+          withHint(hint, { pointer: tagPointer }),
+        );
       }
 
       if (reservedSegments.has(node.segment)) {
@@ -451,7 +615,7 @@ const checkGroups = (
           "TAG-02/reserved-segment",
           "Tag",
           `The group ${JSON.stringify(node.tag)} folds to the file segment ${JSON.stringify(node.segment)}, which api/${node.segment}.ts reserves.`,
-          { hint, pointer: tagPointer },
+          withHint(hint, { pointer: tagPointer }),
         );
       }
     }
@@ -463,26 +627,33 @@ const nameCommand = (
   authorCommands: ReadonlySet<string>,
   collector: Collector,
 ): Named | undefined => {
-  const { operation, site } = candidate;
-  const hint = `${site.configKey}.command`;
-  const name = commandName(operation, site.override, candidate.chain.at(-1)?.tag);
+  const { commandHint: hint, namePointer: pointer, operation } = candidate;
+  const name = commandName(operation, candidate.namer, candidate.chain.at(-1)?.label);
   if (Result.isFailure(name)) {
-    collector.report(operation, "OPR-06/empty-name", "Operation", "The name folds to nothing.", {
-      hint,
-    });
+    collector.report(
+      operation,
+      "OPR-06/empty-name",
+      "Operation",
+      "The name folds to nothing.",
+      withHint(hint, { pointer }),
+    );
 
     return undefined;
   }
 
-  const { name: command, notes } = name.success;
+  const { folded, source } = name.success;
   const atRoot = candidate.container === root;
-  if (reservedCliNames.has(command) || (atRoot && authorCommands.has(command))) {
-    collector.report(operation, "OPR-06/reserved-name", "Operation", "The name is reserved.", {
-      hint,
-    });
+  if (reservedCliNames.has(folded.name) || (atRoot && authorCommands.has(folded.name))) {
+    collector.report(
+      operation,
+      "OPR-06/reserved-name",
+      "Operation",
+      "The name is reserved.",
+      withHint(hint, { pointer }),
+    );
   }
 
-  return { ...candidate, name: command, notes };
+  return { ...candidate, commandSource: source, name: folded.name, notes: folded.notes };
 };
 
 // Command names: two commands folding equal in one group, and a command equal to a sibling group.
@@ -514,7 +685,7 @@ const nameCommands = (
   }
 
   for (const entry of named) {
-    const hint = `${entry.site.configKey}.command`;
+    const { commandHint: hint, namePointer: pointer } = entry;
     const twins = (byName.get(entry.container)?.get(entry.name) ?? []).filter(
       (other) => other !== entry,
     );
@@ -524,10 +695,10 @@ const nameCommands = (
         "OPR-06/command-collision",
         "Operation",
         "Two commands in one group fold to one name.",
-        {
-          hint,
-          related: twins.map((twin) => siteOf(twin.operation)),
-        },
+        withHint(hint, {
+          pointer,
+          related: twins.map((twin) => siteOf(twin.operation, twin.namePointer)),
+        }),
       );
     }
 
@@ -539,10 +710,7 @@ const nameCommands = (
         "OPR-06/group-collision",
         "Operation",
         "The command name equals a sibling group's name.",
-        {
-          hint,
-          related: firstSite(sibling.tag),
-        },
+        withHint(hint, { pointer, related: firstSite(sibling.tag) }),
       );
     }
   }
@@ -603,7 +771,9 @@ const planCredentials = (
   const envPrefix = envPrefixOf(config);
   const reservedEnv = reservedEnvNames(envPrefix, reservedEnvSuffixes, api.securitySchemes);
   const names = new Map<string, CredentialNames>();
-  for (const scheme of named.flatMap((entry) => usesOf(entry.operation))) {
+  // An operation with aliases has several commands; its credentials are checked once.
+  const operations = [...new Set(named.map((entry) => entry.operation))];
+  for (const scheme of operations.flatMap(usesOf)) {
     const credential = credentialNames(config, envPrefix, scheme);
     if (Option.isSome(credential)) {
       names.set(scheme.name, credential.value);
@@ -628,12 +798,12 @@ const planCredentials = (
       reservedEnv.has(credential.env) ||
       reservedCliNames.has(credential.flag));
 
-  for (const entry of named) {
-    const uses = usesOf(entry.operation);
+  for (const operation of operations) {
+    const uses = usesOf(operation);
     const empty = uses.filter((scheme) => names.get(scheme.name)?.slug === "");
     if (empty.length > 0) {
       collector.report(
-        entry.operation,
+        operation,
         "SSC-01/empty-name",
         "Security scheme",
         "A scheme name folds to nothing.",
@@ -651,7 +821,7 @@ const planCredentials = (
     const [first] = clashing;
     if (first !== undefined) {
       collector.report(
-        entry.operation,
+        operation,
         "SSC-01/credential-collision",
         "Security scheme",
         "Two credential names collide.",
@@ -776,6 +946,7 @@ const planModule = (
   entries: readonly Named[],
   reserved: ReadonlySet<string>,
   drafts: ReadonlyMap<Operation, Draft>,
+  flagPlans: FlagPlans,
   collector: Collector,
 ): readonly PlannedCommand[] => {
   const bases = entries.map((entry) => identifierOf(entry.name, "camel"));
@@ -812,16 +983,47 @@ const planModule = (
 
     assigned.add(identifier);
 
-    const draft = drafts.get(operation) ?? { flags: [], positionals: [] };
-
-    return {
+    const command: Mutable<PlannedCommand> = {
       configKey: entry.site.configKey,
       identifier,
       name: entry.name,
       operation,
-      ...planFlags(entry, draft, collector),
+      sources: { command: entry.commandSource, group: entry.groupSource },
+      ...flagPlans.of(entry, drafts),
     };
+    if (entry.alias !== undefined) {
+      command.alias = entry.alias;
+    }
+
+    return command;
   });
+};
+
+type CommandFlags = Pick<PlannedCommand, "flags" | "positionals">;
+
+interface FlagPlans {
+  readonly of: (entry: Named, drafts: ReadonlyMap<Operation, Draft>) => CommandFlags;
+}
+
+// Every command of one operation has the same flags and positionals; they are planned, with
+// their notices, once.
+const makeFlagPlans = (collector: Collector): FlagPlans => {
+  const plans = new Map<Operation, CommandFlags>();
+
+  return {
+    of: (entry, drafts) => {
+      const known = plans.get(entry.operation);
+      if (known !== undefined) {
+        return known;
+      }
+
+      const draft = drafts.get(entry.operation) ?? { flags: [], positionals: [] };
+      const planned = planFlags(entry, draft, collector);
+      plans.set(entry.operation, planned);
+
+      return planned;
+    },
+  };
 };
 
 const planGroup = (
@@ -830,6 +1032,7 @@ const planGroup = (
   first: Named | undefined,
   domain: ReadonlyMap<string, SafeIdentifierValue>,
   drafts: ReadonlyMap<Operation, Draft>,
+  flagPlans: FlagPlans,
   collector: Collector,
 ): PlannedGroup => {
   const imported = domainNames(entries, domain);
@@ -859,6 +1062,7 @@ const planGroup = (
       entries,
       new Set([...fixedNamespaces, namespace, ...imported]),
       drafts,
+      flagPlans,
       collector,
     ),
     name: node.name,
@@ -905,7 +1109,9 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     };
     const drafts = new Map<Operation, Draft>();
     for (const entry of named) {
-      drafts.set(entry.operation, yield* draftFlags(entry, context));
+      if (!drafts.has(entry.operation)) {
+        drafts.set(entry.operation, yield* draftFlags(entry, context));
+      }
     }
 
     const domain = domainIdentifiers(Object.keys(context.defs));
@@ -916,14 +1122,15 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
       ...rootModuleNames,
       ...domainNames(rootEntries, domain),
     ]);
-    const rootCommands = planModule(rootEntries, rootReserved, drafts, collector);
+    const flagPlans = makeFlagPlans(collector);
+    const rootCommands = planModule(rootEntries, rootReserved, drafts, flagPlans, collector);
     const byContainer = new Map<string, Named[]>();
     for (const entry of finals) {
       push(byContainer, entry.container, entry);
     }
 
     const groups = [...firstUses(finals)].map(([node, first]) =>
-      planGroup(node, byContainer.get(node.tag) ?? [], first, domain, drafts, collector),
+      planGroup(node, byContainer.get(node.tag) ?? [], first, domain, drafts, flagPlans, collector),
     );
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),
