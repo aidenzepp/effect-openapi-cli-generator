@@ -1,8 +1,8 @@
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Order, Schema } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
-import type { SecurityScheme } from "../model/entities.ts";
+import type { Api, SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
@@ -33,6 +33,20 @@ export const CommandName = Schema.Struct({
 });
 
 /**
+ * One element the author config made non-standard (design 8.1 `nonStandard`, 6.1): the choice and
+ * the config key that made it, the element's use site, and the row it departs from.
+ */
+export const NonStandardEntry = Schema.Struct({
+  choice: Schema.Literal("deepObjectBrackets"),
+  configKey: Schema.Literal("nonStandard.deepObjectBrackets"),
+  document: DocumentUri,
+  pointer: JsonPointer,
+  row: Schema.Literal("PRM-27"),
+});
+
+export type NonStandardEntryValue = typeof NonStandardEntry.Type;
+
+/**
  * `generation-report.json` (design 8.1, 3.7): what one run refused, noticed, renamed and accepted,
  * and the digests of its inputs. There is no timestamp, so equal inputs give equal bytes. Fields
  * are alphabetical; the order that matters is carried by arrays.
@@ -47,6 +61,8 @@ export const GenerationReport = Schema.Struct({
   commandNames: Schema.Array(CommandName),
   generator: Schema.Struct({ version: Schema.String }),
   inputs: Schema.Array(Schema.Struct({ document: DocumentUri, sha256: Sha256 })),
+  // Always present, empty unless the author config switched a non-standard choice on.
+  nonStandard: Schema.Array(NonStandardEntry),
   notices: Schema.Array(Diagnostic),
   refusals: Schema.Array(Diagnostic),
   renames: Schema.Array(
@@ -66,6 +82,8 @@ export interface GenerationReportInput {
   readonly commandNames?: GenerationReportValue["commandNames"];
   readonly diagnostics: readonly Diagnostic[];
   readonly inputs: GenerationReportValue["inputs"];
+  // The non-standard elements in diagnostic order; absent, none.
+  readonly nonStandard?: GenerationReportValue["nonStandard"];
   readonly renames: GenerationReportValue["renames"];
   readonly schemes?: readonly SecurityScheme[];
   readonly version: string;
@@ -83,6 +101,61 @@ export type GeneratorOutcome =
     }
   | { readonly _tag: "LockHeld" };
 
+const tokenOrder = Order.make<string>((left, right) =>
+  /^(?:0|[1-9][0-9]*)$/u.test(left) && /^(?:0|[1-9][0-9]*)$/u.test(right)
+    ? Order.Number(Number(left), Number(right))
+    : Order.String(left, right),
+);
+
+// Diagnostic order (design 3.7) over use sites: document index, then pointer token by token with
+// array indices numerically. `diagnostic.ts` keeps its pointer order private, so this repeats it.
+const useSiteOrder = (documents: readonly string[]): Order.Order<NonStandardEntryValue> =>
+  Order.combine(
+    Order.mapInput(Order.Number, (entry: NonStandardEntryValue) => {
+      const index = documents.indexOf(entry.document);
+
+      return index === -1 ? documents.length : index;
+    }),
+    Order.mapInput(Order.Array(tokenOrder), (entry: NonStandardEntryValue) =>
+      entry.pointer.split("/").slice(1),
+    ),
+  );
+
+const entryAt = (origin: { readonly document: string; readonly pointer: string }) =>
+  Schema.decodeUnknownSync(NonStandardEntry)({
+    choice: "deepObjectBrackets",
+    configKey: "nonStandard.deepObjectBrackets",
+    document: origin.document,
+    pointer: origin.pointer,
+    row: "PRM-27",
+  });
+
+/**
+ * The elements of the normalized model that carry the non-standard marker (design 6.1): query
+ * parameters and form Encoding entries the author config sends in the bracket convention. The
+ * marker is read as the model holds it, never inferred; a model with none lists none. Entries are
+ * in diagnostic order over `documents`.
+ */
+export const nonStandardEntries = (
+  api: Api,
+  documents: readonly string[],
+): GenerationReportValue["nonStandard"] => {
+  const marked = api.operations.flatMap((operation) => [
+    ...operation.parameters.flatMap(({ serialization }) =>
+      serialization.kind === "style" && serialization.nonStandard !== undefined
+        ? [entryAt(serialization.origin)]
+        : [],
+    ),
+    ...(operation.body?.alternatives ?? []).flatMap((alternative) =>
+      alternative.encoding.flatMap((rule) =>
+        rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
+      ),
+    ),
+  ]);
+
+  return Arr.sort(marked, useSiteOrder(documents));
+};
+
 /**
  * Splits the diagnostics by severity into the report value, keeping their order.
  */
@@ -96,6 +169,7 @@ export const makeGenerationReport = (input: GenerationReportInput): GenerationRe
     commandNames: input.commandNames ?? [],
     generator: { version: input.version },
     inputs: input.inputs,
+    nonStandard: input.nonStandard ?? [],
     notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
     refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
     renames: input.renames,
