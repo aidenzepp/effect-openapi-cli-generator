@@ -25,6 +25,16 @@ const encode = (
     }),
   );
 
+const refusal = (value: { readonly [property: string]: Json }, encoding?: FormEncoding) =>
+  Effect.runPromise(
+    Effect.flip(
+      Serialize.urlEncode(value, {
+        properties:
+          encoding === undefined ? [] : Object.keys(value).map((name) => [name, encoding] as const),
+      }),
+    ),
+  );
+
 describe("form-urlencoded JsonNumber under the default contentType", () => {
   test("a property sends its digit text", async () => {
     expect(await encode({ extra: decimal, name: big })).toBe(
@@ -102,5 +112,32 @@ describe("JsonNumber through the querystring form path and a JSON body", () => {
     );
 
     expect(expanded).toBe("%7B%22n%22%3A12345678901234567890%7D");
+  });
+});
+
+describe("form-urlencoded JsonNumber whose text is not a JSON number", () => {
+  const malformed = new JsonNumber("1&x=2");
+
+  test("a default-rule property is refused", async () => {
+    const error = await refusal({ name: malformed });
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error[Runtime.errorExitCode]).toBe(2);
+    expect(error.message).toBe("parameter name holds a number with no JSON text form");
+  });
+
+  test("a default-rule object member is refused in its compact JSON", async () => {
+    const error = await refusal({ meta: { a: new JsonNumber('1,"x":2') } });
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe("property meta holds a number with no JSON text form");
+  });
+
+  test("a styled form property is refused", async () => {
+    const error = await refusal({ n: [decimal, malformed] }, { style: "form" });
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error[Runtime.errorExitCode]).toBe(2);
+    expect(error.message).toBe("parameter n holds a number with no JSON text form");
   });
 });

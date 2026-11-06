@@ -2,7 +2,8 @@ import { Effect, Option, Predicate, Result, Schema, SchemaIssue, SchemaParser } 
 import type { Stream } from "effect";
 import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
-import { JsonNumber } from "./input.ts";
+import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
+import type { RawJson } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 
 /**
@@ -68,7 +69,9 @@ const unpairedSurrogate = /\p{Surrogate}/u;
 
 const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefined, UsageError> => {
   if (value instanceof JsonNumber) {
-    return Effect.succeed(value.text);
+    return isJsonNumberText(value.text)
+      ? Effect.succeed(value.text)
+      : refuse(`parameter ${name} holds a number with no JSON text form`);
   }
 
   if (Predicate.isString(value)) {
@@ -926,9 +929,13 @@ const isJsonMedia = (mediaType: string) => {
   return essence === "application/json" || essence.endsWith("+json");
 };
 
-const hasNonFinite = (value: Json): boolean => {
+/**
+ * Whether `value` holds a number `JSON.stringify` cannot write as given: a non-finite number, which
+ * it turns into `null`, or a `JsonNumber` whose text is not a JSON number.
+ */
+const hasUnwritableNumber = (value: Json): boolean => {
   if (value instanceof JsonNumber) {
-    return false;
+    return !isJsonNumberText(value.text);
   }
 
   if (Predicate.isNumber(value)) {
@@ -936,43 +943,33 @@ const hasNonFinite = (value: Json): boolean => {
   }
 
   if (Array.isArray(value)) {
-    return value.some((item: Json) => hasNonFinite(item));
+    return value.some((item: Json) => hasUnwritableNumber(item));
   }
 
-  return Predicate.isObject(value) && Object.values(value).some((member) => hasNonFinite(member));
+  return (
+    Predicate.isObject(value) && Object.values(value).some((member) => hasUnwritableNumber(member))
+  );
 };
 
+const rawNumbers = (_key: string, value: Json): Json | RawJson =>
+  value instanceof JsonNumber ? rawJson(value.text) : value;
+
 /**
- * Compact JSON as `JSON.stringify` writes it, with a `JsonNumber` written as its digit text.
+ * Compact JSON text from `JSON.stringify`, with a `JsonNumber` written as its digit text through
+ * `JSON.rawJSON`. `subject` names the body, parameter or property in a refusal.
  */
-const compactJson = (value: Json): string => {
-  if (value instanceof JsonNumber) {
-    return value.text;
-  }
+const jsonText = (subject: string, value: Json) => {
+  const unwritable = `${subject} holds a number with no JSON text form`;
 
-  if (Array.isArray(value)) {
-    return `[${value.map((item: Json) => compactJson(item)).join(",")}]`;
-  }
-
-  if (Predicate.isObject(value)) {
-    const members = Object.entries(value).map(
-      ([member, text]) => `${JSON.stringify(member)}:${compactJson(text)}`,
-    );
-
-    return `{${members.join(",")}}`;
-  }
-
-  return JSON.stringify(value);
+  // The walk leaves `JSON.rawJSON` no text to refuse; a SyntaxError from it is a refusal all the same.
+  return hasUnwritableNumber(value)
+    ? refuse(unwritable)
+    : Effect.sync(() => JSON.stringify(value, rawNumbers)).pipe(
+        Effect.catchDefect((defect) =>
+          defect instanceof SyntaxError ? refuse(unwritable) : Effect.die(defect),
+        ),
+      );
 };
-
-/**
- * Compact JSON text. `JSON.stringify` turns a non-finite number into `null`, which is a different
- * value, so one is refused.
- */
-const jsonText = (value: Json) =>
-  hasNonFinite(value)
-    ? refuse("the body holds a number with no JSON text form")
-    : Effect.succeed(compactJson(value));
 
 const bodyOf = (mediaType: string, value: Body) =>
   Effect.gen(function* bodyEvaluation() {
@@ -985,7 +982,7 @@ const bodyOf = (mediaType: string, value: Body) =>
     }
 
     if (isJsonMedia(mediaType)) {
-      return HttpBody.text(yield* jsonText(value), mediaType);
+      return HttpBody.text(yield* jsonText("the body", value), mediaType);
     }
 
     if (!Predicate.isString(value)) {
@@ -1359,7 +1356,9 @@ const contentPairs = (name: string, value: Json): Effect.Effect<PropertyPairs, U
     const pairs: string[] = [];
 
     for (const item of items) {
-      const text = isJsonScalar(item) ? yield* itemText(name, item) : yield* jsonText(item);
+      const text = isJsonScalar(item)
+        ? yield* itemText(name, item)
+        : yield* jsonText(`property ${name}`, item);
 
       pairs.push(`${encode(name)}=${encode(text)}`);
     }
@@ -1487,7 +1486,7 @@ const isFormMedia = (mediaType: string) =>
 const querystringText = (name: string, mediaType: string, value: Json) =>
   Effect.gen(function* querystringCodec() {
     if (isJsonMedia(mediaType)) {
-      return yield* jsonText(value);
+      return yield* jsonText(`parameter ${name}`, value);
     }
 
     if (!Predicate.isString(value)) {
