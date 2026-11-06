@@ -324,6 +324,27 @@ const objectSchemas = (defs: Defs, key: string): ObjectSchemas => {
 
 const cookieStyles: ReadonlySet<string> = new Set(["cookie", "form"]);
 
+const headerStyles: ReadonlySet<string> = new Set(["simple"]);
+
+// The styles each location's builder writes; a `querystring` parameter is written by content.
+const locationStyles: Readonly<
+  Record<Exclude<Parameter["location"], "querystring">, ReadonlySet<string>>
+> = { cookie: cookieStyles, header: headerStyles, path: pathStyles, query: queryStyles };
+
+/**
+ * Whether the `api/` layer builds a parameter: a `querystring` parameter in `content` form, or any
+ * other in a style its location takes. An operation with any other parameter gets no builder, and
+ * `emitCli` refuses it alone (`unsupported-parameter`).
+ */
+export const buildsParameter = (parameter: Parameter): boolean => {
+  const { location, serialization } = parameter;
+  if (location === "querystring") {
+    return serialization.kind === "content";
+  }
+
+  return serialization.kind === "style" && locationStyles[location].has(serialization.style);
+};
+
 const formMedia = "application/x-www-form-urlencoded";
 
 interface ParameterContext {
@@ -379,6 +400,10 @@ const parameterParts = (
     const { key, parameter } = entry;
     const { serialization } = parameter;
     const subject = `${parameter.location}:${parameter.wireName}`;
+    if (!buildsParameter(parameter)) {
+      return yield* refuse("unsupported-parameter", subject);
+    }
+
     if (parameter.location === "querystring") {
       return yield* querystringParts(entry, defs);
     }
@@ -409,7 +434,7 @@ const parameterParts = (
     const { allowReserved, explode, style } = serialization;
     const wire = str(parameter.wireName);
     const required = bool(parameter.required);
-    if (parameter.location === "path" && pathStyles.has(style)) {
+    if (parameter.location === "path") {
       const options = obj([
         ["allowReserved", bool(allowReserved)],
         ["explode", bool(explode)],
@@ -418,7 +443,7 @@ const parameterParts = (
       return { field, path: fn(style, [wire, value, options]) };
     }
 
-    if (parameter.location === "query" && queryStyles.has(style)) {
+    if (parameter.location === "query") {
       const options = obj([
         ["allowReserved", bool(allowReserved)],
         ...brackets(serialization.nonStandard),
@@ -429,7 +454,7 @@ const parameterParts = (
       return { field, query: fn(style, [wire, value, options]) };
     }
 
-    if (parameter.location === "header" && style === "simple") {
+    if (parameter.location === "header") {
       const options = obj([
         ["explode", bool(explode)],
         ["required", required],
@@ -438,19 +463,15 @@ const parameterParts = (
       return { field, header: fn("header", [wire, value, options]) };
     }
 
-    if (parameter.location === "cookie" && cookieStyles.has(style)) {
-      const options = obj([
-        ["allowReserved", bool(allowReserved)],
-        ["explode", bool(explode)],
-        ["line", str(context.line)],
-        ["required", required],
-        ["style", str(style)],
-      ]);
+    const options = obj([
+      ["allowReserved", bool(allowReserved)],
+      ["explode", bool(explode)],
+      ["line", str(context.line)],
+      ["required", required],
+      ["style", str(style)],
+    ]);
 
-      return { cookie: fn("cookie", [wire, value, options]), field };
-    }
-
-    return yield* refuse("unsupported-parameter", subject);
+    return { cookie: fn("cookie", [wire, value, options]), field };
   });
 
 /**
@@ -997,9 +1018,12 @@ const commandStatements = (
   });
 
 // An operation's builder, `Meta`, `Media`, `Security` and `Input` belong to its primary command
-// alone; its alias commands call them (design 4.4).
+// alone; its alias commands call them (design 4.4). An operation with a parameter this layer does
+// not build has none: `emitCli` refuses it.
 const primaries = (commands: readonly PlannedCommand[]): readonly PlannedCommand[] =>
-  commands.filter((command) => command.alias === undefined);
+  commands.filter(
+    (command) => command.alias === undefined && command.operation.parameters.every(buildsParameter),
+  );
 
 const moduleFile = (
   segment: string,
