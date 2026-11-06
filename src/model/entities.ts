@@ -81,8 +81,11 @@ const nestedEncodingRule = Schema.Struct({
 
 /**
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
+ * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
+ * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
  */
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
+  contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
   headers: requestHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
