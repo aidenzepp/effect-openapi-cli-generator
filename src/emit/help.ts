@@ -130,6 +130,10 @@ const kindNote = (scheme: SecurityScheme): string => {
   return kind.type === "oidcToken" ? "oidc token" : "mutualTls";
 };
 
+// The marker column: what a reader must know about where a scheme came from.
+const markers = (scheme: SecurityScheme): readonly string[] =>
+  scheme.source === "author-supplied" ? ["author-supplied"] : [];
+
 // The first entry per key, as a linear search would find it; built once per command.
 const firstByKey = <T>(items: readonly T[], keyOf: (item: T) => string): ReadonlyMap<string, T> => {
   const map = new Map<string, T>();
@@ -151,7 +155,9 @@ interface UseLookup {
 const useLine = (lookup: UseLookup, name: string): string => {
   const scheme = lookup.schemes.get(name);
   const credential = lookup.credentials.get(name);
-  const head = scheme === undefined ? line(name) : `${line(name)} (${kindNote(scheme)})`;
+  const marked = scheme === undefined ? [] : markers(scheme);
+  const mark = marked.length === 0 ? "" : ` [${marked.join(", ")}]`;
+  const head = scheme === undefined ? line(name) : `${line(name)} (${kindNote(scheme)})${mark}`;
   if (credential === undefined) {
     return head;
   }
