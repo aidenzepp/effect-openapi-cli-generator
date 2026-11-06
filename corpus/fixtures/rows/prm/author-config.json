@@ -1,0 +1,20 @@
+{
+  "package": {
+    "name": "prm-witness-cli",
+    "version": "0.1.0"
+  },
+  "binName": "prm",
+  "envPrefix": "PRM",
+  "allowInsecure": true,
+  "naming": {
+    "operations": {
+      "identity-get": {
+        "parameters": {
+          "header:id": {
+            "flag": "header-id"
+          }
+        }
+      }
+    }
+  }
+}
