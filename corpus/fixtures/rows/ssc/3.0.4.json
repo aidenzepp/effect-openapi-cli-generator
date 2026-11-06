@@ -1,0 +1,222 @@
+{
+  "components": {
+    "securitySchemes": {
+      "basicAuth": {
+        "scheme": "Basic",
+        "type": "http"
+      },
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "cookieKey": {
+        "in": "cookie",
+        "name": "sid",
+        "type": "apiKey"
+      },
+      "headerKey": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      },
+      "queryKey": {
+        "in": "query",
+        "name": "api_key",
+        "type": "apiKey"
+      },
+      "shoutAuth": {
+        "scheme": "BEARER",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Security scheme rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/author": {
+      "get": {
+        "operationId": "author-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/basic": {
+      "get": {
+        "operationId": "basic-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ]
+      }
+    },
+    "/bearer": {
+      "get": {
+        "operationId": "bearer-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/cookie": {
+      "get": {
+        "operationId": "cookie-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "cookieKey": []
+          }
+        ]
+      }
+    },
+    "/header": {
+      "get": {
+        "operationId": "header-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "headerKey": []
+          }
+        ]
+      }
+    },
+    "/query": {
+      "get": {
+        "operationId": "query-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "queryKey": []
+          }
+        ]
+      }
+    },
+    "/query-fail": {
+      "get": {
+        "operationId": "query-fail",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "queryKey": []
+          }
+        ]
+      }
+    },
+    "/shout": {
+      "get": {
+        "operationId": "shout-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "shoutAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}
