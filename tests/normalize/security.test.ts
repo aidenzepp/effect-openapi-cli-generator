@@ -384,21 +384,44 @@ describe("3.2 scheme URIs (SEC-10)", () => {
   });
 });
 
+// One normalization of `count` schemes and one `count`-name alternative; returns the use count.
+const normalized = (count: number): number => {
+  const securitySchemes: Record<string, Json> = {};
+  const requirement: Record<string, Json> = {};
+  for (let index = 0; index < count; index += 1) {
+    securitySchemes[`s${index}`] = keyed;
+    requirement[`s${index}`] = [];
+  }
+
+  const { policy } = run("3.1", {
+    ...withSchemes(securitySchemes),
+    security: [requirement],
+  });
+
+  return policy.policy.alternatives[0]?.uses.length ?? 0;
+};
+
+// Best of a few runs, so a load spike on one run does not decide the ratio.
+const cost = (count: number): number => {
+  let best = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const start = performance.now();
+    expect(normalized(count)).toBe(count);
+    best = Math.min(best, performance.now() - start);
+  }
+
+  return best;
+};
+
 describe("scheme lookup budget", () => {
-  test("50k schemes and one 50k-name alternative normalize in linear time", () => {
-    const names = Array.from({ length: 50_000 }, (_, index) => `s${index}`);
-    const securitySchemes: Record<string, Json> = {};
-    const requirement: Record<string, Json> = {};
-    for (const name of names) {
-      securitySchemes[name] = keyed;
-      requirement[name] = [];
-    }
+  // No absolute wall-clock bound: 8x the schemes must cost about 8x (linear), not about 64x
+  // (quadratic). The bound of 20 sits between them (measured: linear 5-9, a linear-scan mutant 32).
+  test("normalizing 8x the schemes costs far less than 64x as much (linear, not quadratic)", () => {
+    normalized(2000);
 
-    const { policy } = run("3.1", {
-      ...withSchemes(securitySchemes),
-      security: [requirement],
-    });
+    const small = cost(5000);
+    const large = cost(40_000);
 
-    expect(policy.policy.alternatives[0]?.uses.length).toBe(50_000);
-  }, 3000);
+    expect(large / small).toBeLessThan(20);
+  }, 120_000);
 });
