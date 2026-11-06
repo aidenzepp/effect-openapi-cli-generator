@@ -167,6 +167,77 @@ describe("precedence", () => {
   });
 });
 
+// An operation-level override (design 6.4): its own servers, its own accepted default, the same
+// bound set. The root table above stays the `Servers` service's table.
+const operationServer: BaseUrl.ServerEntry = { url: "https://ops.example.com/oplevel" };
+
+const operationTable: BaseUrl.ServersTable = {
+  boundOrigins: [...table.boundOrigins, "https://alt.example.com", "https://ops.example.com"],
+  defaultServer: 0,
+  servers: [operationServer, { name: "alt", url: "https://alt.example.com" }],
+};
+
+const unacceptedOperation: BaseUrl.ServersTable = {
+  boundOrigins: table.boundOrigins,
+  servers: [{ url: "https://unaccepted.example.com/v1" }],
+};
+
+const runFor = (
+  selection: SelectionInput,
+  override: BaseUrl.ServersTable,
+  env: Record<string, string> = {},
+) =>
+  Effect.runPromiseExit(
+    BaseUrl.select(selection, override).pipe(
+      Effect.flatMap((chosen) => BaseUrl.resolve(chosen, override)),
+      Effect.provide(BaseUrl.layer(table, "EXAMPLE")),
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env))),
+    ),
+  );
+
+describe("effective servers: an operation override", () => {
+  test("the request base is the operation's accepted default, not the root's", async () => {
+    const exit = await runFor(input(), operationTable);
+    expect(exit).toEqual(Exit.succeed("https://ops.example.com/oplevel"));
+  });
+
+  test("--server indexes the operation's list", async () => {
+    expect(await runFor(input({ server: Option.some("1") }), operationTable)).toEqual(
+      Exit.succeed("https://alt.example.com"),
+    );
+    expect(await runFor(input({ server: Option.some("alt") }), operationTable)).toEqual(
+      Exit.succeed("https://alt.example.com"),
+    );
+    expectUsage(
+      failure(await runFor(input({ server: Option.some("eu") }), operationTable)),
+      "--server",
+    );
+  });
+
+  test("an operation whose servers are not accepted has no default and names --base-url", async () => {
+    expectUsage(failure(await runFor(input(), unacceptedOperation)), "--base-url");
+  });
+
+  test("an unaccepted operation server is reached through --base-url or the env value", async () => {
+    expect(
+      await runFor(
+        input({ baseUrl: Option.some("https://unaccepted.example.com/v1") }),
+        unacceptedOperation,
+      ),
+    ).toEqual(Exit.succeed("https://unaccepted.example.com/v1"));
+    expect(
+      await runFor(input(), unacceptedOperation, {
+        EXAMPLE_BASE_URL: "https://unaccepted.example.com/v1",
+      }),
+    ).toEqual(Exit.succeed("https://unaccepted.example.com/v1"));
+  });
+
+  test("an operation server outside the operation's bound set is refused", async () => {
+    const outside: BaseUrl.ServersTable = { ...operationTable, boundOrigins: table.boundOrigins };
+    expectUsage(failure(await runFor(input(), outside)), "--server");
+  });
+});
+
 describe("invalid values never echo the value", () => {
   const badUrls = [
     ["scheme", `ftp://${canary}.example.org`],

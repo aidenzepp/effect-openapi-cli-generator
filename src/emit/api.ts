@@ -38,11 +38,12 @@ import type { Expr, Field, Import, PrinterError, Statement, TypeExpr } from "./p
 
 /**
  * What the `api/` layer is emitted from: the normalized `Api`, its name plan, and the bound origin
- * set (design 6.4: the accepted servers' expansions plus the author's `acceptedOrigins`).
+ * set of a servers level (design 6.4: that level's accepted servers' expansions plus the author's
+ * `acceptedOrigins`). Each servers table binds the set of its own servers only.
  */
 export interface ApiEmitInput {
   readonly api: Api;
-  readonly boundOrigins: readonly string[];
+  readonly boundOrigins: (servers: readonly Server[]) => readonly string[];
   readonly plan: NamePlan;
 }
 
@@ -612,10 +613,10 @@ const serverEntry = (server: Server): Expr => {
 };
 
 // The servers table: every server of the level, the first accepted one as the default, and the
-// bound origin set (design 6.4).
-const serversTable = (servers: readonly Server[], bound: readonly string[]): Expr => {
+// bound origin set of that level's servers (design 6.4).
+const serversTable = (servers: readonly Server[], bound: ApiEmitInput["boundOrigins"]): Expr => {
   const entries: (readonly [string, Expr])[] = [
-    ["boundOrigins", strings(bound)],
+    ["boundOrigins", strings(bound(servers))],
     ["servers", arr(servers.map(serverEntry))],
   ];
   const accepted = servers.findIndex((server) => server.accepted);
@@ -640,7 +641,7 @@ const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
   });
 
 interface CommandContext {
-  readonly bound: readonly string[];
+  readonly bound: ApiEmitInput["boundOrigins"];
   readonly defs: Defs;
   readonly document: (uri: string) => string;
   readonly memo: Map<string, boolean>;
@@ -845,7 +846,7 @@ const securityFile = (api: Api, plan: NamePlan) =>
     return { content, path: "src/api/security.ts" };
   });
 
-const serversFile = (api: Api, bound: readonly string[]) =>
+const serversFile = (api: Api, bound: ApiEmitInput["boundOrigins"]) =>
   printModule({
     imports: [
       {
