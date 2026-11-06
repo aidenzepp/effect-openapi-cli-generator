@@ -112,6 +112,11 @@ const rules = {
     element: "Reference cycle",
     message: "A chain of non-schema references returns to an object already on the chain.",
   },
+  "REF-02/non-schema-target": {
+    anchor: "reference-object",
+    element: "Reference to the document root",
+    message: "The reference target is the document root, which is not an object of this kind.",
+  },
   "REF-05/sibling-ignored": {
     anchor: "reference-object",
     element: "Reference Object sibling",
@@ -171,6 +176,11 @@ const rules = {
     anchor: "reference-object",
     element: "Reference Object",
     message: "The reference target does not exist in the document set.",
+  },
+  "SCH-03/non-schema-target": {
+    anchor: "json-schema-keywords",
+    element: "Schema $ref target",
+    message: "The $ref target is the document root, which is not a schema.",
   },
   "SCH-05/dynamic-ref": {
     anchor: "json-schema-keywords",
@@ -372,14 +382,19 @@ const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
 
-const tokensOf = (pointer: string): readonly string[] => {
+const tokensOf = (pointer: string): readonly string[] | undefined => {
   const exit = Effect.runSyncExit(parsePointer(pointer));
 
-  return Exit.isSuccess(exit) ? exit.value : [];
+  return Exit.isSuccess(exit) ? exit.value : undefined;
 };
 
-const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const exit = Effect.runSyncExit(evaluateTokens(root, tokensOf(pointer)));
+export const nodeAt = (root: Json, pointer: string): Json | undefined => {
+  const tokens = tokensOf(pointer);
+  if (tokens === undefined) {
+    return undefined;
+  }
+
+  const exit = Effect.runSyncExit(evaluateTokens(root, tokens));
 
   return Exit.isSuccess(exit) ? exit.value : undefined;
 };
@@ -797,6 +812,10 @@ class Resolver {
     );
   }
 
+  rootCode(): "REF-02/non-schema-target" | "SCH-03/non-schema-target" {
+    return this.line === "3.0" ? "REF-02/non-schema-target" : "SCH-03/non-schema-target";
+  }
+
   // Resolves one schema reference, or names the resource it waits on. Every attempt, retries
   // included, is charged to the node budget.
   schemaSite(site: Site): Failure | { readonly waitOn: string } | undefined {
@@ -813,6 +832,19 @@ class Resolver {
     }
 
     const { found } = outcome;
+    if (found.pointer === "") {
+      // The root is no schema (D-AD12): the use site keeps a reference with no `$defs` key, nothing
+      // is lifted and the root is not walked as a schema; schema normalization refuses the site.
+      this.references.set(keyOf(this.key(site.pointer)), {
+        kind: "schema",
+        site: this.key(site.pointer),
+        target: this.key(found.pointer),
+        via: [],
+      });
+
+      return undefined;
+    }
+
     const target = this.key(found.pointer);
     const key = defsKey(this.input.document, target);
     this.defs.set(keyOf(target), key);
@@ -851,6 +883,10 @@ class Resolver {
       }
 
       const { found } = outcome;
+      if (found.pointer === "") {
+        return failure(this.rootCode(), site.pointer);
+      }
+
       if (onChain.has(found.pointer)) {
         return failure("DOC-23/non-schema-cycle", site.pointer, this.key(found.pointer));
       }
@@ -907,7 +943,7 @@ class Resolver {
     let node: Json | undefined = this.input.value;
     let state: Step = { kind: "root" };
     let { base } = this;
-    for (const token of tokensOf(pointer)) {
+    for (const token of tokensOf(pointer) ?? []) {
       if (node === undefined) {
         break;
       }

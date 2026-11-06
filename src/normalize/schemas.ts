@@ -135,8 +135,12 @@ const byString = Order.String;
 const sortedKeys = (map: ReadonlyMap<string, unknown>): readonly string[] =>
   Arr.sort([...map.keys()], byString);
 
-const tokensOf = (pointer: string): readonly string[] =>
-  Effect.runSync(parsePointer(pointer).pipe(Effect.orElseSucceed((): readonly string[] => [])));
+const tokensOf = (pointer: string): readonly string[] | undefined =>
+  Effect.runSync(
+    parsePointer(pointer).pipe(
+      Effect.orElseSucceed((): readonly string[] | undefined => undefined),
+    ),
+  );
 
 const childAt = (node: Json | undefined, token: string): Json | undefined => {
   if (isObject(node)) {
@@ -406,15 +410,25 @@ const rewriteReferences = (
   pointer: string,
 ): Json => {
   const where = resolution.line === "3.0" ? positions30 : positions2020;
+  const tokens = tokensOf(pointer);
+  if (tokens === undefined) {
+    return node;
+  }
 
-  return transformSchema(budget, node, tokensOf(pointer), where, (current, path) => {
+  return transformSchema(budget, node, tokens, where, (current, path) => {
     const site = { document: resolution.document, pointer: formatPointer(path) };
     const reference =
       stringMember(current, "$ref") === undefined
         ? undefined
         : resolution.references.get(keyOf(site));
-    if (reference?.defsKey === undefined) {
+    if (reference === undefined) {
       return current;
+    }
+
+    // A reference the resolver left without a key names the document root, which is no schema
+    // (D-AD12): the `$ref` is dropped here and `diagnosticsOf` refuses the site.
+    if (reference.defsKey === undefined) {
+      return Object.fromEntries(Object.entries(current).filter(([key]) => key !== "$ref"));
     }
 
     const ref = refFor(reference.defsKey);
@@ -1292,6 +1306,10 @@ const Declared = Schema.Struct({ openapi: Schema.String });
 // The deepest existing node of the source document on the edit's path, as an RFC 6901 pointer.
 const sourcePointer = (value: Json, base: string, path: readonly string[]): string => {
   const tokens = tokensOf(base);
+  if (tokens === undefined) {
+    return "";
+  }
+
   let current = Effect.runSync(Effect.option(evaluatePointer(value, base))).pipe(
     Option.getOrUndefined,
   );
@@ -1325,20 +1343,19 @@ const diagnosticsOf = (
     resolution.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.pointer}`),
   );
   const pending: Effect.Effect<Diagnostic>[] = [];
-  for (const edit of edits) {
-    const [row = "", name = ""] = edit.code.split("/");
-    const rule = rules.get(name);
-    const pointer =
-      rule === undefined
-        ? ""
-        : sourcePointer(resolution.value, sites.get(edit.key) ?? "", reportedPath(edit, rule));
-    const identity = `${edit.code} ${pointer}`;
-    const keyword = edit.action === "remove" ? edit.path.at(-1) : undefined;
+  const report = (
+    code: string,
+    pointer: string,
+    rule: Rule | undefined,
+    keyword?: string,
+  ): void => {
+    const [row = "", name = ""] = code.split("/");
+    const identity = `${code} ${pointer}`;
     if (rule !== undefined && !seen.has(identity)) {
       seen.add(identity);
 
       const decoded = Schema.decodeUnknownEffect(Diagnostic)({
-        code: edit.code,
+        code,
         document: resolution.document,
         element:
           name === "not-asserted" && keyword !== undefined ? `Schema ${keyword}` : rule.element,
@@ -1351,6 +1368,21 @@ const diagnosticsOf = (
         specSection: specSectionUrl(resolution.line, rule.anchor),
       });
       pending.push(Effect.orDie(decoded));
+    }
+  };
+  for (const edit of edits) {
+    const rule = rules.get(edit.code.split("/")[1] ?? "");
+    const pointer =
+      rule === undefined
+        ? ""
+        : sourcePointer(resolution.value, sites.get(edit.key) ?? "", reportedPath(edit, rule));
+    report(edit.code, pointer, rule, edit.action === "remove" ? edit.path.at(-1) : undefined);
+  }
+
+  for (const reference of resolution.references.values()) {
+    if (reference.kind === "schema" && reference.defsKey === undefined) {
+      const row = resolution.line === "3.0" ? "REF-02" : "SCH-03";
+      report(`${row}/non-schema-target`, reference.site.pointer, rules.get("non-schema-target"));
     }
   }
 
