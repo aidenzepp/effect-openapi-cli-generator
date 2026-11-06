@@ -176,8 +176,12 @@ export const resolveUnderRoot = (
   }).pipe(Effect.provide(Path.layer));
 
 /**
- * The opened handle must be the file at `real`, still inside the real root: the real path is
- * re-resolved and checked after the open, and it must be the handle's file (`sameFile`).
+ * The opened handle must be the file at `real`, still inside the real root: after the open the
+ * real path is re-resolved and `stat`ed by path, and that stat must match the handle (`sameFile`).
+ * Together with the pre-open `stat` and `noFollow` (which refuses a symlink at the final
+ * component) this closes the swap window between the pre-open `stat` and the open. The
+ * post-open check is path-based, so a parent directory swapped between `realPath` and `stat`
+ * remains possible (accepted risk, see design).
  */
 const sameCheckedFile =
   (realRoot: string, real: string): VerifyOpened =>
@@ -257,7 +261,9 @@ const preloadRoot = (
 
       /**
        * A name not like a spec file is considered only if it is a directory, found by a `stat`
-       * that never resolves or opens it; anything else under that name is skipped.
+       * that never resolves or opens it; anything else under that name is skipped, including a
+       * directory link that leaves the real root (a `node_modules`-style link). A spec-named
+       * escape is still refused.
        */
       const visitEntry = (name: string): Step => {
         const entry = path.join(directory, name);
@@ -273,11 +279,17 @@ const preloadRoot = (
           Effect.flatMap((consider) =>
             consider
               ? resolveUnderRoot(realRoot, path.relative(realRoot, entry)).pipe(
+                  Effect.catchIf(
+                    (refusal) => !specNamed && refusal.diagnostic.code === "REF-16/outside-root",
+                    () => Effect.succeed(null),
+                  ),
                   Effect.flatMap((real) =>
-                    fs.stat(real).pipe(
-                      Effect.catchTag("PlatformError", () => unreadable(real)),
-                      Effect.flatMap((info) => settle(real, info, specNamed)),
-                    ),
+                    real === null
+                      ? Effect.void
+                      : fs.stat(real).pipe(
+                          Effect.catchTag("PlatformError", () => unreadable(real)),
+                          Effect.flatMap((info) => settle(real, info, specNamed)),
+                        ),
                   ),
                 )
               : Effect.void,

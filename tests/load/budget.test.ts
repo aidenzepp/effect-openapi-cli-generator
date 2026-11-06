@@ -157,7 +157,7 @@ describe("readFileBounded: an operator's path", () => {
     expect(new TextDecoder().decode(bytes)).toBe('{"a":1}');
   });
 
-  test("a file swapped in after the real path was resolved is refused by dev/ino", async () => {
+  test("a file swapped in between the pre-open stat and the open is refused by dev/ino", async () => {
     const base = directory();
     const target = path.join(base, "target.json");
     const other = path.join(base, "other.json");

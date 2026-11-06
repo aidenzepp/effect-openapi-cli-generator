@@ -158,15 +158,28 @@ describe("document set: --ref-root", () => {
     expect(error.diagnostic.hint).toBe(path.join(root, "escape.json"));
   });
 
-  test("a symlink to a directory outside the root is refused", async () => {
+  test("a spec-named symlink to a directory outside the root is refused", async () => {
     const { outside, root } = workspace();
 
-    symlinkSync(outside, path.join(root, "linked"));
+    symlinkSync(outside, path.join(root, "linked.json"));
 
     const error = await refusal([], root);
 
     expect(error.diagnostic.code).toBe("REF-16/outside-root");
     expect(error.diagnostic.scope).toBe("document");
+  });
+
+  test("a node_modules-style directory link to outside the root is skipped and the set loads", async () => {
+    const { outside, root } = workspace();
+
+    symlinkSync(outside, path.join(root, "node_modules"));
+
+    const set = await Effect.runPromise(run([], root));
+
+    expect(uris(set)).toEqual([
+      pathToFileURL(path.join(root, "a.json")).href,
+      pathToFileURL(path.join(root, "sub", "b.yaml")).href,
+    ]);
   });
 
   test("a ../ path is refused at document scope", async () => {

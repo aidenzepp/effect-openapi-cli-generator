@@ -194,7 +194,9 @@ type VerifyAgainst = (
  * `maxBytes` bounds what is actually read. The `stat` before the open refuses a special file
  * already in place without opening it; one swapped in after that `stat` is refused by the handle
  * check, but the open itself can block, since the FileSystem service cannot open non-blocking
- * (accepted risk).
+ * (accepted risk). `noFollow` refuses a symlink at the final component only; a parent directory
+ * swapped before the open is not detected here, so what `verify` can prove is limited to the
+ * window between the pre-open `stat` and the open.
  */
 const readOpened = (
   path: string,
@@ -225,7 +227,9 @@ const readOpened = (
  * Reads a path the operator named (the entry document, a `--document` pair). A symlinked name is
  * the operator's choice, so its real path is resolved first; that real path is then opened
  * without following a symlink, and the handle must be the file a `stat` of the real path saw
- * (`sameFile`), so a file or link swapped in after `realPath` is refused, not read.
+ * (`sameFile`). The dev/ino comparison covers only the window between that `stat` and the open:
+ * a file or final-component link swapped in there is refused, not read. A swap between
+ * `realPath` and the `stat` is not detected.
  */
 export const readFileBounded = (
   path: string,
@@ -246,7 +250,8 @@ export const readFileBounded = (
 /**
  * Reads a file found inside a trust boundary (a `--ref-root` member). `path` is opened as given,
  * never through a symlink at its final component, and `verify` decides whether the open handle
- * is still the file the boundary admitted.
+ * is still the file the boundary admitted. What `verify` can prove is bounded by what it checks:
+ * the `--ref-root` check is path-based after the open (see `sameCheckedFile`).
  */
 export const readMemberBounded = (
   path: string,
