@@ -1,0 +1,9 @@
+{
+  "package": {
+    "name": "sty-cookie-querystring-witness-cli",
+    "version": "0.1.0"
+  },
+  "binName": "stycq",
+  "envPrefix": "STYCQ",
+  "allowInsecure": true
+}
