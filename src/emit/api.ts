@@ -145,24 +145,51 @@ const settle = (
   return Result.fail(key);
 };
 
+// A settled node's own `type` when it is one of the scalar types.
+const scalarOf = (node: JsonNode): string | undefined => {
+  const type = own(node, "type");
+
+  return Predicate.isString(type) && scalarTypes.has(type) ? type : undefined;
+};
+
+// Whether a parameter value is given once per item, and its scalar `type`, if it has one.
+interface ScalarValue {
+  readonly array: boolean;
+  readonly type: string | undefined;
+}
+
+// How a stored parameter schema's value is given, through its `$ref` chain: whether it is an array,
+// and the scalar `type` of the schema, or of its `items` for an array. A type list, an untyped
+// schema and an array without `items` have no scalar type. The failure is the store key that does
+// not resolve.
+const scalarValueOf = (defs: Defs, key: string): Result.Result<ScalarValue, string> =>
+  Result.flatMap(settle(defs, own(defs, key), key), (node): Result.Result<ScalarValue, string> => {
+    if (own(node, "type") !== "array") {
+      return Result.succeed({ array: false, type: scalarOf(node) });
+    }
+
+    const items = own(node, "items");
+
+    return items === undefined
+      ? Result.succeed({ array: true, type: undefined })
+      : Result.map(settle(defs, items, key), (item) => ({ array: true, type: scalarOf(item) }));
+  });
+
 /**
  * Whether a stored parameter schema is `type: "array"` whose `items` is a scalar type (design 6.1):
  * the operator gives such a parameter once per item. An array without `items`, or of objects or
  * arrays, is not one. The failure is the store key that does not resolve.
  */
 export const isScalarArraySchema = (defs: Defs, key: string): Result.Result<boolean, string> =>
-  Result.flatMap(settle(defs, own(defs, key), key), (node) => {
-    const items = own(node, "items");
-    if (own(node, "type") !== "array" || items === undefined) {
-      return Result.succeed(false);
-    }
+  Result.map(scalarValueOf(defs, key), ({ array, type }) => array && type !== undefined);
 
-    return Result.map(settle(defs, items, key), (item) => {
-      const type = own(item, "type");
-
-      return Predicate.isString(type) && scalarTypes.has(type);
-    });
-  });
+/**
+ * The scalar `type` of a stored parameter schema through its `$ref` chain, or of its `items` for an
+ * array (`"boolean"`, `"integer"`, `"number"` or `"string"`). A 3.1 type list, an untyped schema
+ * and an array of objects or arrays have none. The failure is the store key that does not resolve.
+ */
+export const scalarTypeOf = (defs: Defs, key: string): Result.Result<string | undefined, string> =>
+  Result.map(scalarValueOf(defs, key), ({ type }) => type);
 
 const refuse = (reason: ApiEmitError["reason"], subject: string) =>
   new ApiEmitError({ reason, subject });

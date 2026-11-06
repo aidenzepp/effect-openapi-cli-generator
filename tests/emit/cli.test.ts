@@ -701,7 +701,7 @@ describe("emitCli: array parameters", () => {
 
     const text = contentOf(output, "src/cli/users.ts") ?? "";
     expect(text).toContain('metrics: Flag.String("metrics").pipe(Flag.atLeast(0))');
-    expect(text).toContain('tag: Flag.String("tag").pipe(Flag.atLeast(1))');
+    expect(text).toContain('tag: Input.numericFlag("tag", "integer").pipe(Flag.atLeast(1))');
     expect(text).toContain('xTrace: Flag.String("x-trace").pipe(Flag.atLeast(0))');
     expect(text).toContain("metrics: flags.metrics,");
     expect(text).toContain("tag: flags.tag,");
