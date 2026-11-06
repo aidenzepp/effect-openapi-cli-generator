@@ -545,11 +545,12 @@ export interface Subject {
 }
 
 // `pointer` is the parameter or media alternative; `field` is a body flag's RFC 6901 pointer
-// relative to the body root.
+// relative to the body root. A positional owns its metavar: `--describe` keys positionals and flags
+// in one object, so a metavar equal to a flag name collides (design 4.4, FU:CF).
 interface Owner {
   readonly field?: string;
   readonly hint: string;
-  readonly kind: "body" | "parameter";
+  readonly kind: "body" | "parameter" | "positional";
   readonly pointer: string;
 }
 
@@ -648,18 +649,20 @@ const draftParameters = (
       }
 
       const drafted = found.value;
+      const hint = parameterHint(site, keys[0] ?? `${parameter.location}:${parameter.wireName}`);
       if (isPositional(drafted)) {
+        // Two positionals sharing a metavar are `orderPositionals`' refusal; only the first owns it.
+        if (!positionals.some((known) => known.name === drafted.name)) {
+          addOwner(owners, drafted.name, { hint, kind: "positional", pointer: drafted.pointer });
+        }
+
         positionals.push(drafted);
         continue;
       }
 
       flags.push(drafted);
 
-      const owner: Owner = {
-        hint: parameterHint(site, keys[0] ?? `${parameter.location}:${parameter.wireName}`),
-        kind: "parameter",
-        pointer: drafted.pointer,
-      };
+      const owner: Owner = { hint, kind: "parameter", pointer: drafted.pointer };
       addOwner(owners, drafted.name, owner);
       if (drafted.boolean) {
         addOwner(owners, `no-${drafted.name}`, owner);
@@ -776,20 +779,27 @@ const draftBody = (
     });
   });
 
-const parameterFirst = Order.mapInput(Order.Number, (owner: Owner) =>
-  owner.kind === "parameter" ? 0 : 1,
-);
+const ownerRank: Record<Owner["kind"], number> = { body: 2, parameter: 1, positional: 0 };
+
+const positionalFirst = Order.mapInput(Order.Number, (owner: Owner) => ownerRank[owner.kind]);
 
 const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): void => {
   const { operation } = subject;
   for (const [name, list] of owners) {
-    const reserved = reservedCliNames.has(name) || context.credentialFlags.has(name);
-    const [primary, ...rest] = Arr.sort(list, parameterFirst);
+    // Reserved and credential names are flags; a positional alone may use one as its metavar.
+    const reserved =
+      list.some((owner) => owner.kind !== "positional") &&
+      (reservedCliNames.has(name) || context.credentialFlags.has(name));
+    const [primary, ...rest] = Arr.sort(list, positionalFirst);
     if (primary === undefined || (rest.length === 0 && !reserved)) {
       continue;
     }
 
-    const isParameter = primary.kind === "parameter";
+    const isParameter = primary.kind !== "body";
+    const summary =
+      primary.kind === "positional"
+        ? `The positional ${name} collides with the flag --${name}.`
+        : `The flag --${name} collides with another flag or a reserved name.`;
     const related = [...new Set(rest.map((owner) => owner.pointer))]
       .filter((pointer) => pointer !== primary.pointer)
       .map((pointer) => siteOf(operation, pointer));
@@ -801,7 +811,7 @@ const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): vo
       operation,
       `${isParameter ? "PRM-02" : "RQB-03"}/flag-collision`,
       isParameter ? "Parameter" : "Request body",
-      `The flag --${name} collides with another flag or a reserved name.${named}`,
+      `${summary}${named}`,
       { hint: primary.hint, pointer: primary.pointer, related },
     );
   }
@@ -847,8 +857,9 @@ const orderPositionals = (
 /**
  * Drafts one operation's positionals (template order) and flags (parameters, then every media
  * alternative's body flags merged by name), refusing at `operation` scope any two flags that share
- * a name or a boolean's `no-` negation, and any flag equal to a reserved or credential flag name
- * (design 4.4 first collision row). A property whose name folds to nothing is a notice.
+ * a name or a boolean's `no-` negation, any flag equal to a reserved or credential flag name
+ * (design 4.4 first collision row), and any positional whose metavar equals a flag name. A property
+ * whose name folds to nothing is a notice.
  */
 export const draftFlags = (subject: Subject, context: DraftContext): Effect.Effect<Draft> =>
   Effect.gen(function* draft() {
