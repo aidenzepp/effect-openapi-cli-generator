@@ -222,12 +222,23 @@ const openFile = (
       : opened.pipe(Effect.flatMap((body) => limited(body, limit)));
   });
 
+// `--body-file -` as a chunked body with no length: stdin under the one stdin claim, streamed as
+// it arrives and never collected. A read failure is a `UsageError` naming the flag.
+const stdinBody: Effect.Effect<HttpBody.HttpBody, UsageError, Stdio.Stdio | StdinClaim> =
+  Effect.service(StdinClaim).pipe(
+    Effect.flatMap((claim) => claim.claim(bodyFileName)),
+    Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+    Effect.map((stdio) => HttpBody.stream(stdio.stdin.pipe(Stream.mapError(cannotRead)))),
+  );
+
 /**
- * A binary request body from `--body-file` only. A regular file streams through `FileBody` with its
- * size, its bytes counted against the limit; stdin (`-`) is read into memory, bounded, so an
- * over-limit or unreadable input is a `UsageError` before any request. `--body` is refused, and so
- * is `--body` together with `--body-file`. With neither flag a required body is a `UsageError`
- * naming `--body-file` and an optional one is empty. `maxBytes` replaces the default limit.
+ * A binary request body from `--body-file` only (design 6.3 Binary). A regular file streams through
+ * `FileBody` with its size; stdin (`-`) streams chunked under the one stdin claim, with no
+ * `Content-Length`. Both count their bytes against the limit as they stream, so an over-limit or
+ * unreadable stdin fails the send with a `UsageError` naming `--body-file`. `--body` is refused,
+ * and so is `--body` together with `--body-file`. With neither flag a required body is a
+ * `UsageError` naming `--body-file` and an optional one is empty. `maxBytes` replaces the default
+ * limit.
  */
 export const binaryBody = (options: {
   readonly body: Option.Option<string>;
@@ -256,9 +267,11 @@ export const binaryBody = (options: {
       : Effect.succeed(HttpBody.empty);
   }
 
+  const limit = options.maxBytes ?? maxBodyBytes;
+
   return options.bodyFile.value === "-"
-    ? readBodyFile("-").pipe(Effect.map((read) => HttpBody.uint8Array(read)))
-    : openFile(options.bodyFile.value, options.maxBytes ?? maxBodyBytes);
+    ? stdinBody.pipe(Effect.flatMap((body) => limited(body, limit)))
+    : openFile(options.bodyFile.value, limit);
 };
 
 /**
@@ -293,13 +306,7 @@ export const sequentialBody = (options: {
 
   const path = options.bodyFile.value;
 
-  return path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(bodyFileName)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.map((stdio) => HttpBody.stream(stdio.stdin.pipe(Stream.mapError(cannotRead)))),
-      )
-    : openFile(path);
+  return path === "-" ? stdinBody : openFile(path);
 };
 
 /**
