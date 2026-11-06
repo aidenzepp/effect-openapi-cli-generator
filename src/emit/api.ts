@@ -257,6 +257,11 @@ const documentLabel = (entry: string, document: string): string => {
   return [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/");
 };
 
+// The bracket convention option, `brackets: true`, for an entry the model marks (design 6.1);
+// nothing for an unmarked one, so it emits what it emitted before (C16).
+const brackets = (marker: EncodingRule["nonStandard"]): readonly (readonly [string, Expr])[] =>
+  marker === "deepObjectBrackets" ? [["brackets", bool(true)]] : [];
+
 interface ParameterParts {
   readonly cookie?: Expr;
   readonly field: Field;
@@ -416,6 +421,7 @@ const parameterParts = (
     if (parameter.location === "query" && queryStyles.has(style)) {
       const options = obj([
         ["allowReserved", bool(allowReserved)],
+        ...brackets(serialization.nonStandard),
         ["explode", bool(explode)],
         ["required", required],
       ]);
@@ -593,13 +599,16 @@ const formEncoding = (
   alternative: MediaAlternative,
   name: string,
 ): Effect.Effect<Expr, ApiEmitError> => {
-  const serialization = alternative.encoding.find(
-    (rule) => rule.target.kind === "property" && rule.target.name === name,
-  )?.serialization;
+  const rule = alternative.encoding.find(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === name,
+  );
+  const serialization = rule?.serialization;
   const entries: (readonly [string, Expr])[] = [];
   if (serialization?.allowReserved !== undefined) {
     entries.push(["allowReserved", bool(serialization.allowReserved)]);
   }
+
+  entries.push(...brackets(rule?.nonStandard));
 
   if (serialization?.explode !== undefined) {
     entries.push(["explode", bool(serialization.explode)]);

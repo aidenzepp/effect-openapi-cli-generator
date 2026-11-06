@@ -79,16 +79,23 @@ const nestedEncodingRule = Schema.Struct({
   target: encodingTarget,
 });
 
+// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
+// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
+// convention. Set only from the author config, never defaulted or inferred; absent is strict.
+const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
+
 /**
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
  * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
  * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
+ * `nonStandard` marks a form property the author config sends in the bracket convention.
  */
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
   contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
   headers: requestHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
+  nonStandard,
   origin: Origin,
   rows,
   serialization: Schema.optionalKey(explicitStyle),
@@ -132,12 +139,14 @@ export class Body extends Schema.Class<Body>("Body")({
 }) {}
 
 /**
- * A parameter written in `style` form.
+ * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
+ * author config sends in the bracket convention.
  */
 export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
   allowReserved: Schema.Boolean,
   explode: Schema.Boolean,
   kind: Schema.Literal("style"),
+  nonStandard,
   origin: Origin,
   rows,
   rules,
