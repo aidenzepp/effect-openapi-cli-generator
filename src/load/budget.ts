@@ -1,4 +1,4 @@
-import { Array as Arr, ByteSize, Data, Effect, FileSystem, Schema, Stream } from "effect";
+import { Array as Arr, ByteSize, Data, Effect, FileSystem, Option, Schema, Stream } from "effect";
 import type { PlatformError } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
@@ -132,27 +132,76 @@ export const readStreamBounded = (
   );
 
 /**
- * Reads a regular file through `FileSystem.stream`, so `maxBytes` bounds the bytes actually read,
- * not the size `stat` reported. Anything that is not a regular file is refused unread.
+ * A check a trust boundary runs on the opened handle's metadata before any byte is read. A
+ * refusal here leaves the file unread.
+ */
+export type VerifyOpened = (
+  opened: FileSystem.File.Info,
+) => Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+
+const chunkSize = 64 * 1024;
+
+/**
+ * The handle's bytes, chunk by chunk, until end of file.
+ */
+const handleStream = (
+  file: FileSystem.File,
+): Stream.Stream<Uint8Array, PlatformError.PlatformError> =>
+  Stream.paginate(file, (handle) =>
+    handle.readAlloc(chunkSize).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => [[], Option.none()] as const,
+          onSome: (chunk) => [[chunk], Option.some(handle)] as const,
+        }),
+      ),
+    ),
+  );
+
+const checkRegular = (
+  info: FileSystem.File.Info,
+  limits: LoadLimits,
+  document: Document,
+): Effect.Effect<void, LoadRefusal> => {
+  if (info.type !== "File") {
+    return refuse(document, "DOC-14/unreadable");
+  }
+
+  return ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)
+    ? refuse(document, "DOC-14/too-large")
+    : Effect.void;
+};
+
+/**
+ * Opens `path` without following a symlink at its final component, checks the open handle (a
+ * regular file within `maxBytes`, then `verify`), and reads that same handle through
+ * `Stream.limitBytes`, so the bytes read are the bytes checked and `maxBytes` bounds what is
+ * actually read. A `stat` before the open refuses a special file already in place without
+ * opening it; one swapped in after that `stat` is refused by the handle check, but the open
+ * itself can block, since the FileSystem service cannot open non-blocking (accepted risk).
  */
 export const readFileBounded = (
   path: string,
   limits: LoadLimits,
   document: Document,
+  verify: VerifyOpened = () => Effect.void,
 ): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
   Effect.gen(function* readBounded() {
     const fs = yield* FileSystem.FileSystem;
-    const info = yield* fs
-      .stat(path)
-      .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
+    const unreadable = () => refuse(document, "DOC-14/unreadable");
 
-    if (info.type !== "File") {
-      return yield* refuse(document, "DOC-14/unreadable");
-    }
+    yield* fs.stat(path).pipe(
+      Effect.catchTag("PlatformError", unreadable),
+      Effect.flatMap((info) => checkRegular(info, limits, document)),
+    );
 
-    if (ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)) {
-      return yield* refuse(document, "DOC-14/too-large");
-    }
+    const file = yield* fs
+      .open(path, { flag: "r", noFollow: true })
+      .pipe(Effect.catchTag("PlatformError", unreadable));
+    const opened = yield* file.stat.pipe(Effect.catchTag("PlatformError", unreadable));
 
-    return yield* readStreamBounded(fs.stream(path), limits, document);
-  });
+    yield* checkRegular(opened, limits, document);
+    yield* verify(opened);
+
+    return yield* readStreamBounded(handleStream(file), limits, document);
+  }).pipe(Effect.scoped);

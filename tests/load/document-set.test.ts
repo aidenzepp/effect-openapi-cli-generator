@@ -1,6 +1,7 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { makeDocumentSet, maxDocuments } from "../../src/load/document-set.ts";
@@ -92,5 +93,26 @@ describe("document set: --document pairs", () => {
     expect(error.diagnostic.code).toBe("REF-16/document-limit");
     expect(error.diagnostic.scope).toBe("document");
     expect(error.diagnostic.hint).toBe(pet);
+  });
+
+  test("a pair whose path is a symlink is refused: the open does not follow it", async () => {
+    const scratch = path.join(import.meta.dir, "..", "..", "work");
+
+    mkdirSync(scratch, { recursive: true });
+
+    const base = mkdtempSync(path.join(scratch, "document-set-"));
+    const link = path.join(base, "pet.json");
+
+    symlinkSync(pet, link);
+
+    const error = await refusal([{ path: link, uri: "https://example.com/pet.json" }]).finally(
+      () => {
+        rmSync(base, { force: true, recursive: true });
+      },
+    );
+
+    expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+    expect(error.diagnostic.scope).toBe("document");
+    expect(error.diagnostic.hint).toBe(link);
   });
 });

@@ -193,15 +193,27 @@ describe("load: bytes actually read", () => {
   test("a file that reports a small size but streams past the cap is refused at the cap", async () => {
     let served = 0;
     const chunk = new Uint8Array(512).fill(0x20);
-    const endless = Stream.iterate(chunk, (c) => c).pipe(
-      Stream.tap((c) =>
+    const endless: FileSystem.File = {
+      [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+      read: () => Effect.succeed(0),
+      readAlloc: () =>
         Effect.sync(() => {
-          served += c.length;
+          served += chunk.length;
+
+          return Option.some(chunk);
         }),
-      ),
-    );
+      seek: () => Effect.succeed(0n),
+      stat: Effect.succeed(info(10, "File")),
+      sync: Effect.void,
+      truncate: () => Effect.void,
+      write: () => Effect.succeed(0),
+      writeAll: () => Effect.void,
+    };
     const error = await refusal(
-      withFs({ stat: () => Effect.succeed(info(10, "File")), stream: () => endless }),
+      withFs({
+        open: () => Effect.succeed(endless),
+        stat: () => Effect.succeed(info(10, "File")),
+      }),
     );
     expect(error.diagnostic.code).toBe("DOC-14/too-large");
     expect(served).toBeLessThanOrEqual(1024 + 512 * 2);
