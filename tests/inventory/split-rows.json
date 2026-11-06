@@ -1,0 +1,10 @@
+[
+  {
+    "halves": ["request", "response"],
+    "row": "MED-03"
+  },
+  {
+    "halves": ["request-id", "retry-after"],
+    "row": "RSP-04"
+  }
+]
