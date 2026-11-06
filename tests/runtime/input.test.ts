@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import nodePath from "node:path";
 import { BunFileSystem, BunServices } from "@effect/platform-bun";
-import { Effect, FileSystem, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Runtime, Schema, Sink, Stdio, Stream } from "effect";
 import { CliError, Command } from "effect/cli";
 import type { Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
@@ -774,6 +774,7 @@ describe("Input.selectBody", () => {
       }),
     );
 
+    expect(selected.key).toBe("application/json");
     expect(selected.contentType).toBe("application/json");
     expect([json.counter.runs, png.counter.runs]).toEqual([1, 0]);
   });
@@ -846,8 +847,70 @@ describe("Input.selectBody", () => {
       }),
     );
 
+    expect(selected.key).toBe("image/*");
     expect(selected.contentType).toBe("image/webp");
     expect(image.counter.runs).toBe(1);
+  });
+
+  test("each key keeps its own body type, narrowed by the chosen key", async () => {
+    const selected = await run(
+      Input.selectBody({
+        alternatives: {
+          "application/json": Effect.succeed(HttpBody.text("json")),
+          "application/x-www-form-urlencoded": Effect.succeed<Input.JsonNode | undefined>({
+            name: "ada",
+          }),
+        },
+        chosen: Option.some("application/x-www-form-urlencoded"),
+        media: {
+          request: ["application/json", "application/x-www-form-urlencoded"],
+          responses: {},
+        },
+      }),
+    );
+
+    expect(selected.key).toBe("application/x-www-form-urlencoded");
+
+    if (selected.key === "application/x-www-form-urlencoded") {
+      const form: Input.JsonNode | undefined = selected.body;
+
+      expect(form).toEqual({ name: "ada" });
+    }
+  });
+
+  test("a supplied flag foreign to the chosen type is exit 2 before any alternative runs", async () => {
+    const json = counting(HttpBody.text("json"));
+    const png = counting(marker);
+    const error = await run(
+      Input.selectBody({
+        alternatives: { "application/json": json.effect, "image/png": png.effect },
+        chosen: Option.some("image/png"),
+        foreign: { "application/json": { body: true }, "image/png": { photo: false, url: true } },
+        media,
+      }).pipe(Effect.flip),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error[Runtime.errorExitCode]).toBe(2);
+    expect(error.flag).toBe("url");
+    expect(error.message).toBe("--url: does not apply to --content-type image/png");
+    expect([json.counter.runs, png.counter.runs]).toEqual([0, 0]);
+  });
+
+  test("an unsupplied foreign flag, or one foreign to another type, passes", async () => {
+    const json = counting(HttpBody.text("json"));
+    const png = counting(marker);
+    const selected = await run(
+      Input.selectBody({
+        alternatives: { "application/json": json.effect, "image/png": png.effect },
+        chosen: none,
+        foreign: { "application/json": { photo: false }, "image/png": { url: true } },
+        media,
+      }),
+    );
+
+    expect(selected.key).toBe("application/json");
+    expect([json.counter.runs, png.counter.runs]).toEqual([1, 0]);
   });
 });
 
