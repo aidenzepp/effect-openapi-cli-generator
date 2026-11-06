@@ -10,6 +10,7 @@ import {
   sameFile,
 } from "./budget.ts";
 import type { VerifyOpened } from "./budget.ts";
+import { sha256Hex } from "../write/manifest.ts";
 import { loadBytes } from "./index.ts";
 import type { Loaded } from "./index.ts";
 
@@ -26,6 +27,10 @@ export interface DocumentPair {
 
 export interface SetMember extends Loaded {
   readonly path: string;
+  /**
+   * The sha256 of the exact bytes parsed, computed once at load.
+   */
+  readonly sha256: string;
 }
 
 /**
@@ -92,6 +97,11 @@ const refuse = (code: keyof typeof messages, pair: DocumentPair) =>
     Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))),
   );
 
+/**
+ * The `REF-16/duplicate-uri` refusal for `pair`, whose `uri` is the retrieval URI already in use.
+ */
+export const duplicateUri = (pair: DocumentPair) => refuse("REF-16/duplicate-uri", pair);
+
 const withPath = (refusal: LoadRefusal, path: string): LoadRefusal => {
   const diagnostic = Schema.decodeUnknownSync(Diagnostic)({
     ...Schema.encodeSync(Diagnostic)(refusal.diagnostic),
@@ -115,7 +125,7 @@ const loadPair = (
   }
 
   if (documents.has(uri.value)) {
-    return refuse("REF-16/duplicate-uri", pair);
+    return duplicateUri(pair);
   }
 
   const read =
@@ -124,11 +134,14 @@ const loadPair = (
       : readMemberBounded(pair.path, defaultLimits, uri.value, verify);
 
   return read.pipe(
-    Effect.flatMap((bytes) => loadBytes(bytes, { document: uri.value })),
-    Effect.map((loaded): readonly [Document, SetMember] => [
-      uri.value,
-      { ...loaded, path: pair.path },
-    ]),
+    Effect.flatMap((bytes) =>
+      loadBytes(bytes, { document: uri.value }).pipe(
+        Effect.map((loaded): readonly [Document, SetMember] => [
+          uri.value,
+          { ...loaded, path: pair.path, sha256: sha256Hex(bytes) },
+        ]),
+      ),
+    ),
     Effect.mapError((refusal) => withPath(refusal, pair.path)),
   );
 };

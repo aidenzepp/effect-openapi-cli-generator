@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
 import { Schema } from "effect";
@@ -171,6 +172,35 @@ describe("generator CLI document set", () => {
       `file://${nodePath.join(nodeFs.realpathSync(ran.dir), "openapi.json")}`,
     );
     expect(nodeFs.existsSync(nodePath.join(ran.dir, "out", "src", "cli", "users.ts"))).toBe(true);
+  });
+
+  test("the report lists each --document member with its hash, in set order, and is reproducible", () => {
+    const args = generateArgs(
+      "--document",
+      `${schemasUri}=users.json`,
+      "--document",
+      `${avatarUri}=avatar.json`,
+    );
+    const ran = cli(args, crossDocumentFiles);
+    const report = reportOf(ran);
+    const hash = (name: string) =>
+      createHash("sha256")
+        .update(nodeFs.readFileSync(nodePath.join(ran.dir, name)))
+        .digest("hex");
+
+    expect(report.inputs.map((input) => String(input.document))).toEqual([
+      `file://${nodePath.join(nodeFs.realpathSync(ran.dir), "openapi.json")}`,
+      schemasUri,
+      avatarUri,
+      expect.stringMatching(/c\.json$/u),
+    ]);
+    expect(report.inputs.map((input) => input.sha256).slice(1, 3)).toEqual([
+      hash("users.json"),
+      hash("avatar.json"),
+    ]);
+    expect(reportOf(cli(args, crossDocumentFiles)).inputs.slice(1, 3)).toEqual(
+      report.inputs.slice(1, 3),
+    );
   });
 
   test("without the pairs the same references are outside the set and nothing is written", () => {
