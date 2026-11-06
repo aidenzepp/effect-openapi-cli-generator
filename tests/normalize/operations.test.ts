@@ -273,11 +273,13 @@ describe("bodies on GET, HEAD, DELETE, OPTIONS and TRACE", () => {
   });
 });
 
-const cookie = (required: boolean): Json => ({
-  in: "cookie",
+// A parameter that stays refused: a query parameter in matrix style (STY-40).
+const refusedQuery = (required: boolean): Json => ({
+  in: "query",
   name: "sid",
   required,
   schema: { type: "string" },
+  style: "matrix",
 });
 
 const formBody = (required: boolean): Json => ({
@@ -302,7 +304,7 @@ const raised = (diagnostics: readonly Diagnostic[]) =>
 describe("operation-scope refusals", () => {
   test("a required parameter that is refused removes the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, parameters: [cookie(true)] }, post: ok },
+      "/a": { get: { ...ok, parameters: [refusedQuery(true)] }, post: ok },
     });
 
     see(api.operations.map((found) => found.key.method)).toEqual(["POST"]);
@@ -311,7 +313,7 @@ describe("operation-scope refusals", () => {
 
   test("an optional parameter that is refused leaves the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, parameters: [cookie(false)] } },
+      "/a": { get: { ...ok, parameters: [refusedQuery(false)] } },
     });
 
     see(api.operations).toHaveLength(1);
@@ -321,7 +323,7 @@ describe("operation-scope refusals", () => {
 
   test("a required path item parameter that is refused removes every operation of the item", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: ok, parameters: [cookie(true)], post: ok },
+      "/a": { get: ok, parameters: [refusedQuery(true)], post: ok },
     });
 
     see(api.operations).toEqual([]);
@@ -334,8 +336,8 @@ describe("operation-scope refusals", () => {
   test("a refused required parameter that an operation overrides does not remove it", () => {
     const { api } = run("3.1", {
       "/a": {
-        get: { ...ok, parameters: [{ in: "cookie", name: "sid", schema: { type: "string" } }] },
-        parameters: [cookie(true)],
+        get: { ...ok, parameters: [{ in: "query", name: "sid", schema: { type: "string" } }] },
+        parameters: [refusedQuery(true)],
       },
     });
 
@@ -449,7 +451,7 @@ describe("operation-scope refusals", () => {
 
   test("the raise names the operation and points at the refused element", () => {
     const { diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, operationId: "g", parameters: [cookie(true)] } },
+      "/a": { get: { ...ok, operationId: "g", parameters: [refusedQuery(true)] } },
     });
     const found = diagnostics.find((diagnostic) => diagnostic.scope === "operation");
 
@@ -552,7 +554,7 @@ const mixedPaths: Json = Object.fromEntries([
     {
       get: {
         ...ok,
-        parameters: [{ in: "cookie", name: "sid", schema: { type: "string" } }],
+        parameters: [refusedQuery(false)],
         requestBody: jsonBody,
       },
       parameters: [{ in: "header", name: "Accept", schema: { type: "string" } }],
@@ -572,7 +574,7 @@ describe("diagnostic order", () => {
 
     see(diagnostics).toEqual(sortDiagnostics([entry], diagnostics));
     see(diagnostics.map((diagnostic) => [diagnostic.pointer, diagnostic.code])).toEqual([
-      ["/paths/~1a/get/parameters/0", "STY-33/not-implemented"],
+      ["/paths/~1a/get/parameters/0", "STY-40/style-location"],
       ["/paths/~1a/get/requestBody", "OPR-10/body-refused"],
       ["/paths/~1a/parameters/0", "PRM-19/ignored-header"],
       ["/paths/~1b/delete", "OPR-09/required-body-refused"],
