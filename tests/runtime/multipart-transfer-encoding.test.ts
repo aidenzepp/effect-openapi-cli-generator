@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect";
 import type { HttpBody } from "effect/http";
 import { formData } from "../../src/runtime-src/runtime/multipart.ts";
 import type { Part } from "../../src/runtime-src/runtime/multipart.ts";
+import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 const boundary = "testboundary";
 
@@ -111,5 +112,72 @@ describe("multipart base64 transfer encoding", () => {
     const text = await textOf([{ body: encoder.encode("x"), name: "a" }]);
 
     expect(text).not.toContain("Content-Transfer-Encoding");
+  });
+});
+
+// The bytes `Serialize.formData` streams, with its random boundary read back from `Content-Type`.
+const formDataText = async (fields: Serialize.FormFields, options: Serialize.FormDataOptions) => {
+  const body = await Effect.runPromise(Serialize.formData(fields, options).expand);
+  if (body._tag !== "Stream") {
+    throw new Error(`expected a stream body, got ${body._tag}`);
+  }
+
+  const random = /boundary=(?<boundary>.+)$/u.exec(body.contentType)?.groups?.boundary ?? "";
+  const decoder = new TextDecoder();
+  const chunks = await chunksOf(body);
+  const text = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("");
+
+  return text.replaceAll(random, boundary);
+};
+
+describe("Serialize.formData: a part entry's contentEncoding", () => {
+  test("a base64 part entry writes one Content-Transfer-Encoding line and a base64 body", async () => {
+    const text = await formDataText(
+      {
+        doc: [{ filename: "doc.bin", stream: Stream.make(alphabetBytes) }],
+        title: ["plain"],
+      },
+      {
+        parts: [
+          ["doc", "application/octet-stream", "base64"],
+          ["title", "text/plain"],
+        ],
+        required: true,
+      },
+    );
+
+    expect(text).toBe(
+      [
+        "--testboundary",
+        'Content-Disposition: form-data; name="doc"; filename="doc.bin"',
+        "Content-Transfer-Encoding: base64",
+        "Content-Type: application/octet-stream",
+        "",
+        "+//+AQ==",
+        "--testboundary",
+        'Content-Disposition: form-data; name="title"',
+        "Content-Type: text/plain",
+        "",
+        "plain",
+        "--testboundary--",
+        "",
+      ].join("\r\n"),
+    );
+    expect(text.split("Content-Transfer-Encoding")).toHaveLength(2);
+  });
+
+  test("a base64 part entry encodes a text value's UTF-8 bytes", async () => {
+    const text = await formDataText(
+      { note: ["Café"] },
+      { parts: [["note", "text/plain", "base64"]], required: true },
+    );
+
+    expect(text.split("\r\n").slice(1, 5)).toEqual([
+      'Content-Disposition: form-data; name="note"',
+      "Content-Transfer-Encoding: base64",
+      "Content-Type: text/plain",
+      "",
+    ]);
+    expect(text.split("\r\n")[5]).toBe(encoder.encode("Café").toBase64());
   });
 });

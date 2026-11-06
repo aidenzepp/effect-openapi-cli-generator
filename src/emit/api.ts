@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type {
   Api,
+  EncodingRule,
   MediaAlternative,
   Operation,
   Parameter,
@@ -256,6 +257,11 @@ const documentLabel = (entry: string, document: string): string => {
   return [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/");
 };
 
+// The bracket convention option, `brackets: true`, for an entry the model marks (design 6.1);
+// nothing for an unmarked one, so it emits what it emitted before (C16).
+const brackets = (marker: EncodingRule["nonStandard"]): readonly (readonly [string, Expr])[] =>
+  marker === "deepObjectBrackets" ? [["brackets", bool(true)]] : [];
+
 interface ParameterParts {
   readonly cookie?: Expr;
   readonly field: Field;
@@ -415,6 +421,7 @@ const parameterParts = (
     if (parameter.location === "query" && queryStyles.has(style)) {
       const options = obj([
         ["allowReserved", bool(allowReserved)],
+        ...brackets(serialization.nonStandard),
         ["explode", bool(explode)],
         ["required", required],
       ]);
@@ -447,32 +454,22 @@ const parameterParts = (
   });
 
 /**
- * One `multipart/form-data` part a command sends: its part flag, its part name and its Encoding
- * `contentType`.
+ * One `multipart/form-data` part a command sends: its part flag, its part name, its Encoding
+ * `contentType` and, from its Encoding rule, its transfer encoding.
  */
 export interface FormPart {
+  readonly contentEncoding?: "base64";
   readonly contentType: string;
   readonly flag: PlannedFlag;
   readonly name: string;
 }
 
-// Whether a part's schema, or its array's `items`, declares `contentEncoding`.
-const isEncoded = (defs: Defs, schema: Schema.Json | undefined, key: string): boolean => {
-  const node = settle(defs, schema, key);
-  if (Result.isFailure(node)) {
-    return false;
-  }
-
-  const items = own(node.success, "items");
-  const item = items === undefined ? undefined : settle(defs, items, key);
-
-  return (
-    own(node.success, "contentEncoding") !== undefined ||
-    (item !== undefined &&
-      Result.isSuccess(item) &&
-      own(item.success, "contentEncoding") !== undefined)
-  );
-};
+// The runtime writes `Content-Transfer-Encoding` for a part with a transfer encoding, so a declared
+// header of that name is not sent beside it (design 6.3 Multipart transfer encoding).
+const sentHeaders = (rule: EncodingRule): EncodingRule["headers"] =>
+  rule.contentEncoding === undefined
+    ? rule.headers
+    : rule.headers.filter((header) => header.name.toLowerCase() !== "content-transfer-encoding");
 
 const isPartFlag = (flag: PlannedFlag, mediaType: string): boolean =>
   flag.source._tag === "Body" &&
@@ -486,8 +483,6 @@ interface OrderedPart extends FormPart {
 
 interface PartContext {
   readonly alternative: MediaAlternative;
-  readonly defs: Defs;
-  readonly key: string;
   readonly schemas: ObjectSchemas;
 }
 
@@ -528,7 +523,7 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`nested parts in multipart part ${pointer}`);
   }
 
-  if (rule.headers.length > 0) {
+  if (sentHeaders(rule).length > 0) {
     return Result.fail(`part headers for multipart part ${pointer}`);
   }
 
@@ -541,11 +536,11 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`one content type for multipart part ${pointer}`);
   }
 
-  if (isEncoded(context.defs, context.schemas.properties.get(name), context.key)) {
-    return Result.fail(`the contentEncoding of multipart part ${pointer}`);
-  }
+  const part = { contentType, flag, name, order };
 
-  return Result.succeed({ contentType, flag, name, order });
+  return Result.succeed(
+    rule.contentEncoding === undefined ? part : { ...part, contentEncoding: rule.contentEncoding },
+  );
 };
 
 const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
@@ -555,9 +550,9 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
  * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
  * command's request media alternatives; the part flags are those whose media lists it. Refused,
  * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
- * positional parts, a nested part, part headers, a part style, a part whose `contentType` is not
- * one concrete media type, a `contentEncoding` part, and a required part the names plan gave no
- * flag.
+ * positional parts, a nested part, part headers (a declared `Content-Transfer-Encoding` beside
+ * the rule's transfer encoding aside), a part style, a part whose `contentType` is not one
+ * concrete media type, and a required part the names plan gave no flag.
  */
 export const formParts = (
   command: PlannedCommand,
@@ -570,7 +565,7 @@ export const formParts = (
   }
 
   const key = alternative.schema?.key ?? "";
-  const context: PartContext = { alternative, defs, key, schemas: objectSchemas(defs, key) };
+  const context: PartContext = { alternative, schemas: objectSchemas(defs, key) };
   const parts: OrderedPart[] = [];
   for (const flag of command.flags) {
     if (isPartFlag(flag, alternative.mediaType)) {
@@ -589,9 +584,7 @@ export const formParts = (
     return Result.fail(`a flag for multipart part ${formatPointer([missing])}`);
   }
 
-  return Result.succeed(
-    Arr.sort(parts, byOrder).map(({ contentType, flag, name }) => ({ contentType, flag, name })),
-  );
+  return Result.succeed(Arr.sort(parts, byOrder).map(({ order: _order, ...part }) => part));
 };
 
 interface BodyParts {
@@ -606,13 +599,16 @@ const formEncoding = (
   alternative: MediaAlternative,
   name: string,
 ): Effect.Effect<Expr, ApiEmitError> => {
-  const serialization = alternative.encoding.find(
-    (rule) => rule.target.kind === "property" && rule.target.name === name,
-  )?.serialization;
+  const rule = alternative.encoding.find(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === name,
+  );
+  const serialization = rule?.serialization;
   const entries: (readonly [string, Expr])[] = [];
   if (serialization?.allowReserved !== undefined) {
     entries.push(["allowReserved", bool(serialization.allowReserved)]);
   }
+
+  entries.push(...brackets(rule?.nonStandard));
 
   if (serialization?.explode !== undefined) {
     entries.push(["explode", bool(serialization.explode)]);
@@ -698,8 +694,15 @@ const encoderOf = (
       return Option.none();
     }
 
+    const entries = parts.success.map(({ contentEncoding, contentType, name }) =>
+      arr([
+        str(name),
+        str(contentType),
+        ...(contentEncoding === undefined ? [] : [str(contentEncoding)]),
+      ]),
+    );
     const options = obj([
-      ["parts", arr(parts.success.map((part) => arr([str(part.name), str(part.contentType)])))],
+      ["parts", arr(entries)],
       ["required", required],
     ]);
 
@@ -840,6 +843,21 @@ const serversTable = (servers: readonly Server[], bound: ApiEmitInput["boundOrig
   return obj(entries);
 };
 
+const requestIdNames: ReadonlySet<string> = new Set([
+  "request-id",
+  "x-request-id",
+  "x-correlation-id",
+]);
+
+/**
+ * The first declared response header, in response-key then document order, named `request-id`,
+ * `x-request-id` or `x-correlation-id` in any case (design 7.1), with its declared spelling.
+ */
+const requestIdHeaderOf = (responses: Operation["responses"]): string | undefined =>
+  responses
+    .flatMap((response) => response.headers)
+    .find((header) => requestIdNames.has(header.name.toLowerCase()))?.name;
+
 const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
   Effect.gen(function* requirement() {
     const alternatives = operation.security.alternatives.map((alternative) =>
@@ -936,6 +954,12 @@ const commandStatements = (
       meta.push(["operationId", str(operation.operationId)]);
     }
 
+    // Only an operation that declares a candidate names one, so M1 output is unchanged (C16).
+    const requestId = requestIdHeaderOf(operation.responses);
+    if (requestId !== undefined) {
+      meta.push(["requestIdHeader", str(requestId)]);
+    }
+
     if (operation.servers.some((server) => server.level !== "root")) {
       meta.push(["servers", serversTable(operation.servers, context.bound)]);
     }
@@ -1006,11 +1030,16 @@ const groupPrefix = (group: PlannedGroup, byTag: ReadonlyMap<string, PlannedGrou
   return `${names.join(" ")} `;
 };
 
+// A scheme the document marks deprecated carries `deprecated: true`; any other prints no field.
+const deprecation = (scheme: SecurityScheme): readonly (readonly [string, Expr])[] =>
+  scheme.deprecated ? [["deprecated", bool(true)]] : [];
+
 const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr, ApiEmitError> => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
     return Effect.succeed(
       obj([
+        ...deprecation(scheme),
         ["env", str(env)],
         ["in", str(kind.in)],
         ["kind", str("apiKey")],
@@ -1022,6 +1051,7 @@ const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr,
   if (kind.type === "http") {
     return Effect.succeed(
       obj([
+        ...deprecation(scheme),
         ["env", str(env)],
         ["kind", str("http")],
         ["scheme", str(kind.scheme)],
