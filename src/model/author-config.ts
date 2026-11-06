@@ -38,6 +38,22 @@ const environmentName = Schema.String.pipe(Schema.check(Schema.isPattern(environ
 
 const nonNegative = Schema.Finite.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 
+// The Security Scheme Object subset an author may add (D-OQ3 (b)); normalization refuses a type or
+// scheme the runtime cannot send exactly as it does a declared one.
+const AddedScheme = Schema.Struct({
+  deprecated: Schema.optionalKey(Schema.Boolean),
+  flows: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+  in: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+  scheme: Schema.optionalKey(Schema.String),
+  type: Schema.String,
+});
+
+const AddedSecurity = Schema.Struct({
+  requirement: Schema.Array(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  schemes: Schema.Record(Schema.NonEmptyString, AddedScheme),
+});
+
 const ParameterOverride = Schema.Struct({ flag: Schema.optionalKey(Schema.NonEmptyString) });
 
 const OperationOverride = Schema.Struct({
@@ -85,8 +101,17 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       timeoutSeconds: Schema.optionalKey(nonNegative),
     }),
   ),
+  // `security.add` adds a scheme and requirement (D-OQ3 (b)); every other key is a scheme name with
+  // its credential environment variable (D-AD11), so a scheme cannot be named `add`.
   security: Schema.optionalKey(
-    Schema.Record(Schema.NonEmptyString, Schema.Struct({ env: environmentName })),
+    Schema.StructWithRest(Schema.Struct({ add: Schema.optionalKey(AddedSecurity) }), [
+      Schema.Record(
+        Schema.NonEmptyString.pipe(
+          Schema.check(Schema.makeFilter((name: string) => name !== "add")),
+        ),
+        Schema.Struct({ env: environmentName }),
+      ),
+    ]),
   ),
   servers: Schema.optionalKey(Schema.Struct({ accepted: Schema.Array(Schema.NonEmptyString) })),
 }) {}
