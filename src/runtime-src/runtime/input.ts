@@ -85,9 +85,14 @@ export const stdinClaimLayer: Layer.Layer<StdinClaim> = Layer.effect(
 const usage = (flag: string, cause: string): UsageError =>
   new UsageError({ flag, message: `--${flag}: ${cause}` });
 
-const cannotRead = (): UsageError => usage(bodyFileName, "cannot read the file or stdin");
+const cannotReadIn = (flag: string): UsageError => usage(flag, "cannot read the file or stdin");
 
-const overLimit = (): UsageError => usage(bodyFileName, `the body is over ${maxBodyBytes} bytes`);
+const overLimitIn = (flag: string): UsageError =>
+  usage(flag, `the body is over ${maxBodyBytes} bytes`);
+
+const cannotRead = (): UsageError => cannotReadIn(bodyFileName);
+
+const overLimit = (): UsageError => overLimitIn(bodyFileName);
 
 const notAFile = (): UsageError =>
   usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
@@ -126,13 +131,33 @@ const bounded = (
     ),
   );
 
-const toUsage = (cause: OverLimit | ReadFailed): UsageError =>
-  cause instanceof OverLimit ? overLimit() : cannotRead();
+const toUsage = (cause: OverLimit | ReadFailed, flag: string = bodyFileName): UsageError =>
+  cause instanceof OverLimit ? overLimitIn(flag) : cannotReadIn(flag);
 
 const collect = (
   source: Stream.Stream<Uint8Array, unknown>,
+  flag: string = bodyFileName,
 ): Effect.Effect<Uint8Array, UsageError> =>
-  bounded(source).pipe(Stream.runCollect, Effect.map(concat), Effect.mapError(toUsage));
+  bounded(source).pipe(
+    Stream.runCollect,
+    Effect.map(concat),
+    Effect.mapError((cause) => toUsage(cause, flag)),
+  );
+
+// A bounded read of a path, or of stdin for `-` under the one stdin claim, failing in `flag`.
+const readFlagFile = (
+  path: string,
+  flag: string,
+): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(flag)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.flatMap((stdio) => collect(stdio.stdin, flag)),
+      )
+    : Effect.service(FileSystem.FileSystem).pipe(
+        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }), flag)),
+      );
 
 /**
  * Reads `--body-file` into memory, bounded: a file by path, or stdin for `-` (which takes the one
@@ -141,15 +166,7 @@ const collect = (
 export const readBodyFile = (
   path: string,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(bodyFileName)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => collect(stdio.stdin)),
-      )
-    : Effect.service(FileSystem.FileSystem).pipe(
-        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }))),
-      );
+  readFlagFile(path, bodyFileName);
 
 // A body stream that counts the bytes it yields, so a file that grows past its stat size, or a
 // `FileBody` that under-declares, still stops at the limit; the send step sees a `UsageError`.
@@ -259,7 +276,34 @@ export type FieldValue =
   | readonly FieldValue[]
   | { readonly [key: string]: FieldValue };
 
-export type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
+/**
+ * Text encodings a base64 body property takes (RFC 4648 section 4 and 5), padding kept for both.
+ */
+export type FieldEncoding = "base64" | "base64url";
+
+/**
+ * A field flag whose value is a path, or `-` for stdin, to a file the runtime reads and encodes
+ * into the property at its pointer. `flag` is the flag's name, the only thing a failure names.
+ */
+export class FileField {
+  readonly encoding: FieldEncoding;
+  readonly flag: string;
+  readonly path: string;
+
+  constructor(options: {
+    readonly encoding: FieldEncoding;
+    readonly flag: string;
+    readonly path: string;
+  }) {
+    this.encoding = options.encoding;
+    this.flag = options.flag;
+    this.path = options.path;
+  }
+}
+
+export type Fields = Readonly<
+  Record<string, Option.Option<FieldValue | FileField> | readonly FieldValue[]>
+>;
 
 export type JsonNode =
   | null
@@ -451,7 +495,7 @@ const setAt = (
   return Effect.void;
 };
 
-const supplied = (value: Fields[string]): FieldValue | undefined => {
+const supplied = (value: Fields[string]): FieldValue | FileField | undefined => {
   if (Option.isOption(value)) {
     return Option.getOrUndefined(value);
   }
@@ -505,6 +549,25 @@ const toNode = (value: FieldValue): JsonNode => {
 
   return copy;
 };
+
+const base64Chunk = 0x80_00;
+
+// btoa over binary-string chunks, so a large file never spreads into one call's arguments.
+const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string => {
+  let text = "";
+  for (let offset = 0; offset < bytes.length; offset += base64Chunk) {
+    text += btoa(String.fromCodePoint(...bytes.subarray(offset, offset + base64Chunk)));
+  }
+
+  return encoding === "base64url" ? text.replaceAll("+", "-").replaceAll("/", "_") : text;
+};
+
+const readEncoded = (
+  field: FileField,
+): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  readFlagFile(field.path, field.flag).pipe(
+    Effect.map((bytes) => encodeBytes(bytes, field.encoding)),
+  );
 
 const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
   Effect.try({
@@ -601,7 +664,8 @@ export const mergeBody = (options: {
       return yield* Effect.fail(usage(flag, "must be a JSON object to take field flags"));
     }
 
-    for (const [pointer, value] of overrides) {
+    for (const [pointer, given] of overrides) {
+      const value = given instanceof FileField ? yield* readEncoded(given) : given;
       const verdict = inspectField(value);
 
       if (verdict === "badNumber") {
