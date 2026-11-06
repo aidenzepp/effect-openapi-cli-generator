@@ -282,6 +282,51 @@ export class Informational extends Schema.Class<Informational>("Informational")(
 }) {}
 
 /**
+ * One naming extension source of an operation or alias (design 4.4): a group as its segments, top
+ * level first, and a method name, both unfolded. `pointer` is the object that holds the keys, so a
+ * key's own pointer is `pointer` plus the key. At least one of `group` and `method` is present.
+ */
+export const NamingHint = Schema.Struct({
+  group: Schema.optionalKey(Schema.NonEmptyArray(Schema.NonEmptyString)),
+  method: Schema.optionalKey(Schema.NonEmptyString),
+  pointer: JsonPointer,
+}).check(
+  Schema.makeFilter(
+    (hint) => hint.group !== undefined || hint.method !== undefined || "a hint names something",
+  ),
+);
+
+/**
+ * One usable entry of `x-forge-aliases`: its own Forge and Fern hints, never the operation's, its
+ * own `operationId` (never the operation's), and its index in the array.
+ */
+export const NamingAlias = Schema.Struct({
+  fern: Schema.optionalKey(NamingHint),
+  forge: Schema.optionalKey(NamingHint),
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  operationId: Schema.optionalKey(Schema.NonEmptyString),
+});
+
+/**
+ * The naming extensions an operation carries (design 4.4, D-NAME4): its own Forge and Fern hints
+ * name its primary command, and each alias names one more command for it. Absent when the
+ * operation has no usable naming extension.
+ */
+export const Naming = Schema.Struct({
+  aliases: Schema.optionalKey(Schema.NonEmptyArray(NamingAlias)),
+  fern: Schema.optionalKey(NamingHint),
+  forge: Schema.optionalKey(NamingHint),
+}).check(
+  Schema.makeFilter(
+    (naming) =>
+      naming.aliases !== undefined ||
+      naming.fern !== undefined ||
+      naming.forge !== undefined ||
+      "naming carries a hint or an alias",
+  ),
+);
+
+/**
  * One operation, keyed by method token and path template.
  */
 export class Operation extends Schema.Class<Operation>("Operation")({
@@ -289,9 +334,7 @@ export class Operation extends Schema.Class<Operation>("Operation")({
   deprecated: Schema.Boolean,
   docs: Docs,
   key: Schema.Struct({ method: MethodToken, path: PathTemplate }),
-  naming: Schema.optionalKey(
-    Schema.Struct({ command: Schema.NonEmptyString, group: Schema.NonEmptyString }),
-  ),
+  naming: Schema.optionalKey(Naming),
   operationId: Schema.optionalKey(Schema.NonEmptyString),
   origin: Origin,
   parameters: Schema.Array(Parameter),

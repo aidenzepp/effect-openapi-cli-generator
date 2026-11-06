@@ -4,7 +4,16 @@ import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Operation } from "../model/entities.ts";
-import type { Body, Parameter, Server } from "../model/entities.ts";
+import type {
+  Body,
+  Naming,
+  NamingAlias,
+  NamingHint,
+  Parameter,
+  Server,
+} from "../model/entities.ts";
+import { isArray, isObject } from "../model/json-tree.ts";
+import type { JsonObject } from "../model/json-tree.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
 import { evaluatePointer, childPointer } from "../model/pointer.ts";
@@ -56,6 +65,21 @@ interface Rule {
 }
 
 const rules = {
+  "EXT-01/alias-unnamed": {
+    anchor: "specification-extensions",
+    element: "Naming extension",
+    message: "The alias has no usable group and method name, so it names no command.",
+    scope: "element",
+    severity: "notice",
+  },
+  "EXT-01/naming-invalid": {
+    anchor: "specification-extensions",
+    element: "Naming extension",
+    hint: "Give a group as a dotted string or an array of names, and a method as one string.",
+    message: "The naming extension value is not a shape this generator reads, so it is ignored.",
+    scope: "element",
+    severity: "notice",
+  },
   "OPR-08/required-parameter-refused": {
     anchor: "operation-parameters",
     element: "Operation parameters",
@@ -184,6 +208,7 @@ const jsonPointer = (text: string) =>
 interface RawOperation {
   readonly additional: boolean;
   readonly fields: typeof OperationFields.Type;
+  readonly node: JsonObject;
   readonly itemFields: typeof ItemFields.Type;
   readonly itemPointer: string;
   readonly method: Method;
@@ -212,13 +237,12 @@ const operationsOfItem = (
     const pointer = entry.additional
       ? childPointer(childPointer(item.pointer, "additionalOperations"), entry.name)
       : childPointer(item.pointer, entry.name);
-    const fields = nodeAt(resolution, pointer).pipe(
-      Option.flatMap((node) => decodeOption(OperationFields, node)),
-    );
+    const node = nodeAt(resolution, pointer).pipe(Option.filter(isObject));
+    const fields = node.pipe(Option.flatMap((found) => decodeOption(OperationFields, found)));
     const method = decodeOption(MethodToken, entry.token);
 
     // A key the check stage refused (PTH-07, PTH-23, PTH-24) is not read: its diagnostic exists.
-    return Option.isSome(fields) && Option.isSome(method)
+    return Option.isSome(node) && Option.isSome(fields) && Option.isSome(method)
       ? [
           {
             additional: entry.additional,
@@ -226,6 +250,7 @@ const operationsOfItem = (
             itemFields,
             itemPointer: item.pointer,
             method: method.value,
+            node: node.value,
             path,
             pointer,
           },
@@ -503,6 +528,172 @@ const rowsOf = (
   return Arr.sort(Arr.dedupe(rows), Order.String);
 };
 
+type NamingCode = "EXT-01/alias-unnamed" | "EXT-01/naming-invalid";
+
+interface NamingNotice {
+  readonly code: NamingCode;
+  readonly pointer: string;
+}
+
+interface NamingRead<A> {
+  readonly notices: readonly NamingNotice[];
+  readonly value: A | undefined;
+}
+
+// The keys each source names a group and a method by (design 4.4 Naming extensions).
+const namingKeys = {
+  fern: { group: "x-fern-sdk-group-name", method: "x-fern-sdk-method-name" },
+  forge: { group: "x-forge-group-name", method: "x-forge-method-name" },
+} as const;
+
+const aliasesKey = "x-forge-aliases";
+
+// A group is a dotted string, split at `.`, or an array whose elements are kept whole; no segment
+// may be empty. Any other shape is unusable.
+const groupSegments = (value: Json): Option.Option<Arr.NonEmptyReadonlyArray<string>> =>
+  decodeOption(Schema.String, value).pipe(
+    Option.map((text): readonly string[] => text.split(".")),
+    Option.orElse(() => decodeOption(Schema.Array(Schema.String), value)),
+    Option.filter(Arr.isReadonlyArrayNonEmpty),
+    Option.filter((segments) => segments.every((segment) => segment !== "")),
+  );
+
+const methodName = (value: Json): Option.Option<string> =>
+  decodeOption(Schema.NonEmptyString, value);
+
+const invalid = (pointer: string): NamingNotice => ({ code: "EXT-01/naming-invalid", pointer });
+
+// One source's hint from the object at `pointer`; a present key with an unusable value is dropped
+// with a notice at that key.
+const hintOf = (
+  holder: JsonObject,
+  pointer: string,
+  source: keyof typeof namingKeys,
+): NamingRead<Plain<typeof NamingHint.Encoded>> => {
+  const keys = namingKeys[source];
+  const notices: NamingNotice[] = [];
+  const read = <A>(key: string, parse: (value: Json) => Option.Option<A>): A | undefined => {
+    const value = holder[key];
+    if (value === undefined) {
+      return undefined;
+    }
+
+    const parsed = parse(value);
+    if (Option.isNone(parsed)) {
+      notices.push(invalid(childPointer(pointer, key)));
+    }
+
+    return Option.getOrUndefined(parsed);
+  };
+  const group = read(keys.group, groupSegments);
+  const method = read(keys.method, methodName);
+  if (group === undefined && method === undefined) {
+    return { notices, value: undefined };
+  }
+
+  const hint: Plain<typeof NamingHint.Encoded> = { pointer };
+  if (group !== undefined) {
+    hint.group = group;
+  }
+
+  if (method !== undefined) {
+    hint.method = method;
+  }
+
+  return { notices, value: hint };
+};
+
+// An alias names a command by its own keys only: it is usable when its Forge keys, else its Fern
+// keys, give both a group and a method, or else when it has its own `operationId`. It never takes
+// the operation's `operationId`. An `x-forge-aliases` inside it is not read.
+const aliasOf = (
+  element: Json,
+  pointer: string,
+  index: number,
+): NamingRead<Plain<typeof NamingAlias.Encoded>> => {
+  if (!isObject(element)) {
+    return { notices: [invalid(pointer)], value: undefined };
+  }
+
+  const forge = hintOf(element, pointer, "forge");
+  const fern = hintOf(element, pointer, "fern");
+  const notices = [...forge.notices, ...fern.notices];
+  const group = forge.value?.group ?? fern.value?.group;
+  const method = forge.value?.method ?? fern.value?.method;
+  const rawId = element.operationId;
+  const operationId = rawId === undefined ? Option.none() : methodName(rawId);
+  if (rawId !== undefined && Option.isNone(operationId)) {
+    notices.push(invalid(childPointer(pointer, "operationId")));
+  }
+
+  if ((group === undefined || method === undefined) && Option.isNone(operationId)) {
+    return { notices: [...notices, { code: "EXT-01/alias-unnamed", pointer }], value: undefined };
+  }
+
+  const alias: Plain<typeof NamingAlias.Encoded> = { index };
+  if (forge.value !== undefined) {
+    alias.forge = forge.value;
+  }
+
+  if (fern.value !== undefined) {
+    alias.fern = fern.value;
+  }
+
+  if (Option.isSome(operationId)) {
+    alias.operationId = operationId.value;
+  }
+
+  return { notices, value: alias };
+};
+
+// `x-forge-aliases` must be an array holding at least one usable alias; otherwise it is treated as
+// absent with one notice at the array.
+const aliasesOf = (
+  holder: JsonObject,
+  pointer: string,
+): NamingRead<Arr.NonEmptyReadonlyArray<Plain<typeof NamingAlias.Encoded>>> => {
+  const value = holder[aliasesKey];
+  if (value === undefined) {
+    return { notices: [], value: undefined };
+  }
+
+  const arrayPointer = childPointer(pointer, aliasesKey);
+  const read = isArray(value)
+    ? value.map((element, index) =>
+        aliasOf(element, childPointer(arrayPointer, String(index)), index),
+      )
+    : [];
+  const notices = read.flatMap((one) => one.notices);
+  const aliases = read.flatMap((one) => (one.value === undefined ? [] : [one.value]));
+
+  return Arr.isReadonlyArrayNonEmpty(aliases)
+    ? { notices, value: aliases }
+    : { notices: [invalid(arrayPointer), ...notices], value: undefined };
+};
+
+// The naming extensions of an Operation Object (design 4.4, D-NAME4). Only the five naming keys
+// are read; every extension stays recorded as EXT-01 by `collectInformational`.
+const namingOf = (raw: RawOperation): NamingRead<Plain<typeof Naming.Encoded>> => {
+  const forge = hintOf(raw.node, raw.pointer, "forge");
+  const fern = hintOf(raw.node, raw.pointer, "fern");
+  const aliases = aliasesOf(raw.node, raw.pointer);
+  const notices = [...forge.notices, ...fern.notices, ...aliases.notices];
+  const naming: Plain<typeof Naming.Encoded> = {};
+  if (aliases.value !== undefined) {
+    naming.aliases = aliases.value;
+  }
+
+  if (fern.value !== undefined) {
+    naming.fern = fern.value;
+  }
+
+  if (forge.value !== undefined) {
+    naming.forge = forge.value;
+  }
+
+  return { notices, value: Object.keys(naming).length === 0 ? undefined : naming };
+};
+
 interface Assembly {
   readonly diagnostics: readonly Diagnostic[];
   readonly operation?: Operation;
@@ -521,6 +712,12 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
     const policy = yield* normalizeSecurityPolicy(resolution, shared.schemes, raw.pointer);
     const servers = yield* effectiveServersOf(shared, raw);
     const site = { operation: operationInfo(raw), pointer: raw.pointer };
+    const naming = namingOf(raw);
+    const namingNotices = yield* Effect.all(
+      naming.notices.map((found) =>
+        diagnose(shared, found.code, { operation: site.operation, pointer: found.pointer }),
+      ),
+    );
     const raises = [
       ...(parameters.refusedRequired.length === 0
         ? []
@@ -553,6 +750,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       ...responses.diagnostics,
       ...policy.diagnostics,
       ...servers.diagnostics,
+      ...namingNotices,
       ...raises,
     ];
     if (raises.length > 0) {
@@ -573,6 +771,10 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
     };
     if (body.body !== undefined) {
       fields.body = body.body;
+    }
+
+    if (naming.value !== undefined) {
+      fields.naming = naming.value;
     }
 
     // An empty operationId is not a name; naming reports it (OPR-06).
