@@ -8,8 +8,8 @@ import { formatPointer } from "../model/pointer.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
- * binary multipart part, or a base64 body property the runtime encodes from the file), or the
- * whole body.
+ * binary multipart part, or a base64 body property or multipart part the runtime encodes from the
+ * file), or the whole body.
  */
 export type BodyFlagKind =
   | "body"
@@ -173,6 +173,11 @@ interface Ctx {
    */
   readonly base64Fields: boolean;
   /**
+   * Multipart only: the parts whose Encoding rule sends them base64 encoded. Each is a `file`
+   * part: the runtime encodes the file's bytes, so typed text is never encoded in their place.
+   */
+  readonly base64Parts: ReadonlySet<string>;
+  /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
@@ -180,8 +185,23 @@ interface Ctx {
   visits: number;
 }
 
-const newCtx = (defs: Defs, codec: "form" | "json" | "multipart"): Ctx => ({
+// The property parts of a multipart alternative whose rule declares a transfer encoding.
+const base64PartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.contentEncoding !== undefined && rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
+const newCtx = (
+  defs: Defs,
+  codec: "form" | "json" | "multipart",
+  encoding: MediaAlternative["encoding"],
+): Ctx => ({
   base64Fields: codec === "json",
+  base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
@@ -541,7 +561,8 @@ const walkProperties = (
 
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
- * (repeated parts) or a binary `file` part; any other shape is skipped with a reason.
+ * (repeated parts), or a `file` part when it is binary or its rule sends it base64 encoded; any
+ * other shape is skipped with a reason.
  */
 const walkParts = (
   ctx: Ctx,
@@ -573,7 +594,7 @@ const walkParts = (
     }
 
     flags.push({
-      kind: classified.success.kind,
+      kind: ctx.base64Parts.has(key) ? "file" : classified.success.kind,
       name: folded.success.name,
       notes: folded.success.notes,
       pointer,
@@ -621,12 +642,15 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * `alternative.schema` is the root's key in it. JSON and form bodies get field flags plus `--body`
  * and `--body-file`; a binary or XML body only `--body-file`; a multipart body one flag per
  * top-level part and no whole-body flag (design 6.3, D-ENC1 a); any other codec both whole-body
- * flags and no field flags. Work is bounded: each `$defs` key is classified once per call, and node
- * visits, including every property entry, share one budget (`BodyBudgetExceeded`).
+ * flags and no field flags. A multipart part reads its transfer encoding from
+ * `alternative.encoding` (absent: no rules), never from its schema. Work is bounded: each `$defs`
+ * key is classified once per call, and node visits, including every property entry, share one
+ * budget (`BodyBudgetExceeded`).
  */
 export const flattenBody = (
   defs: Defs,
-  alternative: Pick<MediaAlternative, "codec" | "schema">,
+  alternative: Pick<MediaAlternative, "codec" | "schema"> &
+    Partial<Pick<MediaAlternative, "encoding">>,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
   if (codec === "binary") {
@@ -644,7 +668,7 @@ export const flattenBody = (
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs, codec);
+  const ctx = newCtx(defs, codec, alternative.encoding ?? []);
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));

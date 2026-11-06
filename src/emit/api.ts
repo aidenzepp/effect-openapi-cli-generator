@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type {
   Api,
+  EncodingRule,
   MediaAlternative,
   Operation,
   Parameter,
@@ -447,32 +448,22 @@ const parameterParts = (
   });
 
 /**
- * One `multipart/form-data` part a command sends: its part flag, its part name and its Encoding
- * `contentType`.
+ * One `multipart/form-data` part a command sends: its part flag, its part name, its Encoding
+ * `contentType` and, from its Encoding rule, its transfer encoding.
  */
 export interface FormPart {
+  readonly contentEncoding?: "base64";
   readonly contentType: string;
   readonly flag: PlannedFlag;
   readonly name: string;
 }
 
-// Whether a part's schema, or its array's `items`, declares `contentEncoding`.
-const isEncoded = (defs: Defs, schema: Schema.Json | undefined, key: string): boolean => {
-  const node = settle(defs, schema, key);
-  if (Result.isFailure(node)) {
-    return false;
-  }
-
-  const items = own(node.success, "items");
-  const item = items === undefined ? undefined : settle(defs, items, key);
-
-  return (
-    own(node.success, "contentEncoding") !== undefined ||
-    (item !== undefined &&
-      Result.isSuccess(item) &&
-      own(item.success, "contentEncoding") !== undefined)
-  );
-};
+// The runtime writes `Content-Transfer-Encoding` for a part with a transfer encoding, so a declared
+// header of that name is not sent beside it (design 6.3 Multipart transfer encoding).
+const sentHeaders = (rule: EncodingRule): EncodingRule["headers"] =>
+  rule.contentEncoding === undefined
+    ? rule.headers
+    : rule.headers.filter((header) => header.name.toLowerCase() !== "content-transfer-encoding");
 
 const isPartFlag = (flag: PlannedFlag, mediaType: string): boolean =>
   flag.source._tag === "Body" &&
@@ -486,8 +477,6 @@ interface OrderedPart extends FormPart {
 
 interface PartContext {
   readonly alternative: MediaAlternative;
-  readonly defs: Defs;
-  readonly key: string;
   readonly schemas: ObjectSchemas;
 }
 
@@ -528,7 +517,7 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`nested parts in multipart part ${pointer}`);
   }
 
-  if (rule.headers.length > 0) {
+  if (sentHeaders(rule).length > 0) {
     return Result.fail(`part headers for multipart part ${pointer}`);
   }
 
@@ -541,11 +530,11 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`one content type for multipart part ${pointer}`);
   }
 
-  if (isEncoded(context.defs, context.schemas.properties.get(name), context.key)) {
-    return Result.fail(`the contentEncoding of multipart part ${pointer}`);
-  }
+  const part = { contentType, flag, name, order };
 
-  return Result.succeed({ contentType, flag, name, order });
+  return Result.succeed(
+    rule.contentEncoding === undefined ? part : { ...part, contentEncoding: rule.contentEncoding },
+  );
 };
 
 const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
@@ -555,9 +544,9 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
  * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
  * command's request media alternatives; the part flags are those whose media lists it. Refused,
  * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
- * positional parts, a nested part, part headers, a part style, a part whose `contentType` is not
- * one concrete media type, a `contentEncoding` part, and a required part the names plan gave no
- * flag.
+ * positional parts, a nested part, part headers (a declared `Content-Transfer-Encoding` beside
+ * the rule's transfer encoding aside), a part style, a part whose `contentType` is not one
+ * concrete media type, and a required part the names plan gave no flag.
  */
 export const formParts = (
   command: PlannedCommand,
@@ -570,7 +559,7 @@ export const formParts = (
   }
 
   const key = alternative.schema?.key ?? "";
-  const context: PartContext = { alternative, defs, key, schemas: objectSchemas(defs, key) };
+  const context: PartContext = { alternative, schemas: objectSchemas(defs, key) };
   const parts: OrderedPart[] = [];
   for (const flag of command.flags) {
     if (isPartFlag(flag, alternative.mediaType)) {
@@ -589,9 +578,7 @@ export const formParts = (
     return Result.fail(`a flag for multipart part ${formatPointer([missing])}`);
   }
 
-  return Result.succeed(
-    Arr.sort(parts, byOrder).map(({ contentType, flag, name }) => ({ contentType, flag, name })),
-  );
+  return Result.succeed(Arr.sort(parts, byOrder).map(({ order: _order, ...part }) => part));
 };
 
 interface BodyParts {
@@ -698,8 +685,15 @@ const encoderOf = (
       return Option.none();
     }
 
+    const entries = parts.success.map(({ contentEncoding, contentType, name }) =>
+      arr([
+        str(name),
+        str(contentType),
+        ...(contentEncoding === undefined ? [] : [str(contentEncoding)]),
+      ]),
+    );
     const options = obj([
-      ["parts", arr(parts.success.map((part) => arr([str(part.name), str(part.contentType)])))],
+      ["parts", arr(entries)],
       ["required", required],
     ]);
 

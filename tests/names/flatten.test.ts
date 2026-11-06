@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { flattenBody } from "../../src/names/flatten.ts";
+import { EncodingRule } from "../../src/model/entities.ts";
 import type { MediaAlternative } from "../../src/model/entities.ts";
 
 type Defs = Readonly<Record<string, Schema.Json>>;
@@ -327,6 +328,17 @@ describe("flattenBody", () => {
   }, 5000);
 });
 
+// A part's Encoding rule as normalize builds it, with a base64 transfer encoding.
+const base64Rule = (name: string) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentEncoding: "base64",
+    contentType: ["application/octet-stream"],
+    headers: [],
+    origin: { document: "file:///spec.json", pointer: `/properties/${name}` },
+    rows: [],
+    target: { kind: "property", name },
+  });
+
 describe("flattenBody: multipart and xml", () => {
   const parts = {
     Root: object({
@@ -353,13 +365,11 @@ describe("flattenBody: multipart and xml", () => {
     expect(flattened.skipped).toEqual([{ pointer: "/meta", reason: "UnsupportedPart" }]);
   });
 
-  test("3.1 binary: contentMediaType and a schemaless part are files, base64 text is not", () => {
+  test("3.1 binary: contentMediaType and a schemaless part are files", () => {
     const flattened = run(
       {
         Root: object({
           any: {},
-          b64: { contentEncoding: "base64", type: "string" },
-          bytes: { format: "byte", type: "string" },
           png: { contentMediaType: "image/png", type: "string" },
         }),
       },
@@ -367,9 +377,33 @@ describe("flattenBody: multipart and xml", () => {
     );
     expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([
       ["any", "file"],
-      ["b64", "string"],
-      ["bytes", "string"],
       ["png", "file"],
+    ]);
+  });
+
+  test("a part whose Encoding rule is base64 is a file part; the rule decides, not the schema", () => {
+    const defs = {
+      Root: object({
+        b64: { contentEncoding: "base64", type: "string" },
+        bytes: { format: "byte", type: "string" },
+        many: { items: { format: "byte", type: "string" }, type: "array" },
+        text: { contentEncoding: "base64", type: "string" },
+      }),
+    } satisfies Defs;
+    const result = flattenBody(defs, {
+      codec: "multipart",
+      encoding: ["b64", "bytes", "many"].map(base64Rule),
+      schema: { key: "Root" },
+    });
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    expect(result.success.flags.map(({ kind, name, repeated }) => [name, kind, repeated])).toEqual([
+      ["b64", "file", false],
+      ["bytes", "file", false],
+      ["many", "file", true],
+      ["text", "string", false],
     ]);
   });
 

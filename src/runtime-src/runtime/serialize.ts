@@ -1043,10 +1043,21 @@ export type FormValue = string | number | boolean | { readonly text: string } | 
 export type FormFields = Readonly<Record<string, readonly FormValue[]>>;
 
 /**
- * The declared parts in wire order: the part name and its Encoding `contentType`.
+ * One declared part: its name, its Encoding `contentType` and, when the part is sent base64
+ * encoded, its transfer encoding (design 6.3 Multipart transfer encoding). The writer then encodes
+ * the part's bytes and writes the one `Content-Transfer-Encoding` header.
+ */
+export type FormPartEntry = readonly [
+  name: string,
+  contentType: string,
+  contentEncoding?: "base64",
+];
+
+/**
+ * The declared parts in wire order.
  */
 export interface FormDataOptions {
-  readonly parts: readonly (readonly [name: string, contentType: string])[];
+  readonly parts: readonly FormPartEntry[];
   readonly required: boolean;
 }
 
@@ -1071,19 +1082,17 @@ const formText = (value: Exclude<FormValue, FormFile>) => {
 
 const utf8 = new TextEncoder();
 
-const formPart = (name: string, contentType: string, value: FormValue) =>
-  isFormFile(value)
-    ? Effect.succeed<Multipart.LeafPart>({
-        body: value.stream,
-        contentType,
-        filename: value.filename,
-        name,
-      })
-    : Effect.map(formText(value), (text): Multipart.LeafPart => ({
-        body: utf8.encode(text),
-        contentType,
-        name,
-      }));
+// One value's part. A part entry's `contentEncoding` reaches the writer, which encodes the bytes.
+const formPart = ([name, contentType, contentEncoding]: FormPartEntry, value: FormValue) => {
+  const encoded = (part: Multipart.LeafPart): Multipart.LeafPart =>
+    contentEncoding === undefined ? part : { ...part, contentEncoding };
+
+  return isFormFile(value)
+    ? Effect.succeed(encoded({ body: value.stream, contentType, filename: value.filename, name }))
+    : Effect.map(formText(value), (text) =>
+        encoded({ body: utf8.encode(text), contentType, name }),
+      );
+};
 
 const formDataOf = (fields: FormFields, options: FormDataOptions) =>
   Effect.gen(function* formDataEvaluation() {
@@ -1093,9 +1102,10 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
     }
 
     const leaves: Multipart.LeafPart[] = [];
-    for (const [name, contentType] of options.parts) {
+    for (const entry of options.parts) {
+      const [name] = entry;
       for (const value of Object.hasOwn(fields, name) ? (fields[name] ?? []) : []) {
-        leaves.push(yield* formPart(name, contentType, value));
+        leaves.push(yield* formPart(entry, value));
       }
     }
 
@@ -1202,7 +1212,8 @@ export const assertFormData =
 
 /**
  * A `multipart/form-data` body streamed through the multipart writer (design 6.3): one part per
- * value, in the declared part order, each with its declared `Content-Type`. With no value a
+ * value, in the declared part order, each with its declared `Content-Type`, and a part entry's
+ * `contentEncoding` base64-encodes each of its values. With no value a
  * required body is the close delimiter alone and an optional one is empty. `request` sends the
  * writer's `Content-Type`, which carries its boundary.
  */

@@ -853,24 +853,14 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/imports.ts")).not.toContain("meta");
   });
 
-  test("part headers, contentEncoding and several part content types are refused, not guessed", async () => {
+  test("part headers and several part content types are refused, not guessed", async () => {
     const headers = {
       file: { headers: { "X-Rate": { schema: { type: "integer" } } } },
-    };
-    const encoded = {
-      ...importSchema,
-      properties: {
-        ...importSchema.properties,
-        title: { contentEncoding: "base64", type: "string" },
-      },
     };
     const types = { file: { contentType: "text/csv, application/json" } };
 
     expect(await multipartRefusals(multipart(importSchema, headers))).toEqual([
       { reason: "unsupported-body", subject: "part headers for multipart part /file" },
-    ]);
-    expect(await multipartRefusals(multipart(encoded))).toEqual([
-      { reason: "unsupported-body", subject: "the contentEncoding of multipart part /title" },
     ]);
     expect(await multipartRefusals(multipart(importSchema, types))).toEqual([
       { reason: "unsupported-body", subject: "one content type for multipart part /file" },

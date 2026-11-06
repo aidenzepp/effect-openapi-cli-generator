@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
+import { formatPointer } from "../model/pointer.ts";
 import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
@@ -498,6 +499,23 @@ const fileDescription = ({ description, encoding, mediaType }: FieldSchema): str
     .filter((part) => part !== "")
     .join(" ");
 
+// The transfer encoding of a multipart `file` part flag, from its Encoding rule and never its
+// schema (design 6.3 Multipart transfer encoding): the runtime encodes the file's bytes.
+const partEncoding = (
+  flag: PlannedFlag,
+  alternative: MediaAlternative | undefined,
+): FieldEncoding | undefined => {
+  const { source } = flag;
+  if (alternative?.codec !== "multipart" || source._tag !== "Body" || source.kind !== "file") {
+    return undefined;
+  }
+
+  return alternative.encoding.find(
+    (rule) =>
+      rule.target.kind === "property" && formatPointer([rule.target.name]) === source.wireName,
+  )?.contentEncoding;
+};
+
 // A field flag's help text; an encoded field the walk cannot settle an encoding for is refused.
 const fieldDescription = (
   flag: PlannedFlag,
@@ -505,6 +523,11 @@ const fieldDescription = (
   schema: FieldSchema,
 ) =>
   Effect.gen(function* described() {
+    const encoding = partEncoding(flag, alternative);
+    if (encoding !== undefined) {
+      return fileDescription({ ...schema, encoding });
+    }
+
     if (!isEncodedField(flag, alternative)) {
       return schema.description;
     }
