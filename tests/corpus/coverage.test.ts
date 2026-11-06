@@ -294,6 +294,20 @@ describe("coverage check", () => {
     expect(result.missing).toEqual([]);
   });
 
+  test("a document-scope refusal accounts every element of its document", () => {
+    const empty = encodeDescription({ ...goldenDescription(), commands: [] });
+    const unrefused = coverage(empty);
+    const refused = coverage(
+      empty,
+      withRecords({ refusals: [{ pointer: "", scope: "document" }] }),
+    );
+
+    expect(pointers(unrefused)).toContain(update);
+    expect(pointers(unrefused)).toContain("/servers/0");
+    expect(refused.missing).toEqual([]);
+    expect(refused.invented).toEqual([]);
+  });
+
   test("an element accounted only by a notice is listed, not missing", () => {
     const header = `${update}/parameters/2`;
     const result = coverage(
