@@ -89,10 +89,8 @@ const rules: Record<Line, string> = { "3.0": "oas-3.0", "3.1": "oas-3.1", "3.2":
 
 const ignoredHeaders: ReadonlySet<string> = new Set(["accept", "authorization", "content-type"]);
 
-const formUrlencoded = /^application\/x-www-form-urlencoded[ \t]*(?:;|$)/iu;
-
 // One row per legal (location, style, explode, allowReserved) of design 6.1; deepObject and the
-// cookie rows are decided by `deepObjectRow` and `cookieFinding`.
+// cookie rows are decided by `deepObjectRow` and `decideCookie`.
 const styleTable: readonly (readonly [string, StyleName, boolean, boolean, string])[] = [
   ["path", "matrix", false, false, "STY-01"],
   ["path", "matrix", true, false, "STY-02"],
@@ -183,15 +181,6 @@ const notice = (code: string, anchor: string, element: string, message: string):
   severity: "notice",
 });
 
-const notImplemented = (row: string, anchor: string, element: string): Finding =>
-  refusal(
-    `${row}/not-implemented`,
-    anchor,
-    element,
-    "This construct is read but not implemented in Milestone 1.",
-    "Milestone 2 implements this",
-  );
-
 const cookieNames = {
   "STY-33": "Parameter in cookie, style form",
   "STY-34": "Parameter in cookie, style form, explode false",
@@ -222,30 +211,6 @@ const stagedCookieRow = (style: StyleName, explode: boolean, allowReserved: bool
   return allowReserved ? "STY-36" : "STY-33";
 };
 
-// STY-33, 34, 36 and 38 are what Milestone 2 implements; STY-35, 37 and 39 are refused for good.
-const cookieFinding = (
-  line: Line,
-  style: StyleName,
-  explode: boolean,
-  allowReserved: boolean,
-): Finding => {
-  if (!explode && line === "3.2") {
-    const row = permanentCookieRow(style, allowReserved);
-
-    return refusal(
-      `${row}/cookie-explode-false`,
-      "style-values",
-      cookieNames[row],
-      "A cookie parameter cannot have explode false in 3.2.",
-      "refused (permanent): explode: false is invalid with in: cookie",
-    );
-  }
-
-  const row = stagedCookieRow(style, explode, allowReserved);
-
-  return notImplemented(row, "style-values", cookieNames[row]);
-};
-
 const deepObjectRow = (line: Line, explode: boolean, allowReserved: boolean): string => {
   if (line === "3.2") {
     return allowReserved ? "STY-30" : "STY-27";
@@ -269,7 +234,7 @@ interface StylePlan {
 interface ContentPlan {
   readonly kind: "content";
   readonly mediaType: string;
-  readonly row: string;
+  readonly rows: readonly string[];
   readonly schemaKey: string;
 }
 
@@ -283,6 +248,50 @@ type Decision =
   | { readonly _tag: "Refuse"; readonly finding: Finding };
 
 const refuse = (finding: Finding): Decision => ({ _tag: "Refuse", finding });
+
+const cookieExplodeFalse = (style: StyleName, allowReserved: boolean): Finding => {
+  const row = permanentCookieRow(style, allowReserved);
+
+  return refusal(
+    `${row}/cookie-explode-false`,
+    "style-values",
+    cookieNames[row],
+    "A cookie parameter cannot have explode false in 3.2.",
+    "refused (permanent): explode: false is invalid with in: cookie",
+  );
+};
+
+const cookieFormMultiple = refusal(
+  "PRM-34/cookie-form-multiple",
+  "appendix-d-serializing-headers-and-cookies",
+  "Parameter in cookie, style form, array or object",
+  "An exploded form cookie cannot carry an array or object; the specification calls it always incorrect.",
+  "Use a primitive schema, or style: cookie in 3.2",
+);
+
+// STY-33, 34, 36 and 38 build; STY-35, 37 and 39 are refused for good, and so is an exploded form
+// cookie over an array or object (PRM-34, Appendix D).
+const decideCookie = (
+  line: Line,
+  plan: Omit<StylePlan, "kind" | "row">,
+  multiple: boolean,
+  findings: readonly Finding[],
+): Decision => {
+  const { allowReserved, explode, style } = plan;
+  if (!explode && line === "3.2") {
+    return refuse(cookieExplodeFalse(style, allowReserved));
+  }
+
+  if (style === "form" && explode && multiple) {
+    return refuse(cookieFormMultiple);
+  }
+
+  return {
+    _tag: "Build",
+    findings,
+    plan: { ...plan, kind: "style", row: stagedCookieRow(style, explode, allowReserved) },
+  };
+};
 
 const styleLocation = refusal(
   "STY-40/style-location",
@@ -321,6 +330,34 @@ const deepObjectExplode = (row: string): Finding =>
     "The 3.2 text says explode has no effect for deepObject; it is applied to this line, so the value is exploded.",
   );
 
+const cookieName = refusal(
+  "PRM-02/invalid-cookie-name",
+  "parameter-name",
+  "Parameter in cookie name",
+  "The cookie parameter name is not an RFC 6265 token.",
+  "Use a name made of RFC 9110 token characters",
+);
+
+const querystringSchemaFields = refusal(
+  "STY-45/querystring-schema-fields",
+  "fixed-fields-for-use-with-schema",
+  "Parameter in querystring with schema fields",
+  "A querystring parameter cannot use schema, style, explode or allowReserved.",
+  "Describe the query string with exactly one content entry",
+);
+
+// An RFC 6265 cookie-name is an RFC 9110 token.
+const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+
+// The rows a content-based parameter's serialization rests on, by location.
+const contentRows = (location: Location): readonly string[] => {
+  if (location === "querystring") {
+    return ["STY-42", "STY-43"];
+  }
+
+  return location === "header" || location === "cookie" ? ["PRM-24"] : ["PRM-23"];
+};
+
 const explodeNotApplicableFinding = (row: string): Finding =>
   refusal(
     `${row}/explode-not-applicable`,
@@ -334,12 +371,6 @@ const decideContent = (
   mediaType: string,
   schemaKey: Option.Option<string>,
 ): Decision => {
-  if (node.in === "cookie") {
-    return refuse(
-      notImplemented("PRM-24", "parameter-content", "Parameter in cookie with content"),
-    );
-  }
-
   if (Option.isNone(Schema.decodeUnknownOption(MediaType)(mediaType))) {
     return refuse(
       refusal(
@@ -368,7 +399,7 @@ const decideContent = (
     plan: {
       kind: "content",
       mediaType,
-      row: node.in === "header" ? "PRM-24" : "PRM-23",
+      rows: contentRows(node.in),
       schemaKey: schemaKey.value,
     },
   };
@@ -387,7 +418,7 @@ const styleNotices = (
   node: ParameterNode,
   line: Line,
   honored: boolean,
-  deepRow: string | undefined,
+  deepRow?: string,
 ): readonly Finding[] => {
   const findings: Finding[] = [];
   if (node.allowEmptyValue === true && node.in !== "query") {
@@ -409,7 +440,7 @@ const styleNotices = (
   return findings;
 };
 
-const decideStyle = (node: ParameterNode, line: Line): Decision => {
+const decideStyle = (node: ParameterNode, line: Line, multiple: boolean): Decision => {
   const location = node.in;
   const style = node.style ?? defaultStyle(location);
   const explode = node.explode ?? (style === "form" || style === "cookie");
@@ -420,7 +451,9 @@ const decideStyle = (node: ParameterNode, line: Line): Decision => {
   const honored = honorsAllowReserved(node, style, line);
   const allowReserved = honored && node.allowReserved === true;
   if (location === "cookie") {
-    return refuse(cookieFinding(line, style, explode, allowReserved));
+    const findings = styleNotices(node, line, honored);
+
+    return decideCookie(line, { allowReserved, explode, style }, multiple, findings);
   }
 
   const deepRow =
@@ -486,31 +519,30 @@ const decideName = (node: ParameterNode): Decision | undefined => {
     );
   }
 
-  return undefined;
+  return node.in === "cookie" && !cookieNameToken.test(node.name) ? refuse(cookieName) : undefined;
 };
 
 type Media = Option.Option<readonly [string, Option.Option<string>]>;
 
-const decide = (node: ParameterNode, line: Line, media: Media): Decision => {
+// STY-45: a querystring is content only.
+const usesSchemaFields = (node: ParameterNode): boolean =>
+  node.schema !== undefined ||
+  node.style !== undefined ||
+  node.explode !== undefined ||
+  node.allowReserved !== undefined;
+
+const decide = (node: ParameterNode, line: Line, media: Media, multiple: boolean): Decision => {
   const named = decideName(node);
   if (named !== undefined) {
     return named;
   }
 
-  if (node.in === "querystring") {
-    return refuse(
-      Option.exists(media, ([mediaType]) => formUrlencoded.test(mediaType))
-        ? notImplemented(
-            "STY-43",
-            "parameter-object-examples",
-            "Parameter in querystring with form-urlencoded content",
-          )
-        : notImplemented("STY-42", "parameter-locations", "Parameter in querystring"),
-    );
+  if (node.in === "querystring" && usesSchemaFields(node)) {
+    return refuse(querystringSchemaFields);
   }
 
   return Option.match(media, {
-    onNone: () => decideStyle(node, line),
+    onNone: () => decideStyle(node, line, multiple),
     onSome: ([mediaType, schemaKey]) => decideContent(node, mediaType, schemaKey),
   });
 };
@@ -524,11 +556,12 @@ const contractReason = (
     return "line-mismatch";
   }
 
-  if ((node.schema === undefined) === (node.content === undefined)) {
-    return "schema-xor-content";
-  }
-
-  if (node.content === undefined && node.in === "querystring") {
+  // A querystring with schema is refused as STY-45, not stopped here.
+  const both = node.schema !== undefined && node.content !== undefined;
+  if (
+    (node.schema === undefined && node.content === undefined) ||
+    (both && node.in !== "querystring")
+  ) {
     return "schema-xor-content";
   }
 
@@ -657,6 +690,25 @@ const read = (
   );
 };
 
+const TypedSchema = Schema.Struct({
+  type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+});
+
+// Whether a cookie's schema, through `$ref`, declares an array or object type (PRM-34).
+const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
+  if (source.node.in !== "cookie" || source.node.schema === undefined) {
+    return Effect.succeed(false);
+  }
+
+  return nodeIn(resolution, follow(resolution, childKey(source.target, "schema"))).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(TypedSchema)),
+    Effect.map(({ type }) =>
+      [type ?? []].flat().some((name) => name === "array" || name === "object"),
+    ),
+    Effect.orElseSucceed(() => false),
+  );
+};
+
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
   if (mediaType === undefined) {
@@ -679,7 +731,7 @@ const serializationOf = (
       kind: plan.kind,
       mediaType: plan.mediaType,
       origin,
-      rows: sorted(["PRM-15", plan.row]),
+      rows: sorted(["PRM-15", ...plan.rows]),
       rules: rules[line],
       schema: { key: plan.schemaKey },
     };
@@ -746,7 +798,12 @@ export const normalizeParameter = (
       return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
     }
 
-    const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source));
+    const decision = decide(
+      source.node,
+      resolution.line,
+      yield* mediaOf(resolution, source),
+      yield* carriesMultiple(resolution, source),
+    );
     const diagnostics = (findings: readonly Finding[]) =>
       toDiagnostics(resolution, site, source.related, source.node.name, findings);
     if (decision._tag === "Ignore") {

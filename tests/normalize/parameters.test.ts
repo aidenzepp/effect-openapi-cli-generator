@@ -532,9 +532,9 @@ describe("the entity", () => {
 
 describe("diagnostic wire name", () => {
   test("a refused cookie parameter carries its own name as wire", () => {
-    expect(refused("3.1", cookie({ name: "session" })).diagnostics.map((d) => d.wire)).toEqual([
-      "session",
-    ]);
+    expect(
+      refused("3.2", cookie({ explode: false, name: "session" })).diagnostics.map((d) => d.wire),
+    ).toEqual(["session"]);
   });
 
   test("the Cookie header refusal carries the name as written", () => {
@@ -553,54 +553,47 @@ describe("diagnostic wire name", () => {
   });
 });
 
-describe("STY-33 in: cookie is refused until Milestone 2", () => {
-  const staged: readonly (readonly [string, Line, Json])[] = [
-    ["STY-33", "3.0", cookie({})],
-    ["STY-33", "3.1", cookie({ explode: true })],
-    ["STY-33", "3.2", cookie({})],
-    ["STY-34", "3.0", cookie({ explode: false })],
-    ["STY-34", "3.1", cookie({ explode: false })],
-    ["STY-36", "3.2", cookie({ allowReserved: true })],
-    ["STY-38", "3.2", cookie({ style: "cookie" })],
-    ["STY-38", "3.2", cookie({ allowReserved: true, style: "cookie" })],
-  ];
+describe("STY-33 in: cookie generates a style serialization", () => {
+  const generated: readonly (readonly [string, Line, Json, "cookie" | "form", boolean, boolean])[] =
+    [
+      ["STY-33", "3.0", cookie({}), "form", true, false],
+      ["STY-33", "3.1", cookie({ explode: true }), "form", true, false],
+      ["STY-33", "3.2", cookie({}), "form", true, false],
+      ["STY-34", "3.0", cookie({ explode: false }), "form", false, false],
+      ["STY-34", "3.1", cookie({ explode: false }), "form", false, false],
+      ["STY-36", "3.2", cookie({ allowReserved: true }), "form", true, true],
+      ["STY-38", "3.2", cookie({ style: "cookie" }), "cookie", true, false],
+      ["STY-38", "3.2", cookie({ allowReserved: true, style: "cookie" }), "cookie", true, false],
+    ];
 
-  for (const [row, line, parameter] of staged) {
-    test(`${row} ${line} is not-implemented at element scope with a Milestone 2 hint`, () => {
-      const outcome = refused(line, parameter);
-      const [diagnostic] = outcome.diagnostics;
-
-      expect(codes(outcome)).toEqual([`${row}/not-implemented`]);
-      expect(diagnostic?.row).toBe(row);
-      expect(diagnostic?.scope).toBe("element");
-      expect(diagnostic?.severity).toBe("refusal");
-      expect(diagnostic?.hint).toContain("Milestone 2");
-      expect(diagnostic?.specSection).toMatch(
-        new RegExp(`^https://spec.openapis.org/oas/v${specVersion[line]}.html#.+`, "u"),
-      );
+  for (const [row, line, parameter, style, explode, allowReserved] of generated) {
+    test(`${row} ${line} is a ${style} Serialization entry`, () => {
+      expect(styled(line, parameter)).toEqual({ allowReserved, explode, rows: [row], style });
+      expect(implemented(line, parameter).parameter.location).toBe("cookie");
     });
   }
 
   test("STY-33 3.0 and 3.1 ignore allowReserved on a cookie, so the row stays STY-33", () => {
-    expect(codes(refused("3.1", cookie({ allowReserved: true })))).toEqual([
-      "STY-33/not-implemented",
-    ]);
+    const outcome = implemented("3.1", cookie({ allowReserved: true }));
+
+    expect(codes(outcome)).toEqual(["PRM-35/allow-reserved-ignored"]);
+    expect(styled("3.1", cookie({ allowReserved: true })).rows).toEqual(["STY-33"]);
   });
 
-  test("PRM-24 a content-based cookie is not implemented either", () => {
-    const outcome = refused("3.1", {
+  test("PRM-24 a content-based cookie is a content Serialization entry", () => {
+    const { serialization } = implemented("3.1", {
       content: { "text/plain": { schema: string } },
       in: "cookie",
       name: "c",
-    });
+    }).parameter;
 
-    expect(codes(outcome)).toEqual(["PRM-24/not-implemented"]);
-    expect(outcome.diagnostics[0]?.hint).toContain("Milestone 2");
+    expect(serialization.kind).toBe("content");
+    expect(texts(serialization.rows)).toEqual(["PRM-15", "PRM-24"]);
   });
 
-  test("STY-33 a required cookie parameter reports it for the operation-scope raise", () => {
-    expect(refused("3.1", cookie({ required: true })).required).toBe(true);
-    expect(refused("3.1", cookie({})).required).toBe(false);
+  test("STY-33 a required cookie parameter keeps required", () => {
+    expect(implemented("3.1", cookie({ required: true })).parameter.required).toBe(true);
+    expect(implemented("3.1", cookie({})).parameter.required).toBe(false);
   });
 });
 
@@ -629,29 +622,41 @@ describe("STY-35 cookie explode false is refused for good in 3.2", () => {
   }
 });
 
-describe("STY-42 in: querystring is refused until Milestone 2", () => {
-  test("STY-42 a JSON querystring is not-implemented at element scope", () => {
-    const outcome = refused("3.2", querystring("application/json"));
-    const [diagnostic] = outcome.diagnostics;
+const querystringContent = (media: string) => {
+  const { parameter } = implemented("3.2", querystring(media));
+  if (parameter.serialization.kind !== "content") {
+    throw new Error("expected a content serialization");
+  }
 
-    expect(codes(outcome)).toEqual(["STY-42/not-implemented"]);
-    expect(diagnostic?.scope).toBe("element");
-    expect(diagnostic?.hint).toContain("Milestone 2");
-    expect(diagnostic?.specSection).toMatch(
-      /^https:\/\/spec\.openapis\.org\/oas\/v3\.2\.1\.html#.+/u,
-    );
-    expect(outcome.required).toBe(true);
+  return {
+    location: parameter.location,
+    mediaType: String(parameter.serialization.mediaType),
+    required: parameter.required,
+    rows: texts(parameter.serialization.rows),
+  };
+};
+
+describe("STY-42 in: querystring generates a content Serialization entry", () => {
+  test("STY-42 a JSON querystring is one content value", () => {
+    expect(querystringContent("application/json")).toEqual({
+      location: "querystring",
+      mediaType: "application/json",
+      required: true,
+      rows: ["PRM-15", "STY-42", "STY-43"],
+    });
   });
 
-  test("STY-43 a form-urlencoded querystring is not-implemented under its own row", () => {
+  test("STY-43 a form-urlencoded querystring is one content value", () => {
     for (const media of [
       "application/x-www-form-urlencoded",
       "Application/X-WWW-Form-Urlencoded; charset=utf-8",
     ]) {
-      const outcome = refused("3.2", querystring(media));
-
-      expect(codes(outcome)).toEqual(["STY-43/not-implemented"]);
-      expect(outcome.diagnostics[0]?.hint).toContain("Milestone 2");
+      expect(querystringContent(media)).toEqual({
+        location: "querystring",
+        mediaType: media,
+        required: true,
+        rows: ["PRM-15", "STY-42", "STY-43"],
+      });
     }
   });
 });
