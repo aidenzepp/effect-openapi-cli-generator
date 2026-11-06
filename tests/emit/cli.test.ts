@@ -352,14 +352,14 @@ describe("emitCli: shapes beyond the fixture", () => {
 });
 
 describe("emitCli: operation-scope refusals", () => {
-  test("a text request body refuses its operation and the rest of the package emits", async () => {
+  test("an SSE request body refuses its operation and the rest of the package emits", async () => {
     const output = await emit(
       withPaths({
         ...paths,
         "/notes": {
           post: {
             operationId: "notes-create",
-            requestBody: { content: { "text/plain": { schema: { type: "string" } } } },
+            requestBody: { content: { "text/event-stream": { schema: { type: "string" } } } },
             responses: ok,
             tags: ["notes"],
           },
@@ -382,7 +382,7 @@ describe("emitCli: operation-scope refusals", () => {
           post: {
             operationId: "users-note",
             parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-            requestBody: { content: { "text/plain": { schema: { type: "string" } } } },
+            requestBody: { content: { "text/event-stream": { schema: { type: "string" } } } },
             responses: ok,
             tags: ["users"],
           },
