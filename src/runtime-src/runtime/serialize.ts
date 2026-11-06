@@ -397,6 +397,8 @@ export const path = (template: string, parameters: readonly PathParameter[]): Pa
   template,
 });
 
+type QueryStyle = "deepObject" | "form" | "pipeDelimited" | "spaceDelimited";
+
 export interface QueryOptions {
   readonly allowEmptyValue?: boolean;
   readonly allowReserved: boolean;
@@ -412,10 +414,8 @@ export interface QueryOptions {
 export interface QueryParameter {
   readonly expand: Effect.Effect<string | undefined, UsageError>;
   readonly name: string;
-  readonly style: "deepObject" | "form" | "pipeDelimited" | "spaceDelimited";
+  readonly style: QueryStyle | "querystring";
 }
-
-type QueryStyle = QueryParameter["style"];
 
 /**
  * Delimiters the style emits as `%20` or `%7C` or leaves unencoded: an item containing one cannot
@@ -1316,6 +1316,68 @@ export const urlEncoded = (
 ): RequestBody => ({
   expand: urlEncodedOf(mediaType, value, options),
   mediaType,
+});
+
+/**
+ * A `querystring` parameter's content: `required`, and for form-urlencoded content the declared
+ * properties as for a body (none declared means every key takes the default rules).
+ */
+export interface QuerystringOptions extends Partial<UrlEncodedOptions> {
+  readonly required: boolean;
+}
+
+const isFormMedia = (mediaType: string) =>
+  (mediaType.split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
+
+/**
+ * The text a `querystring` value has before any percent-encoding: its codec's text, JSON compact
+ * and text as is.
+ */
+const querystringText = (name: string, mediaType: string, value: Json) =>
+  Effect.gen(function* querystringCodec() {
+    if (isJsonMedia(mediaType)) {
+      return yield* jsonText(value);
+    }
+
+    if (!Predicate.isString(value)) {
+      return yield* refuse(`parameter ${name} must be text under a non-JSON media type`);
+    }
+
+    return unpairedSurrogate.test(value)
+      ? yield* refuse(`parameter ${name} holds an unpaired surrogate, which has no UTF-8 form`)
+      : value;
+  });
+
+/**
+ * A `querystring` parameter (3.2): its value is the whole query string after `?`, so `request`
+ * appends it as the only query part. `application/x-www-form-urlencoded` content goes through
+ * `urlEncode` and is not encoded again; any other media type is serialized by its codec and then
+ * percent-encoded once. `value` is `undefined` when the caller gave none: an optional parameter
+ * then sends nothing and a required one is refused. Present input that yields no text adds no `?`.
+ */
+export const querystring = (
+  name: string,
+  mediaType: string,
+  value: Json | undefined,
+  options: QuerystringOptions,
+): QueryParameter => ({
+  expand: Effect.gen(function* querystringExpansion() {
+    if (value === undefined) {
+      return options.required
+        ? yield* refuse(`parameter ${name} is required and has no value`)
+        : undefined;
+    }
+
+    if (isFormMedia(mediaType)) {
+      return isJsonObject(value)
+        ? yield* urlEncode(value, { properties: options.properties ?? [] })
+        : yield* refuse(`parameter ${name} must be an object under form-urlencoded content`);
+    }
+
+    return encodeUnreserved(yield* querystringText(name, mediaType, value));
+  }),
+  name,
+  style: "querystring",
 });
 
 /**
