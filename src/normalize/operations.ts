@@ -381,11 +381,16 @@ const assembleParameters = (
           shared.resolution,
           entry.level === "operation"
             ? {
+                nonStandard: shared.context.config.nonStandard,
                 openapi: shared.context.openapi,
                 operation: operationInfo(raw),
                 pointer: entry.pointer,
               }
-            : { openapi: shared.context.openapi, pointer: entry.pointer },
+            : {
+                nonStandard: shared.context.config.nonStandard,
+                openapi: shared.context.openapi,
+                pointer: entry.pointer,
+              },
         ));
       shared.cache.set(entry.pointer, outcome);
       diagnostics.push(...outcome.diagnostics);
