@@ -282,8 +282,9 @@ const refusedQuery = (required: boolean): Json => ({
   style: "matrix",
 });
 
-const formBody = (required: boolean): Json => ({
-  content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
+// A body that stays refused: multipart with no schema on 3.0 and 3.1 (ENC-33).
+const refusedBody = (required: boolean): Json => ({
+  content: { "multipart/form-data": {} },
   required,
 });
 
@@ -346,7 +347,7 @@ describe("operation-scope refusals", () => {
 
   test("a required body whose only alternative is refused removes the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { post: { ...ok, requestBody: formBody(true) } },
+      "/a": { post: { ...ok, requestBody: refusedBody(true) } },
     });
 
     see(api.operations).toEqual([]);
@@ -355,7 +356,7 @@ describe("operation-scope refusals", () => {
 
   test("an optional body whose only alternative is refused leaves the operation without a body", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { post: { ...ok, requestBody: formBody(false) } },
+      "/a": { post: { ...ok, requestBody: refusedBody(false) } },
     });
 
     see(api.operations).toHaveLength(1);
@@ -371,7 +372,7 @@ describe("operation-scope refusals", () => {
           requestBody: {
             content: {
               "application/json": { schema: { type: "string" } },
-              "application/x-www-form-urlencoded": { schema: { type: "object" } },
+              "multipart/form-data": {},
             },
             required: true,
           },
@@ -541,10 +542,7 @@ const mixedPaths: Json = Object.fromEntries([
     {
       delete: {
         ...ok,
-        requestBody: {
-          content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
-          required: true,
-        },
+        requestBody: refusedBody(true),
         security: [{ oauth: [] }],
       },
     },
@@ -579,10 +577,7 @@ describe("diagnostic order", () => {
       ["/paths/~1a/parameters/0", "PRM-19/ignored-header"],
       ["/paths/~1b/delete", "OPR-09/required-body-refused"],
       ["/paths/~1b/delete", "SEC-06/no-satisfiable-alternative"],
-      [
-        "/paths/~1b/delete/requestBody/content/application~1x-www-form-urlencoded",
-        "ENC-27/not-implemented",
-      ],
+      ["/paths/~1b/delete/requestBody/content/multipart~1form-data", "ENC-33/missing-schema"],
       ["/paths/~1b/delete/security/0", "SSC-18/not-implemented"],
     ]);
   });

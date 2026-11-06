@@ -940,16 +940,6 @@ const stopAlternative = (...findings: readonly Finding[]): AlternativeResult => 
 const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
   referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
 
-const formRefusal = (line: Line, at: CanonicalKey): Finding =>
-  refusal(
-    line === "3.2" ? "ENC-28/not-implemented" : "ENC-27/not-implemented",
-    "encoding-the-x-www-form-urlencoded-media-type",
-    "Request body application/x-www-form-urlencoded",
-    "This construct is read but not implemented in Milestone 1.",
-    at,
-    "Milestone 2 implements this",
-  );
-
 // The slice names `S30-24/multipart-extra-fields` for 3.0, but the Diagnostic codec's row pattern
 // (`^[A-Z]+-[0-9]+$`, src/model/diagnostic.ts) rejects the digits in `S30`, so 3.0 reports SCH-13
 // too until that pattern admits them; then restore the 3.0 code here and in the test.
@@ -1004,6 +994,7 @@ const readMedia = (
 
 const alternativeRows = (
   line: Line,
+  codec: Codec,
   node: MediaNode,
   schema: boolean,
   itemSchema: boolean,
@@ -1016,6 +1007,7 @@ const alternativeRows = (
     ...(node.prefixEncoding === undefined ? [] : ["MED-07"]),
     ...(node.itemEncoding === undefined ? [] : ["MED-08"]),
     ...(schema || itemSchema ? [] : [line === "3.0" ? "RQB-10" : "RQB-09"]),
+    ...(codec === "form" ? [line === "3.2" ? "ENC-28" : "ENC-27", "ENC-29"] : []),
   ]);
 
 interface Parts {
@@ -1124,6 +1116,28 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
   return { findings, refused: false };
 };
 
+// One input per declared property in document order, with its Encoding Object when it has one.
+const propertyInputs = (
+  media: Media,
+  members: Members,
+  honorsStyle: boolean,
+): readonly RuleInput[] => {
+  const byName = media.node.encoding ?? {};
+
+  return members.properties.map(([name, schema]): RuleInput => {
+    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+
+    return {
+      actual: explicit === undefined ? schema : childKey(media.home, "encoding", name),
+      depth: 0,
+      honorsStyle,
+      node: explicit,
+      schema,
+      target: { kind: "property", name },
+    };
+  });
+};
+
 // One input per declared property, then per prefixEncoding entry, then the itemEncoding rule.
 const partInputs = (
   line: Line,
@@ -1132,21 +1146,9 @@ const partInputs = (
   honorsStyle: boolean,
 ): readonly RuleInput[] => {
   const { home, node } = media;
-  const byName = node.encoding ?? {};
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
-  const properties = members.properties.map(([name, schema]): RuleInput => {
-    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
-
-    return {
-      actual: explicit === undefined ? schema : childKey(home, "encoding", name),
-      depth: 0,
-      honorsStyle,
-      node: explicit,
-      schema,
-      target: { kind: "property", name },
-    };
-  });
+  const properties = propertyInputs(media, members, honorsStyle);
   const positions = prefix.map((entry, index): RuleInput => ({
     actual: childKey(home, "prefixEncoding", String(index)),
     depth: 0,
@@ -1214,6 +1216,166 @@ const multipartParts = (
     };
   });
 
+// --- Form-urlencoded (design 6.3) ---
+
+const multipartOnly = (code: string, anchor: string, field: string, at: CanonicalKey): Finding =>
+  notice(
+    code,
+    anchor,
+    `Encoding ${field} under form-urlencoded`,
+    `The ${field} field applies to multipart media types only, so it is ignored for form-urlencoded.`,
+    at,
+  );
+
+// Fields a form value has no use for, in pointer order: part headers (ENC-11) and nested encoding
+// (ENC-07 to ENC-09).
+const formIgnored = (node: EncodingNode, actual: CanonicalKey): readonly Finding[] => [
+  ...(node.encoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-07/nested-encoding-ignored",
+          "encoding-encoding",
+          "encoding",
+          childKey(actual, "encoding"),
+        ),
+      ]),
+  ...(node.headers === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-11/headers-ignored",
+          "encoding-headers",
+          "headers",
+          childKey(actual, "headers"),
+        ),
+      ]),
+  ...(node.itemEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-09/item-encoding-ignored",
+          "encoding-item-encoding",
+          "itemEncoding",
+          childKey(actual, "itemEncoding"),
+        ),
+      ]),
+  ...(node.prefixEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-08/prefix-encoding-ignored",
+          "encoding-prefix-encoding",
+          "prefixEncoding",
+          childKey(actual, "prefixEncoding"),
+        ),
+      ]),
+];
+
+const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
+  refusal(
+    "ENC-02/form-content-type",
+    "encoding-content-type",
+    "Encoding contentType under form-urlencoded",
+    `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
+    childKey(input.actual, "contentType"),
+    `Remove contentType, or set it to ${expected}`,
+  );
+
+// One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
+// them the value is sent by the default table, so an explicit contentType is kept only when it
+// names the table's type, which changes nothing on the wire.
+const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
+  Effect.gen(function* build() {
+    const node: EncodingNode = input.node ?? {};
+    const typing = yield* typingOf(ctx, input, node);
+    if (typing.refused) {
+      return { findings: typing.findings, rule: undefined };
+    }
+
+    const explicit = typing.serialization === undefined && node.contentType !== undefined;
+    const fallback = explicit
+      ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema))
+      : undefined;
+    const [given] = typing.contentType;
+    if (
+      fallback !== undefined &&
+      (typing.contentType.length !== 1 || given?.toLowerCase() !== fallback.type)
+    ) {
+      return {
+        findings: [...typing.findings, formContentTypeRefusal(input, fallback.type)],
+        rule: undefined,
+      };
+    }
+
+    const rule: PlainRule = {
+      contentType: typing.contentType,
+      headers: [],
+      origin: input.actual,
+      rows: sorted([
+        ...typing.rows,
+        ...(fallback === undefined ? [] : [fallback.row]),
+        ...(typing.serialization === undefined ? [] : ["ENC-12"]),
+        ...(ctx.line === "3.0" ? ["ENC-14"] : []),
+      ]),
+      target: input.target,
+    };
+    if (typing.serialization !== undefined) {
+      rule.serialization = typing.serialization;
+    }
+
+    return { findings: [...typing.findings, ...formIgnored(node, input.actual)], rule };
+  });
+
+// Positional encoding applies to multipart only (MED-07, MED-08), so a form alternative ignores it.
+const formPositional = (media: Media): readonly Finding[] => [
+  ...(media.node.itemEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "MED-08/item-encoding-ignored",
+          "media-type-item-encoding",
+          "itemEncoding",
+          childKey(media.home, "itemEncoding"),
+        ),
+      ]),
+  ...(media.node.prefixEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "MED-07/prefix-encoding-ignored",
+          "media-type-prefix-encoding",
+          "prefixEncoding",
+          childKey(media.home, "prefixEncoding"),
+        ),
+      ]),
+];
+
+// Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
+const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBudget> =>
+  Effect.gen(function* parts() {
+    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+    const keys = unknownKeys(ctx.line, media, members);
+    if (keys.refused) {
+      return refusedParts(keys.findings);
+    }
+
+    const findings: Finding[] = [...keys.findings, ...formPositional(media)];
+    const rules: PlainRule[] = [];
+    for (const input of propertyInputs(media, members, true)) {
+      const result = yield* formRule(ctx, input);
+      findings.push(...result.findings);
+      if (result.rule === undefined) {
+        return refusedParts(findings);
+      }
+
+      rules.push(result.rule);
+    }
+
+    return { ...noParts, encoding: rules, findings };
+  });
+
 const ignoredParts = (line: Line, media: Media): Parts => {
   const { home, node } = media;
   const present = [node.encoding, node.prefixEncoding, node.itemEncoding].some(
@@ -1221,6 +1383,21 @@ const ignoredParts = (line: Line, media: Media): Parts => {
   );
 
   return present ? { ...noParts, findings: [encodingIgnored(line, home)] } : noParts;
+};
+
+// The part rules of an alternative: multipart and form-urlencoded read their encoding fields; any
+// other codec ignores them.
+const partsOf = (
+  ctx: Context,
+  media: Media,
+  base: string,
+  codec: Codec,
+): Effect.Effect<Parts, BodyNodeBudget> => {
+  if (codec === "multipart") {
+    return multipartParts(ctx, media, base);
+  }
+
+  return codec === "form" ? formParts(ctx, media) : Effect.succeed(ignoredParts(ctx.line, media));
 };
 
 const normalizeAlternative = (
@@ -1245,14 +1422,9 @@ const normalizeAlternative = (
 
     const base = baseType(key);
     const codec = codecOf(base);
-    if (codec === "form") {
-      return stopAlternative(formRefusal(line, mediaSite));
-    }
-
     const media = yield* readMedia(resolution, mediaSite);
     const { home, node } = media;
-    const parts =
-      codec === "multipart" ? yield* multipartParts(ctx, media, base) : ignoredParts(line, media);
+    const parts = yield* partsOf(ctx, media, base, codec);
     if (parts.refused) {
       return stopAlternative(...parts.findings);
     }
@@ -1267,6 +1439,7 @@ const normalizeAlternative = (
       prefixEncoding: parts.prefixEncoding,
       rows: alternativeRows(
         line,
+        codec,
         node,
         node.schema !== undefined && !opaque,
         node.itemSchema !== undefined && !opaque,
@@ -1354,9 +1527,9 @@ const emptyContent = (line: Line, at: CanonicalKey): Finding =>
 /**
  * Normalizes one Request Body Object into a `Body` whose alternatives are the media types that
  * survive, with element-scope refusals and notices for the rest (design 2.2, 6.3, 6.6). Codecs
- * follow the media type; encoding defaults follow the line's table; XML stays opaque; staged and
- * undecided constructs are refused rather than dropped. A site the earlier stages should have
- * stopped fails with `BodyNotReadable`.
+ * follow the media type; encoding defaults follow the line's table; form-urlencoded and multipart
+ * bodies take a rule per property; XML stays opaque; undecided constructs are refused rather than
+ * dropped. A site the earlier stages should have stopped fails with `BodyNotReadable`.
  */
 export const normalizeBody = (
   resolution: Resolution,
