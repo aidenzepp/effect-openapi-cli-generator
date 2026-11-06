@@ -4,6 +4,7 @@ import nodePath from "node:path";
 import { Effect, Schema } from "effect";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import type { Server } from "../../src/model/entities.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
 import { planNames } from "../../src/names/index.ts";
@@ -36,10 +37,8 @@ const pipeline = (value: Schema.Json) =>
     const resolution = yield* resolve({ document, line: "3.1", value });
     const { api } = yield* normalize(resolution, { config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
-    const bound = boundOrigins(
-      [...api.servers, ...api.operations.flatMap((operation) => operation.servers)],
-      { config, configDocument, document, openapi: api.openapi },
-    );
+    const context = { config, configDocument, document, openapi: api.openapi };
+    const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
 
     return { api, bound, plan };
   });
@@ -47,7 +46,7 @@ const pipeline = (value: Schema.Json) =>
 const emit = (value: Schema.Json) =>
   Effect.runPromise(
     pipeline(value).pipe(
-      Effect.flatMap(({ api, bound, plan }) => emitApi({ api, boundOrigins: bound.origins, plan })),
+      Effect.flatMap(({ api, bound, plan }) => emitApi({ api, boundOrigins: bound, plan })),
     ),
   );
 
@@ -137,7 +136,7 @@ describe("emitApi: shapes beyond the fixture", () => {
       groups: plan.groups.map((group) => ({ ...group, segment: reserved })),
     };
     const error = await Effect.runPromise(
-      Effect.flip(emitApi({ api, boundOrigins: bound.origins, plan: forged })),
+      Effect.flip(emitApi({ api, boundOrigins: bound, plan: forged })),
     );
 
     expect(error._tag).toBe("ApiEmitError");
@@ -255,7 +254,7 @@ const emitFrom = (uri: string) =>
           Object.defineProperty(operation.origin, "document", { value: uri });
         }
 
-        return emitApi({ api, boundOrigins: bound.origins, plan });
+        return emitApi({ api, boundOrigins: bound, plan });
       }),
     ),
   );

@@ -340,10 +340,10 @@ export const generate = (
       diagnostics: analyzed,
       resolution,
     } = yield* analyze(input, bytes, author.value, configDocument);
-    const bound = boundOrigins(
-      [...api.servers, ...api.operations.flatMap((operation) => operation.servers)],
-      { config: author.value, configDocument, document, openapi: api.openapi },
-    );
+    // Each servers table binds the origins of its own level only (design 6.4), so a credential
+    // for one operation never reaches a host accepted only for another or only at the root.
+    const serversContext = { config: author.value, configDocument, document, openapi: api.openapi };
+    const bound = boundOrigins(api.servers, serversContext);
     const plan = yield* planNames(api, {
       config: author.value,
       configDocument,
@@ -364,7 +364,11 @@ export const generate = (
       requestRoots(api),
       plan.domain,
     );
-    const apiFiles = yield* emitApi({ api, boundOrigins: bound.origins, plan });
+    const apiFiles = yield* emitApi({
+      api,
+      boundOrigins: (servers) => boundOrigins(servers, serversContext).origins,
+      plan,
+    });
     const cli = yield* emitCli({ api, config: author.value, plan });
     const emitted = yield* Effect.all(cli.refusals.map((refusal) => emitRefusal(api, refusal)));
     const diagnostics = sortDiagnostics(
