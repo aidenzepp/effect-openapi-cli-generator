@@ -66,6 +66,21 @@ const request = Serialize.request("PATCH", {
   query: [Serialize.form("notify", true, { allowReserved: false, explode: true, required: false })],
 });
 
+const headRequest = Serialize.request("HEAD", {
+  headers: [],
+  path: Serialize.path("/users/{id}", [
+    Serialize.simple("id", "42", { allowReserved: false, explode: false }),
+  ]),
+  query: [],
+});
+
+const head: Output.OperationMeta = {
+  ...meta,
+  media: { request: [], responses: { "200": [] } },
+  method: "HEAD",
+  operationId: "users-head",
+};
+
 interface Seen {
   readonly headers: Readonly<Record<string, string>>;
   readonly init: Client.DirectRoute | undefined;
@@ -91,6 +106,8 @@ interface World {
   readonly defect?: boolean;
   readonly env?: Record<string, string>;
   readonly operation?: Output.OperationMeta;
+  readonly request?: Serialize.Request;
+  readonly terminal?: boolean;
 }
 
 const failingBody = (text: string | undefined): ReadableStream<Uint8Array> =>
@@ -170,13 +187,13 @@ const run = async (world: World = {}) => {
     Stdio.layerTest({
       stderr: capture(stderr),
       stdout: capture(stdout),
-      stdoutIsTerminal: Effect.succeed(false),
+      stdoutIsTerminal: Effect.succeed(world.terminal ?? false),
     }),
     Input.stdinClaimLayer,
     Output.runCredentialsLayer,
     Layer.succeed(HttpClient.HttpClient, client),
     Layer.succeed(Output.ClientPolicy, {
-      allowed: new Set(["PATCH"]),
+      allowed: new Set(["HEAD", "PATCH"]),
       binName: "example",
       direct: sentinel,
       version: "1.2.3",
@@ -190,7 +207,7 @@ const run = async (world: World = {}) => {
     Layer.succeed(Auth.allowCredentialsForBaseUrl, world.allowUnbound ?? false),
   );
   const program = Output.finalCatch([])(
-    request.pipe(
+    (world.request ?? request).pipe(
       Effect.flatMap(Output.send(world.operation ?? meta, Option.fromNullishOr(world.accept))),
     ),
   );
@@ -247,6 +264,66 @@ describe("Output.send success", () => {
 
     expect([result.tag, result.exitCode]).toEqual(["UsageError", 2]);
     expect(result.seen).toHaveLength(0);
+  });
+});
+
+describe("Output.send bodiless responses", () => {
+  test("a HEAD answered with Content-Length 0 and no body exits 0 with no output", async () => {
+    const result = await run({
+      answer: { headers: { "content-length": "0" }, status: 200 },
+      operation: head,
+      request: headRequest,
+    });
+
+    expect(result.seen[0]?.method).toBe("HEAD");
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect([result.stdout, result.stderr]).toEqual(["", ""]);
+  });
+
+  test("a HEAD whose Content-Length describes the GET body is not held to it", async () => {
+    const result = await run({
+      answer: { headers: { "content-length": "1234" }, status: 200 },
+      operation: head,
+      request: headRequest,
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.stdout).toBe("");
+  });
+
+  test("a HEAD to a terminal is not refused as binary output", async () => {
+    const result = await run({
+      answer: { headers: { "content-length": "0" }, status: 200 },
+      operation: head,
+      request: headRequest,
+      terminal: true,
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.stderr).toBe("");
+  });
+
+  test("a 204 with no body exits 0 with no output", async () => {
+    const result = await run({ answer: { status: 204 } });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect([result.stdout, result.stderr]).toEqual(["", ""]);
+  });
+
+  test("a HEAD answered 404 still fails with its status and an empty excerpt", async () => {
+    const result = await run({
+      answer: { status: 404 },
+      operation: { ...head, media: { request: [], responses: { "200": [], "404": [] } } },
+      request: headRequest,
+    });
+
+    expect([result.tag, result.matched, result.exitCode]).toEqual(["ApiResponseError", "404", 1]);
+  });
+
+  test("a GET-style 200 with no body is still a truncated stream (exit 5)", async () => {
+    const result = await run({ answer: { status: 200 } });
+
+    expect([result.tag, result.exitCode]).toEqual(["ResponseStreamError", 5]);
   });
 });
 
