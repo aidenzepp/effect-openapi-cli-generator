@@ -1,0 +1,25 @@
+{
+  "allowInsecure": true,
+  "binName": "ssc",
+  "envPrefix": "SSC",
+  "package": {
+    "name": "ssc-witness-cli",
+    "version": "0.1.0"
+  },
+  "security": {
+    "add": {
+      "requirement": [
+        {
+          "authorKey": []
+        }
+      ],
+      "schemes": {
+        "authorKey": {
+          "in": "header",
+          "name": "X-Author-Key",
+          "type": "apiKey"
+        }
+      }
+    }
+  }
+}
