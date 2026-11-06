@@ -434,14 +434,14 @@ describe("emitApi: multipart request bodies", () => {
     expect(content("src/api/imports.ts")).toContain("required: false,");
   });
 
-  test("a multipart alternative beside other request media keeps the generic body builder", async () => {
+  test("a multipart range alternative is left out of the builder's table, never sent as raw bytes", async () => {
     const content = contentOf(
       await emit(
         withPaths(
           importsPath(
             {
               "application/json": { schema: { type: "object" } },
-              "multipart/form-data": { schema: importSchema },
+              "multipart/*": { schema: importSchema },
             },
             true,
           ),
@@ -449,9 +449,9 @@ describe("emitApi: multipart request bodies", () => {
       ),
     );
 
-    expect(content("src/api/imports.ts")).toContain(
-      "Serialize.body(input.contentType, input.body)",
-    );
+    expect(content("src/api/imports.ts")).toContain("Serialize.alternatives(input.body, {");
+    expect(content("src/api/imports.ts")).not.toContain('multipart/*": (');
     expect(content("src/api/imports.ts")).not.toContain("formData");
+    expect(content("src/api/imports.ts")).not.toContain("input.contentType");
   });
 });

@@ -12,7 +12,7 @@ import type {
 } from "../names/index.ts";
 import type { FieldEncoding } from "../runtime-src/runtime/input.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { formParts, inputKeys, isScalarArraySchema } from "./api.ts";
+import { encodesByKey, formParts, inputKeys, isScalarArraySchema } from "./api.ts";
 import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpFlag } from "./help.ts";
@@ -49,11 +49,11 @@ export interface CliEmitInput {
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. An SSE body,
- * and a form, text or sequential body beside other media types, are `unsupported-body` until their
- * merge exists, and so is a multipart body the runtime writer cannot send exactly (`formParts`
- * names why); an XML body is opaque `--body-file` bytes, like a binary one, and a lone text or
- * sequential body is the operator's `--body` text or `--body-file` stream (design 6.3).
+ * The plan, model or author config holds something the `cli/` layer cannot express. An SSE body is
+ * `unsupported-body`, and so is a multipart body the runtime writer cannot send exactly
+ * (`formParts` names why), alone or beside other media; an XML body is opaque `--body-file` bytes,
+ * like a binary one, and a text or sequential body is the operator's `--body` text or
+ * `--body-file` stream (design 6.3).
  * `unsupported-flag` is a flag with no call-expression form today: an integer field whose width the
  * walk cannot settle, and a required boolean parameter (absent would send `false`).
  * `unsupported-parameter` is a boolean path parameter, or a path array before another positional (a
@@ -608,8 +608,7 @@ const isOpaque = (alternative: MediaAlternative): boolean =>
   alternative.codec === "binary" || alternative.codec === "xml";
 
 // Bodies sent as the operator's bytes, as given: `--body` text or a `--body-file` stream, never
-// parsed or framed (design 6.3 Sequential uploads). Only a lone one is sent; beside other media
-// it is refused until the choice table takes it (m2-em9b).
+// parsed or framed (design 6.3 Sequential uploads).
 const isVerbatim = (alternative: MediaAlternative): boolean =>
   alternative.codec === "ndjson" || alternative.codec === "jsonseq" || alternative.codec === "text";
 
@@ -617,17 +616,15 @@ const isVerbatim = (alternative: MediaAlternative): boolean =>
 const isLoaded = (alternative: MediaAlternative): boolean =>
   isOpaque(alternative) || isVerbatim(alternative);
 
-// A lone form-urlencoded body is merged from the JSON body sources into the value the `api/`
-// builder encodes (`Input.structuredBody`); a form alternative beside other media types is not
-// merged yet (m2-em9). A lone text or sequential body is `Input.sequentialBody`; the builder's
-// `Serialize.body` sets its declared media type as `Content-Type`. `lone` is set when the body
-// has no other alternative to choose.
+// A form-urlencoded body is merged from the JSON body sources into the value the `api/` builder
+// encodes (`Input.structuredBody`). A text or sequential body is `Input.sequentialBody`; the
+// builder's `Serialize.body` sets its media type as `Content-Type`. A multipart body is
+// `formBody`'s, and an SSE body is refused.
 const alternativeBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
   required: boolean,
   context: CommandContext,
-  lone = false,
 ) =>
   Effect.gen(function* body() {
     const sources: Entry[] = [
@@ -641,14 +638,14 @@ const alternativeBody = (
       };
     }
 
-    if (lone && isVerbatim(alternative)) {
+    if (isVerbatim(alternative)) {
       return {
         domain: [],
         value: fn("Input.sequentialBody", obj([...sources, ["required", bool(required)]])),
       };
     }
 
-    const structured = lone && alternative.codec === "form";
+    const structured = alternative.codec === "form";
     if (alternative.codec !== "json" && !structured) {
       return yield* refuse("unsupported-body", `${alternative.codec}:${alternative.mediaType}`);
     }
@@ -748,13 +745,13 @@ const partValues = (part: FormPart) =>
 // 4.5, C2), and the domain name it imports; none for a multipart body that declares no schema.
 const formAssertion = (
   command: PlannedCommand,
+  alternative: MediaAlternative,
   parts: readonly FormPart[],
   context: CommandContext,
 ) =>
   Effect.gen(function* assertion() {
     const { body } = command.operation;
-    const key = body?.alternatives.find((alternative) => alternative.codec === "multipart")?.schema
-      ?.key;
+    const key = alternative.schema?.key;
     if (body === undefined || key === undefined) {
       return { domain: [], steps: [] };
     }
@@ -780,12 +777,16 @@ const formAssertion = (
     };
   });
 
-// A `multipart/form-data` body: the part values, asserted against the body's schema and then
-// streamed by the `api/` builder through the runtime writer (design 6.3). There is no whole-body
-// flag (D-ENC1 a).
-const formBody = (command: PlannedCommand, context: CommandContext) =>
+// A `multipart/form-data` alternative's body: the part values, asserted against its schema and
+// then streamed by the `api/` builder through the runtime writer (design 6.3). There is no
+// whole-body flag (D-ENC1 a).
+const formBody = (
+  command: PlannedCommand,
+  alternative: MediaAlternative,
+  context: CommandContext,
+) =>
   Effect.gen(function* form() {
-    const parts = formParts(command, context.defs);
+    const parts = formParts(command, alternative, context.defs);
     if (Result.isFailure(parts)) {
       return yield* refuse("unsupported-body", parts.failure);
     }
@@ -795,7 +796,7 @@ const formBody = (command: PlannedCommand, context: CommandContext) =>
       entries.push([part.name, yield* partValues(part)]);
     }
 
-    const assertion = yield* formAssertion(command, parts.success, context);
+    const assertion = yield* formAssertion(command, alternative, parts.success, context);
 
     return {
       args: [["body", ident(I("parts"))]],
@@ -806,6 +807,54 @@ const formBody = (command: PlannedCommand, context: CommandContext) =>
     } satisfies BodyPlan;
   });
 
+// The body flags that do not apply to one alternative, each mapped to whether the operator gave
+// it (`Input.selectBody`'s `foreign`): a field or part flag whose media does not list the key, and
+// `--body` and `--body-file` for a multipart key (D-ENC1 a). A binary or XML key keeps its own
+// `--body` refusal.
+const foreignFlags = (command: PlannedCommand, alternative: MediaAlternative) =>
+  Effect.gen(function* foreign() {
+    const entries: Entry[] = [];
+    for (const flag of command.flags) {
+      const { source } = flag;
+      if (source._tag !== "Body") {
+        continue;
+      }
+
+      const applies = isWholeBody(flag)
+        ? alternative.codec !== "multipart"
+        : source.media.includes(alternative.mediaType);
+      if (applies) {
+        continue;
+      }
+
+      const value = yield* flagValue(flag.identifier);
+      const given = source.repeated ? fn("Option.fromIterable", value) : value;
+      entries.push([flag.name, fn("Option.isSome", given)]);
+    }
+
+    return entries;
+  });
+
+// One alternative's unevaluated body effect in the `Input.selectBody` table.
+const choiceEntry = (
+  command: PlannedCommand,
+  alternative: MediaAlternative,
+  required: boolean,
+  context: CommandContext,
+) =>
+  Effect.gen(function* entry() {
+    if (alternative.codec !== "multipart") {
+      return yield* alternativeBody(command, alternative, required, context);
+    }
+
+    const form = yield* formBody(command, alternative, context);
+
+    return { domain: form.domain, value: pipe(form.head, form.steps ?? []) };
+  });
+
+// A lone alternative is built directly. Several, or a range key, go into the `Input.selectBody`
+// table with each key's foreign flags; the builder takes the whole choice when it encodes per key
+// (`encodesByKey`), else the chosen body and its `Content-Type`.
 const bodyPlan = (
   command: PlannedCommand,
   meta: Expr,
@@ -819,12 +868,12 @@ const bodyPlan = (
       return Option.none();
     }
 
-    if (body.alternatives.some((alternative) => alternative.codec === "multipart")) {
-      return Option.some(yield* formBody(command, context));
+    if (!choosesType && first.codec === "multipart") {
+      return Option.some(yield* formBody(command, first, context));
     }
 
     if (!choosesType) {
-      const single = yield* alternativeBody(command, first, body.required, context, true);
+      const single = yield* alternativeBody(command, first, body.required, context);
       const parameter = isLoaded(first) ? "loaded" : "merged";
 
       return Option.some({
@@ -837,28 +886,37 @@ const bodyPlan = (
 
     const alternatives: Entry[] = [];
     const domain: string[] = [];
+    const foreign: Entry[] = [];
     for (const alternative of body.alternatives) {
-      const built = yield* alternativeBody(command, alternative, body.required, context);
+      const built = yield* choiceEntry(command, alternative, body.required, context);
       alternatives.push([alternative.mediaType, built.value]);
       domain.push(...built.domain);
+
+      const misplaced = yield* foreignFlags(command, alternative);
+      if (misplaced.length > 0) {
+        foreign.push([alternative.mediaType, obj(misplaced)]);
+      }
     }
 
     const selected = ident(I("selected"));
+    const options: Entry[] = [
+      ["alternatives", obj(alternatives)],
+      ["chosen", path("flags.contentType")],
+      ["media", member(meta, M("media"))],
+    ];
+    if (foreign.length > 0) {
+      options.push(["foreign", obj(foreign)]);
+    }
 
     return Option.some({
-      args: [
-        ["body", member(selected, M("body"))],
-        ["contentType", member(selected, M("contentType"))],
-      ],
+      args: encodesByKey(body.alternatives)
+        ? [["body", selected]]
+        : [
+            ["body", member(selected, M("body"))],
+            ["contentType", member(selected, M("contentType"))],
+          ],
       domain,
-      head: fn(
-        "Input.selectBody",
-        obj([
-          ["alternatives", obj(alternatives)],
-          ["chosen", path("flags.contentType")],
-          ["media", member(meta, M("media"))],
-        ]),
-      ),
+      head: fn("Input.selectBody", obj(options)),
       parameter: "selected",
     });
   });

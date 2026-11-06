@@ -816,15 +816,13 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
   });
 
-  test("a multipart alternative beside other request media refuses its operation", async () => {
+  test("a multipart range alternative beside other request media refuses its operation", async () => {
     expect(
       await multipartRefusals({
         "application/json": { schema: { properties: { url: { type: "string" } }, type: "object" } },
-        ...multipart(importSchema),
+        "multipart/*": { schema: importSchema },
       }),
-    ).toEqual([
-      { reason: "unsupported-body", subject: "multipart/form-data beside other request media" },
-    ]);
+    ).toEqual([{ reason: "unsupported-body", subject: "a multipart/* request body" }]);
   });
 
   test("a required part the names plan skipped refuses its operation", async () => {

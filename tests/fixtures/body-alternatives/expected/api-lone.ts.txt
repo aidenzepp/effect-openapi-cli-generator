@@ -1,0 +1,106 @@
+import type { SecurityRequirement } from "../runtime/auth.ts";
+import type { MediaDeclaration } from "../runtime/negotiate.ts";
+import * as Serialize from "../runtime/serialize.ts";
+
+export interface JsonInput {
+  readonly body: Serialize.Body;
+}
+
+/**
+ * Request builder for lone json, not an HttpApi definition.
+ */
+export const json = (input: JsonInput): Serialize.Request =>
+  Serialize.request("POST", {
+    body: Serialize.body("application/json", input.body),
+    headers: [],
+    path: Serialize.path("/lone/json", []),
+    query: [],
+  });
+
+const jsonMedia: MediaDeclaration = { request: ["application/json"], responses: { "204": [] } };
+
+const jsonSecurity: SecurityRequirement = [];
+
+export const jsonMeta = {
+  media: jsonMedia,
+  method: "POST",
+  operationId: "lone-json",
+  origin: { document: "openapi.json", pointer: "/paths/~1lone~1json/post" },
+  pathTemplate: "/lone/json",
+  security: jsonSecurity,
+};
+
+export interface FormInput {
+  readonly body: Serialize.Json | undefined;
+}
+
+/**
+ * Request builder for lone form, not an HttpApi definition.
+ */
+export const form = (input: FormInput): Serialize.Request =>
+  Serialize.request("POST", {
+    body: Serialize.urlEncoded("application/x-www-form-urlencoded", input.body, {
+      properties: [
+        ["content", {}],
+        ["tags", { explode: false }],
+        ["ids", {}],
+      ],
+      required: true,
+    }),
+    headers: [],
+    path: Serialize.path("/lone/form", []),
+    query: [],
+  });
+
+const formMedia: MediaDeclaration = {
+  request: ["application/x-www-form-urlencoded"],
+  responses: { "204": [] },
+};
+
+const formSecurity: SecurityRequirement = [];
+
+export const formMeta = {
+  media: formMedia,
+  method: "POST",
+  operationId: "lone-form",
+  origin: { document: "openapi.json", pointer: "/paths/~1lone~1form/post" },
+  pathTemplate: "/lone/form",
+  security: formSecurity,
+};
+
+export interface MultipartInput {
+  readonly body: Serialize.FormFields;
+}
+
+/**
+ * Request builder for lone multipart, not an HttpApi definition.
+ */
+export const multipart = (input: MultipartInput): Serialize.Request =>
+  Serialize.request("POST", {
+    body: Serialize.formData(input.body, {
+      parts: [
+        ["content", "text/plain"],
+        ["file", "application/octet-stream"],
+      ],
+      required: true,
+    }),
+    headers: [],
+    path: Serialize.path("/lone/multipart", []),
+    query: [],
+  });
+
+const multipartMedia: MediaDeclaration = {
+  request: ["multipart/form-data"],
+  responses: { "204": [] },
+};
+
+const multipartSecurity: SecurityRequirement = [];
+
+export const multipartMeta = {
+  media: multipartMedia,
+  method: "POST",
+  operationId: "lone-multipart",
+  origin: { document: "openapi.json", pointer: "/paths/~1lone~1multipart/post" },
+  pathTemplate: "/lone/multipart",
+  security: multipartSecurity,
+};

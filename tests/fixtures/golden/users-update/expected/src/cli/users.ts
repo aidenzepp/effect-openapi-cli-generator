@@ -113,6 +113,7 @@ export const setAvatar = Command.make(
         }),
       },
       chosen: flags.contentType,
+      foreign: { "image/png": { url: Option.isSome(flags.url) } },
       media: Users.setAvatarMeta.media,
     }).pipe(
       Effect.flatMap((selected) =>
