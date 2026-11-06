@@ -1,5 +1,5 @@
 import { Array as Arr, Data, Effect, FileSystem, Option, Order, Schema } from "effect";
-import type { Path, PlatformError, Stream } from "effect";
+import type { Path, PlatformError, Stream, Types } from "effect";
 import { stringLiteral } from "./emit/escape.ts";
 import { emitApi } from "./emit/api.ts";
 import type { ApiEmitError } from "./emit/api.ts";
@@ -22,6 +22,7 @@ import { Diagnostic, sortDiagnostics } from "./model/diagnostic.ts";
 import { Api } from "./model/entities.ts";
 import type { Operation } from "./model/entities.ts";
 import { planNames } from "./names/index.ts";
+import type { NamePlan, PlannedCommand, PlannedGroup } from "./names/index.ts";
 import { normalize } from "./normalize/index.ts";
 import type { NormalizeError } from "./normalize/index.ts";
 import { distinctDiagnostics } from "./normalize/operations.ts";
@@ -330,8 +331,80 @@ const requestRoots = (api: Api): readonly string[] =>
     ]),
   );
 
-// Design 8.4 `EMT-1`: one operation-scope refusal per command `emitCli` could not express.
-const emitRefusal = (api: Api, refusal: CliRefusal): Effect.Effect<Diagnostic> =>
+interface CommandAt {
+  readonly command: PlannedCommand;
+  readonly path: readonly string[];
+}
+
+// Every planned command with its visible path, in the order `--describe` walks the tree (design
+// 8.3): top-level groups in plan order, each group's commands before its child groups, then the
+// root's commands.
+const commandOrder = (plan: NamePlan): readonly CommandAt[] => {
+  const byTag = new Map(plan.groups.map((group) => [group.tag, group]));
+  const namesOf = (group: PlannedGroup): readonly string[] => {
+    const parent = group.parent === undefined ? undefined : byTag.get(group.parent);
+
+    return [...(parent === undefined ? [] : namesOf(parent)), group.name];
+  };
+  const walk = (group: PlannedGroup): readonly CommandAt[] => [
+    ...group.commands.map((command) => ({ command, path: [...namesOf(group), command.name] })),
+    ...plan.groups.filter((child) => child.parent === group.tag).flatMap(walk),
+  ];
+
+  return [
+    ...plan.groups.filter((group) => group.parent === undefined).flatMap(walk),
+    ...plan.root.map((command) => ({ command, path: [command.name] })),
+  ];
+};
+
+const refusedBy = (refusals: readonly CliRefusal[], operation: Operation): boolean =>
+  refusals.some((refusal) => sameKey(operation, refusal.operation.method, refusal.operation.path));
+
+type CommandName = GenerationReportValue["commandNames"][number];
+
+const commandName = ({ command, path }: CommandAt): CommandName => {
+  const name: Types.Mutable<CommandName> = {
+    command: command.sources.command,
+    document: command.operation.origin.document,
+    group: command.sources.group,
+    path,
+    pointer: command.operation.origin.pointer,
+  };
+  if (command.alias !== undefined) {
+    name.alias = command.alias;
+  }
+
+  return name;
+};
+
+// Design 8.1 `commandNames`: the emitted commands, so none of a refused operation's names.
+const commandNames = (
+  order: readonly CommandAt[],
+  refusals: readonly CliRefusal[],
+): GenerationReportValue["commandNames"] =>
+  order.flatMap((entry) =>
+    refusedBy(refusals, entry.command.operation) ? [] : [commandName(entry)],
+  );
+
+// `emitCli` refuses each command of an operation alone, and an operation's commands share its
+// flags, so its primary and alias commands are refused for one reason: keep the first of each.
+const refusedOperations = (refusals: readonly CliRefusal[]): readonly CliRefusal[] =>
+  Arr.dedupeWith(
+    refusals,
+    (left, right) =>
+      left.operation.method === right.operation.method &&
+      left.operation.path === right.operation.path &&
+      left.reason === right.reason &&
+      left.subject === right.subject,
+  );
+
+// Design 8.4 `EMT-1`: one operation-scope refusal per operation `emitCli` could not express,
+// naming every command of the operation that is not generated.
+const emitRefusal = (
+  api: Api,
+  refusal: CliRefusal,
+  order: readonly CommandAt[],
+): Effect.Effect<Diagnostic> =>
   Effect.gen(function* map() {
     const operation = api.operations.find((candidate) =>
       sameKey(candidate, refusal.operation.method, refusal.operation.path),
@@ -341,6 +414,14 @@ const emitRefusal = (api: Api, refusal: CliRefusal): Effect.Effect<Diagnostic> =
     }
 
     const { method, path } = operation.key;
+    const names = order.flatMap((entry) =>
+      sameKey(entry.command.operation, method, path) ? [stringLiteral(entry.path.join(" "))] : [],
+    );
+    const needs = stringLiteral(refusal.subject);
+    const message =
+      names.length > 1
+        ? `The commands ${names.join(", ")} are not generated: they need ${needs}.`
+        : `The command is not generated: it needs ${needs}.`;
     const key =
       operation.operationId === undefined
         ? { method, path }
@@ -349,7 +430,7 @@ const emitRefusal = (api: Api, refusal: CliRefusal): Effect.Effect<Diagnostic> =
       code: `EMT-1/${refusal.reason}`,
       document: operation.origin.document,
       element: "Emitted command",
-      message: `The command is not generated: it needs ${stringLiteral(refusal.subject)}.`,
+      message,
       openapi: api.openapi,
       operation: key,
       pointer: operation.origin.pointer,
@@ -435,8 +516,9 @@ const analyze = (
  * normalize, plan names, emit `domain/`, `api/`, `cli/` and the scaffold, then write every file and
  * `generation-report.json` in one run. A document-scope refusal stops before emission and writes
  * nothing; an operation or element refusal leaves that element out and writes the rest; under
- * `strict` any refusal writes nothing. Each `CliRefusal` becomes an `EMT-1` diagnostic (design
- * 8.4), so its command is absent and the report lists it.
+ * `strict` any refusal writes nothing. Each operation `emitCli` refuses becomes one `EMT-1`
+ * diagnostic (design 8.4), so none of its commands is emitted and the report lists it; the report's
+ * `commandNames` lists every emitted command with the sources of its names (design 8.1).
  */
 export const generate = (
   input: GenerateInput,
@@ -485,7 +567,10 @@ export const generate = (
       plan,
     });
     const cli = yield* emitCli({ api, config: author.value, plan });
-    const emitted = yield* Effect.all(cli.refusals.map((refusal) => emitRefusal(api, refusal)));
+    const commands = commandOrder(plan);
+    const emitted = yield* Effect.all(
+      refusedOperations(cli.refusals).map((refusal) => emitRefusal(api, refusal, commands)),
+    );
     const diagnostics = sortDiagnostics(order, distinctDiagnostics([...planned, ...emitted]));
     if (input.strict && diagnostics.some(isRefusal)) {
       return yield* refused("strict")(diagnostics);
@@ -503,6 +588,7 @@ export const generate = (
     ).pipe(Effect.mapError(() => new PackageEmitError({ reason: "invalid-generator-source" })));
     const report = makeGenerationReport({
       acceptedServers: acceptedServers(api),
+      commandNames: commandNames(commands, cli.refusals),
       diagnostics,
       inputs: [
         { document, sha256: sha256Hex(bytes) },
@@ -510,6 +596,7 @@ export const generate = (
       ],
       // The names plan reports renames as notices only; it carries no from/to pairs yet.
       renames: [],
+      schemes: api.securitySchemes,
       version,
     });
     const files: readonly EmittedFile[] = [

@@ -73,6 +73,7 @@ describe("generation report bytes", () => {
 
     expect(keys).toEqual([
       "acceptedServers",
+      "commandNames",
       "generator",
       "inputs",
       "notices",

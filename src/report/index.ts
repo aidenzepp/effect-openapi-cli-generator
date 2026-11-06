@@ -6,6 +6,32 @@ import type { SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
+// Where a command's group or command name came from (design 8.1, D-NAME4); `none` is a root
+// command's group.
+const NameSource = Schema.Literals([
+  "config",
+  "none",
+  "operationId",
+  "route",
+  "tag",
+  "x-fern",
+  "x-forge",
+]);
+
+/**
+ * One emitted command (design 8.1 `commandNames`): its visible path (group names, then the
+ * command), the operation's use site, the source of each name, and for an alias command its index
+ * in the author-config `aliases` or else in `x-forge-aliases`.
+ */
+export const CommandName = Schema.Struct({
+  alias: Schema.optionalKey(Schema.Int),
+  command: NameSource,
+  document: DocumentUri,
+  group: NameSource,
+  path: Schema.Array(Schema.String),
+  pointer: JsonPointer,
+});
+
 /**
  * `generation-report.json` (design 8.1, 3.7): what one run refused, noticed, renamed and accepted,
  * and the digests of its inputs. There is no timestamp, so equal inputs give equal bytes. Fields
@@ -18,6 +44,7 @@ export const GenerationReport = Schema.Struct({
   authorSuppliedSchemes: Schema.optionalKey(
     Schema.Array(Schema.Struct({ key: Schema.String, name: Schema.String })),
   ),
+  commandNames: Schema.Array(CommandName),
   generator: Schema.Struct({ version: Schema.String }),
   inputs: Schema.Array(Schema.Struct({ document: DocumentUri, sha256: Sha256 })),
   notices: Schema.Array(Diagnostic),
@@ -31,10 +58,12 @@ export type GenerationReportValue = typeof GenerationReport.Type;
 
 /**
  * What one run knows. `diagnostics` arrive already in diagnostic order (design 3.7), `inputs` in
- * document order; the report keeps both orders.
+ * document order and `commandNames` in command order; the report keeps each order.
  */
 export interface GenerationReportInput {
   readonly acceptedServers: GenerationReportValue["acceptedServers"];
+  // The emitted commands in command order; absent, the run emitted none.
+  readonly commandNames?: GenerationReportValue["commandNames"];
   readonly diagnostics: readonly Diagnostic[];
   readonly inputs: GenerationReportValue["inputs"];
   readonly renames: GenerationReportValue["renames"];
@@ -64,6 +93,7 @@ export const makeGenerationReport = (input: GenerationReportInput): GenerationRe
 
   const report: GenerationReportValue = {
     acceptedServers: input.acceptedServers,
+    commandNames: input.commandNames ?? [],
     generator: { version: input.version },
     inputs: input.inputs,
     notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
