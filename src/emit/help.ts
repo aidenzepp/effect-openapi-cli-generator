@@ -130,9 +130,11 @@ const kindNote = (scheme: SecurityScheme): string => {
   return kind.type === "oidcToken" ? "oidc token" : "mutualTls";
 };
 
-// The marker column: what a reader must know about where a scheme came from.
-const markers = (scheme: SecurityScheme): readonly string[] =>
-  scheme.source === "author-supplied" ? ["author-supplied"] : [];
+// The marker column: what a reader must know about where a scheme came from and whether it is deprecated.
+const markers = (scheme: SecurityScheme): readonly string[] => [
+  ...(scheme.source === "author-supplied" ? ["author-supplied"] : []),
+  ...(scheme.deprecated ? ["deprecated"] : []),
+];
 
 // The first entry per key, as a linear search would find it; built once per command.
 const firstByKey = <T>(items: readonly T[], keyOf: (item: T) => string): ReadonlyMap<string, T> => {
