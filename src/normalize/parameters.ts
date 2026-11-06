@@ -1,4 +1,5 @@
 import { Array as Arr, Data, Effect, Option, Order, Schema } from "effect";
+import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
@@ -13,9 +14,11 @@ import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
- * known, and the document's full `openapi` value.
+ * known, and the document's full `openapi` value. `nonStandard` carries the author config's opt-in
+ * switches of the same name; absent is strict (design 6.1, D-OQ1).
  */
 export interface ParameterSite {
+  readonly nonStandard?: AuthorConfig["nonStandard"];
   readonly openapi: string;
   readonly operation?: typeof DiagnosticOperation.Type;
   readonly pointer: string;
@@ -227,6 +230,7 @@ interface StylePlan {
   readonly allowReserved: boolean;
   readonly explode: boolean;
   readonly kind: "style";
+  readonly nonStandard?: "deepObjectBrackets";
   readonly row: string;
   readonly style: StyleName;
 }
@@ -330,6 +334,21 @@ const deepObjectExplode = (row: string): Finding =>
     "Parameter deepObject explode",
     "The 3.2 text says explode has no effect for deepObject; it is applied to this line, so the value is exploded.",
   );
+
+const compoundNested = refusal(
+  "PRM-27/compound-nested",
+  "style-values",
+  "Parameter style deepObject",
+  "deepObject is defined only for an object with scalar members; this schema is an array or has an object or array member.",
+  "Flatten the parameter, or set nonStandard.deepObjectBrackets in the author config to send the bracket convention",
+);
+
+const bracketAuthorChoice = notice(
+  "PRM-27/bracket-author-choice",
+  "style-values",
+  "Parameter style deepObject",
+  "The author config's nonStandard.deepObjectBrackets sends this nested deepObject value in the bracket convention, which the specification does not define.",
+);
 
 const cookieName = refusal(
   "PRM-02/invalid-cookie-name",
@@ -441,7 +460,18 @@ const styleNotices = (
   return findings;
 };
 
-const decideStyle = (node: ParameterNode, line: Line, multiple: boolean): Decision => {
+/**
+ * What the schema shape and the author config add to a parameter's decision: `multiple` for a
+ * cookie over an array or object (PRM-34), `nested` for a `deepObject` value beyond one level
+ * (PRM-27) and `brackets` for the author config's bracket switch.
+ */
+interface Traits {
+  readonly brackets: boolean;
+  readonly multiple: boolean;
+  readonly nested: boolean;
+}
+
+const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision => {
   const location = node.in;
   const style = node.style ?? defaultStyle(location);
   const explode = node.explode ?? (style === "form" || style === "cookie");
@@ -454,7 +484,7 @@ const decideStyle = (node: ParameterNode, line: Line, multiple: boolean): Decisi
   if (location === "cookie") {
     const findings = styleNotices(node, line, honored);
 
-    return decideCookie(line, { allowReserved, explode, style }, multiple, findings);
+    return decideCookie(line, { allowReserved, explode, style }, traits.multiple, findings);
   }
 
   const deepRow =
@@ -468,17 +498,28 @@ const decideStyle = (node: ParameterNode, line: Line, multiple: boolean): Decisi
     return refuse(explodeNotApplicableFinding(row));
   }
 
-  return {
-    _tag: "Build",
-    findings: styleNotices(node, line, honored, deepRow),
-    plan: {
-      allowReserved,
-      explode: explode || deepRow !== undefined,
-      kind: "style",
-      row,
-      style,
-    },
+  // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
+  const nested = deepRow !== undefined && traits.nested;
+  if (nested && !traits.brackets) {
+    return refuse(compoundNested);
+  }
+
+  const notices = styleNotices(node, line, honored, deepRow);
+  const plan: StylePlan = {
+    allowReserved,
+    explode: explode || deepRow !== undefined,
+    kind: "style",
+    row,
+    style,
   };
+
+  return nested
+    ? {
+        _tag: "Build",
+        findings: [...notices, bracketAuthorChoice],
+        plan: { ...plan, nonStandard: "deepObjectBrackets" },
+      }
+    : { _tag: "Build", findings: notices, plan };
 };
 
 const decideName = (node: ParameterNode): Decision | undefined => {
@@ -532,7 +573,7 @@ const usesSchemaFields = (node: ParameterNode): boolean =>
   node.explode !== undefined ||
   node.allowReserved !== undefined;
 
-const decide = (node: ParameterNode, line: Line, media: Media, multiple: boolean): Decision => {
+const decide = (node: ParameterNode, line: Line, media: Media, traits: Traits): Decision => {
   const named = decideName(node);
   if (named !== undefined) {
     return named;
@@ -543,7 +584,7 @@ const decide = (node: ParameterNode, line: Line, media: Media, multiple: boolean
   }
 
   return Option.match(media, {
-    onNone: () => decideStyle(node, line, multiple),
+    onNone: () => decideStyle(node, line, traits),
     onSome: ([mediaType, schemaKey]) => decideContent(node, mediaType, schemaKey),
   });
 };
@@ -695,20 +736,65 @@ const TypedSchema = Schema.Struct({
   type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 });
 
+const MemberSchemas = Schema.Struct({
+  additionalProperties: Schema.optionalKey(Schema.Unknown),
+  properties: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+});
+
+// The type names the schema at `key` declares, through `$ref`; none when it declares no type.
+const typesAt = (resolution: Resolution, key: CanonicalKey): Effect.Effect<readonly string[]> =>
+  nodeIn(resolution, follow(resolution, key)).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(TypedSchema)),
+    Effect.map(({ type }) => [type ?? []].flat()),
+    Effect.orElseSucceed(() => []),
+  );
+
+const compound = (types: readonly string[]): boolean =>
+  types.some((name) => name === "array" || name === "object");
+
 // Whether a cookie's schema, through `$ref`, declares an array or object type (PRM-34).
 const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
   if (source.node.in !== "cookie" || source.node.schema === undefined) {
     return Effect.succeed(false);
   }
 
-  return nodeIn(resolution, follow(resolution, childKey(source.target, "schema"))).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(TypedSchema)),
-    Effect.map(({ type }) =>
-      [type ?? []].flat().some((name) => name === "array" || name === "object"),
-    ),
-    Effect.orElseSucceed(() => false),
-  );
+  return typesAt(resolution, childKey(source.target, "schema")).pipe(Effect.map(compound));
 };
+
+// Whether a deepObject query parameter's schema, through `$ref`, is an array or declares a
+// property or `additionalProperties` schema of an object or array type (PRM-27). An untyped
+// member is not nested.
+const nestsDeeply = (resolution: Resolution, source: Source): Effect.Effect<boolean> =>
+  Effect.gen(function* nests() {
+    const { node, target } = source;
+    if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
+      return false;
+    }
+
+    const home = follow(resolution, childKey(target, "schema"));
+    if ((yield* typesAt(resolution, home)).includes("array")) {
+      return true;
+    }
+
+    const declared = yield* nodeIn(resolution, home).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(MemberSchemas)),
+      Effect.orElseSucceed((): typeof MemberSchemas.Type => ({})),
+    );
+    const members = Object.keys(declared.properties ?? {}).map((name) =>
+      childKey(home, "properties", name),
+    );
+    if (declared.additionalProperties !== undefined) {
+      members.push(childKey(home, "additionalProperties"));
+    }
+
+    for (const member of members) {
+      if (compound(yield* typesAt(resolution, member))) {
+        return true;
+      }
+    }
+
+    return false;
+  });
 
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
@@ -740,7 +826,7 @@ const serializationOf = (
 
   const honored = node.in === "query" && node.allowEmptyValue === true;
 
-  return {
+  const serialization = {
     allowReserved: plan.allowReserved,
     explode: plan.explode,
     kind: plan.kind,
@@ -749,6 +835,10 @@ const serializationOf = (
     rules: rules[line],
     style: plan.style,
   };
+
+  return plan.nonStandard === undefined
+    ? serialization
+    : { ...serialization, nonStandard: plan.nonStandard };
 };
 
 const parameterRows = (node: ParameterNode, plan: ContentPlan | StylePlan): readonly string[] => {
@@ -799,12 +889,11 @@ export const normalizeParameter = (
       return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
     }
 
-    const decision = decide(
-      source.node,
-      resolution.line,
-      yield* mediaOf(resolution, source),
-      yield* carriesMultiple(resolution, source),
-    );
+    const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source), {
+      brackets: site.nonStandard?.deepObjectBrackets === true,
+      multiple: yield* carriesMultiple(resolution, source),
+      nested: yield* nestsDeeply(resolution, source),
+    });
     const diagnostics = (findings: readonly Finding[]) =>
       toDiagnostics(resolution, site, source.related, source.node.name, findings);
     if (decision._tag === "Ignore") {
