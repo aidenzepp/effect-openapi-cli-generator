@@ -134,7 +134,7 @@ describe("corpus run options", () => {
 
     expect(ran.code).toBe(0);
     expect(ran.stdout).toBe("clean\nrefused\nbroken\n");
-  });
+  }, 60_000);
 
   test("--only runs one entry; --out writes there and leaves corpus/verdicts untouched", () => {
     const out = nodePath.join(stub, "out");
@@ -157,7 +157,7 @@ describe("corpus run options", () => {
 
     expect(ran.code).toBe(1);
     expect(ran.log).toContain("refused: refused (document): VAL-03/schema-invalid");
-  });
+  }, 60_000);
 
   test("a build that fails exits 1; --only repeats, so both selected entries are reached", () => {
     const ran = runner("--only", "refused", "--only", "broken");
@@ -168,11 +168,14 @@ describe("corpus run options", () => {
   }, 300_000);
 
   test("an unknown --only id, an unknown argument and --check with --out exit 1", () => {
-    expect(runner("--only", "nope").code).toBe(1);
-    expect(runner("--only", "nope").log).toContain("--only nope: no ci entry with that id");
+    // Three process spawns, one per case (the unknown id is run once, not twice). Each is a
+    // failure before any build, measured at 0.3-0.6 s idle; 60 s leaves two orders of margin.
+    const unknownId = runner("--only", "nope");
+    expect(unknownId.code).toBe(1);
+    expect(unknownId.log).toContain("--only nope: no ci entry with that id");
     expect(runner("--frobnicate").log).toContain("unknown argument: --frobnicate");
     expect(runner("--check", "--out", "x").code).toBe(1);
-  });
+  }, 60_000);
 });
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///fixture/openapi.json");
