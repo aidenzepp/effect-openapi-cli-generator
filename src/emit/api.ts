@@ -1021,11 +1021,16 @@ const groupPrefix = (group: PlannedGroup, byTag: ReadonlyMap<string, PlannedGrou
   return `${names.join(" ")} `;
 };
 
+// A scheme the document marks deprecated carries `deprecated: true`; any other prints no field.
+const deprecation = (scheme: SecurityScheme): readonly (readonly [string, Expr])[] =>
+  scheme.deprecated ? [["deprecated", bool(true)]] : [];
+
 const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr, ApiEmitError> => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
     return Effect.succeed(
       obj([
+        ...deprecation(scheme),
         ["env", str(env)],
         ["in", str(kind.in)],
         ["kind", str("apiKey")],
@@ -1037,6 +1042,7 @@ const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr,
   if (kind.type === "http") {
     return Effect.succeed(
       obj([
+        ...deprecation(scheme),
         ["env", str(env)],
         ["kind", str("http")],
         ["scheme", str(kind.scheme)],
