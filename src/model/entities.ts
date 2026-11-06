@@ -297,13 +297,14 @@ export const NamingHint = Schema.Struct({
 );
 
 /**
- * One usable entry of `x-forge-aliases`: its own Forge and Fern hints, never the operation's, and
- * its index in the array.
+ * One usable entry of `x-forge-aliases`: its own Forge and Fern hints, never the operation's, its
+ * own `operationId` (never the operation's), and its index in the array.
  */
 export const NamingAlias = Schema.Struct({
   fern: Schema.optionalKey(NamingHint),
   forge: Schema.optionalKey(NamingHint),
   index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  operationId: Schema.optionalKey(Schema.NonEmptyString),
 });
 
 /**

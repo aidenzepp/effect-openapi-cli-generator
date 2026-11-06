@@ -604,7 +604,8 @@ const hintOf = (
 };
 
 // An alias names a command by its own keys only: it is usable when its Forge keys, else its Fern
-// keys, give both a group and a method. An `x-forge-aliases` inside it is not read.
+// keys, give both a group and a method, or else when it has its own `operationId`. It never takes
+// the operation's `operationId`. An `x-forge-aliases` inside it is not read.
 const aliasOf = (
   element: Json,
   pointer: string,
@@ -619,7 +620,13 @@ const aliasOf = (
   const notices = [...forge.notices, ...fern.notices];
   const group = forge.value?.group ?? fern.value?.group;
   const method = forge.value?.method ?? fern.value?.method;
-  if (group === undefined || method === undefined) {
+  const rawId = element.operationId;
+  const operationId = rawId === undefined ? Option.none() : methodName(rawId);
+  if (rawId !== undefined && Option.isNone(operationId)) {
+    notices.push(invalid(childPointer(pointer, "operationId")));
+  }
+
+  if ((group === undefined || method === undefined) && Option.isNone(operationId)) {
     return { notices: [...notices, { code: "EXT-01/alias-unnamed", pointer }], value: undefined };
   }
 
@@ -630,6 +637,10 @@ const aliasOf = (
 
   if (fern.value !== undefined) {
     alias.fern = fern.value;
+  }
+
+  if (Option.isSome(operationId)) {
+    alias.operationId = operationId.value;
   }
 
   return { notices, value: alias };

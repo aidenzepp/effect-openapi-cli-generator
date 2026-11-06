@@ -201,6 +201,77 @@ describe.each(lines)("naming extensions (%s)", (line, openapi) => {
     ]);
   });
 
+  test("an alias with only its own operationId is usable", () => {
+    const { api, diagnostics } = run(
+      line,
+      openapi,
+      get("/a", { "x-forge-aliases": [{ operationId: "listZones" }] }),
+    );
+
+    see(at(api.operations, "/a")?.naming).toEqual({
+      aliases: [{ index: 0, operationId: "listZones" }],
+    });
+    see(notices(diagnostics)).toEqual([]);
+  });
+
+  test("an alias with a group only is usable through its own operationId", () => {
+    const { api, diagnostics } = run(
+      line,
+      openapi,
+      get("/a", {
+        "x-forge-aliases": [{ operationId: "listRecords", "x-forge-group-name": "dns" }],
+      }),
+    );
+
+    see(at(api.operations, "/a")?.naming).toEqual({
+      aliases: [
+        {
+          forge: { group: ["dns"], pointer: pointerOf("/a", "x-forge-aliases", "0") },
+          index: 0,
+          operationId: "listRecords",
+        },
+      ],
+    });
+    see(notices(diagnostics)).toEqual([]);
+  });
+
+  test("an alias with neither keys nor an operationId is alias-unnamed", () => {
+    const { api, diagnostics } = run(
+      line,
+      openapi,
+      get("/a", {
+        "x-forge-aliases": [{ "x-forge-method-name": "only-a-method" }],
+        "x-forge-method-name": "list",
+      }),
+    );
+
+    see(at(api.operations, "/a")?.naming).toEqual({
+      forge: { method: "list", pointer: pointerOf("/a") },
+    });
+    see(notices(diagnostics)).toEqual([
+      notice("EXT-01/naming-invalid", pointerOf("/a", "x-forge-aliases")),
+      notice("EXT-01/alias-unnamed", pointerOf("/a", "x-forge-aliases", "0")),
+    ]);
+  });
+
+  test("an alias never inherits the operation's operationId", () => {
+    const { api, diagnostics } = run(line, openapi, {
+      "/a": {
+        get: {
+          ...ok,
+          operationId: "parentId",
+          "x-forge-aliases": [{ "x-forge-group-name": "dns" }],
+        },
+      },
+    });
+
+    see(hasNaming(api.operations, "/a")).toBe(false);
+    see(notices(diagnostics)).toEqual([
+      notice("EXT-01/naming-invalid", pointerOf("/a", "x-forge-aliases")),
+      notice("EXT-01/alias-unnamed", pointerOf("/a", "x-forge-aliases", "0")),
+    ]);
+  });
+
   test("an x-forge-aliases inside an alias is ignored without a notice", () => {
     const { api, diagnostics } = run(
       line,
