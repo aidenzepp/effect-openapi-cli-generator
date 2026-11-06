@@ -1505,6 +1505,10 @@ export type Request = Effect.Effect<HttpClientRequest.HttpClientRequest, UsageEr
 
 export interface RequestParts {
   readonly body?: RequestBody | undefined;
+  /**
+   * The cookie parameters, in document order. `request` joins their pairs into one `Cookie` header.
+   */
+  readonly cookies?: readonly CookieParameter[] | undefined;
   readonly headers: readonly HeaderParameter[];
   readonly path: Path;
   readonly query: readonly QueryParameter[];
@@ -1512,7 +1516,9 @@ export interface RequestParts {
 
 /**
  * Evaluate the descriptors into a request whose URL is the expanded path plus the query pairs
- * joined by `&`, with no origin (the caller prefixes the base) and no `urlParams`.
+ * joined by `&`, with no origin (the caller prefixes the base) and no `urlParams`. The cookie
+ * pairs, in the order given, form one `Cookie` header joined by `; `, sent only when some pair
+ * exists; a header parameter named `Cookie` beside cookie parameters is refused.
  */
 export const request = (method: string, descriptors: RequestParts): Request =>
   Effect.gen(function* requestEvaluation() {
@@ -1525,11 +1531,19 @@ export const request = (method: string, descriptors: RequestParts): Request =>
       return yield* refuse("two header parameters have one name");
     }
 
+    const cookies = descriptors.cookies ?? [];
+
+    if (cookies.length > 0 && names.includes("cookie")) {
+      return yield* refuse("a header parameter named Cookie sits beside cookie parameters");
+    }
+
     const values = yield* Effect.all(
       descriptors.headers.map((parameter) =>
         parameter.expand.pipe(Effect.map((text) => [parameter.name, text] as const)),
       ),
     );
+    const cookiePairs = yield* Effect.all(cookies.map((parameter) => parameter.expand));
+    const cookieHeader = cookiePairs.filter(Predicate.isNotUndefined).join("; ");
     const url = query === "" ? expandedPath : `${expandedPath}?${query}`;
     let built = HttpClientRequest.setUrl(
       HttpClientRequest.makeWith(
@@ -1547,6 +1561,10 @@ export const request = (method: string, descriptors: RequestParts): Request =>
       if (text !== undefined) {
         built = HttpClientRequest.setHeader(built, name, text);
       }
+    }
+
+    if (cookieHeader !== "") {
+      built = HttpClientRequest.setHeader(built, "Cookie", cookieHeader);
     }
 
     if (descriptors.body === undefined) {
