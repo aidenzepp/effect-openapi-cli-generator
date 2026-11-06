@@ -10,6 +10,7 @@ import type {
   PlannedGroup,
   PlannedPositional,
 } from "../names/index.ts";
+import type { FieldEncoding } from "../runtime-src/runtime/input.ts";
 import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
 import { formParts, inputKeys, isScalarArraySchema } from "./api.ts";
 import type { FormPart } from "./api.ts";
@@ -26,6 +27,7 @@ import {
   call,
   ident,
   member,
+  newExpr,
   num,
   obj,
   printModule,
@@ -193,6 +195,9 @@ const boundKeywords: readonly string[] = [
 
 interface FieldNode {
   readonly allOf: readonly Schema.Json[];
+  readonly contentEncoding: string | undefined;
+  readonly contentMediaType: string | undefined;
+  readonly format: string | undefined;
   readonly int64: boolean;
   readonly items: Schema.Json | undefined;
   readonly prose: string | undefined;
@@ -220,8 +225,17 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
     return Predicate.isNumber(bound) && Math.abs(bound) > Number.MAX_SAFE_INTEGER;
   });
 
+  const text = (key: string): string | undefined => {
+    const value = own(json, key);
+
+    return Predicate.isString(value) ? value : undefined;
+  };
+
   return Option.some({
     allOf: Array.isArray(allOf) ? allOf : [],
+    contentEncoding: text("contentEncoding"),
+    contentMediaType: text("contentMediaType"),
+    format: text("format"),
     int64: own(json, "format") === "int64" || unsafe,
     items: own(json, "items"),
     properties: isJsonObject(properties) ? properties : undefined,
@@ -239,7 +253,13 @@ type IntegerWidth = "int64" | "safe" | "unsettled";
 
 interface FieldSchema {
   readonly description: string;
+  /**
+   * The text encoding of a base64 string field (3.0 `format: byte`; 3.1+ `contentEncoding`),
+   * read from the end of the `$ref` chain as the name plan's walk reads it.
+   */
+  readonly encoding: FieldEncoding | undefined;
   readonly integer: IntegerWidth;
+  readonly mediaType: string | undefined;
 }
 
 // The node chain a schema reaches through `$ref`, starting at the schema itself; `settled` when
@@ -252,6 +272,15 @@ interface Chain {
 type Work =
   | { readonly _tag: "Direct"; readonly node: FieldNode }
   | { readonly _tag: "Expand"; readonly json: Schema.Json };
+
+// The text encoding of a base64 string node: `contentEncoding` wins over 3.0 `format: byte`.
+const encodingOf = (node: FieldNode): FieldEncoding | undefined => {
+  if (node.contentEncoding === "base64" || node.contentEncoding === "base64url") {
+    return node.contentEncoding;
+  }
+
+  return node.contentEncoding === undefined && node.format === "byte" ? "base64" : undefined;
+};
 
 const fieldSchema = (
   defs: Defs,
@@ -334,7 +363,15 @@ const fieldSchema = (
     return field.settled && items.settled ? "safe" : "unsettled";
   };
 
-  return { description: described?.prose ?? "", integer: width() };
+  const last = field.nodes.at(-1);
+  const encoding = last === undefined ? undefined : encodingOf(last);
+
+  return {
+    description: described?.prose ?? "",
+    encoding,
+    integer: width(),
+    mediaType: last?.contentMediaType,
+  };
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -431,6 +468,41 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): E
     : flagConstructor(flag, kind);
 };
 
+// A JSON body property the runtime reads from a file and encodes (design 6.3 Binary): its flag is
+// a `file` flag inside a JSON alternative, where a multipart part flag of the same kind is a part.
+const isEncodedField = (flag: PlannedFlag, alternative: MediaAlternative | undefined): boolean =>
+  alternative?.codec === "json" &&
+  flag.source._tag === "Body" &&
+  flag.source.kind === "file" &&
+  !flag.source.repeated;
+
+const fileDescription = ({ description, encoding, mediaType }: FieldSchema): string =>
+  [
+    description,
+    `File path, or - for stdin; the ${encoding ?? "base64"} encoding is applied for you.`,
+    ...(mediaType === undefined ? [] : [`Content type: ${mediaType}.`]),
+  ]
+    .filter((part) => part !== "")
+    .join(" ");
+
+// A field flag's help text; an encoded field the walk cannot settle an encoding for is refused.
+const fieldDescription = (
+  flag: PlannedFlag,
+  alternative: MediaAlternative | undefined,
+  schema: FieldSchema,
+) =>
+  Effect.gen(function* described() {
+    if (!isEncodedField(flag, alternative)) {
+      return schema.description;
+    }
+
+    if (schema.encoding === undefined) {
+      return yield* refuse("unsupported-flag", flag.name);
+    }
+
+    return fileDescription(schema);
+  });
+
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
     const { source } = flag;
@@ -470,18 +542,19 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     const alternative = operation.body?.alternatives.find((candidate) =>
       source.media.includes(candidate.mediaType),
     );
-    const schema: { readonly description: string; readonly integer: IntegerWidth } =
+    const schema: FieldSchema =
       alternative?.schema === undefined
-        ? { description: "", integer: "unsettled" }
+        ? { description: "", encoding: undefined, integer: "unsettled", mediaType: undefined }
         : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
 
+    const description = yield* fieldDescription(flag, alternative, schema);
     const head = bodyFlagHead(flag, source.kind, schema.integer);
     const steps = [
       source.repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
-      ...describedBy(schema.description).map((text) => fn("Flag.withDescription", text)),
+      ...describedBy(description).map((text) => fn("Flag.withDescription", text)),
     ];
 
     return [flag.identifier, pipe(head, steps)] as const;
@@ -541,11 +614,43 @@ const alternativeBody = (
       return yield* refuse("unresolved-schema", alternative.mediaType);
     }
 
+    const schemaKey = alternative.schema?.key ?? "";
     const fields: Entry[] = [];
     for (const flag of command.flags.filter(isFieldFlag)) {
-      if (flag.source._tag === "Body" && flag.source.media.includes(alternative.mediaType)) {
-        fields.push([flag.source.wireName, yield* flagValue(flag.identifier)]);
+      const { source } = flag;
+      if (source._tag !== "Body" || !source.media.includes(alternative.mediaType)) {
+        continue;
       }
+
+      const value = yield* flagValue(flag.identifier);
+      if (!isEncodedField(flag, alternative)) {
+        fields.push([source.wireName, value]);
+        continue;
+      }
+
+      const { encoding } = fieldSchema(context.defs, schemaKey, source.wireName, false);
+      if (encoding === undefined) {
+        return yield* refuse("unsupported-flag", flag.name);
+      }
+
+      // The flag stays a path string at parse; the runtime reads and encodes it (m2-b64a).
+      fields.push([
+        source.wireName,
+        fn(
+          "Option.map",
+          value,
+          arrow(
+            [{ name: I("path") }],
+            newExpr(path("Input.FileField"), [
+              obj([
+                ["encoding", str(encoding)],
+                ["flag", str(flag.name)],
+                ["path", ident(I("path"))],
+              ]),
+            ]),
+          ),
+        ),
+      ]);
     }
 
     return {

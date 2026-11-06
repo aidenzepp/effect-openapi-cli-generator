@@ -8,7 +8,8 @@ import { formatPointer } from "../model/pointer.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
- * binary multipart part), or the whole body.
+ * binary multipart part, or a base64 body property the runtime encodes from the file), or the
+ * whole body.
  */
 export type BodyFlagKind =
   | "body"
@@ -168,6 +169,10 @@ const inProgress = Symbol("inProgress");
 interface Ctx {
   readonly defs: Defs;
   /**
+   * JSON bodies only: a base64 string property is a `file` flag, not a `string`.
+   */
+  readonly base64Fields: boolean;
+  /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
@@ -175,9 +180,10 @@ interface Ctx {
   visits: number;
 }
 
-const newCtx = (defs: Defs, fileParts: boolean): Ctx => ({
+const newCtx = (defs: Defs, codec: "form" | "json" | "multipart"): Ctx => ({
+  base64Fields: codec === "json",
   defs,
-  fileParts,
+  fileParts: codec === "multipart",
   memo: new Map(),
   visits: 0,
 });
@@ -305,6 +311,16 @@ const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
 };
 
 /**
+ * A base64 string property (design 6.3 Binary): 3.0 `format: byte`, or 3.1+ `contentEncoding`
+ * `base64` or `base64url`. Other encodings and other types are text.
+ */
+const isBase64 = (schema: SchemaNode, type: SchemaNode["type"]): boolean =>
+  type === "string" &&
+  (schema.contentEncoding === "base64" ||
+    schema.contentEncoding === "base64url" ||
+    (schema.contentEncoding === undefined && schema.format === "byte"));
+
+/**
  * The `allOf` merge: every member an object, and a key two members declare equal in both (its
  * first declaration kept). The equality checks spend from the call's budget.
  */
@@ -364,6 +380,10 @@ const lookupRef = (
 
 const leaf = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): Classified => {
   if (ctx.fileParts && isBinary(schema, type)) {
+    return { _tag: "Scalar", kind: "file", repeated: false };
+  }
+
+  if (ctx.base64Fields && isBase64(schema, type)) {
     return { _tag: "Scalar", kind: "file", repeated: false };
   }
 
@@ -438,9 +458,16 @@ const classify = (
   }
 
   if (type === "array" && schema.items !== undefined) {
-    return Result.map(classify(ctx, schema.items, below(site, "items"), hops + 1), (item) =>
-      item._tag === "Scalar" && !item.repeated ? { ...item, repeated: true } : opaque,
-    );
+    return Result.map(classify(ctx, schema.items, below(site, "items"), hops + 1), (item) => {
+      if (item._tag !== "Scalar" || item.repeated) {
+        return opaque;
+      }
+
+      // An array of base64 strings repeats a text flag; only a lone property is a file.
+      const kind = item.kind === "file" && !ctx.fileParts ? "string" : item.kind;
+
+      return { ...item, kind, repeated: true };
+    });
   }
 
   return Result.succeed(leaf(ctx, schema, type));
@@ -617,7 +644,7 @@ export const flattenBody = (
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs, multipart);
+  const ctx = newCtx(defs, codec);
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));
