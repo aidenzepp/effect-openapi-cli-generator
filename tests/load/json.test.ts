@@ -2,7 +2,7 @@ import { BunFileSystem } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { ByteSize, Effect, FileSystem, Option, Schema, Stream } from "effect";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
@@ -165,11 +165,34 @@ describe("load: strict JSON", () => {
     const error = await refusal(file("missing.json"));
     expect(error.diagnostic.code).toBe("DOC-14/unreadable");
   });
+
+  test("an entry document named through a symlink loads", async () => {
+    const scratch = path.join(import.meta.dir, "..", "..", "work");
+
+    mkdirSync(scratch, { recursive: true });
+
+    const base = mkdtempSync(path.join(scratch, "load-link-"));
+    const link = path.join(base, "spec.yaml");
+
+    try {
+      symlinkSync(fixture("spec.yaml"), link);
+
+      const loaded = await Effect.runPromise(
+        loadFile(link, options()).pipe(Effect.provide(BunFileSystem.layer)),
+      );
+      expect(loaded.format).toBe("yaml");
+      expect(loaded.document).toBe(document);
+    } finally {
+      rmSync(base, { force: true, recursive: true });
+    }
+  });
 });
 
 const withFs = (overrides: Partial<FileSystem.FileSystem>) =>
   loadFile("/virtual/spec.json", options({ maxBytes: 1024, maxDepth: 256, maxNodes: 10_000 })).pipe(
-    Effect.provide(FileSystem.layerNoop(overrides)),
+    Effect.provide(
+      FileSystem.layerNoop({ realPath: (given) => Effect.succeed(given), ...overrides }),
+    ),
   );
 
 const info = (size: number, type: FileSystem.File.Type): FileSystem.File.Info => ({

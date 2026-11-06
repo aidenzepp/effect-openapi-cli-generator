@@ -1,10 +1,22 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { afterEach, describe, expect, test } from "bun:test";
-import { ByteSize, Effect, Schema } from "effect";
-import type { FileSystem } from "effect";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { ByteSize, Effect, FileSystem, Schema } from "effect";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
-import { defaultLimits, readFileBounded, refuse } from "../../src/load/budget.ts";
+import {
+  defaultLimits,
+  readFileBounded,
+  readMemberBounded,
+  refuse,
+} from "../../src/load/budget.ts";
 import type { VerifyOpened } from "../../src/load/budget.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 
@@ -30,14 +42,18 @@ afterEach(() => {
 
 const document = Schema.decodeUnknownSync(DocumentUri)("https://example.com/doc.json");
 
-const read = (file: string, verify?: VerifyOpened, maxBytes = defaultLimits.maxBytes) =>
-  readFileBounded(file, { ...defaultLimits, maxBytes }, document, verify).pipe(
+const read = (
+  file: string,
+  verify: VerifyOpened = () => Effect.void,
+  maxBytes = defaultLimits.maxBytes,
+) =>
+  readMemberBounded(file, { ...defaultLimits, maxBytes }, document, verify).pipe(
     Effect.provide(BunFileSystem.layer),
   );
 
 const refusal = (effect: ReturnType<typeof read>) => Effect.runPromise(Effect.flip(effect));
 
-describe("readFileBounded", () => {
+describe("readMemberBounded", () => {
   test("reads a regular file's bytes from the handle it checked", async () => {
     const file = path.join(directory(), "a.json");
     let seen: FileSystem.File.Info | undefined;
@@ -105,6 +121,63 @@ describe("readFileBounded", () => {
 
     const error = await refusal(read(file, () => refuse(document, "DOC-14/unreadable")));
 
+    expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+  });
+});
+
+const readOperator = (file: string, hook?: (path: string) => void) =>
+  Effect.gen(function* withHook() {
+    const fs = yield* FileSystem.FileSystem;
+    const hooked: FileSystem.FileSystem = {
+      ...fs,
+      open: (opened, options) =>
+        Effect.suspend(() => {
+          hook?.(opened);
+
+          return fs.open(opened, options);
+        }),
+    };
+
+    return yield* readFileBounded(file, defaultLimits, document).pipe(
+      Effect.provideService(FileSystem.FileSystem, hooked),
+    );
+  }).pipe(Effect.provide(BunFileSystem.layer));
+
+describe("readFileBounded: an operator's path", () => {
+  test("a symlinked path loads the file it names", async () => {
+    const base = directory();
+    const target = path.join(base, "target.json");
+    const link = path.join(base, "link.json");
+
+    writeFileSync(target, '{"a":1}');
+    symlinkSync(target, link);
+
+    const bytes = await Effect.runPromise(readOperator(link));
+
+    expect(new TextDecoder().decode(bytes)).toBe('{"a":1}');
+  });
+
+  test("a file swapped in after the real path was resolved is refused by dev/ino", async () => {
+    const base = directory();
+    const target = path.join(base, "target.json");
+    const other = path.join(base, "other.json");
+    const link = path.join(base, "link.json");
+    let opened: string | undefined;
+
+    writeFileSync(target, '{"a":1}');
+    writeFileSync(other, '{"b":2}');
+    symlinkSync(target, link);
+
+    const error = await Effect.runPromise(
+      Effect.flip(
+        readOperator(link, (file) => {
+          opened = file;
+          renameSync(other, target);
+        }),
+      ),
+    );
+
+    expect(opened).toBe(target);
     expect(error.diagnostic.code).toBe("DOC-14/unreadable");
   });
 });

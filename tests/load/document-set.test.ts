@@ -95,7 +95,7 @@ describe("document set: --document pairs", () => {
     expect(error.diagnostic.hint).toBe(pet);
   });
 
-  test("a pair whose path is a symlink is refused: the open does not follow it", async () => {
+  test("a pair whose path is a symlink loads, keeping the pair's URI and path", async () => {
     const scratch = path.join(import.meta.dir, "..", "..", "work");
 
     mkdirSync(scratch, { recursive: true });
@@ -105,14 +105,15 @@ describe("document set: --document pairs", () => {
 
     symlinkSync(pet, link);
 
-    const error = await refusal([{ path: link, uri: "https://example.com/pet.json" }]).finally(
-      () => {
-        rmSync(base, { force: true, recursive: true });
-      },
-    );
+    const set = await Effect.runPromise(
+      run([{ path: link, uri: "https://example.com/pet.json" }]),
+    ).finally(() => {
+      rmSync(base, { force: true, recursive: true });
+    });
+    const member = set.documents.get(uri("https://example.com/pet.json"));
 
-    expect(error.diagnostic.code).toBe("DOC-14/unreadable");
-    expect(error.diagnostic.scope).toBe("document");
-    expect(error.diagnostic.hint).toBe(link);
+    expect(member?.path).toBe(link);
+    expect(member?.document).toBe(uri("https://example.com/pet.json"));
+    expect(member?.format).toBe("json");
   });
 });

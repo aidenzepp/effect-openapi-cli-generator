@@ -1,8 +1,14 @@
-import { Array as Arr, ByteSize, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
+import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
 import { pathToFileURL } from "node:url";
 import { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
-import { defaultLimits, LoadRefusal, readFileBounded } from "./budget.ts";
+import {
+  defaultLimits,
+  LoadRefusal,
+  readFileBounded,
+  readMemberBounded,
+  sameFile,
+} from "./budget.ts";
 import type { VerifyOpened } from "./budget.ts";
 import { loadBytes } from "./index.ts";
 import type { Loaded } from "./index.ts";
@@ -112,7 +118,12 @@ const loadPair = (
     return refuse("REF-16/duplicate-uri", pair);
   }
 
-  return readFileBounded(pair.path, defaultLimits, uri.value, verify).pipe(
+  const read =
+    verify === undefined
+      ? readFileBounded(pair.path, defaultLimits, uri.value)
+      : readMemberBounded(pair.path, defaultLimits, uri.value, verify);
+
+  return read.pipe(
     Effect.flatMap((bytes) => loadBytes(bytes, { document: uri.value })),
     Effect.map((loaded): readonly [Document, SetMember] => [
       uri.value,
@@ -166,8 +177,7 @@ export const resolveUnderRoot = (
 
 /**
  * The opened handle must be the file at `real`, still inside the real root: the real path is
- * re-resolved and checked after the open, and its `(dev, ino)` must equal the handle's. Where the
- * platform reports no inode, `dev` and `size` stand in with the real-path check.
+ * re-resolved and checked after the open, and it must be the handle's file (`sameFile`).
  */
 const sameCheckedFile =
   (realRoot: string, real: string): VerifyOpened =>
@@ -177,11 +187,7 @@ const sameCheckedFile =
       const fs = yield* FileSystem.FileSystem;
       const checked = yield* resolveUnderRoot(realRoot, path.relative(realRoot, real));
       const info = yield* fs.stat(checked).pipe(Effect.catch(() => unreadable(real)));
-      const sameInode =
-        Option.isSome(opened.ino) && Option.isSome(info.ino)
-          ? opened.ino.value === info.ino.value
-          : ByteSize.toBigInt(opened.size) === ByteSize.toBigInt(info.size);
-      const same = checked === real && info.type === "File" && info.dev === opened.dev && sameInode;
+      const same = checked === real && info.type === "File" && sameFile(info, opened);
 
       return yield* same ? Effect.void : outsideRoot(real);
     }).pipe(Effect.provide(Path.layer));

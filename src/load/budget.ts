@@ -173,27 +173,42 @@ const checkRegular = (
 };
 
 /**
- * Opens `path` without following a symlink at its final component, checks the open handle (a
- * regular file within `maxBytes`, then `verify`), and reads that same handle through
- * `Stream.limitBytes`, so the bytes read are the bytes checked and `maxBytes` bounds what is
- * actually read. A `stat` before the open refuses a special file already in place without
- * opening it; one swapped in after that `stat` is refused by the handle check, but the open
- * itself can block, since the FileSystem service cannot open non-blocking (accepted risk).
+ * Whether two `stat` results name the same file: equal `dev` and `ino`. Where the platform reports
+ * no inode, equal `size` stands in for it.
  */
-export const readFileBounded = (
+export const sameFile = (a: FileSystem.File.Info, b: FileSystem.File.Info): boolean =>
+  a.dev === b.dev &&
+  (Option.isSome(a.ino) && Option.isSome(b.ino)
+    ? a.ino.value === b.ino.value
+    : ByteSize.toBigInt(a.size) === ByteSize.toBigInt(b.size));
+
+type VerifyAgainst = (
+  before: FileSystem.File.Info,
+  opened: FileSystem.File.Info,
+) => Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+
+/**
+ * Opens `path` without following a symlink at its final component, checks the open handle (a
+ * regular file within `maxBytes`, then `verify` against the `stat` taken before the open), and
+ * reads that same handle through `Stream.limitBytes`, so the bytes read are the bytes checked and
+ * `maxBytes` bounds what is actually read. The `stat` before the open refuses a special file
+ * already in place without opening it; one swapped in after that `stat` is refused by the handle
+ * check, but the open itself can block, since the FileSystem service cannot open non-blocking
+ * (accepted risk).
+ */
+const readOpened = (
   path: string,
   limits: LoadLimits,
   document: Document,
-  verify: VerifyOpened = () => Effect.void,
+  verify: VerifyAgainst,
 ): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
   Effect.gen(function* readBounded() {
     const fs = yield* FileSystem.FileSystem;
     const unreadable = () => refuse(document, "DOC-14/unreadable");
 
-    yield* fs.stat(path).pipe(
-      Effect.catchTag("PlatformError", unreadable),
-      Effect.flatMap((info) => checkRegular(info, limits, document)),
-    );
+    const before = yield* fs.stat(path).pipe(Effect.catchTag("PlatformError", unreadable));
+
+    yield* checkRegular(before, limits, document);
 
     const file = yield* fs
       .open(path, { flag: "r", noFollow: true })
@@ -201,7 +216,42 @@ export const readFileBounded = (
     const opened = yield* file.stat.pipe(Effect.catchTag("PlatformError", unreadable));
 
     yield* checkRegular(opened, limits, document);
-    yield* verify(opened);
+    yield* verify(before, opened);
 
     return yield* readStreamBounded(handleStream(file), limits, document);
   }).pipe(Effect.scoped);
+
+/**
+ * Reads a path the operator named (the entry document, a `--document` pair). A symlinked name is
+ * the operator's choice, so its real path is resolved first; that real path is then opened
+ * without following a symlink, and the handle must be the file a `stat` of the real path saw
+ * (`sameFile`), so a file or link swapped in after `realPath` is refused, not read.
+ */
+export const readFileBounded = (
+  path: string,
+  limits: LoadLimits,
+  document: Document,
+): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* readOperatorPath() {
+    const fs = yield* FileSystem.FileSystem;
+    const real = yield* fs
+      .realPath(path)
+      .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
+
+    return yield* readOpened(real, limits, document, (before, opened) =>
+      sameFile(before, opened) ? Effect.void : refuse(document, "DOC-14/unreadable"),
+    );
+  });
+
+/**
+ * Reads a file found inside a trust boundary (a `--ref-root` member). `path` is opened as given,
+ * never through a symlink at its final component, and `verify` decides whether the open handle
+ * is still the file the boundary admitted.
+ */
+export const readMemberBounded = (
+  path: string,
+  limits: LoadLimits,
+  document: Document,
+  verify: VerifyOpened,
+): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
+  readOpened(path, limits, document, (_before, opened) => verify(opened));
