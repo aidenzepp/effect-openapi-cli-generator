@@ -107,7 +107,7 @@ describe("formData bytes", () => {
         "Content-Transfer-Encoding: base64",
         "Content-Type: image/png, image/jpeg",
         "",
-        "x",
+        "eA==",
         "--testboundary--",
         "",
       ].join("\r\n"),

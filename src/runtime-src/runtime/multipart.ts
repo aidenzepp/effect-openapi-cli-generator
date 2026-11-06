@@ -158,6 +158,52 @@ const partHead = (
 const bodyStream = (body: LeafPart["body"]): Stream.Stream<Uint8Array, unknown> =>
   body instanceof Uint8Array ? Stream.succeed(body) : body;
 
+/**
+ * RFC 4648 alphabets for the two `contentEncoding` values a part encodes; any other value is
+ * declared in the header and sent as given.
+ */
+const base64Alphabet = (encoding: string | undefined): "base64" | "base64url" | null =>
+  encoding === "base64" || encoding === "base64url" ? encoding : null;
+
+/**
+ * Streams `source` base64-encoded with padding and no line breaks. Only whole 3-byte groups are
+ * encoded per chunk, so no chunk boundary falls inside a quantum; the 0 to 2 leftover bytes are
+ * carried and encoded, padded, when the source ends.
+ */
+const base64Stream = (
+  source: Stream.Stream<Uint8Array, unknown>,
+  alphabet: "base64" | "base64url",
+): Stream.Stream<Uint8Array, unknown> =>
+  source.pipe(
+    Stream.mapAccum(
+      () => new Uint8Array(0),
+      (carry: Uint8Array, chunk: Uint8Array) => {
+        const joined = new Uint8Array(carry.length + chunk.length);
+
+        joined.set(carry);
+        joined.set(chunk, carry.length);
+
+        const whole = joined.length - (joined.length % 3);
+
+        return [
+          joined.slice(whole),
+          whole === 0 ? [] : [encoder.encode(joined.subarray(0, whole).toBase64({ alphabet }))],
+        ] as const;
+      },
+      {
+        onHalt: (carry) =>
+          carry.length === 0 ? [] : [encoder.encode(carry.toBase64({ alphabet }))],
+      },
+    ),
+  );
+
+const leafBody = (part: LeafPart): Stream.Stream<Uint8Array, unknown> => {
+  const alphabet = base64Alphabet(part.contentEncoding);
+  const source = bodyStream(part.body);
+
+  return alphabet === null ? source : base64Stream(source, alphabet);
+};
+
 const nestedBoundary = (injected: string | undefined, index: number): string =>
   injected === undefined ? randomBoundary() : `${injected}-${index}`;
 
@@ -186,7 +232,7 @@ const encode = (
       }
 
       return Stream.succeed(partHead(boundary, kind, part, null)).pipe(
-        Stream.concat(bodyStream(part.body)),
+        Stream.concat(leafBody(part)),
         Stream.concat(Stream.succeed(crlf)),
       );
     }),
