@@ -323,6 +323,128 @@ describe("REF-18 unresolvable references", () => {
   });
 });
 
+const usesSchema = (ref: string) =>
+  usesParameter({ in: "query", name: "q", schema: { $ref: ref } });
+
+// One reference used as an operation Parameter and as a response Header.
+const parameterAndHeader = (ref: string) => ({
+  paths: {
+    "/a": {
+      get: {
+        parameters: [{ $ref: ref }],
+        responses: { "200": { description: "ok", headers: { "X-A": { $ref: ref } } } },
+      },
+    },
+  },
+});
+
+describe("REF-14 a JSON Pointer crossing a schema $id", () => {
+  const withId = {
+    schemas: {
+      S: { $defs: { T: { type: "string" } }, $id: "https://example.com/s.json", type: "object" },
+    },
+  };
+
+  for (const line of ["3.1", "3.2"] as const) {
+    test(`a pointer into a schema below its $id resolves with a notice naming the $id (${line})`, () => {
+      const resolution = resolved(
+        line,
+        spec(line, { components: withId, ...usesSchema("#/components/schemas/S/$defs/T") }),
+      );
+
+      expect(targetOf(resolution, "/paths/~1a/get/parameters/0/schema")).toBe(
+        "/components/schemas/S/$defs/T",
+      );
+      expect(
+        resolution.diagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.severity,
+          diagnostic.scope,
+          diagnostic.pointer,
+        ]),
+      ).toEqual([
+        ["REF-14/pointer-crosses-id", "notice", "element", "/paths/~1a/get/parameters/0/schema"],
+      ]);
+      expect<readonly { document: string; pointer: string }[] | undefined>(
+        resolution.diagnostics[0]?.related,
+      ).toEqual([{ document: entry, pointer: "/components/schemas/S" }]);
+    });
+
+    test(`a pointer to the $id schema itself, or from its $id, raises nothing (${line})`, () => {
+      const atRoot = resolved(
+        line,
+        spec(line, { components: withId, ...usesSchema("#/components/schemas/S") }),
+      );
+      const fromId = resolved(
+        line,
+        spec(line, { components: withId, ...usesSchema("https://example.com/s.json#/$defs/T") }),
+      );
+
+      expect([codes(atRoot), codes(fromId)]).toEqual([[], []]);
+    });
+  }
+});
+
+describe("DOC-19 one node as two object types", () => {
+  const header = { in: "header", name: "X-A", schema: { type: "string" } };
+  const headerSite = "/paths/~1a/get/responses/200/headers/X-A";
+
+  for (const line of lines) {
+    test(`a component Parameter referenced as a response Header is refused naming both pointers (${line})`, () => {
+      const diagnostic = refusal(
+        line,
+        spec(line, {
+          components: { parameters: { P: header } },
+          ...parameterAndHeader("#/components/parameters/P"),
+        }),
+      );
+
+      expect([diagnostic.code, diagnostic.scope, diagnostic.severity, diagnostic.pointer]).toEqual([
+        "DOC-19/two-object-types",
+        "document",
+        "refusal",
+        headerSite,
+      ]);
+      expect<readonly { document: string; pointer: string }[] | undefined>(
+        diagnostic.related,
+      ).toEqual([{ document: entry, pointer: "/components/parameters/P" }]);
+    });
+  }
+
+  test("an untyped node referenced as two types names both reference sites", () => {
+    const diagnostic = refusal(
+      "3.1",
+      spec("3.1", { "x-shared": header, ...parameterAndHeader("#/x-shared") }),
+    );
+
+    // Settled targets are walked last-in first, so the Header use is walked before the Parameter.
+    expect([diagnostic.code, diagnostic.pointer]).toEqual([
+      "DOC-19/two-object-types",
+      "/paths/~1a/get/parameters/0",
+    ]);
+    expect<readonly { document: string; pointer: string }[] | undefined>(
+      diagnostic.related,
+    ).toEqual([{ document: entry, pointer: headerSite }]);
+  });
+
+  test("a node referenced twice as one type is not refused", () => {
+    const value = spec("3.1", {
+      components: { parameters: { P: header } },
+      paths: {
+        "/a": {
+          get: {
+            parameters: [{ $ref: "#/components/parameters/P" }],
+            responses: { "200": { description: "ok" } },
+          },
+          parameters: [{ $ref: "#/components/parameters/P" }],
+        },
+      },
+    });
+
+    expect(codes(resolved("3.1", value))).toEqual([]);
+  });
+});
+
 describe("REF-05, REF-06, REF-07, REF-08 siblings per line", () => {
   test("REF-05 3.0 Reference Object siblings are ignored with a notice", () => {
     const value = spec("3.0", {
