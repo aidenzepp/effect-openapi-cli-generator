@@ -588,3 +588,180 @@ describe("coverage join without a build", () => {
     expect(missing([command({ security: [["key"]] })], skipped)).toEqual(["/servers/0"]);
   });
 });
+
+// A flag as `--describe` lists it, named on the wire as in the spec.
+const describedFlag = (pointer: string, name: string, location: "header" | "query") => ({
+  location,
+  name,
+  pointer,
+  wireName: name,
+});
+
+// A spec of `count` path items, each with a shared header, a GET and a POST, root servers and
+// security, and a refusal or notice on every path: tens of thousands of walked elements against
+// thousands of refusals and notices, the shape that ran for hours on Cloudflare.
+const largeJoin = (count: number) => {
+  const paths: { [path: string]: Json } = {};
+  const commands: Command[] = [];
+  const refusals: Json[] = [];
+  const notices: Json[] = [];
+  const roots = { security: [["k1"], ["k2"]], servers: ["https://a.example", "https://b.example"] };
+
+  for (let index = 0; index < count; index += 1) {
+    const path = `/r${String(index)}`;
+    const item = `/paths/~1r${String(index)}`;
+    const shared = describedFlag(`${item}/parameters/0`, "X-Trace", "header");
+    const own = (method: string, names: readonly string[]) =>
+      names.map((name, position) =>
+        describedFlag(`${item}/${method}/parameters/${String(position)}`, name, "query"),
+      );
+    paths[path] = {
+      get: {
+        parameters: [
+          { in: "query", name: "a" },
+          { in: "query", name: "b" },
+        ],
+        responses: {
+          "200": { description: "ok" },
+          "404": { description: "no" },
+          "500": { description: "err" },
+        },
+      },
+      parameters: [{ in: "header", name: "X-Trace" }],
+      post: {
+        parameters: [
+          { in: "query", name: "c" },
+          { in: "query", name: "d" },
+        ],
+        requestBody: {
+          content: {
+            "application/json": { schema: { type: "object" } },
+            "application/x-www-form-urlencoded": { schema: { type: "object" } },
+          },
+        },
+        responses: {
+          "201": { description: "ok" },
+          "400": { description: "bad" },
+          "500": { description: "err" },
+        },
+      },
+    };
+
+    // Every fourth POST is refused by a collision at the shared header; every fourth GET has its
+    // 500 refused; every fourth POST body is ignored by notice; every fourth GET drops `b` by notice.
+    const variant = index % 4;
+    if (variant === 0) {
+      refusals.push({
+        code: "PRM-02/flag-collision",
+        document: entry,
+        operation: { method: "POST", path },
+        pointer: shared.pointer,
+        scope: "operation",
+      });
+    }
+
+    if (variant === 1) {
+      refusals.push({ document: entry, pointer: `${item}/get/responses/500`, scope: "element" });
+    }
+
+    if (variant === 2) {
+      notices.push({
+        code: "OPR-10/body-ignored",
+        document: entry,
+        pointer: `${item}/post/requestBody`,
+        scope: "element",
+      });
+    }
+
+    if (variant === 3) {
+      notices.push({
+        code: "PRM-09/other",
+        document: entry,
+        pointer: `${item}/get/parameters/1`,
+        scope: "element",
+      });
+    }
+
+    commands.push(
+      command({
+        flags: [shared, ...own("get", variant === 3 ? ["a"] : ["a", "b"])],
+        path: [`r${String(index)}`, "get"],
+        pathTemplate: path,
+        pointer: `${item}/get`,
+        responses: variant === 1 ? ["200", "404"] : ["200", "404", "500"],
+        ...roots,
+      }),
+    );
+    if (variant !== 0) {
+      commands.push(
+        command({
+          flags: [shared, ...own("post", ["c", "d"])],
+          method: "POST",
+          path: [`r${String(index)}`, "post"],
+          pathTemplate: path,
+          pointer: `${item}/post`,
+          requestMedia:
+            variant === 2 ? [] : ["application/json", "application/x-www-form-urlencoded"],
+          responses: ["201", "400", "500"],
+          ...roots,
+        }),
+      );
+    }
+  }
+
+  const spec: Json = {
+    components: {
+      securitySchemes: {
+        k1: { in: "header", name: "K1", type: "apiKey" },
+        k2: { in: "header", name: "K2", type: "apiKey" },
+      },
+    },
+    info: { title: "t", version: "1" },
+    openapi: "3.1.1",
+    paths,
+    security: [{ k1: [] }, { k2: [] }],
+    servers: [{ url: "https://a.example" }, { url: "https://b.example" }],
+  };
+
+  return { commands, notices, refusals, spec };
+};
+
+describe("coverage join cost", () => {
+  test("the join examines a small multiple of elements plus claims, not their product", () => {
+    const paths = 4000;
+    const { commands, notices, refusals, spec } = largeJoin(paths);
+    const resolution = Effect.runSync(
+      resolve({ document: entry, line: "3.1", value: spec }).pipe(Effect.orDie),
+    );
+    // Per path: the shared header, GET (operation, 2 parameters, 3 responses) and POST (operation,
+    // 2 parameters, 2 media, 3 responses); plus 2 root servers and 2 root security alternatives.
+    const elements = paths * 15 + 4;
+    // The indexed join examines about 26 per element or claim here; a scanning join, billions.
+    const budget = 40 * (elements + commands.length + refusals.length + notices.length);
+    let comparisons = 0;
+    // Abort as soon as the budget is spent; a quadratic join would otherwise run for hours.
+    const count = (examined: number) => {
+      comparisons += examined;
+      if (comparisons > budget) {
+        throw new Error(`the join passed ${String(budget)} comparisons`);
+      }
+    };
+
+    const result = Effect.runSync(
+      coverageOf(
+        {
+          describe: encodeDescription({ commands, describeVersion: 1 }),
+          report: JSON.stringify({ notices, refusals }),
+          resolution,
+        },
+        count,
+      ).pipe(Effect.orDie),
+    );
+
+    expect(result.missing).toEqual([]);
+    expect(result.invented).toEqual([]);
+    // Two media under each ignored body and `b` on each GET that drops it.
+    expect(result.byNotice).toHaveLength((paths / 4) * 3);
+    expect(comparisons).toBeLessThanOrEqual(budget);
+  });
+});
