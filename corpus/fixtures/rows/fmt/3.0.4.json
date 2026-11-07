@@ -1,0 +1,139 @@
+{
+  "info": {
+    "title": "Format value rows witness (FMT-01 to FMT-28)",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/count": {
+      "post": {
+        "operationId": "count",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "count": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "ratio": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/numbers": {
+      "get": {
+        "operationId": "numbers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "i32",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "i64",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "float",
+            "schema": {
+              "format": "float",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "double",
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/registry": {
+      "get": {
+        "operationId": "registry",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "format": "x-color",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "small",
+            "schema": {
+              "format": "uint8",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/strings": {
+      "get": {
+        "operationId": "strings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date-time",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}
