@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import nodePath from "node:path";
 import { Effect, Exit, Schema } from "effect";
 import { Diagnostic } from "../../src/model/diagnostic.ts";
-import { Verdict } from "../../src/model/verdict.ts";
+import { JsonPointer } from "../../src/model/brands.ts";
+import { Verdict, VerdictCoverage } from "../../src/model/verdict.ts";
 import { classifyVerdict, makeVerdict, printVerdict } from "../../src/report/verdict.ts";
 import type { VerdictInput } from "../../src/report/verdict.ts";
 
@@ -41,15 +42,80 @@ const elementRefusal = make("refusal", "element", "PRM-9/ignored-style", "/paths
 
 const notice = make("notice", "element", "PRM-19/ignored-header", "/paths/~1x/get/p/1");
 
+const noCoverage = { byNotice: [], checked: true, invented: [], missing: [] };
+
 const input = (diagnostics: readonly Diagnostic[]): VerdictInput => ({
+  commandNames: [],
   corpusVersion: 1,
-  coverage: { checked: true, missing: [] },
+  coverage: noCoverage,
   diagnostics,
   generator: { config: "corpus/config/x.json", configSha256: "a".repeat(64), version: "0.1.0" },
   informational: 2,
+  nonStandard: [],
   operations: { generated: 5, total: 8 },
   spec: { id: "x", openapi: "3.0.0", sha256: "b".repeat(64) },
   twinEquality: { checked: true, equal: true },
+});
+
+const doc = "https://example.com/spec.json";
+
+// Every walk kind and every claim kind once, as the corpus run hands them over (design 8.2).
+const coverage = Schema.decodeUnknownSync(VerdictCoverage)({
+  byNotice: [
+    {
+      document: doc,
+      in: "header",
+      kind: "parameter",
+      name: "X-Trace",
+      pointer: "/paths/~1x/get/parameters/1",
+    },
+  ],
+  checked: true,
+  invented: [
+    { kind: "command", path: ["ghost"] },
+    { kind: "requestMedia", mediaType: "text/csv", path: ["x", "get"] },
+    { key: "418", kind: "response", path: ["x", "get"] },
+    { kind: "securityAlternative", path: ["x", "get"], schemes: ["basic", "key"] },
+    { kind: "server", path: ["x", "get"], url: "https://other.example" },
+  ],
+  missing: [
+    { document: doc, kind: "operation", pointer: "/paths/~1y/post" },
+    {
+      document: doc,
+      in: "query",
+      kind: "parameter",
+      name: "q",
+      pointer: "/paths/~1x/get/parameters/0",
+    },
+    {
+      document: doc,
+      kind: "requestMedia",
+      mediaType: "application/json",
+      pointer: "/paths/~1y/post/requestBody/content/application~1json",
+    },
+    { document: doc, key: "200", kind: "response", pointer: "/paths/~1y/post/responses/200" },
+    { document: doc, kind: "securityAlternative", pointer: "/security/0", schemes: [] },
+    { document: doc, kind: "server", pointer: "/servers/0", url: "https://api.example.com" },
+  ],
+});
+
+const nonStandard = [
+  {
+    choice: "deepObjectBrackets",
+    pointer: Schema.decodeUnknownSync(JsonPointer)("/paths/~1x/get/parameters/2"),
+    row: "PRM-27",
+  },
+] as const;
+
+const commandNames = (
+  ["config", "operationId", "route", "route", "x-fern", "x-forge", "x-forge"] as const
+).map((command) => ({ command }));
+
+const full = (diagnostics: readonly Diagnostic[]): VerdictInput => ({
+  ...input(diagnostics),
+  commandNames,
+  coverage,
+  nonStandard,
 });
 
 const print = (diagnostics: readonly Diagnostic[]) =>
@@ -82,6 +148,7 @@ describe("makeVerdict", () => {
   test("counts come from the diagnostic list and the supplied operation totals", () => {
     expect(verdict.counts).toEqual({
       informational: 2,
+      nonStandard: 0,
       notices: 1,
       operations: { generated: 5, refused: 3, total: 8 },
       refusals: { document: 1, element: 1, operation: 1 },
@@ -157,4 +224,47 @@ describe("printVerdict", () => {
       expect(new TextDecoder().decode(result.stdout)).toBe(text);
     }
   }, 30_000);
+});
+
+describe("revision 19 fields", () => {
+  const verdict = makeVerdict(full([elementRefusal, notice]));
+
+  const text = Effect.runSync(printVerdict(verdict));
+
+  test("a verdict carrying every new field round-trips through the codec in the printer layout", () => {
+    expect(Schema.decodeUnknownSync(Verdict)(JSON.parse(text))).toEqual(verdict);
+    expect(verdict.coverage).toEqual(coverage);
+    expect(verdict.nonStandard).toEqual(nonStandard);
+    expect(verdict.counts.nonStandard).toBe(1);
+    expect(verdict.commandSources).toEqual({ config: 1, fern: 1, fold: 3, forge: 2 });
+
+    const result = Bun.spawnSync([vp, "fmt", "--stdin-filepath=tests/report/verdict.json"], {
+      cwd: root,
+      stdin: new TextEncoder().encode(text),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(new TextDecoder().decode(result.stdout)).toBe(text);
+  }, 30_000);
+
+  test("missing lists walk elements only: no invented claim and no string", () => {
+    const { missing } = Schema.encodeSync(Verdict)(verdict).coverage;
+
+    expect(missing.map((element) => element.kind)).toEqual([
+      "operation",
+      "parameter",
+      "requestMedia",
+      "response",
+      "securityAlternative",
+      "server",
+    ]);
+    expect(JSON.stringify(missing)).not.toContain("invented");
+    expect(verdict.coverage.invented).toHaveLength(5);
+  });
+
+  test("a non-standard entry never changes the verdict", () => {
+    for (const list of [[], [notice], [elementRefusal], [documentRefusal]]) {
+      expect(makeVerdict(full(list)).verdict).toBe(makeVerdict(input(list)).verdict);
+    }
+  });
 });

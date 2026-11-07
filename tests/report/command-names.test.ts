@@ -204,6 +204,22 @@ describe("generation report commandNames", () => {
     expect(report.commandNames.some((name) => "alias" in name)).toBe(false);
   });
 
+  test("the schema rejects tag or none as a command name source", () => {
+    const fields = {
+      document,
+      group: "tag",
+      path: ["things", "list"],
+      pointer: pointerOf("/things", "get"),
+    };
+
+    for (const command of ["tag", "none"]) {
+      expect(() => Schema.decodeUnknownSync(CommandName)({ ...fields, command })).toThrow();
+    }
+    expect(Schema.decodeUnknownSync(CommandName)({ ...fields, command: "route" }).command).toBe(
+      "route",
+    );
+  });
+
   test("two runs print equal bytes", async () => {
     expect(await reportText(curated, curatedConfig)).toBe(await reportText(curated, curatedConfig));
   });
