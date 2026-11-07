@@ -94,6 +94,10 @@ const findings = (diagnostics: readonly Diagnostic[]) =>
     diagnostic.severity,
   ]);
 
+// A refusal that drops its alternative names the media type and keeps its keyword in `related`.
+const relatedOf = (diagnostics: readonly Diagnostic[]) =>
+  diagnostics.map((diagnostic) => (diagnostic.related ?? []).map((site) => String(site.pointer)));
+
 const string: Json = { type: "string" };
 
 const tags: Json = { items: string, type: "array" };
@@ -196,8 +200,9 @@ describe("ENC-17 to ENC-26 the default contentType table when no style field is 
 
       expect(outcome._tag).toBe("Refused");
       expect(findings(outcome.diagnostics)).toEqual([
-        [`${media}/encoding/meta/contentType`, "ENC-02/form-content-type", "element", "refusal"],
+        [media, "ENC-02/form-content-type", "element", "refusal"],
       ]);
+      expect(relatedOf(outcome.diagnostics)).toEqual([[`${media}/encoding/meta/contentType`]]);
     }
   });
 });
@@ -234,8 +239,9 @@ describe("MED-11 MED-12 an encoding key that names no schema property", () => {
 
       expect(outcome._tag).toBe("Refused");
       expect(findings(outcome.diagnostics)).toEqual([
-        [`${media}/encoding/ghost`, "MED-11/unknown-property", "element", "refusal"],
+        [media, "MED-11/unknown-property", "element", "refusal"],
       ]);
+      expect(relatedOf(outcome.diagnostics)).toEqual([[`${media}/encoding/ghost`]]);
     }
   });
 

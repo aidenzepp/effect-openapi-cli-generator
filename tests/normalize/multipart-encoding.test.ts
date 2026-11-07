@@ -73,6 +73,7 @@ const refusalOf = (line: Line, body: Json) => {
     .map((diagnostic) => ({
       code: diagnostic.code,
       pointer: String(diagnostic.pointer),
+      related: diagnostic.related?.map((related) => String(related.pointer)),
       row: diagnostic.row,
       scope: diagnostic.scope,
     }));
@@ -124,13 +125,24 @@ describe("ENC-37: contentEncoding on a 3.1 or 3.2 multipart part", () => {
       expect(ruleOf(line, multipart({ file: byte }), "file").contentEncoding).toBeUndefined();
     });
 
-    test(`ENC-37: ${line} another contentEncoding is refused at the keyword`, () => {
+    for (const value of ["binary", "7bit", "8BIT"]) {
+      test(`ENC-37: ${line} identity contentEncoding ${value} sends the part raw`, () => {
+        const rule = ruleOf(line, multipart({ file: { contentEncoding: value } }), "file");
+
+        expect(rule.contentEncoding).toBeUndefined();
+        expect(rule.contentType.map(String)).toEqual(["application/octet-stream"]);
+        expect(rule.rows.map(String)).toContain("ENC-37");
+      });
+    }
+
+    test(`ENC-37: ${line} another contentEncoding refuses the media type it drops`, () => {
       const body = multipart({ file: { contentEncoding: "quoted-printable", type: "string" } });
 
       expect(refusalOf(line, body)).toEqual([
         {
           code: "ENC-37/unsupported-content-encoding",
-          pointer: `${media}/schema/properties/file/contentEncoding`,
+          pointer: media,
+          related: [`${media}/schema/properties/file/contentEncoding`],
           row: "ENC-37",
           scope: "element",
         },
@@ -150,11 +162,22 @@ describe("ENC-37: a nested part has no place for a transfer encoding", () => {
     expect(refusalOf("3.2", body)).toEqual([
       {
         code: "ENC-37/nested-transfer-encoding",
-        pointer: `${media}/encoding/meta/encoding/blob`,
+        pointer: media,
+        related: [`${media}/encoding/meta/encoding/blob`],
         row: "ENC-37",
         scope: "element",
       },
     ]);
+  });
+
+  test("ENC-37: a 3.2 nested identity part is sent raw", () => {
+    const meta: Json = { properties: { blob: { contentEncoding: "binary" } }, type: "object" };
+    const body = multipart(
+      { meta },
+      { meta: { contentType: "multipart/mixed", encoding: { blob: {} } } },
+    );
+
+    expect(ruleOf("3.2", body, "meta").nested?.length).toBe(1);
   });
 });
 
@@ -165,7 +188,8 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
     expect(refusalOf("3.0", body)).toEqual([
       {
         code: "ENC-39/conflicting-transfer-encoding",
-        pointer: `${media}/encoding/file/headers/Content-Transfer-Encoding/schema/enum`,
+        pointer: media,
+        related: [`${media}/encoding/file/headers/Content-Transfer-Encoding/schema/enum`],
         row: "ENC-39",
         scope: "element",
       },
@@ -178,7 +202,8 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
     expect(refusalOf("3.1", body)).toEqual([
       {
         code: "ENC-39/conflicting-transfer-encoding",
-        pointer: `${media}/encoding/file/headers/Content-Transfer-Encoding/schema/const`,
+        pointer: media,
+        related: [`${media}/encoding/file/headers/Content-Transfer-Encoding/schema/const`],
         row: "ENC-39",
         scope: "element",
       },
