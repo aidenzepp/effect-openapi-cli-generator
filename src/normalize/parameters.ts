@@ -10,7 +10,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
-import { schemaKeyAt } from "./schemas.ts";
+import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -900,6 +900,20 @@ const build = (
   }).pipe(Effect.orDie);
 };
 
+// The schema sites a parameter carries: its `schema`, or its one content entry's `schema`.
+const schemaSitesOf = (resolution: Resolution, source: Source): readonly CanonicalKey[] => {
+  const { node, target } = source;
+  if (node.schema !== undefined) {
+    return [childKey(target, "schema")];
+  }
+
+  const [mediaType] = Object.keys(node.content ?? {});
+
+  return mediaType === undefined
+    ? []
+    : [childKey(follow(resolution, childKey(target, "content", mediaType)), "schema")];
+};
+
 /**
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
  * refusal (design 2.2, 6.1, 6.2). Defaults come from the line's text, never from a schema
@@ -934,6 +948,13 @@ export const normalizeParameter = (
         diagnostics: yield* diagnostics([decision.finding]),
         required: source.node.required ?? false,
       };
+    }
+
+    if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
+      // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
+      // the value cannot be checked without it, so the parameter is refused with no second
+      // diagnostic, as a body is, and a required one raises its operation.
+      return { _tag: "Refused", diagnostics: [], required: source.node.required ?? false };
     }
 
     return {
