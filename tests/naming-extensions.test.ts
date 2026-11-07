@@ -154,17 +154,20 @@ const sequential = { concurrency: 1 } as const;
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
-// The names under a help text's SUBCOMMANDS heading, in printed order.
+// The names under a help text's SUBCOMMANDS heading, in printed order. The section ends at the
+// first blank line or the next unindented title, as help sections are delimited.
 const subcommandsOf = (help: string): readonly string[] => {
   const lines = help.split("\n");
   const start = lines.indexOf("SUBCOMMANDS");
 
-  return start === -1
-    ? []
-    : lines
-        .slice(start + 1)
-        .map((text) => text.trim().split(/\s+/u)[0] ?? "")
-        .filter((name) => name !== "");
+  if (start === -1) {
+    return [];
+  }
+
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((text) => text.trim() === "" || !/^\s/u.test(text));
+
+  return (end === -1 ? rest : rest.slice(0, end)).map((text) => text.trim().split(/\s+/u)[0] ?? "");
 };
 
 // Every leaf command path reachable from the root `--help`, depth first in printed order.

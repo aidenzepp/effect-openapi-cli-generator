@@ -145,7 +145,8 @@ export const builtIns = [
 ] as const;
 
 /**
- * The root help's last line: how to pass a flag value that starts with "-".
+ * How to pass a flag value that starts with "-": the line of the root help's last section,
+ * `FLAG VALUES`.
  */
 export const dashValueEscape = 'Write a flag value that starts with "-" as --flag=-value';
 
@@ -824,8 +825,9 @@ const isRootHelp = (doc: HelpDoc.HelpDoc): boolean => (doc.commandPath ?? []).le
  * The help formatter for a command tree (design 4.6). A command that carries `Output.Help` prints
  * its DESCRIPTION, USAGE, ARGUMENTS and FLAGS with a third column of notes, then its sections,
  * then the pointer to the global flags. Any other command prints as effect's default formatter
- * prints it, without colors and with global flags as a pointer. Root help ends with
- * `dashValueEscape`. Errors render through `valueFreeFormatter`.
+ * prints it, without colors and with global flags as a pointer. Root help ends with a
+ * `FLAG VALUES` section holding `dashValueEscape`, apart from SUBCOMMANDS so nothing reading that
+ * list sees it. Errors render through `valueFreeFormatter`.
  */
 export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
   formatCliError: valueFreeFormatter.formatCliError,
@@ -838,7 +840,7 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
         isNotesLayout(doc) ? renderNotedHelp(doc, notes) : helpBase.formatHelpDoc(doc),
     });
 
-    return isRootHelp(doc) ? `${text.trimEnd()}\n\n${dashValueEscape}` : text;
+    return isRootHelp(doc) ? `${text.trimEnd()}\n\nFLAG VALUES\n  ${dashValueEscape}` : text;
   },
   formatVersion: valueFreeFormatter.formatVersion,
 });
