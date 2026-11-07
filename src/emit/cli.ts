@@ -4,7 +4,7 @@ import type { Api, MediaAlternative, Operation, Parameter } from "../model/entit
 import { formatPointer } from "../model/pointer.ts";
 import type { SchemaEdit } from "../normalize/schemas.ts";
 import type { SpecLine } from "../model/spec-section.ts";
-import { runtimeNamespaces } from "../names/domain.ts";
+import { packageImports, rootNamespaceImports, runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
   NamePlan,
@@ -1616,16 +1616,6 @@ const heads = (expr: Expr, into: Set<string>): Set<string> => {
   return into;
 };
 
-const packageImports: readonly (readonly [string, string])[] = [
-  ["Effect", "effect"],
-  ["Layer", "effect"],
-  ["Option", "effect"],
-  ["Schema", "effect"],
-  ["Argument", "effect/cli"],
-  ["Command", "effect/cli"],
-  ["Flag", "effect/cli"],
-];
-
 interface Binding {
   readonly from: string;
   readonly kind: "Named" | "Namespace";
@@ -1964,8 +1954,7 @@ const rootFile = (
       ...api,
       { from: "../api/security.ts", kind: "Named", name: "security" },
       { from: "../api/servers.ts", kind: "Named", name: "servers" },
-      { from: "../runtime/groups.ts", kind: "Namespace", name: "Groups" },
-      { from: "effect/Array", kind: "Namespace", name: "Arr" },
+      ...rootNamespaceImports.map(([name, from]) => ({ from, kind: "Namespace" as const, name })),
       ...domainBindings(domain),
       ...author.bindings,
     ]);

@@ -1143,10 +1143,11 @@ const depthOf = (node: GroupNode, byTag: ReadonlyMap<string, GroupNode>): number
 
 /**
  * Every group's api namespace, planned once and unique across all api modules: `Root` is
- * `api/root.ts`, and a namespace `N` also claims `NCli`, the alias its `cli/` module is imported
- * under. Groups take their namespace shallowest first, then by group path (`tag`), so the first
- * group to fold to a name keeps it and every later one takes the next free numeric suffix
- * (`Accounts`, `Accounts2`, ...) past the claimed names and the names its importers bind.
+ * `api/root.ts`, a namespace `N` also claims `NCli`, the alias its `cli/` module is imported under,
+ * and neither may be a fixed namespace every cli module imports. Groups take their namespace
+ * shallowest first, then by group path (`tag`), so the first group to fold to a name keeps it and
+ * every later one takes the next free numeric suffix (`Accounts`, `Accounts2`, ...) past the
+ * claimed names and the names its importers bind.
  */
 const planNamespaces = (
   nodes: readonly GroupNode[],
@@ -1157,7 +1158,7 @@ const planNamespaces = (
     Order.mapInput(Order.Number, (node: GroupNode) => depthOf(node, byTag)),
     Order.mapInput(Order.String, (node: GroupNode) => node.tag),
   );
-  const claimed = new Set([rootNamespace, `${rootNamespace}Cli`]);
+  const claimed = new Set([rootNamespace, `${rootNamespace}Cli`, ...fixedNamespaces]);
   const planned = new Map<GroupNode, GroupNamespace>();
   for (const node of Arr.sort(nodes, order)) {
     const importers = blockedFor(node);
@@ -1314,8 +1315,7 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     const namespacesOf = planNamespaces([...firsts.keys()], (node) => {
       const importers = [node.tag, root, ...(links.hosts.get(node.tag) ?? [])].map(imports);
 
-      return (candidate) =>
-        fixedNamespaces.has(candidate) || importers.some((names) => names.has(candidate));
+      return (candidate) => importers.some((names) => names.has(candidate));
     });
     const used = [...firsts].flatMap(([node, first]) => {
       const namespace = namespacesOf.get(node);
