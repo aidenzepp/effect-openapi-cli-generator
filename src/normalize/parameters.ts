@@ -327,12 +327,19 @@ const allowReservedIgnored = notice(
   "allowReserved does not apply to this parameter in this OpenAPI line, so it is ignored.",
 );
 
+/**
+ * The STY-26 notice text for a 3.0 or 3.1 `deepObject` whose `explode` is false or omitted; form
+ * Encoding rules share it (ENC-12).
+ */
+export const deepObjectExplodeText =
+  "The 3.2 text says explode has no effect for deepObject; it is applied to this line, so the value is exploded.";
+
 const deepObjectExplode = (row: string): Finding =>
   notice(
     `${row}/explode-no-effect`,
     "parameter-explode",
     "Parameter deepObject explode",
-    "The 3.2 text says explode has no effect for deepObject; it is applied to this line, so the value is exploded.",
+    deepObjectExplodeText,
   );
 
 const compoundNested = refusal(

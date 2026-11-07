@@ -871,7 +871,8 @@ describe("emitCli: multipart request bodies", () => {
   });
 
   test("a multipart/mixed body is refused", async () => {
-    expect(await multipartRefusals({ "multipart/mixed": { schema: importSchema } })).toEqual([
+    // Untyped: normalization refuses an object schema on multipart/mixed first (MED-25).
+    expect(await multipartRefusals({ "multipart/mixed": { schema: {} } })).toEqual([
       { reason: "unsupported-body", subject: "a multipart/mixed request body" },
     ]);
   });

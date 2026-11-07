@@ -15,6 +15,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { deepObjectExplodeText } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
@@ -1282,6 +1283,20 @@ const arrayFormData = (at: CanonicalKey): Finding =>
     "Describe the body as an object whose properties are the parts",
   );
 
+// MED-25: a multipart type other than form-data sends unnamed ordered parts, and correlating them
+// with an object's properties by a Content-Disposition name is a MAY this generator does not offer.
+const unnamedParts = (line: Line, at: CanonicalKey): Finding =>
+  refusal(
+    "MED-25/unnamed-parts",
+    line === "3.2" ? "additional-encoding-approaches" : "encoding-multipart-media-types",
+    "Multipart object body other than form-data",
+    "This multipart type sends unnamed parts in order, which the object schema's named properties do not map to, so the media type is refused.",
+    at,
+    line === "3.2"
+      ? "Use multipart/form-data, or describe the parts in order with an array schema"
+      : "Use multipart/form-data",
+  );
+
 interface Media {
   readonly home: CanonicalKey;
   readonly node: MediaNode;
@@ -1512,6 +1527,22 @@ const isArrayBody = (
     return typesOf(yield* flatten(walk, schema)).includes("array");
   });
 
+// An object root: not an array body, and typed object or with declared properties.
+const isObjectBody = (
+  walk: Walk,
+  schema: CanonicalKey,
+  members: Members,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* objectBody() {
+    if (yield* isArrayBody(walk, schema, members)) {
+      return false;
+    }
+
+    return (
+      members.properties.length > 0 || typesOf(yield* flatten(walk, schema)).includes("object")
+    );
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1532,6 +1563,16 @@ const multipartParts = (
       (yield* isArrayBody(ctx.walk, schema, members))
     ) {
       return refusedParts([arrayFormData(media.home)]);
+    }
+
+    // A range such as `multipart/*` is not a concrete type, so it is left to the emitter.
+    if (
+      schema !== undefined &&
+      base !== "multipart/form-data" &&
+      !base.endsWith("/*") &&
+      (yield* isObjectBody(ctx.walk, schema, members))
+    ) {
+      return refusedParts([dropping(unnamedParts(line, schema))]);
     }
 
     const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
@@ -1685,6 +1726,25 @@ const bracketChoice = (input: RuleInput): Finding =>
     input.actual,
   );
 
+// ENC-12 (design D-OC14): a 3.0 or 3.1 form deepObject with explode false or omitted is exploded,
+// as STY-26 is for a parameter, with that row's notice text.
+const deepObjectExplode = (
+  line: Line,
+  serialization: PlainSerialization | undefined,
+  actual: CanonicalKey,
+): readonly Finding[] =>
+  line !== "3.2" && serialization?.style === "deepObject" && serialization.explode !== true
+    ? [
+        notice(
+          "ENC-12/explode-no-effect",
+          "encoding-explode",
+          "Encoding deepObject explode",
+          deepObjectExplodeText,
+          actual,
+        ),
+      ]
+    : [];
+
 // What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
 // bracket convention (the author config's switch, never defaulted or inferred).
 const deepObjectOf = (
@@ -1756,6 +1816,7 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       findings: [
         ...typing.findings,
         ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
         ...formIgnored(node, input.actual),
       ],
       rule,
