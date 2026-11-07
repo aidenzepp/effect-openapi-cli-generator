@@ -8789,7 +8789,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -8807,7 +8807,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -8849,7 +8849,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9155,7 +9155,7 @@
       "scope": "operation"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9167,7 +9167,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9413,7 +9413,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9557,7 +9557,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1climate~1orders~1{order}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9749,7 +9749,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9767,7 +9767,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9815,7 +9815,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9845,7 +9845,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers~1{customer}~1cards/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -9923,7 +9923,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers~1{customer}~1sources/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10409,7 +10409,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10421,7 +10421,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10445,7 +10445,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10469,7 +10469,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10505,7 +10505,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -10733,7 +10733,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11189,7 +11189,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_informational/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11339,7 +11339,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1prices~1{price}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11429,7 +11429,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1products~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11501,7 +11501,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11513,7 +11513,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11789,7 +11789,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11927,7 +11927,7 @@
       "scope": "operation"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -11939,7 +11939,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -12215,7 +12215,7 @@
       "scope": "operation"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -12227,7 +12227,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1tax~1registrations~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -12287,7 +12287,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1terminal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -12299,7 +12299,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -12329,7 +12329,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1terminal~1locations~1{location}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -13253,7 +13253,7 @@
       "scope": "operation"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
@@ -13265,7 +13265,7 @@
       "scope": "element"
     },
     {
-      "code": "PRM-27/compound-nested",
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
