@@ -350,6 +350,16 @@ const compoundNested = refusal(
   "Flatten the parameter, or set nonStandard.deepObjectBrackets in the author config to send the bracket convention",
 );
 
+// PRM-27 (style-values): deepObject is defined only for an object; a schema that also admits a
+// value that is not an object would generate a flag the runtime refuses for every value.
+const nonObjectSchema = refusal(
+  "PRM-27/non-object-schema",
+  "style-values",
+  "Parameter style deepObject",
+  "deepObject is defined only for an object; this schema also admits a value that is not an object.",
+  "Give the parameter an object schema, or use style: form",
+);
+
 const bracketAuthorChoice = notice(
   "PRM-27/bracket-author-choice",
   "style-values",
@@ -482,6 +492,7 @@ const styleNotices = (
 /**
  * What the schema shape and the author config add to a parameter's decision: `multiple` for a
  * cookie over an array or object (PRM-34), `nested` for a `deepObject` value beyond one level
+ * (PRM-27), `nonObject` for a `deepObject` schema that admits a value that is not an object
  * (PRM-27), `primitive` for a schema that declares only primitive types (STY-17, STY-21) and
  * `brackets` for the author config's bracket switch.
  */
@@ -489,6 +500,7 @@ interface Traits {
   readonly brackets: boolean;
   readonly multiple: boolean;
   readonly nested: boolean;
+  readonly nonObject: boolean;
   readonly primitive: boolean;
 }
 
@@ -521,6 +533,11 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
 
   if (delimitedStyles.has(style) && traits.primitive) {
     return refuse(primitiveNotApplicableFinding(row));
+  }
+
+  // PRM-27: a deepObject over a schema that admits non-objects is refused, bracket switch or not.
+  if (deepRow !== undefined && traits.nonObject) {
+    return refuse(nonObjectSchema);
   }
 
   // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
@@ -830,6 +847,65 @@ const nestsDeeply = (resolution: Resolution, source: Source): Effect.Effect<bool
     return false;
   });
 
+const CompositionSchema = Schema.Struct({
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  properties: Schema.optionalKey(Schema.Unknown),
+});
+
+// How deep `objectOnly` reads anyOf and oneOf members, as a `$ref` chain stops at 64 hops.
+const maxMemberDepth = 64;
+
+// Whether the schema at `key`, through `$ref`, admits only objects, or arrays, which PRM-27's
+// nested test refuses. A declared type list must name nothing else. An untyped schema is read as
+// the emitted object test reads it (an object when it declares `properties`), except that an
+// anyOf or oneOf decides instead: every member must admit only objects.
+const objectOnly = (
+  resolution: Resolution,
+  key: CanonicalKey,
+  depth: number,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* admitsOnlyObjects() {
+    const home = follow(resolution, key);
+    const types = yield* typesAt(resolution, home);
+    if (types.length > 0) {
+      return types.every((name) => name === "object" || name === "array");
+    }
+
+    const declared = yield* nodeIn(resolution, home).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
+      Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
+    );
+    const members = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
+      (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
+    );
+    if (members.length === 0) {
+      return declared.properties !== undefined;
+    }
+
+    if (depth >= maxMemberDepth) {
+      return false;
+    }
+
+    for (const member of members) {
+      if (!(yield* objectOnly(resolution, member, depth + 1))) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+// Whether a deepObject query parameter's schema admits a value that is not an object (PRM-27).
+const admitsNonObject = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
+  const { node, target } = source;
+  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
+    return Effect.succeed(false);
+  }
+
+  return objectOnly(resolution, childKey(target, "schema"), 0).pipe(Effect.map((only) => !only));
+};
+
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
   if (mediaType === undefined) {
@@ -941,6 +1017,7 @@ export const normalizeParameter = (
       brackets: site.nonStandard?.deepObjectBrackets === true,
       multiple: yield* carriesMultiple(resolution, source),
       nested: yield* nestsDeeply(resolution, source),
+      nonObject: yield* admitsNonObject(resolution, source),
       primitive: yield* declaresPrimitive(resolution, source),
     });
     const diagnostics = (findings: readonly Finding[]) =>
