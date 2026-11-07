@@ -100,19 +100,28 @@ export class SchemaBudgetExceeded extends Data.TaggedError("SchemaBudgetExceeded
  */
 export type SchemaLimits = Partial<Pick<ResolveLimits, "maxNodes">>;
 
-// Every schema or OpenAPI object a walk visits is charged once; past the limit, walks stop
-// descending and the call fails.
-interface Budget {
+/**
+ * The node budget one call's walks share: every schema or OpenAPI object a walk visits is charged
+ * once; past the limit, walks stop descending and the call fails (or, for a predicate, fails
+ * closed).
+ */
+export interface Budget {
   readonly limit: number;
   spent: number;
 }
 
-const budgetOf = (limits: SchemaLimits): Budget => ({
+/**
+ * A fresh budget of `maxNodes` from the limits, the resolution default when absent.
+ */
+export const budgetOf = (limits: SchemaLimits): Budget => ({
   limit: limits.maxNodes ?? defaultLimits.maxNodes,
   spent: 0,
 });
 
-const charge = (budget: Budget): boolean => {
+/**
+ * Charges one visit; false once the budget is spent.
+ */
+export const charge = (budget: Budget): boolean => {
   budget.spent += 1;
 
   return budget.spent <= budget.limit;

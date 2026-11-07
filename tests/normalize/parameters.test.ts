@@ -85,6 +85,8 @@ const flat: Json = { properties: { a: string }, type: "object" };
 
 const deep = (members: Members): Json => query({ schema: flat, style: "deepObject", ...members });
 
+const ref = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
+
 const path = (members: Members): Json => ({
   in: "path",
   name: "q",
@@ -844,5 +846,66 @@ describe("PRM-27 deepObject is defined only for an object schema", () => {
 
   test("PRM-27 an array is still PRM-27/compound-nested", () => {
     expect(codes(refused("3.2", deep({ schema: list })))).toEqual(["PRM-27/compound-nested"]);
+  });
+});
+
+// One normalization with its wall time in milliseconds.
+const timed = (run: () => ParameterOutcome) => {
+  const start = performance.now();
+  const outcome = run();
+
+  return { elapsed: performance.now() - start, outcome };
+};
+
+describe("PRM-27 the object test's schema walk is bounded", () => {
+  const depth = 30;
+
+  // A_i and B_i each hold anyOf [A_{i+1}, B_{i+1}]: 2^30 paths to the bottom, 62 distinct schemas.
+  const fanOut = (bottom: Json): Members => ({
+    schemas: Object.fromEntries([
+      ["A30", bottom],
+      ["B30", bottom],
+      ...Array.from({ length: depth }, (_, level): readonly (readonly [string, Json])[] => {
+        const next = { anyOf: [ref(`A${level + 1}`), ref(`B${level + 1}`)] };
+
+        return [
+          [`A${level}`, next],
+          [`B${level}`, next],
+        ];
+      }).flat(),
+    ]),
+  });
+
+  const top = deep({ schema: ref("A0") });
+
+  test("PRM-27 a fan-out of depth 30 over objects is decided once per schema and built", () => {
+    const { elapsed, outcome } = timed(() => normalize("3.2", top, fanOut(flat)));
+
+    expect(outcome._tag).toBe("Implemented");
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a fan-out of depth 30 that cycles back to its top fails closed, fast", () => {
+    const { elapsed, outcome } = timed(() =>
+      normalize("3.2", top, fanOut({ anyOf: [ref("A0"), flat] })),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a spent node budget fails closed", () => {
+    const value: Json = {
+      components: fanOut(flat),
+      info: { title: "t", version: "1" },
+      openapi: openapi["3.2"],
+      paths: { "/a": { get: { parameters: [top], responses: { "200": { description: "ok" } } } } },
+    };
+    const resolution = Effect.runSync(resolve({ document: entry, line: "3.2", value }));
+    const outcome = Effect.runSync(
+      normalizeParameter(resolution, { openapi: openapi["3.2"], pointer: site }, { maxNodes: 5 }),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
   });
 });
