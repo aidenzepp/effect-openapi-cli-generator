@@ -1303,8 +1303,9 @@ export const referenceAt = (
 ): ResolvedReference | undefined =>
   resolution.references.get(keyOf({ document: resolution.document, pointer }));
 
-// A 3.2 Security Scheme URI (SEC-10), resolved inside the set only.
-const schemeByUri = (resolution: Resolution, name: string): Option.Option<CanonicalKey> => {
+// A name read as a URI, resolved inside the set only: a 3.2 Security Scheme URI (SEC-10) or a
+// discriminator mapping value that is not a component name (DSC-03, DSC-08).
+const componentByUri = (resolution: Resolution, name: string): Option.Option<CanonicalKey> => {
   const resolved = resolveUri(name, resolution.base);
   const hash = resolved?.indexOf("#") ?? -1;
   const resource = resolved === undefined ? undefined : stripFragment(resolved);
@@ -1321,8 +1322,9 @@ const schemeByUri = (resolution: Resolution, name: string): Option.Option<Canoni
 };
 
 /**
- * Resolves an implicit connection by name from the entry document only (design 3.3). For a 3.2
- * security scheme, a name that is not a component name is a URI resolved inside the set.
+ * Resolves an implicit connection by name from the entry document only (design 3.3). For a schema
+ * on every line, and for a 3.2 security scheme, a name that is not a component name is a URI
+ * resolved inside the set.
  */
 export const implicitComponent = (
   resolution: Resolution,
@@ -1334,9 +1336,43 @@ export const implicitComponent = (
     return Option.some({ document: resolution.document, pointer });
   }
 
-  return resolution.line === "3.2" && section === "securitySchemes"
-    ? schemeByUri(resolution, name)
+  return section === "schemas" || resolution.line === "3.2"
+    ? componentByUri(resolution, name)
     : Option.none();
+};
+
+const referrersMemo = new WeakMap<Resolution, ReadonlyMap<string, readonly CanonicalKey[]>>();
+
+/**
+ * The `allOf` members that reference each schema, keyed by `keyOf` of the target: the use sites
+ * whose pointer ends `/allOf/<i>`, in every document and component, referenced by an operation or
+ * not. These are the children of the allOf discriminator pattern (DSC-05, DSC-11). Built once
+ * per resolution.
+ */
+export const allOfReferrers = (
+  resolution: Resolution,
+): ReadonlyMap<string, readonly CanonicalKey[]> => {
+  const known = referrersMemo.get(resolution);
+  if (known !== undefined) {
+    return known;
+  }
+
+  const referrers = new Map<string, CanonicalKey[]>();
+  for (const reference of resolution.references.values()) {
+    if (/\/allOf\/\d+$/u.test(reference.site.pointer)) {
+      const key = keyOf(reference.target);
+      const sites = referrers.get(key);
+      if (sites === undefined) {
+        referrers.set(key, [reference.site]);
+      } else {
+        sites.push(reference.site);
+      }
+    }
+  }
+
+  referrersMemo.set(resolution, referrers);
+
+  return referrers;
 };
 
 /**
