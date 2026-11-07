@@ -9,6 +9,7 @@ import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { headerMarks } from "./header-object.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.
@@ -258,26 +259,6 @@ const serializedBySchema = (resolution: Resolution, at: CanonicalKey): Effect.Ef
     Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
     Effect.map((header) => header.schema !== undefined),
     Effect.orDie,
-  );
-
-const HeaderMarksObject = Schema.Struct({
-  deprecated: Schema.optionalKey(Schema.Boolean),
-  required: Schema.optionalKey(Schema.Boolean),
-});
-
-// A Header Object's `required` and `deprecated` marks, read where its `$ref` leads; a mark that is
-// absent or not a boolean is false.
-const headerMarks = (
-  resolution: Resolution,
-  at: CanonicalKey,
-): Effect.Effect<{ readonly deprecated: boolean; readonly required: boolean }> =>
-  nodeIn(resolution, follow(resolution, at)).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(HeaderMarksObject)),
-    Effect.map((header) => ({
-      deprecated: header.deprecated ?? false,
-      required: header.required ?? false,
-    })),
-    Effect.orElseSucceed(() => ({ deprecated: false, required: false })),
   );
 
 const headersOf = (

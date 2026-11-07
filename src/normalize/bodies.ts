@@ -15,6 +15,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { headerMarks } from "./header-object.ts";
 import { deepObjectExplodeText } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
@@ -797,10 +798,8 @@ const headerRequired = (
   actual: CanonicalKey,
   name: string,
 ): Effect.Effect<boolean> =>
-  nodeIn(resolution, follow(resolution, childKey(actual, "headers", name))).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
-    Effect.map((header) => header.required ?? false),
-    Effect.orElseSucceed(() => false),
+  headerMarks(resolution, childKey(actual, "headers", name)).pipe(
+    Effect.map((marks) => marks.required),
   );
 
 interface Headers {
