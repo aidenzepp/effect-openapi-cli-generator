@@ -1,0 +1,196 @@
+{
+  "components": {
+    "headers": {
+      "RequestId": {
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "parameters": {
+      "Limit": {
+        "in": "query",
+        "name": "limit",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "requestBodies": {
+      "Thing": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "required": true
+      }
+    },
+    "responses": {
+      "Thing": {
+        "content": {
+          "application/vnd.thing+json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        },
+        "description": "a thing"
+      }
+    },
+    "schemas": {
+      "Count": {
+        "$ref": "#/components/schemas/Whole"
+      },
+      "Whole": {
+        "type": "integer"
+      }
+    },
+    "securitySchemes": {
+      "cmpKey": {
+        "in": "header",
+        "name": "X-Cmp-Key",
+        "type": "apiKey"
+      },
+      "rootKey": {
+        "in": "header",
+        "name": "X-Root-Key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Document root rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/accepted": {
+      "get": {
+        "operationId": "accepted-get",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Thing"
+          }
+        }
+      }
+    },
+    "/cmp-secured": {
+      "get": {
+        "operationId": "cmp-secured",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "cmpKey": []
+          }
+        ]
+      }
+    },
+    "/counted": {
+      "get": {
+        "operationId": "counted-get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "count",
+            "schema": {
+              "$ref": "#/components/schemas/Count"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/described": {
+      "get": {
+        "description": "Line one \u001b[31mred\u001b[0m and a bell \u0007 done.",
+        "operationId": "described-get",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "summary": "Described \u001b]0;title\u0007 operation"
+      }
+    },
+    "/root-secured": {
+      "get": {
+        "operationId": "root-secured",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/things": {
+      "get": {
+        "operationId": "things-list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "post": {
+        "operationId": "things-create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Thing"
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/traced": {
+      "get": {
+        "operationId": "traced-get",
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "400": {
+            "description": "bad",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "rootKey": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}/root",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}
