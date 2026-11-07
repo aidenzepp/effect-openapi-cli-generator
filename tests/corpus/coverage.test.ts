@@ -138,7 +138,11 @@ interface Record {
 // Only the report fields the checker reads.
 const decodeReport = Schema.decodeUnknownSync(
   Schema.fromJsonString(
-    Schema.Struct({ notices: Schema.Array(Schema.Json), refusals: Schema.Array(Schema.Json) }),
+    Schema.Struct({
+      notices: Schema.Array(Schema.Json),
+      refusals: Schema.Array(Schema.Json),
+      skipped: Schema.Array(Schema.Json),
+    }),
   ),
 );
 
@@ -146,14 +150,21 @@ const decodeReport = Schema.decodeUnknownSync(
 const withRecords = (records: {
   readonly notices?: readonly Record[];
   readonly refusals?: readonly Record[];
+  readonly skipped?: readonly string[];
 }): string => {
   const report = decodeReport(goldenRun().report);
   const named = (list: readonly Record[] = []) =>
     list.map((record) => ({ ...record, document: entry }));
+  const skipped = (records.skipped ?? []).map((pointer) => ({
+    document: entry,
+    pointer,
+    reason: "config-skip",
+  }));
 
   return JSON.stringify({
     notices: [...report.notices, ...named(records.notices)],
     refusals: [...report.refusals, ...named(records.refusals)],
+    skipped: [...report.skipped, ...skipped],
   });
 };
 
@@ -285,6 +296,17 @@ describe("coverage check", () => {
     expect(refused.invented).toEqual([]);
   });
 
+  test("an author-skipped operation covers its subtree and its inherited elements", () => {
+    const dropped = dropCommand(update);
+    const skipped = coverage(dropped, withRecords({ skipped: [update] }));
+
+    expect(decodeReport(goldenRun().report).skipped).toEqual([]);
+    expect(pointers(coverage(dropped))).toContain("/servers/0");
+    expect(skipped.missing).toEqual([]);
+    expect(skipped.byNotice).toEqual([]);
+    expect(skipped.invented).toEqual([]);
+  });
+
   test("an operation-scope refusal anchored inside the operation refuses that operation", () => {
     const dropped = dropCommand(update);
     const refused = coverage(
@@ -388,13 +410,13 @@ const command = (fields: Partial<Command>): Command => ({
   ...fields,
 });
 
-const joinSpec = (spec: Json, commands: readonly Command[]): Coverage =>
+const joinSpec = (spec: Json, commands: readonly Command[], report?: Json): Coverage =>
   Effect.runSync(
     resolve({ document: entry, line: "3.1", value: spec }).pipe(
       Effect.flatMap((resolution) =>
         coverageOf({
           describe: encodeDescription({ commands, describeVersion: 1 }),
-          report: JSON.stringify({ notices: [], refusals: [] }),
+          report: JSON.stringify(report ?? { notices: [], refusals: [] }),
           resolution,
         }),
       ),
@@ -458,5 +480,37 @@ describe("coverage join without a build", () => {
         command({ method: "POST", pointer: "/paths/~1a/post" }),
       ]).missing.map((element) => element.pointer),
     ).toEqual(["/paths/~1a/parameters/0"]);
+  });
+
+  test("skipping an operation leaves root servers and security carried by the emitted commands", () => {
+    const spec: Json = {
+      ...bare,
+      components: { securitySchemes: { key: { in: "header", name: "X-Key", type: "apiKey" } } },
+      paths: {
+        "/a": {
+          get: { responses: { "200": { description: "ok" } } },
+          post: { responses: { "200": { description: "ok" } } },
+        },
+      },
+      security: [{ key: [] }],
+      servers: [{ url: "https://api.example.com" }],
+    };
+    const emitted = command({ security: [["key"]], servers: ["https://api.example.com"] });
+    const skipped = {
+      notices: [],
+      refusals: [],
+      skipped: [{ document: entry, pointer: "/paths/~1a/post", reason: "config-skip" }],
+    };
+    const missing = (commands: readonly Command[], report?: Json) =>
+      joinSpec(spec, commands, report).missing.map((element) => element.pointer);
+
+    expect(missing([emitted])).toEqual([
+      "/paths/~1a/post",
+      "/paths/~1a/post/responses/200",
+      "/security/0",
+      "/servers/0",
+    ]);
+    expect(missing([emitted], skipped)).toEqual([]);
+    expect(missing([command({ security: [["key"]] })], skipped)).toEqual(["/servers/0"]);
   });
 });

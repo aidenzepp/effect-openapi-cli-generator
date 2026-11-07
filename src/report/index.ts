@@ -1,8 +1,9 @@
 import { Array as Arr, Effect, Order, Schema } from "effect";
+import type { Types } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
-import type { Api, SecurityScheme } from "../model/entities.ts";
+import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
@@ -47,6 +48,21 @@ export const NonStandardEntry = Schema.Struct({
 export type NonStandardEntryValue = typeof NonStandardEntry.Type;
 
 /**
+ * One operation the author config skipped (`naming.operations[<id>].skip`, or `naming.byPointer`
+ * for an operation with no operationId; design 8.2): a recorded choice, not a refusal, so it has no
+ * command and coverage counts it and its subtree as accounted for. `operationId` is absent for an
+ * operation keyed by pointer.
+ */
+export const SkippedOperation = Schema.Struct({
+  document: DocumentUri,
+  operationId: Schema.optionalKey(Schema.String),
+  pointer: JsonPointer,
+  reason: Schema.Literal("config-skip"),
+});
+
+export type SkippedOperationValue = typeof SkippedOperation.Type;
+
+/**
  * `generation-report.json` (design 8.1, 3.7): what one run refused, noticed, renamed and accepted,
  * and the digests of its inputs. There is no timestamp, so equal inputs give equal bytes. Fields
  * are alphabetical; the order that matters is carried by arrays.
@@ -68,6 +84,8 @@ export const GenerationReport = Schema.Struct({
   renames: Schema.Array(
     Schema.Struct({ from: Schema.String, pointer: JsonPointer, to: Schema.String }),
   ),
+  // Always present, empty unless the author config skipped an operation.
+  skipped: Schema.Array(SkippedOperation),
 });
 
 export type GenerationReportValue = typeof GenerationReport.Type;
@@ -86,6 +104,8 @@ export interface GenerationReportInput {
   readonly nonStandard?: GenerationReportValue["nonStandard"];
   readonly renames: GenerationReportValue["renames"];
   readonly schemes?: readonly SecurityScheme[];
+  // The author-skipped operations in diagnostic order; absent, none.
+  readonly skipped?: GenerationReportValue["skipped"];
   readonly version: string;
 }
 
@@ -109,16 +129,19 @@ const tokenOrder = Order.make<string>((left, right) =>
 
 // Diagnostic order (design 3.7) over use sites: document index, then pointer token by token with
 // array indices numerically. `diagnostic.ts` keeps its pointer order private, so this repeats it.
-const useSiteOrder = (documents: readonly string[]): Order.Order<NonStandardEntryValue> =>
+interface UseSite {
+  readonly document: string;
+  readonly pointer: string;
+}
+
+const useSiteOrder = (documents: readonly string[]): Order.Order<UseSite> =>
   Order.combine(
-    Order.mapInput(Order.Number, (entry: NonStandardEntryValue) => {
+    Order.mapInput(Order.Number, (entry: UseSite) => {
       const index = documents.indexOf(entry.document);
 
       return index === -1 ? documents.length : index;
     }),
-    Order.mapInput(Order.Array(tokenOrder), (entry: NonStandardEntryValue) =>
-      entry.pointer.split("/").slice(1),
-    ),
+    Order.mapInput(Order.Array(tokenOrder), (entry: UseSite) => entry.pointer.split("/").slice(1)),
   );
 
 const entryAt = (origin: { readonly document: string; readonly pointer: string }) =>
@@ -157,6 +180,30 @@ export const nonStandardEntries = (
 };
 
 /**
+ * The report entries for the operations the author config skipped, in diagnostic order over
+ * `documents`. Which operations are skipped is the names plan's rule; the caller passes them.
+ */
+export const skippedEntries = (
+  operations: readonly Operation[],
+  documents: readonly string[],
+): GenerationReportValue["skipped"] =>
+  Arr.sort(
+    operations.map(({ operationId, origin }) => {
+      const entry: Types.Mutable<SkippedOperationValue> = {
+        document: origin.document,
+        pointer: origin.pointer,
+        reason: "config-skip",
+      };
+      if (operationId !== undefined) {
+        entry.operationId = operationId;
+      }
+
+      return entry;
+    }),
+    useSiteOrder(documents),
+  );
+
+/**
  * Splits the diagnostics by severity into the report value, keeping their order.
  */
 export const makeGenerationReport = (input: GenerationReportInput): GenerationReportValue => {
@@ -173,6 +220,7 @@ export const makeGenerationReport = (input: GenerationReportInput): GenerationRe
     notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
     refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
     renames: input.renames,
+    skipped: input.skipped ?? [],
   };
 
   return added.length === 0 ? report : { ...report, authorSuppliedSchemes: added };

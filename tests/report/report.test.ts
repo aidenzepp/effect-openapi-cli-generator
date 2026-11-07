@@ -80,6 +80,7 @@ describe("generation report bytes", () => {
       "notices",
       "refusals",
       "renames",
+      "skipped",
     ]);
   });
 

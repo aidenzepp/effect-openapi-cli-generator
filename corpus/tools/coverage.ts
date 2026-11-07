@@ -56,7 +56,15 @@ const Record = Schema.Struct({
   scope: Schema.Literals(["document", "operation", "element"]),
 });
 
-const Report = Schema.Struct({ notices: Schema.Array(Record), refusals: Schema.Array(Record) });
+// `skipped` is optional so a hand-built report naming no skip still decodes; the generator always
+// writes it.
+const Report = Schema.Struct({
+  notices: Schema.Array(Record),
+  refusals: Schema.Array(Record),
+  skipped: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ document: Schema.String, pointer: Schema.String })),
+  ),
+});
 
 const decodeDescription = Schema.decodeUnknownEffect(Schema.fromJsonString(Description));
 
@@ -123,8 +131,11 @@ const carries = (command: Command, element: WalkElement): boolean => {
 /**
  * Joins the walk with `--describe` and the generation report (design 8.3, R11).
  *
- * - An operation is accounted for by a command at its `(document, pointer)`, or by a document-scope
- *   refusal or an operation-scope refusal at, above or anywhere inside it.
+ * - An operation is accounted for by a command at its `(document, pointer)`, by a document-scope
+ *   refusal or an operation-scope refusal at, above or anywhere inside it, or by the report's
+ *   `skipped` entry at its pointer (an author-config skip, design 8.2). A skipped operation is
+ *   treated like a refused one: its subtree is accounted for, and its inherited elements need no
+ *   command of it, so root servers and security stay carried by the emitted commands.
  * - An element under an operation is accounted for when every command for THAT operation (its primary
  *   name and each `x-forge-aliases` alias, design 8.3 Aliases) carries it: a parameter by flag
  *   pointer, request media and response keys by value as the spec spells them, a security
@@ -149,11 +160,14 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
     const description = yield* decodeDescription(input.describe);
     const report = yield* decodeReport(input.report);
 
-    const labelled = (records: typeof report.refusals) =>
+    const labelled = <R extends { readonly document: string }>(records: readonly R[]) =>
       records.map((record) => ({ ...record, document: label(record.document) }));
     const refusals = labelled(report.refusals);
     const notices = new Set(
       labelled(report.notices).map((record) => key(record.document, record.pointer)),
+    );
+    const skipped = new Set(
+      labelled(report.skipped ?? []).map((record) => key(record.document, record.pointer)),
     );
     const siteOf = (element: WalkElement) => key(label(element.document), element.pointer);
 
@@ -172,7 +186,9 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
           operation.document === element.document && within(element.pointer, operation.pointer),
       );
 
+    // A refusal or an author-config skip: either way the operation has no command by decision.
     const refused = (operation: Operation): boolean =>
+      skipped.has(siteOf(operation)) ||
       refusals.some(
         (record) =>
           record.document === label(operation.document) &&
