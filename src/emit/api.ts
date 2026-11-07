@@ -16,6 +16,7 @@ import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../nam
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
 import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
+import { isJsonMedia } from "../runtime-src/runtime/serialize.ts";
 import { JsDocText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 import {
@@ -394,15 +395,8 @@ export const buildsParameter = (parameter: Parameter): boolean => {
  * compact JSON text, and under form media in `querystring`, whose object the runtime writes as
  * pairs. Under any other media the value is the operator's string, sent as given.
  */
-export const takesJsonContent = (location: Parameter["location"], mediaType: string): boolean => {
-  const base = essence(mediaType);
-
-  return (
-    base === "application/json" ||
-    base.endsWith("+json") ||
-    (location === "querystring" && base === formMedia)
-  );
-};
+export const takesJsonContent = (location: Parameter["location"], mediaType: string): boolean =>
+  isJsonMedia(mediaType) || (location === "querystring" && essence(mediaType) === formMedia);
 
 interface ParameterContext {
   readonly defs: Defs;

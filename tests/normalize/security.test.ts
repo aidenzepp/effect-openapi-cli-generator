@@ -448,8 +448,10 @@ describe("3.2 scheme URIs (SEC-10)", () => {
   });
 });
 
-// One normalization of `count` schemes and one `count`-name alternative; returns the use count.
-const normalized = (count: number): number => {
+// The scheme list's element reads while `normalizeSecurityPolicy` resolves one alternative that
+// names all `count` schemes. A lookup built once reads each scheme a bounded number of times; a
+// scan per requirement name reads about count² of them.
+const elementReads = (count: number): number => {
   const securitySchemes: Record<string, Json> = {};
   const requirement: Record<string, Json> = {};
   for (let index = 0; index < count; index += 1) {
@@ -457,35 +459,59 @@ const normalized = (count: number): number => {
     requirement[`s${index}`] = [];
   }
 
-  const { policy } = run("3.1", {
-    ...withSchemes(securitySchemes),
-    security: [requirement],
-  });
+  let reads = 0;
+  const reader =
+    <T>(item: T) =>
+    (): T => {
+      reads += 1;
 
-  return policy.policy.alternatives[0]?.uses.length ?? 0;
-};
+      return item;
+    };
+  // A copy of `items` whose elements count each read.
+  const counted = <T>(items: readonly T[]): readonly T[] => {
+    const tracked: T[] = [];
+    for (const [index, item] of items.entries()) {
+      Object.defineProperty(tracked, index, { enumerable: true, get: reader(item) });
+    }
 
-// Best of a few runs, so a load spike on one run does not decide the ratio.
-const cost = (count: number): number => {
-  let best = Number.POSITIVE_INFINITY;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const start = performance.now();
-    expect(normalized(count)).toBe(count);
-    best = Math.min(best, performance.now() - start);
-  }
+    return tracked;
+  };
 
-  return best;
+  const uses = Effect.runSync(
+    Effect.gen(function* normalize() {
+      const resolution = yield* resolve({
+        document: entry,
+        line: "3.1",
+        value: {
+          info: { title: "t", version: "1" },
+          openapi: openapi["3.1"],
+          paths: {},
+          ...withSchemes(securitySchemes, { security: [requirement] }),
+        },
+      });
+      const schemes = yield* normalizeSecuritySchemes(
+        resolution,
+        undefined,
+        yield* checkSpecText(resolution),
+      );
+      const policy = yield* normalizeSecurityPolicy(resolution, {
+        ...schemes,
+        schemes: counted(schemes.schemes),
+        unusable: counted(schemes.unusable),
+      });
+
+      return policy.policy.alternatives[0]?.uses.length ?? 0;
+    }),
+  );
+  expect(uses).toBe(count);
+
+  return reads;
 };
 
 describe("scheme lookup budget", () => {
-  // No absolute wall-clock bound: 8x the schemes must cost about 8x (linear), not about 64x
-  // (quadratic). The bound of 20 sits between them (measured: linear 5-9, a linear-scan mutant 32).
-  test("normalizing 8x the schemes costs far less than 64x as much (linear, not quadratic)", () => {
-    normalized(2000);
+  test("resolving an alternative of every scheme reads each scheme a bounded number of times (linear, not quadratic)", () => {
+    const count = 2000;
 
-    const small = cost(5000);
-    const large = cost(40_000);
-
-    expect(large / small).toBeLessThan(20);
-  }, 120_000);
+    expect(elementReads(count)).toBeLessThanOrEqual(2 * count);
+  });
 });

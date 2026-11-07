@@ -957,7 +957,11 @@ export interface RequestBody {
   readonly ownsContentType?: true;
 }
 
-const isJsonMedia = (mediaType: string) => {
+/**
+ * Whether `mediaType` is JSON media: `application/json` or a `+json` suffix, parameters and case
+ * ignored. A body or `content` value under it is written as JSON text.
+ */
+export const isJsonMedia = (mediaType: string): boolean => {
   const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
 
   return essence === "application/json" || essence.endsWith("+json");

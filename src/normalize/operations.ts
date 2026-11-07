@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Exit, Option, Order, Schema } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Operation } from "../model/entities.ts";
 import type {
@@ -260,20 +260,6 @@ const operationsOfItem = (
       : [];
   });
 };
-
-const isIndex = (token: string): boolean => /^(?:0|[1-9][0-9]*)$/u.test(token);
-
-// Diagnostic pointer order (design 3.7): token by token, array indices numerically.
-// `model/diagnostic.ts` keeps its pointer order private, so this repeats it.
-const tokenOrder = Order.make<string>((left, right) =>
-  isIndex(left) && isIndex(right)
-    ? Order.Number(Number(left), Number(right))
-    : Order.String(left, right),
-);
-
-const pointerOrder = Order.mapInput(Order.Array(tokenOrder), (pointer: string): readonly string[] =>
-  pointer.split("/").slice(1),
-);
 
 // An operation's use site under `/paths`: the path key, then the method or its
 // `additionalOperations` entry. Unlike `pointer`, it is unique when path items share a target.

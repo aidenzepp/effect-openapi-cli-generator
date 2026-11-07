@@ -66,8 +66,13 @@ const tokenOrder = Order.make<string>((left, right) =>
     : Order.String(left, right),
 );
 
-const pointerOrder = Order.mapInput(Order.Array(tokenOrder), (pointer: string): readonly string[] =>
-  pointer.split("/").slice(1),
+/**
+ * Diagnostic pointer order (design 3.7): JSON Pointers compare token by token, array indices
+ * numerically and every other token as a string.
+ */
+export const pointerOrder: Order.Order<string> = Order.mapInput(
+  Order.Array(tokenOrder),
+  (pointer: string): readonly string[] => pointer.split("/").slice(1),
 );
 
 /**

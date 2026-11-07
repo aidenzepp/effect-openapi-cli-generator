@@ -281,13 +281,13 @@ export const binaryBody = (options: {
 };
 
 /**
- * A sequential request body (NDJSON, JSON Lines, JSON-seq; design 6.3 Sequential uploads) exactly
- * as the operator gives it: `--body` is the text as given; a `--body-file` regular file streams
- * through `FileBody` with its size; `-` streams stdin chunked under the one stdin claim. The bytes
- * are never parsed, re-framed, buffered whole, asserted against a schema or counted against the
- * in-memory read limit, which bounds only reads into memory (design I5). The caller sets the
- * declared media type as `Content-Type`. `--body` together with `--body-file` is refused. With
- * neither flag a required body is a `UsageError` and an optional one is empty.
+ * A sequential request body (NDJSON, JSON Lines, JSON-seq; design 6.3 Sequential uploads) or a text
+ * body, exactly as the operator gives it: `--body` is the text as given; a `--body-file` regular
+ * file streams through `FileBody` with its size; `-` streams stdin chunked under the one stdin
+ * claim. The bytes are never parsed, re-framed, buffered whole, asserted against a schema or
+ * counted against the in-memory read limit, which bounds only reads into memory (design I5). The
+ * caller sets the declared media type as `Content-Type`. `--body` together with `--body-file` is
+ * refused. With neither flag a required body is a `UsageError` and an optional one is empty.
  */
 export const sequentialBody = (options: {
   readonly body: Option.Option<string>;

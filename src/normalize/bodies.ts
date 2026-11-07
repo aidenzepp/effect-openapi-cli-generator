@@ -1290,9 +1290,9 @@ const stopAlternative = (...findings: readonly Finding[]): AlternativeResult => 
   findings,
 });
 
-// The slice names `S30-24/multipart-extra-fields` for 3.0, but the Diagnostic codec's row pattern
-// (`^[A-Z]+-[0-9]+$`, src/model/diagnostic.ts) rejects the digits in `S30`, so 3.0 reports SCH-13
-// too until that pattern admits them; then restore the 3.0 code here and in the test.
+// Every line reports `SCH-13`. The slice named `S30-24/multipart-extra-fields` for 3.0; the
+// Diagnostic row pattern (src/model/diagnostic.ts) now admits `S30-24`, but moving 3.0 to that code
+// changes its diagnostics, so it is not done here.
 const extraFieldsRefusal = (at: CanonicalKey): Finding =>
   refusal(
     "SCH-13/multipart-extra-fields",

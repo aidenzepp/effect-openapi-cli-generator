@@ -7,7 +7,6 @@ import {
   precedenceOrder,
 } from "../../src/normalize/responses.ts";
 import type { ResponseCase } from "../../src/model/entities.ts";
-import { normalizeParameter } from "../../src/normalize/parameters.ts";
 import type { NormalizedResponses } from "../../src/normalize/responses.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -222,39 +221,6 @@ describe("HDR-15 response header percent-encoding in 3.0", () => {
       "HDR-15/header-percent-encoding",
       "HDR-15/header-percent-encoding",
     ]);
-  });
-
-  test("the notice says what the PRM-32 header parameter notice says", () => {
-    const notice = normalize("3.0", traced, components).diagnostics.find(
-      (diagnostic) => diagnostic.code === "HDR-15/header-percent-encoding",
-    );
-
-    const value: Json = {
-      info: { title: "t", version: "1" },
-      openapi: openapi["3.0"],
-      paths: {
-        "/a": {
-          get: {
-            parameters: [{ in: "header", name: "X-Rate", schema: {} }],
-            responses: { "200": ok },
-          },
-        },
-      },
-    };
-    const parameter = Effect.runSync(
-      resolve({ document: entry, line: "3.0", value }).pipe(
-        Effect.flatMap((resolution) =>
-          normalizeParameter(resolution, {
-            openapi: openapi["3.0"],
-            pointer: "/paths/~1a/get/parameters/0",
-          }),
-        ),
-      ),
-    );
-    const [prm32] = parameter.diagnostics;
-
-    expect(prm32?.code).toBe("PRM-32/header-percent-encoding");
-    expect(notice?.message).toBe(prm32?.message);
   });
 
   test("3.1 and 3.2 headers already agree with the correction", () => {

@@ -300,6 +300,9 @@ const decideCookie = (
   };
 };
 
+// In the entry document, official-schema validation (VAL-02 to VAL-04) refuses a style its
+// location does not define before this runs; a parameter in another document-set member, which is
+// not schema-validated, reaches this refusal.
 const styleLocation = refusal(
   "STY-40/style-location",
   "style-values",
@@ -315,11 +318,18 @@ const allowEmptyValueIgnored = notice(
   "allowEmptyValue applies only to a query parameter with a style, so it is ignored here.",
 );
 
+/**
+ * What a 3.0 header notice says: `PRM-32` for a header parameter, `HDR-15` for a schema-serialized
+ * response header (design D-OC9).
+ */
+export const headerPercentEncoding =
+  "The 3.0 text implies percent-encoding of header values; 3.1 calls that a mistake, so none is applied.";
+
 const headerEncoding = notice(
   "PRM-32/header-percent-encoding",
   "appendix-d-serializing-headers-and-cookies",
   "Header parameter percent-encoding",
-  "The 3.0 text implies percent-encoding of header values; 3.1 calls that a mistake, so none is applied.",
+  headerPercentEncoding,
 );
 
 const allowReservedIgnored = notice(
@@ -377,6 +387,9 @@ const cookieName = refusal(
   "Use a name made of RFC 9110 token characters",
 );
 
+// In the entry document, official-schema validation (VAL-04) refuses these fields on a querystring
+// parameter before this runs; a parameter in another document-set member, which is not
+// schema-validated, reaches this refusal.
 const querystringSchemaFields = refusal(
   "STY-45/querystring-schema-fields",
   "fixed-fields-for-use-with-schema",
