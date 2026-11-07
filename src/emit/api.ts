@@ -736,10 +736,6 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
     return Result.fail(`an encoding for multipart part ${pointer}`);
   }
 
-  if (rule.nested !== undefined) {
-    return Result.fail(`nested parts in multipart part ${pointer}`);
-  }
-
   // A style the writer sends (ENC-40) arrives typed `text/plain`; normalize refuses any other, and
   // the names plan gives that part no flag.
   if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
@@ -808,6 +804,13 @@ export const formParts = (
   const problem = alternativeProblem(alternative);
   if (problem !== undefined) {
     return Result.fail(problem);
+  }
+
+  // Checked over the rules, not the part flags: a part the names plan gave no flag (a
+  // `prefixItems` array) still carries its nested rule. Positional rules were refused above.
+  const nested = alternative.encoding.find((rule) => rule.nested !== undefined);
+  if (nested !== undefined && nested.target.kind === "property") {
+    return Result.fail(`nested parts in multipart part ${formatPointer([nested.target.name])}`);
   }
 
   const key = alternative.schema?.key ?? "";
