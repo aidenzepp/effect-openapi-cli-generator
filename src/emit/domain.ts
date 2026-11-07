@@ -13,7 +13,7 @@ import {
 import { constVoid } from "effect/Function";
 import type { JsonSchema } from "effect";
 import type { SafeIdentifierValue } from "../names/fold.ts";
-import { codeGenerationCopy } from "../normalize/schemas.ts";
+import { codeGenerationCopy, importSchemas } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
 import type { Json } from "../model/pointer.ts";
 import { guardTemplateCurly, stringLiteral, lineWidth, keyText, numberText } from "./escape.ts";
@@ -23,7 +23,9 @@ import { textWidth } from "./printer.ts";
 /**
  * The code-generation copy cannot become `domain/schemas.ts`. `identifier-mismatch`: a copy key
  * has no name in the identifier map, two keys share one, or Effect exported a name the map does not
- * give (the module would not export what cli modules import).
+ * give (the module would not export what cli modules import). `import-failed`: the copy, which
+ * normalize already imported through the same `importSchemas`, does not import again, or names a
+ * definition outside itself (a defect, never a property of the document).
  */
 export class DomainEmitError extends Data.TaggedError("DomainEmitError")<{
   readonly reason:
@@ -1454,7 +1456,7 @@ const importCode = (
   Effect.try({
     catch: () => new DomainEmitError({ reason: "import-failed" }),
     try: () => {
-      const [first, ...rest] = SchemaRepresentation.fromJsonSchemaMultiDocument(multi);
+      const [first, ...rest] = importSchemas(multi);
 
       return SchemaRepresentation.toCodeDocument(
         SchemaRepresentation.toRepresentations([first.ast, ...rest.map((schema) => schema.ast)]),

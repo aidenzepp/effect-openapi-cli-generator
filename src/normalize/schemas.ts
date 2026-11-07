@@ -613,6 +613,7 @@ const keywordRows = new Map<string, readonly [row30: string, row31: string]>([
   ["minContains", ["SCH-42", "SCH-42"]],
   ["not", ["S30-21", "SCH-24"]],
   ["pattern", ["S30-09", "SCH-37"]],
+  ["patternProperties", ["SCH-15", "SCH-15"]],
   ["then", ["SCH-19", "SCH-19"]],
   ["unevaluatedItems", ["SCH-25", "SCH-25"]],
   ["unevaluatedProperties", ["SCH-26", "SCH-26"]],
@@ -635,6 +636,7 @@ const serverValidated: ReadonlySet<string> = new Set([
   "maxContains",
   "minContains",
   "pattern",
+  "patternProperties",
   "then",
   "unevaluatedItems",
   "unevaluatedProperties",
@@ -792,6 +794,12 @@ const retype = (value: Json): Json => {
   return [...new Set(strings(value).map((type) => (type === "integer" ? "number" : type)))];
 };
 
+// An `additionalProperties` that rejects or types some keys. Beside `patternProperties` it cannot
+// stay: which keys it governs depends on the patterns, which are not asserted (SCH-15), so the
+// object is left open, as Effect's importer leaves it when it ignores patterns.
+const constrainsKeys = (value: Json): boolean =>
+  value === false || (isObject(value) && !isEmptySchema(value));
+
 const filterNode =
   (recorder: Recorder): Visit =>
   (node, path) => {
@@ -811,11 +819,17 @@ const filterNode =
       record(recorder, "retype", "FMT-02/int64-range", path);
     }
 
+    const patterned = member(node, "patternProperties") !== undefined;
     const kept: [string, Json][] = [];
     for (const [keyword, value] of Object.entries(node)) {
       const code = removalCode(recorder.line, keyword, value);
       if (code !== undefined) {
         record(recorder, "remove", code, [...path, keyword]);
+      } else if (keyword === "additionalProperties" && patterned && constrainsKeys(value)) {
+        record(recorder, "remove", `${rowOf(recorder.line, "patternProperties")}/not-asserted`, [
+          ...path,
+          keyword,
+        ]);
       } else if (keyword === "type" && int64) {
         kept.push([keyword, retype(value)]);
       } else if (keyword !== "enum" && !rewritten.has(keyword)) {
@@ -1022,8 +1036,6 @@ const importClasses: readonly (readonly [prefix: string, code: (line: Line) => s
     'Cannot combine typed "additionalProperties"',
     (line) => `${rowOf(line, "additionalProperties")}/not-asserted`,
   ],
-  ["Cannot import this closed patterned object", () => "SCH-15/not-asserted"],
-  ['Cannot import open "patternProperties"', () => "SCH-15/not-asserted"],
   ["Missing definition", (line) => `${line === "3.0" ? "REF-02" : "SCH-03"}/non-schema-target`],
   ['Cannot resolve $ref under a nested "$id"', () => "SCH-02/nested-resource"],
   ["Definition ", () => "DOC-23/alias-cycle"],
@@ -1104,6 +1116,17 @@ const multiDocument = (
   };
 };
 
+/**
+ * Effect's importer as both import copies run it: the validation copy here, and the
+ * code-generation copy in the domain emitter. Pattern constraints stay at the importer's default
+ * (rejected): the validation copy removes every `pattern` and `patternProperties` before import, so
+ * the two copies can never disagree on one.
+ */
+export const importSchemas = (
+  multi: JsonSchema.MultiDocument<"draft-2020-12">,
+): readonly [Schema.Top, ...Schema.Top[]] =>
+  SchemaRepresentation.fromJsonSchemaMultiDocument(multi);
+
 const importOnce = (
   definitions: ReadonlyMap<string, Json>,
 ): Effect.Effect<Option.Option<string>> => {
@@ -1112,10 +1135,7 @@ const importOnce = (
     return Effect.succeed(Option.none());
   }
 
-  return Effect.try({
-    catch: messageOf,
-    try: () => SchemaRepresentation.fromJsonSchemaMultiDocument(multi, { patterns: "ignore" }),
-  }).pipe(
+  return Effect.try({ catch: messageOf, try: () => importSchemas(multi) }).pipe(
     Effect.match({ onFailure: (message) => Option.some(message), onSuccess: () => Option.none() }),
   );
 };
@@ -1146,7 +1166,7 @@ const importEdit = (
     : { action: "replace", code: found[1](line), key, path };
 };
 
-// Imports with `patterns: "ignore"`; each rejected node becomes `{}` under the code of its class,
+// Imports through `importSchemas`; each rejected node becomes `{}` under the code of its class,
 // at its deepest existing schema ancestor, until the import succeeds. The importer stops at its
 // first failure, so repairs cannot be batched: each pass is charged the number of definitions it
 // imports, and the budget caps the passes.
@@ -1183,9 +1203,10 @@ const importCopy = (
  * with a refusal; an all-constant `oneOf` or `anyOf` becomes one `enum` with no notice; `enum`
  * members outside the declared type are dropped with a notice (SM-R16); a 3.0 `nullable` in 3.1 or
  * 3.2 is removed with a notice and no effect; an out-of-safe-range integer is asserted as a number
- * (int64 notice); a pure alias cycle is refused; then Effect's importer runs with `patterns:
- * "ignore"`, and each node it still rejects becomes `{}` under the code of its D-AD12 class. The
- * copy is the stored document minus `edits` (X10); it is recomputed, never edited.
+ * (int64 notice); `patternProperties` is removed with a notice, with an `additionalProperties`
+ * beside it that rejects or types keys (SCH-15); a pure alias cycle is refused; then Effect's
+ * importer runs, and each node it still rejects becomes `{}` under the code of its D-AD12 class.
+ * The copy is the stored document minus `edits` (X10); it is recomputed, never edited.
  */
 export const validationCopy = (
   line: Line,

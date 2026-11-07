@@ -262,11 +262,52 @@ describe("validation copy", () => {
     });
   });
 
-  test("patterns are ignored by the importer, so patternProperties keys raise nothing", () => {
-    const result = one({ patternProperties: { "^x-": { type: "string" } }, type: "object" });
+  test("SCH-15 open patternProperties is removed with a notice; properties stay typed", () => {
+    const result = one({
+      patternProperties: { "^x-": { type: "string" } },
+      properties: { a: { type: "string" } },
+      type: "object",
+    });
 
-    expect(result.diagnostics).toEqual([]);
-    expect(copied(result, "S")).toEqual(stored(result, "S"));
+    expect(found(result)).toEqual(["SCH-15/not-asserted /components/schemas/S/patternProperties"]);
+    expect(scopes(result)).toEqual(["notice:element"]);
+    expect(copied(result, "S")).toEqual({ properties: { a: { type: "string" } }, type: "object" });
+  });
+
+  test("SCH-15 closed patternProperties leaves the object open, each removal with a notice", () => {
+    const result = one({
+      additionalProperties: false,
+      patternProperties: { "^x-": { type: "integer" } },
+      properties: { a: { type: "string" } },
+      type: "object",
+    });
+
+    expect(sorted(found(result))).toEqual([
+      "SCH-15/not-asserted /components/schemas/S/additionalProperties",
+      "SCH-15/not-asserted /components/schemas/S/patternProperties",
+    ]);
+    expect(copied(result, "S")).toEqual({ properties: { a: { type: "string" } }, type: "object" });
+  });
+
+  test("SCH-15 nested patternProperties is removed where it occurs; an open sibling stays", () => {
+    const result = one({
+      properties: {
+        m: {
+          additionalProperties: true,
+          patternProperties: { "^[a-z]+$": { type: "number" } },
+          type: "object",
+        },
+      },
+      type: "object",
+    });
+
+    expect(found(result)).toEqual([
+      "SCH-15/not-asserted /components/schemas/S/properties/m/patternProperties",
+    ]);
+    expect(copied(result, "S")).toEqual({
+      properties: { m: { additionalProperties: true, type: "object" } },
+      type: "object",
+    });
   });
 
   test("SCO-09 a union the importer cannot intersect becomes {} with a notice", () => {
