@@ -1,0 +1,63 @@
+{
+  "components": {
+    "parameters": {
+      "Optional": {
+        "in": "query",
+        "name": "optional",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "Code": {
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "Reference Object rows witness (REF-01 to REF-18)",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/schema-sibling": {
+      "post": {
+        "operationId": "schema-sibling",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Code",
+                "description": "sibling-description-5c1e",
+                "maxLength": 3
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/sibling-required": {
+      "get": {
+        "operationId": "sibling-required",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Optional",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}

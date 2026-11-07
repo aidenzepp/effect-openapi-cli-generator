@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "refw",
+  "envPrefix": "REFW",
+  "package": {
+    "name": "ref-witness-cli",
+    "version": "0.1.0"
+  }
+}
