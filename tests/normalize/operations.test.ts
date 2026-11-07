@@ -83,7 +83,8 @@ describe("operation keys", () => {
   test("3.2 query and additionalOperations keys are sent as spelled", () => {
     const { api } = run("3.2", { "/a": { additionalOperations: { PURGE: ok }, query: ok } });
 
-    see(api.operations.map((found) => found.key.method)).toEqual(["QUERY", "PURGE"]);
+    // Canonical order (design 3.7): `/paths/~1a/additionalOperations/PURGE` sorts before `query`.
+    see(api.operations.map((found) => found.key.method)).toEqual(["PURGE", "QUERY"]);
   });
 
   test("operationId, deprecated and docs are read from the operation", () => {
