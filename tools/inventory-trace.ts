@@ -100,7 +100,14 @@ interface Title {
 const callPattern =
   /(?:^|[^\w.$])(?:test|it)(?<todo>\.todo)?\(\s*(?<quote>["'`])(?<text>(?:\\.|(?!\k<quote>).)*)\k<quote>/gu;
 
-const titlePattern = /^(?<id>[A-Z]+-\d+)(?: \((?<half>[a-z0-9-]+)\))?: /u;
+const rowId = "[A-Z][A-Z0-9]*-\\d+";
+
+/**
+ * Matches a whole inventory row id: capitals and digits from a leading capital, a hyphen, digits.
+ */
+export const rowIdPattern = new RegExp(`^${rowId}$`, "u");
+
+const titlePattern = new RegExp(`^(?<id>${rowId})(?: \\((?<half>[a-z0-9-]+)\\))?: `, "u");
 
 const stripComments = (source: string): string =>
   source.replaceAll(/\/\*[\s\S]*?\*\//gu, "").replaceAll(/^\s*\/\/.*$/gmu, "");

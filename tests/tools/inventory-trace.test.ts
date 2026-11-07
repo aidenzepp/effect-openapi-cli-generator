@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
-import { traceRows, titlesOf } from "../../tools/inventory-trace.ts";
+import * as InventoryTrace from "../../tools/inventory-trace.ts";
+
+const { traceRows, titlesOf } = InventoryTrace;
 
 const row = (id: string, coveredBy: readonly string[] = []) => ({
   coveredBy,
@@ -43,5 +46,35 @@ describe("inventory trace: todo is never covered", () => {
       { id: "TRC-01", status: "covered" },
       { id: "TRC-02", status: "covered" },
     ]);
+  });
+});
+
+describe("inventory trace: row id forms", () => {
+  test("TRC-05: an id whose prefix holds a digit is counted", () => {
+    expect(titlesOf(`test("S30-12: works", () => {});`)).toEqual([
+      { half: undefined, id: "S30-12", todo: false },
+    ]);
+  });
+
+  test("TRC-06: a letters-only prefix is still counted", () => {
+    expect(titlesOf(`test("SCO-03: works", () => {});`)).toEqual([
+      { half: undefined, id: "SCO-03", todo: false },
+    ]);
+  });
+
+  test("TRC-07: a title that is not a row id is ignored", () => {
+    expect(
+      titlesOf(`test("works without an id", () => {});\ntest("3S-01: bad", () => {});`),
+    ).toEqual([]);
+  });
+
+  test("TRC-08: every id in rows.json matches the id pattern", () => {
+    const text = readFileSync(new URL("../inventory/rows.json", import.meta.url), "utf-8");
+    const ids = [...text.matchAll(/"id":\s*"(?<id>[^"]+)"/gu)].map((match) => match.groups?.id);
+
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.filter((id) => id === undefined || !InventoryTrace.rowIdPattern.test(id))).toEqual(
+      [],
+    );
   });
 });
