@@ -165,6 +165,7 @@ describe("corpus files", () => {
       "openai",
       "resend",
       "stripe",
+      "stripe-brackets",
     ]);
     expect(
       Arr.sort(

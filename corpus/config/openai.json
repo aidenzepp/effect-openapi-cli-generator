@@ -1,0 +1,11 @@
+{
+  "binName": "openai",
+  "envPrefix": "OPENAI",
+  "package": {
+    "name": "openai-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": ["https://api.openai.com/v1"]
+  }
+}

@@ -1,0 +1,2259 @@
+{
+  "commandSources": {
+    "config": 0,
+    "fern": 0,
+    "fold": 248,
+    "forge": 0
+  },
+  "corpusVersion": 1,
+  "counts": {
+    "informational": 495,
+    "nonStandard": 0,
+    "notices": 407,
+    "operations": {
+      "generated": 248,
+      "refused": 0,
+      "total": 248
+    },
+    "refusals": {
+      "document": 0,
+      "element": 0,
+      "operation": 0
+    }
+  },
+  "coverage": {
+    "byNotice": [
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1namespaces~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1nodes/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1nodes~1{name}/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1persistentvolumes/delete/requestBody/content/*~1*"
+      },
+      {
+        "document": "https://raw.githubusercontent.com/kubernetes/kubernetes/2af1ee8d0b379c06efa5357d2e9c3c25546d96e5/api/openapi-spec/v3/api__v1_openapi.json",
+        "kind": "requestMedia",
+        "mediaType": "*/*",
+        "pointer": "/paths/~1api~1v1~1persistentvolumes~1{name}/delete/requestBody/content/*~1*"
+      }
+    ],
+    "checked": true,
+    "invented": [],
+    "missing": []
+  },
+  "generator": {
+    "config": "corpus/config/kubernetes-core-v1.json",
+    "configSha256": "c581308b9386543d6d92f039abcd25e8c940e2e3eca4a0e2cf5141c21768e717",
+    "version": "0.0.0"
+  },
+  "nonStandard": [],
+  "notices": [
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.authentication.v1.TokenRequestSpec/properties/expirationSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.authentication.v1.TokenRequestSpec/properties/expirationSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.autoscaling.v1.ScaleSpec/properties/replicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.autoscaling.v1.ScaleStatus/properties/replicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.AWSElasticBlockStoreVolumeSource/properties/partition/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ClientIPConfig/properties/timeoutSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ClusterTrustBundleProjection/properties/user",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ClusterTrustBundleProjection/properties/user/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ConfigMapVolumeSource/properties/defaultMode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ConfigMapVolumeSource/properties/defaultUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ConfigMapVolumeSource/properties/defaultUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerImage/properties/sizeBytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerImage/properties/sizeBytes/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerPort/properties/containerPort/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerPort/properties/hostPort/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerRestartRuleOnExitCodes/properties/values/items/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerStateTerminated/properties/exitCode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerStateTerminated/properties/signal/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ContainerStatus/properties/restartCount/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DaemonEndpoint/properties/Port/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeFile/properties/mode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeFile/properties/user",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeFile/properties/user/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeSource/properties/defaultMode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeSource/properties/defaultUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.DownwardAPIVolumeSource/properties/defaultUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.EmptyDirVolumeSource/properties/mode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.EndpointPort/properties/port/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Event/properties/count/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.EventSeries/properties/count/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.EvictionResponder/properties/priority/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.FCVolumeSource/properties/lun/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.GCEPersistentDiskVolumeSource/properties/partition/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.GRPCAction/properties/port/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ISCSIPersistentVolumeSource/properties/lun/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ISCSIVolumeSource/properties/lun/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.KeyToPath/properties/mode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.KeyToPath/properties/user",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.KeyToPath/properties/user/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/gid",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/gid/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/supplementalGroups/items",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/supplementalGroups/items/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/uid",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.LinuxContainerUser/properties/uid/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.NodeSwapStatus/properties/capacity",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.NodeSwapStatus/properties/capacity/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodCertificateProjection/properties/maxExpirationSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodCertificateProjection/properties/user",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodCertificateProjection/properties/user/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodCondition/properties/observedGeneration",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodCondition/properties/observedGeneration/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/fsGroup",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/fsGroup/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/runAsGroup",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/runAsGroup/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/runAsUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/runAsUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/supplementalGroups/items",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSecurityContext/properties/supplementalGroups/items/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSpec/properties/activeDeadlineSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSpec/properties/activeDeadlineSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSpec/properties/priority/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSpec/properties/terminationGracePeriodSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodSpec/properties/terminationGracePeriodSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodStatus/properties/observedGeneration",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PodStatus/properties/observedGeneration/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PortStatus/properties/port/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.PreferredSchedulingTerm/properties/weight/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/failureThreshold/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/initialDelaySeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/periodSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/successThreshold/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/terminationGracePeriodSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/terminationGracePeriodSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Probe/properties/timeoutSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ProjectedVolumeSource/properties/defaultMode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ProjectedVolumeSource/properties/defaultUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ProjectedVolumeSource/properties/defaultUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerSpec/properties/minReadySeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerSpec/properties/replicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/availableReplicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/fullyLabeledReplicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/observedGeneration",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/observedGeneration/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/readyReplicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ReplicationControllerStatus/properties/replicas/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecretVolumeSource/properties/defaultMode/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecretVolumeSource/properties/defaultUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecretVolumeSource/properties/defaultUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecurityContext/properties/runAsGroup",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecurityContext/properties/runAsGroup/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecurityContext/properties/runAsUser",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SecurityContext/properties/runAsUser/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServiceAccountTokenProjection/properties/expirationSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServiceAccountTokenProjection/properties/expirationSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServiceAccountTokenProjection/properties/user",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServiceAccountTokenProjection/properties/user/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServicePort/properties/nodePort/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServicePort/properties/port/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.ServiceSpec/properties/healthCheckNodePort/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SleepAction/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.SleepAction/properties/seconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Toleration/properties/tolerationSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.Toleration/properties/tolerationSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.TopologySpreadConstraint/properties/maxSkew/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.TopologySpreadConstraint/properties/minDomains/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.api.core.v1.WeightedPodAffinityTerm/properties/weight/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Condition/properties/observedGeneration",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Condition/properties/observedGeneration/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.DeleteOptions/properties/gracePeriodSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.DeleteOptions/properties/gracePeriodSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ListMeta/properties/remainingItemCount",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ListMeta/properties/remainingItemCount/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.MicroTime/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/deletionGracePeriodSeconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/deletionGracePeriodSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/generation",
+      "row": "FMT-02"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/generation/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status/properties/code/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.StatusDetails/properties/retryAfterSeconds/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "S30-26/not-asserted",
+      "pointer": "/components/schemas/io.k8s.apimachinery.pkg.util.intstr.IntOrString/format",
+      "row": "S30-26"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1componentstatuses/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1configmaps/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1endpoints/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1events/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1limitranges/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1bindings/parameters/3",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1configmaps~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1endpoints~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1events~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1limitranges~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1attach/parameters/2",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1attach/parameters/2",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1binding/parameters/4",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1ephemeralcontainers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1ephemeralcontainers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1ephemeralcontainers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1eviction/parameters/4",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1exec/parameters/3",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1exec/parameters/3",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1log/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1portforward/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1portforward/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1resize/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1resize/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1resize/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1pods~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1scale/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1scale/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1scale/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1replicationcontrollers~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1resourcequotas~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1secrets~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1serviceaccounts~1{name}~1token/parameters/4",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1proxy~1{path}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{namespace}~1services~1{name}~1status/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1namespaces~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1nodes/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1nodes/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1nodes/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1nodes~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1persistentvolumeclaims/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1persistentvolumes/delete/parameters/0",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1persistentvolumes/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1persistentvolumes/get/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "OPR-10/body-ignored",
+      "pointer": "/paths/~1api~1v1~1persistentvolumes~1{name}/delete/requestBody",
+      "row": "OPR-10"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1pods/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1podtemplates/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1replicationcontrollers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1resourcequotas/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1secrets/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1serviceaccounts/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1services/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1configmaps/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1endpoints/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1events/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1limitranges/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1configmaps/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1configmaps/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1configmaps~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1configmaps~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1endpoints/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1endpoints/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1endpoints~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1endpoints~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1events/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1events/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1events~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1events~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1limitranges/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1limitranges/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1limitranges~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1limitranges~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1persistentvolumeclaims/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1persistentvolumeclaims/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1persistentvolumeclaims~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1pods/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1pods/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1pods~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1pods~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1podtemplates/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1podtemplates/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1podtemplates~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1replicationcontrollers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1replicationcontrollers/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1replicationcontrollers~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1resourcequotas/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1resourcequotas/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1resourcequotas~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1secrets/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1secrets/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1secrets~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1secrets~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1serviceaccounts/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1serviceaccounts/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1serviceaccounts~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1services/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1services/parameters/5",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1services~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{namespace}~1services~1{name}/parameters/6",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1namespaces~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1nodes/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1nodes~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1persistentvolumeclaims/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1persistentvolumes/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1persistentvolumes~1{name}/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1pods/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1podtemplates/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1replicationcontrollers/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1resourcequotas/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1secrets/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1serviceaccounts/parameters/1",
+      "row": "PRM-02"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1api~1v1~1watch~1services/parameters/1",
+      "row": "PRM-02"
+    }
+  ],
+  "refusals": [],
+  "spec": {
+    "id": "kubernetes-core-v1",
+    "openapi": "3.0.0",
+    "sha256": "73f8ea69ee8e4c9140d4a5f042873cfd3b3a4db22a26b94a3802605d15cde673"
+  },
+  "twinEquality": {
+    "checked": false,
+    "equal": false
+  },
+  "verdict": "accepted"
+}

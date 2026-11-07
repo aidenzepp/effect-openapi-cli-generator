@@ -1,0 +1,11 @@
+{
+  "binName": "discord",
+  "envPrefix": "DISCORD",
+  "package": {
+    "name": "discord-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": ["https://discord.com/api/v10"]
+  }
+}
