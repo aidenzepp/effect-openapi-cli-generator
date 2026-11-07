@@ -458,9 +458,17 @@ describe("SRV rows through generate()", () => {
     expect(summary(found)).toEqual([["SRV-12/default-not-in-enum", "notice", "operation"]]);
   }, 60_000);
 
-  // Nothing checks server name uniqueness: the run reports no diagnostic at all.
-  test.todo("SRV-04: two 3.2.1 servers named the same raise no diagnostic vs a refusal of the duplicate name (D-OC3)", () =>
-    Promise.resolve());
+  test("SRV-04: a second 3.2.1 server named the same is refused at its name (D-OC3)", async () => {
+    const found = await inProcess(
+      withServer("3.2.1", [
+        { name: "main", url: "https://a.example.com" },
+        { name: "main", url: "https://b.example.com" },
+      ]),
+    );
+
+    expect(summary(found)).toEqual([["SRV-04/duplicate-name", "refusal", "operation"]]);
+    expect(pointers(found)).toEqual(["/paths/~1a/get/servers/1/name"]);
+  }, 60_000);
 
   test("SRV-19: a repeated variable or an illegal literal character is refused", async () => {
     const repeated = await inProcess(
