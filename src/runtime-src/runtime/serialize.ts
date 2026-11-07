@@ -14,7 +14,8 @@ export type Scalar = string | number | boolean | null | undefined | JsonNumber;
 
 /**
  * A parameter value: a scalar, an array of scalars, or an object with scalar members. Deeper
- * nesting has no style and is refused.
+ * nesting has no style: a style constructor takes any `Nested` value, such as an object-schema
+ * parameter's JSON, and refuses a member that is itself an object or array.
  */
 export type Value = Scalar | readonly Scalar[] | { readonly [member: string]: Scalar };
 
@@ -126,6 +127,12 @@ const isScalar = (value: Nested): value is Scalar =>
 const isFlat = (value: Nested): value is Value =>
   isScalar(value) ||
   (isNestedList(value) ? value : Object.values(value)).every((member) => isScalar(member));
+
+// A value an RFC 6570 style expands, or the refusal of a member that is an object or array.
+const flatOf = (name: string, value: Nested): Effect.Effect<Value, UsageError> =>
+  isFlat(value)
+    ? Effect.succeed(value)
+    : refuse(`parameter ${name} holds a value nested deeper than one level`);
 
 const describe = (name: string, value: Value): Effect.Effect<Text | undefined, UsageError> => {
   if (isList(value)) {
@@ -320,14 +327,14 @@ const compose = (
 
 const styled =
   (style: PathStyle) =>
-  (name: string, value: Value, options: PathOptions): PathParameter => ({
+  (name: string, value: Nested, options: PathOptions): PathParameter => ({
     expand: Effect.gen(function* styleExpansion() {
       // Only a matrix expansion emits the name.
       if (style === "matrix" && unpairedSurrogate.test(name)) {
         return yield* refuse("a matrix parameter has a name with no UTF-8 form");
       }
 
-      const text = yield* toText(name, value, true);
+      const text = yield* toText(name, yield* flatOf(name, value), true);
 
       if (text === undefined) {
         return yield* refuse(`parameter ${name} is required and has no value`);
@@ -695,7 +702,7 @@ const queryStyled =
     style,
   });
 
-type QueryExpansion = (name: string, value: Value, options: QueryOptions) => QueryParameter;
+type QueryExpansion = (name: string, value: Nested, options: QueryOptions) => QueryParameter;
 
 /**
  * Query `form`: RFC 6570 `{?name}` and `{?name*}`.
@@ -781,13 +788,13 @@ const headerAmbiguity = (text: Text, explode: boolean): readonly string[] => {
 /**
  * Header `simple` (RFC 6570 `{name}`, `{name*}`) with no percent-encoding in any line.
  */
-export const header = (name: string, value: Value, options: HeaderOptions): HeaderParameter => ({
+export const header = (name: string, value: Nested, options: HeaderOptions): HeaderParameter => ({
   expand: Effect.gen(function* headerExpansion() {
     if (!headerToken.test(name)) {
       return yield* refuse("a header parameter has a name that is not an RFC 9110 token");
     }
 
-    const text = yield* toText(name, value, options.required);
+    const text = yield* toText(name, yield* flatOf(name, value), options.required);
 
     if (text === undefined) {
       return text;
@@ -862,7 +869,7 @@ const composeCookie = (name: string, text: Text, explode: boolean): string => {
  * incorrect"). 3.2 `cookie` sends the text as given and refuses a value outside `cookie-octet`. 3.2
  * refuses `explode: false`, and `cookie` exists only on 3.2.
  */
-export const cookie = (name: string, value: Value, options: CookieOptions): CookieParameter => ({
+export const cookie = (name: string, value: Nested, options: CookieOptions): CookieParameter => ({
   expand: Effect.gen(function* cookieExpansion() {
     if (!headerToken.test(name)) {
       return yield* refuse("a cookie parameter has a name that is not an RFC 6265 token");
@@ -876,7 +883,7 @@ export const cookie = (name: string, value: Value, options: CookieOptions): Cook
       return yield* refuse(`parameter ${name} sets explode false, which 3.2 forbids for a cookie`);
     }
 
-    const text = yield* toText(name, value, options.required);
+    const text = yield* toText(name, yield* flatOf(name, value), options.required);
 
     if (text === undefined) {
       return text;
