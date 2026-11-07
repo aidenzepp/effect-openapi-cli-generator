@@ -876,6 +876,10 @@ describe("emitCli: multipart request bodies", () => {
     expect(output.refusals).toEqual([]);
     expect(text).toContain('Flag.Literals("file-content-type", ["text/csv", "application/json"])');
     expect(text).toContain('["file-content-type", Option.isSome(flags.fileContentType), true]');
+    expect(text).toContain(
+      'Effect.flatMap(Serialize.chooseParts({ file: ["file", flags.fileContentType] })),',
+    );
+    expect(text).toContain("Effect.flatMap((parts) => Imports.create({ body: parts })),");
   });
 
   test("a multipart/mixed body is refused", async () => {

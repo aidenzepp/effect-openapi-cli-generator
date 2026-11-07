@@ -20,8 +20,9 @@ import type { BinRun, GeneratedPackage } from "../support/generated-cli.ts";
 // ENC-10 (design 6.3): a multipart part whose Encoding `contentType` lists several media types
 // gets a `--<part>-content-type` choice flag over them, with no sniffing default. The part is
 // sent under the chosen type; a sent part without the flag, and the flag without its part, are
-// usage errors before any connection. The package's own install, `tsc` and build prove the
-// `api/` builder's chosen-type input against the runtime.
+// usage errors before any connection. The `api/` builder takes the chosen type with the part's
+// values, so a call without the part names no type. The package's own install, `tsc` and build
+// prove that shape against the runtime, with `builderCheck` among its sources.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -119,12 +120,41 @@ describe("names plan and emitters: a part with several content types", () => {
     );
   });
 
-  test("the api/ builder takes the chosen type and sends it on the part entry", () => {
-    expect(emitted.api).toContain('readonly fileContentType: "image/png" | "image/jpeg";');
-    expect(emitted.api).toContain('["file", input.fileContentType],');
+  test("the api/ builder takes the chosen type with the part, and no type without it", () => {
+    expect(emitted.api).toContain(
+      'readonly file?: Serialize.ChosenPart<"image/png" | "image/jpeg"> | undefined;',
+    );
+    expect(emitted.api).toContain("readonly body: CreateForm;");
+    expect(emitted.api).not.toContain("ContentType");
+    expect(emitted.api).toContain("Serialize.formData(input.body.fields, {");
+    expect(emitted.api).toContain('["file", input.body.file],');
     expect(emitted.api).toContain('["title", "text/plain"],');
   });
+
+  test("the cli/ command splits the chosen part out, filling no type", () => {
+    expect(emitted.cli).toContain(
+      'Effect.flatMap(Serialize.chooseParts({ file: ["file", flags.fileContentType] })),',
+    );
+    expect(emitted.cli).not.toContain("Option.getOrElse(flags.fileContentType");
+  });
 });
+
+// Compiled with the package (`tsc` fails the build step otherwise): a call without the part names
+// no content type, a call with it takes a listed one, and the part without its type does not
+// compile (the `@ts-expect-error` line fails as unused if it does).
+const builderCheck = `import * as Uploads from "./api/uploads.ts";
+
+export const titleOnly = Uploads.create({ body: { fields: { title: ["cat"] } } });
+
+export const chosen = Uploads.create({
+  body: { fields: { title: ["cat"] }, file: { contentType: "image/jpeg", values: ["x"] } },
+});
+
+export const untyped = Uploads.create({
+  // @ts-expect-error a sent part needs its content type
+  body: { fields: { title: ["cat"] }, file: { values: ["x"] } },
+});
+`;
 
 // The generated package lives under the worktree's git-ignored `work/`, never the system temp
 // directory.
@@ -161,11 +191,11 @@ beforeAll(async () => {
   capture.script("/uploads", { status: 204 });
 
   generated = await Effect.runPromise(
-    generateFixture({ configPath, specPath }).pipe(
-      Effect.tap(preparePackage),
-      Scope.provide(scope),
-      Effect.provide(layer),
-    ),
+    generateFixture({
+      authorFiles: [{ content: builderCheck, path: "src/builder-check.ts" }],
+      configPath,
+      specPath,
+    }).pipe(Effect.tap(preparePackage), Scope.provide(scope), Effect.provide(layer)),
   );
 }, 900_000);
 

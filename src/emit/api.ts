@@ -587,7 +587,7 @@ const parameterParts = (
 
 /**
  * A part's `Content-Type`: the one media type its Encoding `contentType` lists, or the operator's
- * choice among several (design 6.3, ENC-10), with the `Input` key that carries it, the listed
+ * choice among several (design 6.3, ENC-10), with the part's key in the builder's form, the listed
  * types, and the `--<part>-content-type` flag.
  */
 export type PartType =
@@ -613,12 +613,12 @@ export interface FormPart {
 }
 
 /**
- * The `Input` keys of the part content types an operation's operator chooses (ENC-10), by part
- * name: `<part> content type` folded to camel case, renamed by numeric suffix past the parameter
- * keys and each other. Keys never depend on flag spelling.
+ * The keys in the builder's form of the parts whose content type an operation's operator chooses
+ * (ENC-10), by part name: the part name folded to camel case, renamed by numeric suffix past
+ * `fields` and each other. Keys never depend on flag spelling.
  */
-export const contentTypeKeys = (operation: Operation): ReadonlyMap<string, string> => {
-  const taken = new Set([...fixedInputKeys, ...inputKeys(operation).map(({ key }) => key)]);
+export const chosenPartKeys = (operation: Operation): ReadonlyMap<string, string> => {
+  const taken = new Set(["fields"]);
   const keys = new Map<string, string>();
   for (const alternative of operation.body?.alternatives ?? []) {
     for (const { contentType, target } of alternative.encoding) {
@@ -631,8 +631,8 @@ export const contentTypeKeys = (operation: Operation): ReadonlyMap<string, strin
         continue;
       }
 
-      const folded = foldIdentifier(`${target.name} content type`, "camel");
-      const base = Result.isSuccess(folded) ? folded.success.name : "partContentType";
+      const folded = foldIdentifier(target.name, "camel");
+      const base = Result.isSuccess(folded) ? folded.success.name : "part";
       const key = taken.has(base) ? suffixed(base, (candidate) => taken.has(candidate)) : base;
       taken.add(key);
       keys.set(target.name, key);
@@ -781,7 +781,7 @@ export const formParts = (
   const context: PartContext = {
     alternative,
     flags: command.flags,
-    keys: contentTypeKeys(command.operation),
+    keys: chosenPartKeys(command.operation),
     schemas: objectSchemas(defs, key),
   };
   const parts: OrderedPart[] = [];
@@ -857,11 +857,11 @@ export const encodesByKey = (alternatives: readonly MediaAlternative[]): boolean
   );
 
 // How one alternative's body value is typed and sent: `encode` takes the value and the
-// `Content-Type` expressions; `typed` is whether it reads the second; `fields` are the `Input`
-// fields it reads beside the body, one per chosen part type.
+// `Content-Type` expressions; `typed` is whether it reads the second; `declarations` declare the
+// value's type when the encoder names one.
 interface Encoder {
+  readonly declarations?: readonly Statement[];
   readonly encode: (value: Expr, contentType: Expr) => Expr;
-  readonly fields?: readonly Field[];
   readonly type: TypeExpr;
   readonly typed: boolean;
 }
@@ -876,11 +876,13 @@ const bytesEncoder: Encoder = {
 // no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order.
 // A multipart body the writer can send is its part values, streamed by `Serialize.formData`. Any
 // other body is an `HttpBody` that `Serialize.body` sends. A multipart body the writer cannot send
-// has no encoder (`None`); `cli/` refuses its operation.
+// has no encoder (`None`); `cli/` refuses its operation. A multipart body with a chosen part type is
+// the `formName` interface.
 const encoderOf = (
   command: PlannedCommand,
   alternative: MediaAlternative,
   defs: Defs,
+  formName: string,
 ): Effect.Effect<Option.Option<Encoder>, ApiEmitError> =>
   Effect.gen(function* encoder() {
     const required = bool(command.operation.body?.required ?? false);
@@ -914,37 +916,57 @@ const encoderOf = (
       return Option.none();
     }
 
-    // A chosen part type is read from its `Input` key; the `cli/` step refuses a sent part
-    // without one (ENC-10).
-    const fields: Field[] = [];
-    const entries: Expr[] = [];
+    // A chosen part type travels with its part's values in the form, so a part not sent has no
+    // type to give (ENC-10).
+    const chosen: Field[] = [];
+    const sends: ((form: Expr) => Expr)[] = [];
     for (const { contentEncoding, contentType, name } of parts.success) {
-      const sent =
-        contentType._tag === "Declared"
-          ? str(contentType.mediaType)
-          : member(ident(I("input")), yield* memberName(contentType.key));
-      if (contentType._tag === "Chosen") {
-        fields.push({
-          key: contentType.key,
-          optional: false,
-          type: typeUnion(contentType.choices.map((choice) => typeLiteral(choice))),
-        });
+      const encoding = contentEncoding === undefined ? [] : [str(contentEncoding)];
+      if (contentType._tag === "Declared") {
+        sends.push(() => arr([str(name), str(contentType.mediaType), ...encoding]));
+        continue;
       }
 
-      entries.push(
-        arr([str(name), sent, ...(contentEncoding === undefined ? [] : [str(contentEncoding)])]),
-      );
+      const key = yield* memberName(contentType.key);
+      const choices = typeUnion(contentType.choices.map((choice) => typeLiteral(choice)));
+      chosen.push({
+        key: contentType.key,
+        optional: true,
+        type: optionalOf(typeRef(I("Serialize"), [M("ChosenPart")], [choices])),
+      });
+      sends.push((form) => arr([str(name), member(form, key), ...encoding]));
     }
 
-    const options = obj([
-      ["parts", arr(entries)],
-      ["required", required],
-    ]);
+    const options = (form: Expr) =>
+      obj([
+        ["parts", arr(sends.map((send) => send(form)))],
+        ["required", required],
+      ]);
+    const fields = typeRef(I("Serialize"), [M("FormFields")]);
+    if (chosen.length === 0) {
+      return Option.some<Encoder>({
+        encode: (value) => fn("formData", [value, options(value)]),
+        type: fields,
+        typed: false,
+      });
+    }
+
+    const name = yield* identifier(formName);
+    const doc = yield* docText(
+      "The multipart parts: fields holds each part with one listed content type, and each part listing several carries the type chosen for it, or is absent when not sent.",
+    );
 
     return Option.some<Encoder>({
-      encode: (value) => fn("formData", [value, options]),
-      fields,
-      type: typeRef(I("Serialize"), [M("FormFields")]),
+      declarations: [
+        {
+          _tag: "Interface",
+          doc,
+          fields: [{ key: "fields", optional: false, type: fields }, ...chosen],
+          name,
+        },
+      ],
+      encode: (value) => fn("formData", [member(value, M("fields")), options(value)]),
+      type: typeRef(name),
       typed: false,
     });
   });
@@ -954,13 +976,20 @@ const encoderOf = (
 // `Serialize.alternatives` calls the chosen key's encoder, with annotated parameters. A multipart
 // alternative the writer cannot send is left out, so no builder sends multipart without its
 // boundary; `cli/` refuses that operation.
-const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifier.Type) =>
+const chosenParts = (
+  command: PlannedCommand,
+  defs: Defs,
+  name: typeof Identifier.Type,
+  formName: string,
+) =>
   Effect.gen(function* chosen() {
+    const declarations: Statement[] = [];
     const fields: Field[] = [];
-    const typeFields = new Map<string, Field>();
     const table: (readonly [string, Expr])[] = [];
     for (const alternative of command.operation.body?.alternatives ?? []) {
-      const found = yield* encoderOf(command, alternative, defs);
+      const forms = declarations.length;
+      const numbered = forms === 0 ? formName : `${formName}${forms + 1}`;
+      const found = yield* encoderOf(command, alternative, defs, numbered);
       if (Option.isNone(found)) {
         continue;
       }
@@ -973,11 +1002,8 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
         params.push({ name: I("contentType"), type: sent });
       }
 
+      declarations.push(...(encoder.declarations ?? []));
       fields.push({ key: mediaType, optional: false, type: encoder.type });
-      for (const field of encoder.fields ?? []) {
-        typeFields.set(field.key, field);
-      }
-
       table.push([
         mediaType,
         arrow(params, encoder.encode(ident(I("body")), ident(I("contentType")))),
@@ -987,7 +1013,7 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
     const value = member(ident(I("input")), M("body"));
 
     return {
-      declarations: [{ _tag: "Interface", fields, name }],
+      declarations: [...declarations, { _tag: "Interface", fields, name }],
       entry: ["body", fn("alternatives", [value, obj(table)])],
       fields: [
         {
@@ -995,7 +1021,6 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
           optional: false,
           type: typeRef(I("Serialize"), [M("Chosen")], [typeRef(name)]),
         },
-        ...typeFields.values(),
       ],
     } satisfies BodyParts;
   });
@@ -1004,11 +1029,13 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
 // no input is `HttpBody.empty`, which `Serialize.request` sends without `Content-Type`. A lone
 // alternative is sent by its own encoder under its media type. The content type is an input when
 // the operator chooses it among bytes alternatives, or under a range key; a body with a form or
-// multipart alternative among several is encoded per key (`chosenParts`).
+// multipart alternative among several is encoded per key (`chosenParts`). `formName` names a
+// multipart body with a chosen part type.
 const bodyParts = (
   command: PlannedCommand,
   defs: Defs,
   bodies: typeof Identifier.Type,
+  formName: string,
 ): Effect.Effect<BodyParts, ApiEmitError> =>
   Effect.gen(function* parts() {
     const alternatives = command.operation.body?.alternatives ?? [];
@@ -1018,18 +1045,19 @@ const bodyParts = (
     }
 
     if (encodesByKey(alternatives)) {
-      return yield* chosenParts(command, defs, bodies);
+      return yield* chosenParts(command, defs, bodies, formName);
     }
 
     const input = ident(I("input"));
     const value = member(input, M("body"));
     if (alternatives.length === 1 && !isRange(first.mediaType)) {
-      const encoder = Option.getOrElse(yield* encoderOf(command, first, defs), () => bytesEncoder);
+      const found = yield* encoderOf(command, first, defs, formName);
+      const encoder = Option.getOrElse(found, () => bytesEncoder);
 
       return {
-        declarations: [],
+        declarations: encoder.declarations ?? [],
         entry: ["body", encoder.encode(value, str(first.mediaType))],
-        fields: [{ key: "body", optional: false, type: encoder.type }, ...(encoder.fields ?? [])],
+        fields: [{ key: "body", optional: false, type: encoder.type }],
       };
     }
 
@@ -1145,7 +1173,8 @@ const commandStatements = (
     const parameters = yield* Effect.forEach(inputKeys(operation), (entry) =>
       parameterParts(entry, context),
     );
-    const body = yield* bodyParts(command, context.defs, yield* identifier(`${capitalized}Bodies`));
+    const bodies = yield* identifier(`${capitalized}Bodies`);
+    const body = yield* bodyParts(command, context.defs, bodies, `${capitalized}Form`);
     const cookies = parameters.flatMap((part) => (part.cookie === undefined ? [] : [part.cookie]));
     const parts: (readonly [string, Expr])[] = [
       [

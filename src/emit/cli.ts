@@ -46,7 +46,6 @@ import {
   printModule,
   str,
   typeKeyword,
-  typeLiteral,
   typeReadonlyArray,
 } from "./printer.ts";
 import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
@@ -802,7 +801,6 @@ const flagValue = (key: string) => memberName(key).pipe(Effect.map((name) => mem
 
 interface BodyPlan {
   readonly args: readonly Entry[];
-  readonly inputs?: readonly Entry[];
   readonly domain: readonly string[];
   readonly head: Expr;
   readonly parameter: string;
@@ -1019,13 +1017,12 @@ const partSent = (part: FormPart) =>
   );
 
 // A part type the operator chooses (ENC-10): `Input.partOptions` refuses its flag without the part
-// and a sent part without its flag, before any request, and the builder input carries the chosen
-// type. An unsent part carries no type, so the first listed type only fills that input.
+// and a sent part without its flag, before any request, and `Serialize.chooseParts` moves the
+// sent part's values beside the chosen type under its key in the builder's form.
 const chosenType = (part: FormPart) =>
   Effect.gen(function* chosen() {
     const { contentType } = part;
-    const [first] = contentType._tag === "Chosen" ? contentType.choices : [];
-    if (contentType._tag === "Declared" || first === undefined) {
+    if (contentType._tag === "Declared") {
       return Option.none();
     }
 
@@ -1034,16 +1031,13 @@ const chosenType = (part: FormPart) =>
 
     return Option.some({
       check: fn("Input.partOptions", str(part.flag.name), yield* partSent(part), arr([option])),
-      input: [
-        contentType.key,
-        fn("Option.getOrElse", value, arrow([], str(first), typeLiteral(first))),
-      ] as const,
+      choice: [contentType.key, arr([str(part.name), value])] as const,
     });
   });
 
 // A `multipart/form-data` alternative's body: the part values, asserted against its schema and
 // then streamed by the `api/` builder through the runtime writer (design 6.3). There is no
-// whole-body flag (D-ENC1 a). `inputs` are the builder's chosen part types.
+// whole-body flag (D-ENC1 a). A part with a chosen type leaves the values for the builder's form.
 const formBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
@@ -1057,14 +1051,14 @@ const formBody = (
 
     const entries: Entry[] = [];
     const checks: Expr[] = [];
-    const inputs: Entry[] = [];
+    const choices: Entry[] = [];
     for (const part of parts.success) {
       entries.push([part.name, yield* partValues(part)]);
 
       const chosen = yield* chosenType(part);
       if (Option.isSome(chosen)) {
         checks.push(chosen.value.check);
-        inputs.push(chosen.value.input);
+        choices.push(chosen.value.choice);
       }
     }
 
@@ -1072,14 +1066,15 @@ const formBody = (
     const values = fn("Effect.all", obj(entries));
     const [check, ...more] = checks;
     const ordered = [...more, values].map((next) => fn("Effect.andThen", next));
+    const split =
+      choices.length === 0 ? [] : [fn("Effect.flatMap", fn("Serialize.chooseParts", obj(choices)))];
 
     return {
-      args: [["body", ident(I("parts"))], ...inputs],
+      args: [["body", ident(I("parts"))]],
       domain: assertion.domain,
       head: check ?? values,
-      inputs,
       parameter: "parts",
-      steps: check === undefined ? assertion.steps : [...ordered, ...assertion.steps],
+      steps: [...(check === undefined ? [] : ordered), ...assertion.steps, ...split],
     } satisfies BodyPlan;
   });
 
@@ -1121,14 +1116,12 @@ const choiceEntry = (
 ) =>
   Effect.gen(function* entry() {
     if (alternative.codec !== "multipart") {
-      const body = yield* alternativeBody(command, alternative, required, context);
-
-      return { ...body, inputs: [] };
+      return yield* alternativeBody(command, alternative, required, context);
     }
 
     const form = yield* formBody(command, alternative, context);
 
-    return { domain: form.domain, inputs: form.inputs, value: pipe(form.head, form.steps ?? []) };
+    return { domain: form.domain, value: pipe(form.head, form.steps ?? []) };
   });
 
 // A lone alternative is built directly. Several, or a range key, go into the `Input.selectBody`
@@ -1166,14 +1159,10 @@ const bodyPlan = (
     const alternatives: Entry[] = [];
     const domain: string[] = [];
     const foreign: Entry[] = [];
-    const inputs = new Map<string, Expr>();
     for (const alternative of body.alternatives) {
       const built = yield* choiceEntry(command, alternative, body.required, context);
       alternatives.push([alternative.mediaType, built.value]);
       domain.push(...built.domain);
-      for (const [key, value] of built.inputs) {
-        inputs.set(key, value);
-      }
 
       const misplaced = yield* foreignFlags(command, alternative);
       if (misplaced.length > 0) {
@@ -1193,7 +1182,7 @@ const bodyPlan = (
 
     return Option.some({
       args: encodesByKey(body.alternatives)
-        ? [["body", selected], ...inputs]
+        ? [["body", selected]]
         : [
             ["body", member(selected, M("body"))],
             ["contentType", member(selected, M("contentType"))],
