@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { Result } from "effect";
 
 import * as InventoryTrace from "../../tools/inventory-trace.ts";
 
-const { traceRows, titlesOf } = InventoryTrace;
+const { traceRows } = InventoryTrace;
+
+const titlesOf = (source: string) => Result.getOrThrow(InventoryTrace.titlesOf(source));
 
 const row = (id: string, coveredBy: readonly string[] = []) => ({
   coveredBy,
@@ -76,5 +79,75 @@ describe("inventory trace: row id forms", () => {
     expect(ids.filter((id) => id === undefined || !InventoryTrace.rowIdPattern.test(id))).toEqual(
       [],
     );
+  });
+});
+
+const ids = (source: string) => titlesOf(source).map((title) => title.id);
+
+describe("inventory trace: only real test calls are titles (audit S8)", () => {
+  test("TRC-09: a test call inside a string or a template literal is not a title", () => {
+    expect(ids(`const a = 'test("ZZZ-01: x", () => {})';`)).toEqual([]);
+    expect(ids('const a = "test(\\"ZZZ-01: x\\", () => {})";')).toEqual([]);
+    expect(ids('const a = `test("ZZZ-01: x", () => {})`;')).toEqual([]);
+    expect(ids(`const a = \`\${b}test("ZZZ-01: x")\${c}\`;`)).toEqual([]);
+  });
+
+  test("TRC-10: a test call after a trailing // comment or inside a block comment is not a title", () => {
+    expect(ids(`go(); // test("ZZZ-01: x", () => {});`)).toEqual([]);
+    expect(ids(`go(); /* test("ZZZ-01: x", () => {}); */`)).toEqual([]);
+  });
+
+  test("TRC-11: a test under a skipped, todo or conditional describe is not a title", () => {
+    for (const opener of [
+      "describe.skip(",
+      "describe.todo(",
+      "describe.if(ok)(",
+      "describe.skipIf(no)(",
+    ]) {
+      expect(ids(`${opener}"off", () => { test("ZZZ-01: x", () => {}); });`)).toEqual([]);
+    }
+  });
+
+  test("TRC-12: a skipped describe ends at its closing parenthesis", () => {
+    expect(
+      ids(
+        'describe.skip("off", () => { test("ZZZ-01: x", () => {}); });\ntest("ZZZ-02: y", () => {});',
+      ),
+    ).toEqual(["ZZZ-02"]);
+  });
+
+  test("TRC-13: describe and describe.each keep their tests; test.skip and test.each do not count", () => {
+    expect(
+      ids(
+        'describe("on", () => { test("ZZZ-01: x", () => {}); });\ndescribe.each([1])("%s", () => { it("ZZZ-02: y", () => {}); });',
+      ),
+    ).toEqual(["ZZZ-01", "ZZZ-02"]);
+    expect(
+      ids('test.skip("ZZZ-01: x", () => {});\ntest.each([1])("ZZZ-02: %s", () => {});'),
+    ).toEqual([]);
+  });
+
+  test("TRC-14: a template title with a substitution is read from its head", () => {
+    expect(titlesOf(`test(\`ZZZ-01: \${name}\`, () => {});`)).toEqual([
+      { half: undefined, id: "ZZZ-01", todo: false },
+    ]);
+  });
+
+  test("TRC-15: a regular expression literal holding a quote or a slash does not hide later tests", () => {
+    expect(
+      ids('const r = /"[/]\\//u;\nconst q = a / b / c;\ntest("ZZZ-01: x", () => {});'),
+    ).toEqual(["ZZZ-01"]);
+  });
+
+  test("TRC-16: a source the trace cannot tokenize is refused with the line", () => {
+    for (const [source, reason] of [
+      ['test("ZZZ-01: x");\nconst s = "open;', "unterminated string literal at line 2"],
+      ["const s = `open", "unterminated template literal at line 1"],
+      ["/* open", "unterminated block comment at line 1"],
+      ["const r = /open\n", "unterminated regular expression at line 1"],
+      ["go((", "unbalanced parentheses at line 1"],
+    ] as const) {
+      expect(InventoryTrace.titlesOf(source)).toEqual(Result.fail(reason));
+    }
   });
 });

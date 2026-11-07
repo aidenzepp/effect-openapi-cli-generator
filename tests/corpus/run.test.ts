@@ -38,7 +38,8 @@ const accepted = {
 const refusedSpec = { info: { title: "t" }, openapi: "3.1.1", paths: {} };
 
 interface Stub {
-  readonly config: object;
+  // Absent: the entry has no author config.
+  readonly config?: object;
   readonly id: string;
   readonly spec: object;
 }
@@ -53,6 +54,7 @@ const entries: readonly Stub[] = [
     id: "broken",
     spec: accepted,
   },
+  { id: "unconfigured", spec: accepted },
 ];
 
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -67,7 +69,12 @@ const manifest = (): string => {
     const bytes = new TextEncoder().encode(JSON.stringify(entry.spec));
     const sha256 = digest(bytes);
     written(nodePath.join(cache, sha256), bytes);
-    written(nodePath.join(stub, "corpus/config", `${entry.id}.json`), JSON.stringify(entry.config));
+    if (entry.config !== undefined) {
+      written(
+        nodePath.join(stub, "corpus/config", `${entry.id}.json`),
+        JSON.stringify(entry.config),
+      );
+    }
 
     return {
       bytes: bytes.length,
@@ -133,7 +140,7 @@ describe("corpus run options", () => {
     const ran = runner("--list-ci");
 
     expect(ran.code).toBe(0);
-    expect(ran.stdout).toBe("clean\nrefused\nbroken\n");
+    expect(ran.stdout).toBe("clean\nrefused\nbroken\nunconfigured\n");
   }, 60_000);
 
   test("--only runs one entry; --out writes there and leaves corpus/verdicts untouched", () => {
@@ -166,6 +173,19 @@ describe("corpus run options", () => {
     expect(ran.log).toContain("refused: refused (document)");
     expect(ran.log).toContain("broken: build failed");
   }, 300_000);
+
+  test("--check fails a ci entry with no author config; a plain run skips it", () => {
+    // Two failures before any build, like the case below.
+    const checked = runner("--check", "--only", "unconfigured");
+    const plain = runner("--only", "unconfigured");
+
+    expect(checked.code).toBe(1);
+    expect(checked.log).toContain(
+      "unconfigured: no author config at corpus/config/unconfigured.json",
+    );
+    expect(plain.code).toBe(0);
+    expect(plain.log).toContain("unconfigured: skipped, no corpus/config/unconfigured.json");
+  }, 60_000);
 
   test("an unknown --only id, an unknown argument and --check with --out exit 1", () => {
     // Three process spawns, one per case (the unknown id is run once, not twice). Each is a
