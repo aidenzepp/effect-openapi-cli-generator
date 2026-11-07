@@ -12,6 +12,59 @@
   },
   "openapi": "3.1.2",
   "paths": {
+    "/content": {
+      "get": {
+        "operationId": "content-get",
+        "parameters": [
+          {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "lat": {
+                      "type": "number"
+                    },
+                    "long": {
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "in": "query",
+            "name": "coordinates"
+          },
+          {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "in": "header",
+            "name": "X-Note"
+          },
+          {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "in": "cookie",
+            "name": "pref"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/delimited": {
       "get": {
         "operationId": "delimited-get",
@@ -46,6 +99,32 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "allowReserved": true,
+            "explode": false,
+            "in": "query",
+            "name": "rpipes",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "pipeDelimited"
+          },
+          {
+            "allowReserved": true,
+            "explode": false,
+            "in": "query",
+            "name": "rspaces",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "spaceDelimited"
           }
         ],
         "responses": {

@@ -3,13 +3,14 @@ import nodeFs from "node:fs";
 import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Array as Arr, Effect, Exit, Layer, Order, Scope, Schema } from "effect";
+import { Array as Arr, Effect, Exit, Layer, Order, Runtime, Scope, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { generate, GenerateRefused } from "../../src/generate.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import type { Json } from "../../src/model/pointer.ts";
+import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { HeaderList } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
@@ -92,7 +93,14 @@ afterAll(async () => {
 const latin1 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("latin1");
 
 // The headers the fixture's parameters can set, plus Accept; the rest are the runtime's own.
-const watched: ReadonlySet<string> = new Set(["accept", "cookie", "id", "x-raw", "x-trace"]);
+const watched: ReadonlySet<string> = new Set([
+  "accept",
+  "cookie",
+  "id",
+  "x-note",
+  "x-raw",
+  "x-trace",
+]);
 
 interface Sent {
   readonly headers: HeaderList;
@@ -118,9 +126,16 @@ const watchedOf = (headers: HeaderList): HeaderList =>
     ),
   );
 
+interface Invocation {
+  readonly exchange: Exchange;
+  readonly stderr: string;
+  readonly stdout: string;
+}
+
 // One invocation of the line's built CLI against the bound server, with what the capture server
-// recorded during it. `runBin` is asynchronous, so the in-process capture server keeps answering.
-const run = async (line: Line, args: readonly string[]): Promise<Exchange> => {
+// recorded during it and the CLI's output. `runBin` is asynchronous, so the in-process capture
+// server keeps answering.
+const invoke = async (line: Line, args: readonly string[]): Promise<Invocation> => {
   const generated = packages.get(line);
   if (generated === undefined) {
     throw new Error(`no package built for ${line}`);
@@ -138,12 +153,22 @@ const run = async (line: Line, args: readonly string[]): Promise<Exchange> => {
   }
 
   return {
-    exitCode: result.exitCode,
-    sent: capture
-      .requests()
-      .slice(before)
-      .map((request) => ({ headers: watchedOf(request.headers), target: request.target })),
+    exchange: {
+      exitCode: result.exitCode,
+      sent: capture
+        .requests()
+        .slice(before)
+        .map((request) => ({ headers: watchedOf(request.headers), target: request.target })),
+    },
+    stderr: latin1(result.stderr),
+    stdout: latin1(result.stdout),
   };
+};
+
+const run = async (line: Line, args: readonly string[]): Promise<Exchange> => {
+  const { exchange } = await invoke(line, args);
+
+  return exchange;
 };
 
 const accept: readonly [string, string] = ["accept", "*/*"];
@@ -251,6 +276,23 @@ const schemaRefusals = (found: Generated) =>
 const parameterPointer = "/paths/~1a/get/parameters/0";
 
 const pathParameterPointer = "/paths/~1a~1{p}/get/parameters/0";
+
+// Options for the runtime serializer, for the PRM-29 cases the built CLI cannot reach.
+const runtimeOptions = { allowReserved: false, explode: true, required: false };
+
+const deepObjectRefusal = (value: Serialize.Nested, brackets: boolean) =>
+  Effect.runPromise(
+    Effect.flip(Serialize.deepObject("filter", value, { ...runtimeOptions, brackets }).expand),
+  );
+
+// A deepObject query parameter whose member is itself an object (PRM-27).
+const nestedFilter: Members = {
+  explode: true,
+  in: "query",
+  name: "filter",
+  schema: { properties: { a: { type: "object" } }, type: "object" },
+  style: "deepObject",
+};
 
 // PRM-35 in 3.1: the element's notice and the known-disagreement notice citing both sides.
 const ignoredOutsideQuery = (pointer: string) => [
@@ -378,10 +420,25 @@ describe("PRM rows through the built CLI", () => {
         expect(observed).toEqual(sentOnce("/flags?need=n&limit=7"));
       }, 60_000);
 
-      // Every schema-based scalar parameter is a string flag: `--count abc` and `--limit abc` are
-      // sent as given.
-      test.todo(`PRM-14: --limit abc on an integer parameter is sent as limit=abc (exit 0) vs a usage error from the schema type before any request (${line})`, () =>
-        Promise.resolve());
+      test(`PRM-14: an integer flag takes int64 digits and a number flag JSON number text, sent unchanged; other text is a usage error before any request (${line})`, async () => {
+        const word = await run(line, ["flags-get", "--need", "n", "--limit", "abc"]);
+        const exponent = await run(line, ["flags-get", "--need", "n", "--limit", "1e2"]);
+        const fraction = await run(line, ["flags-get", "--need", "n", "--limit", "1.0"]);
+        const padded = await run(line, ["flags-get", "--need", "n", "--limit", "007"]);
+        const ratio = await run(line, ["types-get", "--ratio", "abc"]);
+        const wide = await run(line, ["flags-get", "--need", "n", "--limit", "9007199254740993"]);
+        const decimal = await run(line, ["types-get", "--ratio", "1.50"]);
+
+        expect([word, exponent, fraction, padded, ratio, wide, decimal]).toEqual([
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          sentOnce("/flags?need=n&limit=9007199254740993"),
+          sentOnce("/types?ratio=1.50"),
+        ]);
+      }, 60_000);
 
       test(`PRM-16: id in query and id in header are two parameters, sent to two places (${line})`, async () => {
         const observed = await run(line, ["identity-get", "--id", "q1", "--header-id", "h1"]);
@@ -467,12 +524,99 @@ describe("PRM rows through the built CLI", () => {
           refusedBeforeSending,
         ]);
       }, 60_000);
+
+      test(`PRM-29: under allowReserved the delimiter and its percent-encoded form are refused and other escapes pass; without it an escape's % is encoded (${line})`, async () => {
+        const pipe = await run(line, ["delimited-get", "--rpipes", "a|b"]);
+        const encodedPipe = await run(line, ["delimited-get", "--rpipes", "a%7Cb"]);
+        const lowerPipe = await run(line, ["delimited-get", "--rpipes", "a%7cb"]);
+        const space = await run(line, ["delimited-get", "--rspaces", "a b"]);
+        const encodedSpace = await run(line, ["delimited-get", "--rspaces", "a%20b"]);
+        const escape = await run(line, ["delimited-get", "--rpipes", "a%5Cb", "--rpipes", "c"]);
+        const strict = await run(line, ["delimited-get", "--pipes", "a%7Cb"]);
+
+        expect([pipe, encodedPipe, lowerPipe, space, encodedSpace, escape, strict]).toEqual([
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          refusedBeforeSending,
+          sentOnce("/delimited?rpipes=a%5Cb%7Cc"),
+          sentOnce("/delimited?pipes=a%257Cb"),
+        ]);
+      }, 60_000);
+
+      test(`PRM-15: a content-based query, header and cookie parameter each send their one media type's text (${line})`, async () => {
+        const observed = await run(line, [
+          "content-get",
+          "--coordinates",
+          '{"lat":1,"long":2}',
+          "--x-note",
+          "a b,c",
+          "--pref",
+          "dark",
+        ]);
+
+        expect(observed).toEqual(
+          sentOnce("/content?coordinates=%7B%22lat%22%3A1%2C%22long%22%3A2%7D", [
+            ["cookie", "pref=dark"],
+            ["x-note", "a b,c"],
+          ]),
+        );
+      }, 60_000);
+
+      test(`PRM-23: JSON query content is serialized compact, then percent-encoded (${line})`, async () => {
+        const observed = await run(line, [
+          "content-get",
+          "--coordinates",
+          '{ "lat": 1.5, "long": -2 }',
+        ]);
+
+        expect(observed).toEqual(
+          sentOnce("/content?coordinates=%7B%22lat%22%3A1.5%2C%22long%22%3A-2%7D"),
+        );
+      }, 60_000);
+
+      test(`PRM-24: text/plain header and cookie content pass through unencoded; cookie text outside cookie-octet is refused (${line})`, async () => {
+        const passed = await run(line, ["content-get", "--x-note", '"a%20b" c', "--pref", "a%20b"]);
+        const spaced = await run(line, ["content-get", "--pref", "a b"]);
+
+        expect([passed, spaced]).toEqual([
+          sentOnce("/content", [
+            ["cookie", "pref=a%20b"],
+            ["x-note", '"a%20b" c'],
+          ]),
+          refusedBeforeSending,
+        ]);
+      }, 60_000);
     });
   }
 
-  // The help text and the use of a deprecated parameter carry no mark; the request is sent.
-  test.todo("PRM-07: --old help carries no deprecation mark and its use prints nothing on stderr vs a deprecated marker in help and a stderr notice on use (all lines)", () =>
-    Promise.resolve());
+  for (const line of lines) {
+    test(`PRM-07: --old is marked deprecated in help and its use writes one stderr notice naming the flag, never the value (${line})`, async () => {
+      const help = await invoke(line, ["flags-get", "--help"]);
+      const used = await invoke(line, ["flags-get", "--need", "n", "--old", "SECRET-o"]);
+      const unused = await invoke(line, ["flags-get", "--need", "n"]);
+      const row = (flag: string) =>
+        help.stdout
+          .split("\n")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.startsWith(`${flag} `));
+      const before = new Set(unused.stderr.split("\n"));
+      const added = used.stderr.split("\n").filter((entry) => !before.has(entry));
+
+      expect(row("--old").map((entry) => entry.endsWith("(query old; deprecated)"))).toEqual([
+        true,
+      ]);
+      expect(row("--need").map((entry) => entry.includes("deprecated"))).toEqual([false]);
+      expect(added).toHaveLength(1);
+      expect(added[0]).toContain("--old");
+      expect(used.stderr).not.toContain("SECRET-o");
+      expect([used.exchange, unused.exchange]).toEqual([
+        sentOnce("/flags?need=n&old=SECRET-o"),
+        sentOnce("/flags?need=n"),
+      ]);
+    }, 60_000);
+  }
 
   for (const line of ["3.0.4", "3.1.2"] as const) {
     test(`PRM-30: = & + in query data are percent-encoded under form rules (${line})`, async () => {
@@ -494,10 +638,17 @@ describe("PRM rows through the built CLI", () => {
     expect(observed).toEqual(sentOnce("/headers", [["x-raw", '"a%20b" c']]));
   }, 60_000);
 
-  // The 3.2.1 query bytes equal the 3.1.2 ones: RFC 3986 percent-encoding, space as %20, ~ raw,
-  // * as %2A. Design 6.1's query row lists no version difference.
-  test.todo("PRM-31: 3.2.1 --plain 'a b~*' is sent as plain=a%20b~%2A, the 3.1.2 bytes, vs the WHATWG application/x-www-form-urlencoded set (plain=a+b%7E*)", () =>
-    Promise.resolve());
+  // RFC 3986 percent-encoding, space as %20, ~ raw, * as %2A, + as %2B, which decodes to the same
+  // text under WHATWG form-urlencoded rules. Design 6.1's query row lists no version difference.
+  test("PRM-31: 3.2.1 --plain 'a b~*+' is sent as plain=a%20b~%2A%2B, the 3.1.2 bytes", async () => {
+    const modern = await run("3.2.1", ["reserved-get", "--plain", "a b~*+"]);
+    const previous = await run("3.1.2", ["reserved-get", "--plain", "a b~*+"]);
+
+    expect([modern, previous]).toEqual([
+      sentOnce("/reserved?plain=a%20b~%2A%2B"),
+      sentOnce("/reserved?plain=a%20b~%2A%2B"),
+    ]);
+  }, 60_000);
 
   test("PRM-32: a 3.0 schema-based header value is not percent-encoded", async () => {
     const observed = await run("3.0.4", ["headers-get", "--x-raw", '"a%20b" c']);
@@ -511,16 +662,37 @@ describe("PRM rows through the built CLI", () => {
     expect(observed).toEqual(sentOnce("/querystring?%22x%20y%22"));
   }, 60_000);
 
-  // No content-based parameter outside querystring generates: `generate()` fails with
-  // ApiEmitError reason unsupported-parameter (subjects query:c, header:X-C, cookie:c, path:p).
-  test.todo("PRM-15: a content-based query, header, cookie or path parameter fails generation with ApiEmitError unsupported-parameter vs a value serialized with its one media type (all lines)", () =>
-    Promise.resolve());
+  // A text/plain querystring flag is a plain string flag: the operator's text needs no JSON quotes.
+  test("PRM-15: a text/plain querystring parameter takes the operator's text as given, percent-encoded once (3.2.1)", async () => {
+    const observed = await run("3.2.1", ["querystring-text-get", "--phrase", "a b&c=d"]);
 
-  test.todo("PRM-23: a query parameter with application/json content fails generation with ApiEmitError unsupported-parameter vs coordinates=%7B%22lat%22… on the wire (all lines)", () =>
-    Promise.resolve());
+    expect(observed).toEqual(sentOnce("/querystring-text?a%20b%26c%3Dd"));
+  }, 60_000);
 
-  test.todo("PRM-24: a cookie parameter with text/plain content fails generation with ApiEmitError unsupported-parameter vs the value passed through in the Cookie header (all lines)", () =>
-    Promise.resolve());
+  // Two PRM-29 cases the built CLI cannot reach, checked on the runtime serializer the package
+  // embeds: a deepObject parameter gets a string flag, so no object with a bracketed member key can
+  // be given, and a pipeDelimited parameter with explode true is refused at generation (STY-22).
+  test("PRM-29: an exploded pipeDelimited item holding | is sent, its | encoded", async () => {
+    const sent = await Effect.runPromise(
+      Serialize.pipeDelimited("c", ["a|b", "x"], { ...runtimeOptions, allowReserved: true }).expand,
+    );
+
+    expect(sent).toBe("c=a%7Cb&c=x");
+  });
+
+  test("PRM-29: a deepObject member key holding [ or ] is a usage error, standard and bracket mode", async () => {
+    const errors = [
+      await deepObjectRefusal({ "a]b": "v" }, false),
+      await deepObjectRefusal({ "a[b": "v" }, false),
+      await deepObjectRefusal({ x: { "[k]": "v" } }, true),
+    ];
+
+    expect(errors.map((error) => [error._tag, error[Runtime.errorExitCode]])).toEqual([
+      ["UsageError", 2],
+      ["UsageError", 2],
+      ["UsageError", 2],
+    ]);
+  });
 
   test.todo("PRM-22: INCONCLUSIVE: a schema-based scalar parameter is a string flag, so the operator has no null to give (--maybe null sends the text null); RFC 6570 undefined is reached only by omitting the flag", () =>
     Promise.resolve());
@@ -676,10 +848,60 @@ describe("PRM rows through generate()", () => {
         ]);
       }, 60_000);
 
-      // A deepObject query parameter with an object property generates with no diagnostic; the
-      // built flag is a plain string, so any --filter value exits 2 as not an object.
-      test.todo(`PRM-27: a deepObject query parameter with a nested object property generates with no diagnostic vs a PRM-27/compound-nested refusal at element scope (${line})`, () =>
-        Promise.resolve());
+      test(`PRM-15: path content and form-urlencoded query content refuse their operation as EMT-1/unsupported-parameter (${line})`, async () => {
+        const path = await inProcess(
+          members(line, {
+            paths: {
+              "/a/{p}": {
+                get: {
+                  parameters: [
+                    {
+                      content: { "text/plain": { schema: text } },
+                      in: "path",
+                      name: "p",
+                      required: true,
+                    },
+                  ],
+                  responses: ok,
+                },
+              },
+            },
+          }),
+        );
+        const form = await inProcess(
+          withParameters(line, [
+            {
+              content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
+              in: "query",
+              name: "q",
+            },
+          ]),
+        );
+
+        expect([summary(path), summary(form)]).toEqual([
+          [["EMT-1/unsupported-parameter", "refusal", "operation", "/paths/~1a~1{p}/get"]],
+          [["EMT-1/unsupported-parameter", "refusal", "operation", "/paths/~1a/get"]],
+        ]);
+      }, 60_000);
+
+      test(`PRM-27: a deepObject query parameter with a nested object property is refused at element scope (${line})`, async () => {
+        const found = await inProcess(withParameters(line, [nestedFilter]));
+
+        expect(summary(found)).toEqual([
+          ["PRM-27/compound-nested", "refusal", "element", parameterPointer],
+        ]);
+      }, 60_000);
+
+      test(`PRM-27: with nonStandard.deepObjectBrackets the nested deepObject parameter is built with one author-choice notice (${line})`, async () => {
+        const found = await inProcess(withParameters(line, [nestedFilter]), {
+          ...plainConfig,
+          nonStandard: { deepObjectBrackets: true },
+        });
+
+        expect(summary(found)).toEqual([
+          ["PRM-27/bracket-author-choice", "notice", "element", parameterPointer],
+        ]);
+      }, 60_000);
     });
   }
 
