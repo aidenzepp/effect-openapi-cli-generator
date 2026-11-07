@@ -76,6 +76,8 @@ const styled = (line: Line, parameter: Json) => {
 
 const string: Json = { type: "string" };
 
+const list: Json = { items: string, type: "array" };
+
 const query = (members: Members): Json => ({ in: "query", name: "q", schema: string, ...members });
 
 const path = (members: Members): Json => ({
@@ -165,10 +167,18 @@ describe("PRM-11 PRM-12 PRM-13 defaults come from the text of each location", ()
     ["STY-14", query({ explode: false }), "form"],
     ["STY-15", query({ allowReserved: true }), "form"],
     ["STY-16", query({ allowReserved: true, explode: false }), "form"],
-    ["STY-17", query({ style: "spaceDelimited" }), "spaceDelimited"],
-    ["STY-19", query({ allowReserved: true, style: "spaceDelimited" }), "spaceDelimited"],
-    ["STY-21", query({ style: "pipeDelimited" }), "pipeDelimited"],
-    ["STY-23", query({ allowReserved: true, style: "pipeDelimited" }), "pipeDelimited"],
+    ["STY-17", query({ schema: list, style: "spaceDelimited" }), "spaceDelimited"],
+    [
+      "STY-19",
+      query({ allowReserved: true, schema: list, style: "spaceDelimited" }),
+      "spaceDelimited",
+    ],
+    ["STY-21", query({ schema: list, style: "pipeDelimited" }), "pipeDelimited"],
+    [
+      "STY-23",
+      query({ allowReserved: true, schema: list, style: "pipeDelimited" }),
+      "pipeDelimited",
+    ],
     ["STY-01", path({ style: "matrix" }), "matrix"],
     ["STY-02", path({ explode: true, style: "matrix" }), "matrix"],
     ["STY-03", path({ style: "label" }), "label"],
@@ -689,6 +699,42 @@ describe("STY-40 STY-18 combinations outside the style table", () => {
       expect(outcome.diagnostics[0]?.scope).toBe("element");
     });
   }
+});
+
+describe("STY-17 STY-21 spaceDelimited and pipeDelimited take an array or object", () => {
+  const primitive: readonly (readonly [string, Json])[] = [
+    ["STY-17", query({ style: "spaceDelimited" })],
+    ["STY-19", query({ allowReserved: true, style: "spaceDelimited" })],
+    ["STY-21", query({ schema: { type: "integer" }, style: "pipeDelimited" })],
+    ["STY-23", query({ allowReserved: true, schema: { type: "boolean" }, style: "pipeDelimited" })],
+  ];
+
+  for (const [row, parameter] of primitive) {
+    test(`${row} over a primitive schema is refused at element scope`, () => {
+      for (const line of lines) {
+        const outcome = refused(line, parameter);
+
+        expect(codes(outcome)).toEqual([`${row}/primitive-not-applicable`]);
+        expect(outcome.diagnostics[0]?.scope).toBe("element");
+      }
+    });
+  }
+
+  test("STY-17 a primitive behind $ref is refused; an object or an untyped schema builds", () => {
+    const components = { schemas: { Flat: string } };
+    const outcome = normalize(
+      "3.1",
+      query({ schema: { $ref: "#/components/schemas/Flat" }, style: "spaceDelimited" }),
+      components,
+    );
+    const object = { properties: { R: { type: "integer" } }, type: "object" };
+
+    expect(codes(outcome)).toEqual(["STY-17/primitive-not-applicable"]);
+    expect(styled("3.1", query({ schema: object, style: "spaceDelimited" })).rows).toEqual([
+      "STY-17",
+    ]);
+    expect(styled("3.1", query({ schema: {}, style: "pipeDelimited" })).rows).toEqual(["STY-21"]);
+  });
 });
 
 describe("ParameterNotReadable is what the earlier stages should have stopped", () => {
