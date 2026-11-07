@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { Effect, Schema } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, FileSystem, Layer, Schema } from "effect";
 import { emitApi } from "../../src/emit/api.ts";
 import { operationHelp } from "../../src/emit/help.ts";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
@@ -12,6 +13,7 @@ import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
 import { resolve } from "../../src/resolve/index.ts";
+import { generateFixture, preparePackage } from "../support/generated-cli.ts";
 
 // The golden operation `users-update` declares three responses (200, 404, default) and no response
 // header. Each fixture swaps in the response headers it needs, as encoded data decoded again.
@@ -114,4 +116,51 @@ describe("operationHelp: a deprecated operation", () => {
 
     expect(sections.map(([title]) => title)).not.toContain("DEPRECATED");
   });
+});
+
+// The golden author config names `./custom/commands.ts`, which the author owns: one `login` command.
+const authorCommands = `import { Command } from "effect/cli";\n\nexport const login = Command.make("login");\n`;
+
+const utf8 = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+// The golden spec with `users-update` marked deprecated, written to a scoped temp directory.
+const deprecatedSpec = Effect.gen(function* writeSpec() {
+  const fs = yield* FileSystem.FileSystem;
+  const dir = yield* fs.makeTempDirectoryScoped({ prefix: "deprecated-operation-" });
+  const marker = '"operationId": "users-update",';
+  const spec = read("openapi.json").replace(marker, `${marker} "deprecated": true,`);
+  if (!spec.includes('"deprecated": true')) {
+    return yield* Effect.die("the golden spec has no users-update operation to mark");
+  }
+
+  const specPath = nodePath.join(dir, "openapi.json");
+  yield* fs.writeFileString(specPath, spec);
+
+  return specPath;
+});
+
+describe("generated package: a deprecated operation", () => {
+  test("OPR-14: the package type-checks and builds", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* buildPackage() {
+        const specPath = yield* deprecatedSpec;
+        const generated = yield* generateFixture({
+          authorFiles: [{ content: authorCommands, path: "custom/commands.ts" }],
+          configPath: nodePath.join(fixture, "author-config.json"),
+          specPath,
+        });
+
+        return yield* preparePackage(generated).pipe(
+          Effect.as("passed"),
+          Effect.catchTag("GeneratedCliStepFailed", (failure) =>
+            Effect.succeed(
+              `${failure.step} exited ${failure.exitCode}\n${utf8(failure.stdout)}${utf8(failure.stderr)}`,
+            ),
+          ),
+        );
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+    );
+
+    expect(outcome).toBe("passed");
+  }, 600_000);
 });
