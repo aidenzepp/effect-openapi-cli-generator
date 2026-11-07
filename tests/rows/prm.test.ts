@@ -409,10 +409,11 @@ describe("PRM rows through the built CLI", () => {
         ]);
       }, 60_000);
 
-      // The rest of the reserved set passes; the sub-delim ' arrives as %27. The runtime's query
-      // reserved set keeps ', so the WHATWG URL serializer under fetch encodes it.
-      test.todo(`PRM-13: --kept "'" with allowReserved arrives as kept=%27 vs kept=' raw, a reserved character (${line})`, () =>
-        Promise.resolve());
+      test(`PRM-13: --kept "'" with allowReserved arrives as kept=%27 (a platform limit, D-OC7) (${line})`, async () => {
+        const observed = await run(line, ["reserved-get", "--kept", "a'b"]);
+
+        expect(observed).toEqual(sentOnce("/reserved?kept=a%27b"));
+      }, 60_000);
 
       test(`PRM-14: a parameter schema given as a Reference Object generates its flag (${line})`, async () => {
         const observed = await run(line, ["flags-get", "--need", "n", "--limit", "7"]);

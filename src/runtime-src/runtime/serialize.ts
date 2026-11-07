@@ -196,9 +196,12 @@ const pathReserved = ":[]@!$&'()*+,;=";
 
 /**
  * Reserved characters a query value may pass under `allowReserved`: RFC 3986 reserved less the form
- * delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded.
+ * delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded. `'` is left out too:
+ * under `fetch` the WHATWG URL serializer always sends it as `%27` in an http(s) query, and
+ * Effect's `HttpClient` parses every request URL with `new URL`, so it can never go raw (a platform
+ * limit, D-OC7). Encoding it here keeps this output equal to the wire, as `queryWireForm` does.
  */
-const queryReserved = ":/?[]@!$'()*,;";
+const queryReserved = ":/?[]@!$()*,;";
 
 const encoder =
   (allowReserved: boolean, passed = pathReserved) =>

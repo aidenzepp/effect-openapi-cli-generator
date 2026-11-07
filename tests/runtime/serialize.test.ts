@@ -524,8 +524,12 @@ describe("allowReserved in a query", () => {
   const options = formOptions({ allowReserved: true });
 
   test("reserved characters pass but the form delimiters are encoded", async () => {
-    expect(await query(Serialize.form("q", ":/?[]@!$'()*,;", options))).toBe("q=:/?[]@!$'()*,;");
+    expect(await query(Serialize.form("q", ":/?[]@!$()*,;", options))).toBe("q=:/?[]@!$()*,;");
     expect(await query(Serialize.form("q", "a&b=c+d#e", options))).toBe("q=a%26b%3Dc%2Bd%23e");
+  });
+
+  test("' is sent as %27, the form fetch writes on the wire (a platform limit, D-OC7)", async () => {
+    expect(await query(Serialize.form("q", ":/?[]@!$'()*,;", options))).toBe("q=:/?[]@!$%27()*,;");
   });
 
   test("everything else is still encoded", async () => {
