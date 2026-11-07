@@ -819,17 +819,41 @@ describe("DOC, VAL and CMP rows through generate()", () => {
       ),
     );
 
-    expect(found.map((each) => [each.failure, nodeFs.existsSync(each.dir)])).toEqual([
-      ["UnsupportedOpenApiVersion", false],
-      ["UnsupportedOpenApiVersion", false],
-      ["UnsupportedOpenApiVersion", false],
+    expect(found.map((each) => [summary(each), nodeFs.existsSync(each.dir)])).toEqual([
+      [[["DOC-02/unsupported-version", "refusal", "document", "/openapi"]], false],
+      [[["DOC-02/unsupported-version", "refusal", "document", "/openapi"]], false],
+      [[["DOC-02/missing-version", "refusal", "document", "/openapi"]], false],
     ]);
   }, 60_000);
 
-  // generate() fails with UnsupportedOpenApiVersion, which carries the value only; the CLI prints
-  // one `refused: unsupported openapi version` line.
-  test.todo("DOC-02: 2.0, 3.3.0 and a missing field fail as UnsupportedOpenApiVersion with no diagnostic vs a refusal with the /openapi pointer and the oas-version section", () =>
-    Promise.resolve());
+  // None of the three names a supported line, so each cites the 3.2.1 oas-version section.
+  test("DOC-02: 2.0, 3.3.0 and a missing field are a document refusal at /openapi citing the oas-version section", async () => {
+    const { openapi: _openapi, ...unversioned } = members("3.1.2");
+    const found = await Effect.runPromise(
+      Effect.forEach(
+        [members("2.0"), members("3.3.0"), unversioned],
+        (entry) => Effect.promise(() => inProcess({ entry })),
+        { concurrency: 1 },
+      ),
+    );
+    const section = "https://spec.openapis.org/oas/v3.2.1.html#oas-version";
+
+    expect(
+      found.map((each) => [
+        each.failure,
+        each.diagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.scope,
+          diagnostic.pointer,
+          String(diagnostic.specSection),
+        ]),
+      ]),
+    ).toEqual([
+      [undefined, [["DOC-02/unsupported-version", "document", "/openapi", section]]],
+      [undefined, [["DOC-02/unsupported-version", "document", "/openapi", section]]],
+      [undefined, [["DOC-02/missing-version", "document", "/openapi", section]]],
+    ]);
+  }, 60_000);
 
   test("DOC-03: a $ref written against the target's $self resolves (3.2.1)", async () => {
     const found = await inProcess({

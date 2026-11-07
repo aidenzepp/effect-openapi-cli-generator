@@ -1,5 +1,8 @@
 import { Data, Effect, Option, Schema } from "effect";
+import type { DocumentUri } from "../model/brands.ts";
+import { Diagnostic } from "../model/diagnostic.ts";
 import type { Json } from "../model/pointer.ts";
+import { patchVersion, specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The OpenAPI line a document declares.
@@ -7,7 +10,8 @@ import type { Json } from "../model/pointer.ts";
 export type Line = "3.0" | "3.1" | "3.2";
 
 /**
- * The document has no `openapi` string, or names a line other than 3.0, 3.1 or 3.2.
+ * The document has no `openapi` string, or names a line other than 3.0, 3.1 or 3.2. A run reports
+ * it as the `DOC-02` refusal `versionRefusal` builds.
  */
 export class UnsupportedOpenApiVersion extends Data.TaggedError("UnsupportedOpenApiVersion")<{
   readonly openapi: string | undefined;
@@ -47,4 +51,37 @@ export const lineOf = (document: Json): Effect.Effect<Line, UnsupportedOpenApiVe
   return line === undefined
     ? Effect.fail(new UnsupportedOpenApiVersion({ openapi }))
     : Effect.succeed(line);
+};
+
+const knownLine = /^(?<line>3\.[012])(?![0-9])/u;
+
+/**
+ * `DOC-02` (design 8.1): the document-scope refusal at `/openapi` for an `openapi` value that names
+ * no supported line. The section is the value's own line when its major.minor is one (`3.1`), and
+ * the 3.2.1 text otherwise.
+ */
+export const versionRefusal = (
+  error: UnsupportedOpenApiVersion,
+  document: typeof DocumentUri.Type,
+): Effect.Effect<Diagnostic, Schema.SchemaError> => {
+  const found =
+    error.openapi === undefined ? undefined : knownLine.exec(error.openapi)?.groups?.line;
+  const line = found === "3.0" || found === "3.1" ? found : "3.2";
+  const declare = "Declare a 3.0.x, 3.1.x or 3.2.x version.";
+
+  return Schema.decodeUnknownEffect(Diagnostic)({
+    code: error.openapi === undefined ? "DOC-02/missing-version" : "DOC-02/unsupported-version",
+    document,
+    element: "openapi",
+    message:
+      error.openapi === undefined
+        ? `The document declares no openapi version. ${declare}`
+        : `The openapi version ${JSON.stringify(error.openapi)} is not supported. ${declare}`,
+    openapi: error.openapi ?? patchVersion[line],
+    pointer: "/openapi",
+    row: "DOC-02",
+    scope: "document",
+    severity: "refusal",
+    specSection: specSectionUrl(line, "oas-version"),
+  });
 };

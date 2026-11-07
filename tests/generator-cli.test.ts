@@ -165,6 +165,20 @@ describe("generator CLI", () => {
     }
   });
 
+  test("an unsupported openapi version prints its DOC-02 refusal line and exits 1", () => {
+    const spec = JSON.stringify({ ...goldenSpec, openapi: "2.0" });
+    const generated = cli(generateArgs("openapi.json"), { spec });
+    const validated = cli(["validate", "openapi.json"], { spec });
+    const verdict = cli(["verdict", "openapi.json", "--config", "c.json"], { spec });
+    const line =
+      'refused DOC-02/unsupported-version at #/openapi: The openapi version "2.0" is not supported. Declare a 3.0.x, 3.1.x or 3.2.x version.; https://spec.openapis.org/oas/v3.2.1.html#oas-version';
+
+    expect([generated.exitCode, lines(generated.stderr)]).toEqual([1, [line]]);
+    expect([validated.exitCode, lines(validated.stderr)]).toEqual([1, [line]]);
+    expect([verdict.exitCode, verdict.stdout]).toEqual([0, "refused\n"]);
+    expect(entries(generated.dir)).toEqual(["c.json", "openapi.json"]);
+  });
+
   test("an operation refusal exits 0 and writes the rest; --strict exits 1 and writes nothing", () => {
     const partial = cli(generateArgs("openapi.json"), { spec: withTextBody });
     const refusals = reportOf(partial).refusals.map((diagnostic) => diagnostic.code);

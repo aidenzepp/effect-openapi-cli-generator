@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect, Predicate } from "effect";
+import { Effect, Predicate, Schema } from "effect";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
+import { UnsupportedOpenApiVersion, versionRefusal } from "../../src/validate/dispatch.ts";
+import { DocumentUri } from "../../src/model/brands.ts";
 import type { ReadSchema } from "../../src/validate/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import valid30 from "../fixtures/validate/valid-3.0.json" with { type: "json" };
@@ -124,6 +126,65 @@ describe("validateDocument", () => {
     expect(await failureTag(validateDocument({ swagger: "2.0" }))).toBe(
       "UnsupportedOpenApiVersion",
     );
+  });
+});
+
+describe("versionRefusal", () => {
+  const uri = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
+  const refusalOf = (openapi?: string) =>
+    Effect.runPromise(versionRefusal(new UnsupportedOpenApiVersion({ openapi }), uri));
+
+  test("a missing openapi value is a DOC-02 document refusal at /openapi citing 3.2.1", async () => {
+    expect(await refusalOf()).toMatchObject({
+      code: "DOC-02/missing-version",
+      document: uri,
+      element: "openapi",
+      openapi: "3.2.1",
+      pointer: "/openapi",
+      row: "DOC-02",
+      scope: "document",
+      severity: "refusal",
+      specSection: "https://spec.openapis.org/oas/v3.2.1.html#oas-version",
+    });
+  });
+
+  test("an unsupported value is refused with the value; a known line cites its own release", async () => {
+    const found = await Promise.all(["2.0", "3.3.0", "3.1"].map((openapi) => refusalOf(openapi)));
+
+    expect(
+      found.map(({ code, message, openapi, pointer, specSection }) => ({
+        code,
+        message,
+        openapi,
+        pointer: String(pointer),
+        specSection: String(specSection),
+      })),
+    ).toEqual([
+      {
+        code: "DOC-02/unsupported-version",
+        message:
+          'The openapi version "2.0" is not supported. Declare a 3.0.x, 3.1.x or 3.2.x version.',
+        openapi: "2.0",
+        pointer: "/openapi",
+        specSection: "https://spec.openapis.org/oas/v3.2.1.html#oas-version",
+      },
+      {
+        code: "DOC-02/unsupported-version",
+        message:
+          'The openapi version "3.3.0" is not supported. Declare a 3.0.x, 3.1.x or 3.2.x version.',
+        openapi: "3.3.0",
+        pointer: "/openapi",
+        specSection: "https://spec.openapis.org/oas/v3.2.1.html#oas-version",
+      },
+      {
+        code: "DOC-02/unsupported-version",
+        message:
+          'The openapi version "3.1" is not supported. Declare a 3.0.x, 3.1.x or 3.2.x version.',
+        openapi: "3.1",
+        pointer: "/openapi",
+        specSection: "https://spec.openapis.org/oas/v3.1.2.html#oas-version",
+      },
+    ]);
   });
 });
 

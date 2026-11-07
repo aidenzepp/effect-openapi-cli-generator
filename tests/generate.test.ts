@@ -285,6 +285,34 @@ describe("generate", () => {
     expect(observed.written).toBe(false);
   });
 
+  test("an unsupported or missing openapi version is a DOC-02 document refusal; nothing is written", async () => {
+    const { openapi: _openapi, ...unversioned } = goldenSpec;
+    const observed = await Effect.runPromise(
+      Effect.forEach(
+        [{ ...goldenSpec, openapi: "2.0" }, unversioned],
+        (spec) =>
+          Effect.promise(() =>
+            run({ spec }, (exit, { out }) =>
+              exists(out).pipe(Effect.map((written) => ({ error: failureOf(exit), written }))),
+            ),
+          ),
+        { concurrency: 1 },
+      ),
+    );
+
+    expect(
+      observed.map(({ error, written }) => [
+        error._tag,
+        error.reason,
+        error.diagnostics?.map((diagnostic) => diagnostic.code),
+        written,
+      ]),
+    ).toEqual([
+      ["GenerateRefused", "document", ["DOC-02/unsupported-version"], false],
+      ["GenerateRefused", "document", ["DOC-02/missing-version"], false],
+    ]);
+  });
+
   test("an operation-scope refusal writes the rest and reports it", async () => {
     const observed = await run({ spec: withMissingParameter }, (exit, { out }) =>
       Effect.all({

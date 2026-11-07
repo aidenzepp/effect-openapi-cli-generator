@@ -1,7 +1,7 @@
 import { Data, Effect, FileSystem, Option, Path, Runtime, Schema, Stdio, Stream } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/cli";
 import { checkSpecText } from "./check/index.ts";
-import { generate, otherDocumentPathItems, setMembers } from "./generate.ts";
+import { generate, otherDocumentPathItems, setMembers, versionRefused } from "./generate.ts";
 import type { GenerateError, GenerateInput, GenerateResult, SpecSource } from "./generate.ts";
 import { defaultLimits, loadBytes } from "./load/index.ts";
 import type { LoadRefusal } from "./load/index.ts";
@@ -125,12 +125,6 @@ const configOf = (configPath: string) =>
 export const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
   if (error._tag === "RunLockHeld") {
     return "error: another run holds the output directory's lock";
-  }
-
-  if (error._tag === "UnsupportedOpenApiVersion") {
-    return error.openapi === undefined
-      ? "refused: the document declares no openapi version"
-      : `refused: unsupported openapi version ${sanitizeField(JSON.stringify(error.openapi))}`;
   }
 
   if (error._tag === "WriteRefused") {
@@ -291,8 +285,10 @@ const check = (spec: Spec, documents: DocumentSet) =>
         : readStreamBounded(spec.source.stream, defaultLimits, document)
     ).pipe(Effect.catch(loadRefused));
     const loaded = yield* loadBytes(bytes, { document }).pipe(Effect.catch(loadRefused));
-    const line = yield* lineOf(loaded.value);
-    const diagnosis = yield* diagnoseDocument(loaded.value, document);
+    const { diagnosis, line } = yield* Effect.all({
+      diagnosis: diagnoseDocument(loaded.value, document),
+      line: lineOf(loaded.value),
+    }).pipe(Effect.catchTag("UnsupportedOpenApiVersion", versionRefused(document)));
     const validated = [
       ...diagnosis.notices,
       ...diagnosis.refusals.map((entry) => entry.diagnostic),

@@ -42,12 +42,9 @@ import type { GenerationReportValue } from "./report/index.ts";
 import { resolve } from "./resolve/index.ts";
 import type { Resolution, ResolveMember } from "./resolve/index.ts";
 import { diagnoseDocument } from "./validate/index.ts";
-import type {
-  SchemaManifestError,
-  UnsupportedOpenApiVersion,
-  ValidatorError,
-} from "./validate/index.ts";
-import { lineOf } from "./validate/dispatch.ts";
+import type { SchemaManifestError, ValidatorError } from "./validate/index.ts";
+import { lineOf, versionRefusal } from "./validate/dispatch.ts";
+import type { UnsupportedOpenApiVersion } from "./validate/dispatch.ts";
 import type { InvalidInstanceLocation } from "./validate/locations.ts";
 import { writeFiles } from "./write/index.ts";
 import type { WriteNotice, WriteRefused } from "./write/index.ts";
@@ -132,7 +129,6 @@ export type GenerateError =
   | SchemaImportDefect
   | SchemaManifestError
   | Schema.SchemaError
-  | UnsupportedOpenApiVersion
   | ValidatorError
   | WriteRefused;
 
@@ -158,6 +154,17 @@ const refused =
   (reason: GenerateRefused["reason"]) =>
   (diagnostics: readonly Diagnostic[]): GenerateRefused =>
     new GenerateRefused({ diagnostics, reason });
+
+/**
+ * `DOC-02`: an `openapi` value that names no supported line refuses the document, reported like
+ * every other document refusal.
+ */
+export const versionRefused =
+  (document: Document) =>
+  (error: UnsupportedOpenApiVersion): Effect.Effect<never, GenerateRefused | Schema.SchemaError> =>
+    versionRefusal(error, document).pipe(
+      Effect.flatMap((diagnostic) => Effect.fail(refused("document")([diagnostic]))),
+    );
 
 const readSpec = (
   input: GenerateInput,
@@ -475,8 +482,10 @@ const analyze = (
     const loaded = yield* loadBytes(bytes, { document }).pipe(
       Effect.mapError((refusal) => refused("document")([refusal.diagnostic])),
     );
-    const line = yield* lineOf(loaded.value);
-    const diagnosis = yield* diagnoseDocument(loaded.value, document);
+    const { diagnosis, line } = yield* Effect.all({
+      diagnosis: diagnoseDocument(loaded.value, document),
+      line: lineOf(loaded.value),
+    }).pipe(Effect.catchTag("UnsupportedOpenApiVersion", versionRefused(document)));
     const validated = [
       ...diagnosis.notices,
       ...diagnosis.refusals.map((entry) => entry.diagnostic),
