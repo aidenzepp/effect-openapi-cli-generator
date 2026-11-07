@@ -191,11 +191,19 @@ const refRootFlag = Flag.String("ref-root").pipe(
 
 const loadRefused = (refusal: LoadRefusal) => exit([humanLine(refusal.diagnostic)]);
 
-// The document set the flags name (design 3.3).
-const documentSetOf = (documents: readonly string[], refRoot: Option.Option<string>) =>
+// The document set the flags name (design 3.3). The entry holds one slot of the budget, and a
+// member spelling its retrieval URI differently is refused at load.
+const documentSetOf = (
+  entry: Document,
+  documents: readonly string[],
+  refRoot: Option.Option<string>,
+) =>
   makeDocumentSet(
     documents.map(parseDocumentPair),
-    Option.match(refRoot, { onNone: () => ({}), onSome: (dir) => ({ refRoot: dir }) }),
+    Option.match(refRoot, {
+      onNone: () => ({ entry }),
+      onSome: (dir) => ({ entry, refRoot: dir }),
+    }),
   );
 
 const runGenerate = (
@@ -239,7 +247,7 @@ export const generateCommand = Command.make(
       const config = yield* configOf(flags.config).pipe(
         Effect.catch(setupFailed("the author config path has no file URL")),
       );
-      const documents = yield* documentSetOf(flags.document, flags.refRoot).pipe(
+      const documents = yield* documentSetOf(spec.document, flags.document, flags.refRoot).pipe(
         Effect.catch(loadRefused),
       );
       const result: GenerateResult = yield* runGenerate(
@@ -322,7 +330,7 @@ export const validateCommand = Command.make(
       const spec = yield* specOf(flags.spec).pipe(
         Effect.catch(setupFailed("the specification path has no file URL")),
       );
-      const documents = yield* documentSetOf(flags.document, flags.refRoot).pipe(
+      const documents = yield* documentSetOf(spec.document, flags.document, flags.refRoot).pipe(
         Effect.catch(loadRefused),
       );
       const diagnostics = yield* check(spec, documents).pipe(Effect.catch(reportFailure));

@@ -143,6 +143,15 @@ const crossDocumentFiles = {
   "users.json": schemasDocument,
 };
 
+// `count` empty member documents named `m-00.json`, `m-01.json` and so on under `dir`.
+const members = (dir: string, count: number) =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      `${dir}/m-${String(index).padStart(2, "0")}.json`,
+      "{}",
+    ]),
+  );
+
 describe("generator CLI document set", () => {
   test("generate and validate --help list --document and --ref-root", () => {
     for (const command of ["generate", "validate"]) {
@@ -281,6 +290,46 @@ describe("generator CLI document set", () => {
     expect(same.exitCode).toBe(0);
     expect(other.exitCode).toBe(1);
     expect(codes(other)).toEqual(["REF-16/duplicate-uri"]);
+  });
+
+  test("the entry is one of the 32 documents: inside --ref-root it fits, outside it overflows", () => {
+    const inside = cli(["validate", "specs/openapi.json", "--ref-root", "specs"], {
+      ...members("specs", 31),
+      "specs/openapi.json": readFixture("openapi.json"),
+    });
+    const outsideFiles = { ...members("refs", 32), "openapi.json": readFixture("openapi.json") };
+    const validated = cli(["validate", "openapi.json", "--ref-root", "refs"], outsideFiles);
+    const generated = cli(generateArgs("--ref-root", "refs"), outsideFiles);
+
+    expect(inside.exitCode).toBe(0);
+    expect(codes(inside).filter((code) => code.startsWith("REF-"))).toEqual([]);
+    expect(validated.exitCode).toBe(1);
+    expect(codes(validated)).toEqual(["REF-16/document-limit"]);
+    expect(generated.exitCode).toBe(1);
+    expect(codes(generated)).toEqual(["REF-16/document-limit"]);
+    expect(nodeFs.existsSync(nodePath.join(generated.dir, "out"))).toBe(false);
+  });
+
+  test("a --document pair spelling the entry's URI differently is refused at load as a duplicate", () => {
+    const files = { "openapi.json": readFixture("openapi.json"), "other.json": "{}" };
+    const first = cli(["validate", "openapi.json"], files);
+    const entryPath = nodePath.join(nodeFs.realpathSync(first.dir), "openapi.json");
+    const pairs = [
+      `file://${nodePath.dirname(entryPath)}/./openapi.json=openapi.json`,
+      `FILE://${entryPath}=other.json`,
+    ];
+
+    expect(first.exitCode).toBe(0);
+    for (const pair of pairs) {
+      const validated = run(first.dir, ["validate", "openapi.json", "--document", pair]);
+      const generated = run(first.dir, generateArgs("--document", pair));
+
+      expect(validated.exitCode).toBe(1);
+      expect(codes(validated)).toEqual(["REF-16/duplicate-uri"]);
+      expect(generated.exitCode).toBe(1);
+      expect(codes(generated)).toEqual(["REF-16/duplicate-uri"]);
+      expect(nodeFs.existsSync(nodePath.join(first.dir, "out"))).toBe(false);
+    }
   });
 
   test("PTH-10: a Path Item reference into another document is refused, not dropped silently", () => {
