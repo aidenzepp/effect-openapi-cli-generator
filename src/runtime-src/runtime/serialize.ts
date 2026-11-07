@@ -1032,10 +1032,23 @@ export interface FormFile {
 }
 
 /**
- * One `multipart/form-data` part value: a scalar sent as its text (an `int64` field as its digit
- * text), or a file.
+ * An object part's value (ENC-22): one decoded JSON value, written as compact JSON under the
+ * part's `contentType`.
  */
-export type FormValue = string | number | boolean | { readonly text: string } | FormFile;
+export interface FormJson {
+  readonly json: Json;
+}
+
+/**
+ * A JSON flag's value as an object part's value.
+ */
+export const jsonPart = (json: Json): FormJson => ({ json });
+
+/**
+ * One `multipart/form-data` part value: a scalar sent as its text (an `int64` field as its digit
+ * text), a JSON value, or a file.
+ */
+export type FormValue = string | number | boolean | { readonly text: string } | FormJson | FormFile;
 
 /**
  * The part values of a `multipart/form-data` body by part name, each name sent once per value.
@@ -1064,7 +1077,14 @@ export interface FormDataOptions {
 const isFormFile = (value: FormValue): value is FormFile =>
   Predicate.isObject(value) && "stream" in value;
 
+const isFormJson = (value: FormValue): value is FormJson =>
+  Predicate.isObject(value) && "json" in value;
+
 const formText = (value: Exclude<FormValue, FormFile>) => {
+  if (isFormJson(value)) {
+    return jsonText("a multipart part", value.json);
+  }
+
   if (Predicate.isObject(value)) {
     return Effect.succeed(value.text);
   }
@@ -1127,11 +1147,40 @@ export interface FormSchemaOptions {
   readonly schema: Schema.Top;
 }
 
-// A part value as the body schema reads it: a scalar as itself and an `int64` digit text as its
-// number, as a merged JSON body is asserted. A file is a stand-in whose issues are never reported.
+// A JSON value as `JSON.parse` reads its text back: a `JsonNumber` as its number.
+const parsedJson = (value: Json): Schema.Json => {
+  if (value instanceof JsonNumber) {
+    return Number(value.text);
+  }
+
+  if (
+    value === null ||
+    Predicate.isString(value) ||
+    Predicate.isNumber(value) ||
+    Predicate.isBoolean(value)
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item: Json) => parsedJson(item));
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, member]) => [key, parsedJson(member)]),
+  );
+};
+
+// A part value as the body schema reads it: a scalar as itself, an `int64` digit text as its
+// number and a JSON part as its parsed value, as a merged JSON body is asserted. A file is a
+// stand-in whose issues are never reported.
 const assertedValue = (value: FormValue) => {
   if (isFormFile(value)) {
     return "";
+  }
+
+  if (isFormJson(value)) {
+    return parsedJson(value.json);
   }
 
   return Predicate.isObject(value) ? Number(value.text) : value;

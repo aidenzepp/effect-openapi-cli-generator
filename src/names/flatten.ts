@@ -52,8 +52,8 @@ export interface ReservedClash {
 
 /**
  * A property that has no field flag: its name folds to nothing (`EmptyFold`), or it is a multipart
- * part whose shape no part flag carries (`UnsupportedPart`: an object, an array of objects, a map
- * or a `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
+ * part whose shape no part flag carries (`UnsupportedPart`: an array of objects, a map or a
+ * `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
  */
 export interface SkippedProperty {
   readonly pointer: string;
@@ -580,8 +580,9 @@ const walkProperties = (
 
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
- * (repeated parts), or a `file` part when it is binary or its rule sends it base64 encoded; any
- * other shape is skipped with a reason. A part whose style normalize refused (ENC-40) gets nothing.
+ * (repeated parts), a `file` part when it is binary or its rule sends it base64 encoded, or a
+ * `json` flag for an object part, sent as one JSON part (ENC-22); any other shape is skipped with
+ * a reason. A part whose style normalize refused (ENC-40) gets nothing.
  */
 const walkParts = (
   ctx: Ctx,
@@ -611,18 +612,24 @@ const walkParts = (
       return Result.fail(classified.failure);
     }
 
-    if (classified.success._tag !== "Scalar") {
+    const part = classified.success;
+    if (part._tag === "Opaque") {
       skipped.push({ pointer, reason: "UnsupportedPart" });
       continue;
     }
 
+    const base = { name: folded.success.name, notes: folded.success.notes, pointer };
+    const schemaPointer = sourcePointer(site);
+    if (part._tag === "Object") {
+      flags.push({ ...base, kind: "json", repeated: false, schemaPointer });
+      continue;
+    }
+
     flags.push({
-      kind: ctx.base64Parts.has(key) ? "file" : classified.success.kind,
-      name: folded.success.name,
-      notes: folded.success.notes,
-      pointer,
-      repeated: classified.success.repeated,
-      schemaPointer: sourcePointer(site),
+      ...base,
+      kind: ctx.base64Parts.has(key) ? "file" : part.kind,
+      repeated: part.repeated,
+      schemaPointer,
     });
   }
 

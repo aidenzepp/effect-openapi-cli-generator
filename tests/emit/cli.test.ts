@@ -827,7 +827,7 @@ describe("emitCli: multipart request bodies", () => {
 
   test("a required part the names plan skipped refuses its operation", async () => {
     const schema = {
-      properties: { meta: { properties: { a: { type: "string" } }, type: "object" } },
+      properties: { meta: { oneOf: [{ type: "string" }, { type: "integer" }] } },
       required: ["meta"],
       type: "object",
     };
@@ -842,7 +842,7 @@ describe("emitCli: multipart request bodies", () => {
       ...importSchema,
       properties: {
         ...importSchema.properties,
-        meta: { properties: { a: { type: "string" } }, type: "object" },
+        meta: { oneOf: [{ type: "string" }, { type: "integer" }] },
       },
     };
     const output = await emit(

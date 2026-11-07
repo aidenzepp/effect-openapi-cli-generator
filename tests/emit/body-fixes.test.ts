@@ -16,7 +16,8 @@ import { resolve } from "../../src/resolve/index.ts";
 // Request body fixes from the body and encoding witnesses (m2-bdfx): a base64 form property takes
 // a file (ENC-31, BIN-02, BIN-04), a 3.2 top-level array part takes its item's default type
 // (ENC-24), a style-based multipart part is sent as name and raw value or refused alone (ENC-40),
-// and a binary body's maxLength bounds the upload (MED-21).
+// and a binary body's maxLength bounds the upload (MED-21). An object multipart part is one JSON
+// part (ENC-22, m2-jpart).
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -129,6 +130,45 @@ describe("ENC-24: a 3.2 top-level array part takes its item type's default conte
 
     expect(emitted.refusals).toEqual([]);
     expect(emitted.api).toContain('parts: [["tags", "text/plain"]],');
+  });
+});
+
+// A multipart body with a `name` text part and a `meta` object part, with `encoding` if given.
+const withMeta = (line: Line, encoding?: Schema.Json) => {
+  const schema = object({
+    meta: object({ a: { type: "string" }, n: { type: "integer" } }),
+    name: { type: "string" },
+  });
+
+  return specOf(
+    line,
+    "multipart/form-data",
+    encoding === undefined ? { schema } : { encoding: { meta: encoding }, schema },
+  );
+};
+
+describe("ENC-22: an object multipart part is one JSON part", () => {
+  for (const line of ["3.0", "3.1", "3.2"] as const) {
+    test(`a ${line} object part gets a JSON flag sent as one application/json part`, async () => {
+      const emitted = await uploads(line, withMeta(line));
+
+      expect(emitted.refusals).toEqual([]);
+      expect(emitted.api).toContain('["meta", "application/json"]');
+      expect(emitted.cli).toContain('Input.jsonFlag("meta")');
+      expect(emitted.cli).toContain("Option.map(flags.meta, Serialize.jsonPart)");
+      expect(emitted.diagnostics.filter(({ code }) => code.startsWith("RQB-03"))).toEqual([]);
+    });
+  }
+
+  test("the declared Encoding contentType wins over the default", async () => {
+    const emitted = await uploads(
+      "3.1",
+      withMeta("3.1", { contentType: "application/vnd.meta+json" }),
+    );
+
+    expect(emitted.refusals).toEqual([]);
+    expect(emitted.api).toContain('["meta", "application/vnd.meta+json"]');
+    expect(emitted.cli).toContain('Input.jsonFlag("meta")');
   });
 });
 

@@ -822,12 +822,20 @@ const alternativeBody = (
   });
 
 // A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
-// file part opens each path, or stdin for `-` under the invocation's one stdin claim.
+// JSON part's value is `Serialize.jsonPart`'s (ENC-22). A file part opens each path, or stdin for
+// `-` under the invocation's one stdin claim.
 const partValues = (part: FormPart) =>
   Effect.gen(function* values() {
     const { flag } = part;
     const repeated = flag.source._tag === "Body" && flag.source.repeated;
     const value = yield* flagValue(flag.identifier);
+    if (flag.source._tag === "Body" && flag.source.kind === "json" && !repeated) {
+      return fn(
+        "Effect.succeed",
+        fn("Option.toArray", fn("Option.map", value, path("Serialize.jsonPart"))),
+      );
+    }
+
     const list = repeated ? value : fn("Option.toArray", value);
     if (flag.source._tag !== "Body" || flag.source.kind !== "file") {
       return fn("Effect.succeed", list);
