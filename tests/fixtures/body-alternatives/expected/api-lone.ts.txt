@@ -2,34 +2,6 @@ import type { SecurityRequirement } from "../runtime/auth.ts";
 import type { MediaDeclaration } from "../runtime/negotiate.ts";
 import * as Serialize from "../runtime/serialize.ts";
 
-export interface JsonInput {
-  readonly body: Serialize.Body;
-}
-
-/**
- * Request builder for lone json, not an HttpApi definition.
- */
-export const json = (input: JsonInput): Serialize.Request =>
-  Serialize.request("POST", {
-    body: Serialize.body("application/json", input.body),
-    headers: [],
-    path: Serialize.path("/lone/json", []),
-    query: [],
-  });
-
-const jsonMedia: MediaDeclaration = { request: ["application/json"], responses: { "204": [] } };
-
-const jsonSecurity: SecurityRequirement = [];
-
-export const jsonMeta = {
-  media: jsonMedia,
-  method: "POST",
-  operationId: "lone-json",
-  origin: { document: "openapi.json", pointer: "/paths/~1lone~1json/post" },
-  pathTemplate: "/lone/json",
-  security: jsonSecurity,
-};
-
 export interface FormInput {
   readonly body: Serialize.Json | undefined;
 }
@@ -66,6 +38,34 @@ export const formMeta = {
   origin: { document: "openapi.json", pointer: "/paths/~1lone~1form/post" },
   pathTemplate: "/lone/form",
   security: formSecurity,
+};
+
+export interface JsonInput {
+  readonly body: Serialize.Body;
+}
+
+/**
+ * Request builder for lone json, not an HttpApi definition.
+ */
+export const json = (input: JsonInput): Serialize.Request =>
+  Serialize.request("POST", {
+    body: Serialize.body("application/json", input.body),
+    headers: [],
+    path: Serialize.path("/lone/json", []),
+    query: [],
+  });
+
+const jsonMedia: MediaDeclaration = { request: ["application/json"], responses: { "204": [] } };
+
+const jsonSecurity: SecurityRequirement = [];
+
+export const jsonMeta = {
+  media: jsonMedia,
+  method: "POST",
+  operationId: "lone-json",
+  origin: { document: "openapi.json", pointer: "/paths/~1lone~1json/post" },
+  pathTemplate: "/lone/json",
+  security: jsonSecurity,
 };
 
 export interface MultipartInput {

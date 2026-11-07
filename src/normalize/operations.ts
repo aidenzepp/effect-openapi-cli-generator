@@ -261,28 +261,62 @@ const operationsOfItem = (
   });
 };
 
-const rawOperations = (resolution: Resolution): readonly RawOperation[] =>
-  decodeOption(PathsRoot, resolution.value)
-    .pipe(
-      Option.map((root) => Object.keys(root.paths ?? {})),
-      Option.getOrElse((): readonly string[] => []),
-    )
-    .flatMap((key) => {
-      const path = decodeOption(PathTemplate, key);
-      const item = locate(resolution, childPointer("/paths", key));
-      const fields = item.pipe(Option.flatMap((located) => decodeOption(ItemFields, located.node)));
-      const node = item.pipe(Option.flatMap((located) => decodeOption(JsonMap, located.node)));
-      if (
-        Option.isNone(path) ||
-        Option.isNone(item) ||
-        Option.isNone(fields) ||
-        Option.isNone(node)
-      ) {
-        return [];
-      }
+const isIndex = (token: string): boolean => /^(?:0|[1-9][0-9]*)$/u.test(token);
 
-      return operationsOfItem(resolution, path.value, item.value, fields.value, node.value);
-    });
+// Diagnostic pointer order (design 3.7): token by token, array indices numerically.
+// `model/diagnostic.ts` keeps its pointer order private, so this repeats it.
+const tokenOrder = Order.make<string>((left, right) =>
+  isIndex(left) && isIndex(right)
+    ? Order.Number(Number(left), Number(right))
+    : Order.String(left, right),
+);
+
+const pointerOrder = Order.mapInput(Order.Array(tokenOrder), (pointer: string): readonly string[] =>
+  pointer.split("/").slice(1),
+);
+
+// An operation's use site under `/paths`: the path key, then the method or its
+// `additionalOperations` entry. Unlike `pointer`, it is unique when path items share a target.
+const useSite = (key: string, raw: RawOperation): string => {
+  const item = childPointer("/paths", key);
+
+  return raw.additional
+    ? childPointer(childPointer(item, "additionalOperations"), raw.method)
+    : childPointer(item, raw.method.toLowerCase());
+};
+
+// The entry document's operations in canonical order (design 3.7): every operation sits in the
+// entry document, so the order is its use-site pointer token by token. Member order of `paths`,
+// a path item and `additionalOperations` is not semantic and never reaches a later stage.
+const rawOperations = (resolution: Resolution): readonly RawOperation[] => {
+  const keys = decodeOption(PathsRoot, resolution.value).pipe(
+    Option.map((root) => Object.keys(root.paths ?? {})),
+    Option.getOrElse((): readonly string[] => []),
+  );
+  const sited = keys.flatMap((key) => {
+    const path = decodeOption(PathTemplate, key);
+    const item = locate(resolution, childPointer("/paths", key));
+    const fields = item.pipe(Option.flatMap((located) => decodeOption(ItemFields, located.node)));
+    const node = item.pipe(Option.flatMap((located) => decodeOption(JsonMap, located.node)));
+    if (
+      Option.isNone(path) ||
+      Option.isNone(item) ||
+      Option.isNone(fields) ||
+      Option.isNone(node)
+    ) {
+      return [];
+    }
+
+    return operationsOfItem(resolution, path.value, item.value, fields.value, node.value).map(
+      (raw) => ({ raw, site: useSite(key, raw) }),
+    );
+  });
+
+  return Arr.sort(
+    sited,
+    Order.mapInput(pointerOrder, (entry: { readonly site: string }) => entry.site),
+  ).map((entry) => entry.raw);
+};
 
 interface ParameterEntry {
   readonly key: string;
@@ -825,17 +859,16 @@ export const distinctDiagnostics = (diagnostics: readonly Diagnostic[]): readonl
   Arr.dedupeWith(diagnostics, (left, right) => diagnosticKey(left) === diagnosticKey(right));
 
 /**
- * Assembles the operations of the entry document in document order (design 2.2, 2.4, 6.3). Each
- * keeps its method token and path template, the path item's parameters merged with its own
+ * Assembles the operations of the entry document in canonical order (design 2.2, 2.4, 3.7, 6.3).
+ * Each keeps its method token and path template, the path item's parameters merged with its own
  * (override by name and `in`, a header name case-insensitively), and the effective servers and
  * security. A body on GET, HEAD, DELETE, OPTIONS or TRACE follows the line: 3.0 ignores it with a
  * notice, 3.1 and later send it on DELETE and OPTIONS and refuse it on GET, HEAD and TRACE at
- * element scope. An operation is removed with an operation-scope refusal when a required
- * parameter or a required body is refused, or when every listed security alternative is refused
- * (`[]` and a remaining `{}` alternative are not). A path or method key the check stage refused
- * is not read. A site the earlier stages should have stopped fails as in the stage that reads it.
- * `checkFindings` are the spec-text check findings of the run: a body discriminator they refuse
- * gets no hint.
+ * element scope. An operation is removed with an operation-scope refusal when a required parameter
+ * or a required body is refused, or when every listed security alternative is refused (`[]` and a
+ * remaining `{}` alternative are not). A path or method key the check stage refused is not read. A
+ * site the earlier stages should have stopped fails as in the stage that reads it. `checkFindings`
+ * are the spec-text check findings of the run: a body discriminator they refuse gets no hint.
  */
 export const assembleOperations = (
   resolution: Resolution,
