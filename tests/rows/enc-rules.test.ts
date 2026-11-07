@@ -262,8 +262,11 @@ describe("ENC rule rows through the built CLI", () => {
         expect(sent).toEqual(formSent("meta=%7B%22a%22%3A%22x+y%22%2C%22b%22%3A2%7D"));
       }, 60_000);
 
-      test.todo(`ENC-22: an object multipart part has no flag (RQB-03/unnamed-property notice), so it is never sent vs one part of JSON under Content-Type: application/json (${line})`, () =>
-        Promise.resolve());
+      test(`ENC-22: an object multipart part is sent as one part of compact JSON under Content-Type: application/json (${line})`, async () => {
+        const sent = await parts(line, ["parts-upload", "--meta", '{ "a": "x y" }']);
+
+        expect(sent).toEqual([text("meta", '{"a":"x y"}', "application/json")]);
+      }, 60_000);
 
       test(`ENC-25: a null property is omitted from the body (${line})`, async () => {
         const sent = await sentOnce(line, ["form-create", "--body", '{"gone":null,"name":"n"}']);
@@ -301,14 +304,11 @@ describe("ENC rule rows through the built CLI", () => {
         ]);
       }, 60_000);
 
-      test(`ENC-31: base64 padding in a form value is percent-encoded (${line})`, async () => {
-        const sent = await sentOnce(line, ["form-create", "--data", "YWI="]);
+      test(`ENC-31: a base64 form property reads a file, and its base64 padding is percent-encoded as %3D (${line})`, async () => {
+        const sent = await sentOnce(line, ["form-create", "--data", file("small.bin")]);
 
-        expect(sent).toEqual(formSent("data=YWI%3D"));
+        expect(sent).toEqual(formSent("data=YWIAAQo%3D"));
       }, 60_000);
-
-      test.todo(`ENC-31: a base64 form property is a plain string flag, so --data <path> sends the path text vs the file's base64 with = sent as %3D (${line})`, () =>
-        Promise.resolve());
 
       test(`ENC-32: form-data is not percent-encoded: the value and the file name are sent as supplied (${line})`, async () => {
         const sent = await parts(line, [
@@ -420,8 +420,29 @@ describe("ENC rule rows through the built CLI", () => {
       expect(sent).toEqual([base64Part("encoded", "small.bin", "YWIAAQo=")]);
     }, 60_000);
 
-    test.todo(`ENC-40: a style-based multipart part (style form, explode) refuses its operation with EMT-1/unsupported-body at operation scope vs names in Content-Disposition and raw values in part bodies (${line})`, () =>
-      Promise.resolve());
+    test(`ENC-37: identity contentEncoding binary, 7bit and 8BIT parts send the file's raw bytes with no Content-Transfer-Encoding (${line})`, async () => {
+      const sent = await parts(line, [
+        "parts-upload",
+        "--binary",
+        file("small.bin"),
+        "--seven",
+        file("three.bin"),
+        "--eight",
+        file("three.bin"),
+      ]);
+
+      expect(sent).toEqual([
+        filePart("binary", "small.bin", latin1(small)),
+        filePart("eight", "three.bin", "abc"),
+        filePart("seven", "three.bin", "abc"),
+      ]);
+    }, 60_000);
+
+    test(`ENC-40: an exploded form-style part sends its name and each raw value as a text/plain part (${line})`, async () => {
+      const sent = await parts(line, ["styled-upload", "--tags", "a b", "--tags", "c%41"]);
+
+      expect(sent).toEqual([text("tags", "a b"), text("tags", "c%41")]);
+    }, 60_000);
   }
 
   test("ENC-18: 3.0 format: binary and format: byte string parts default to application/octet-stream", async () => {
@@ -451,8 +472,11 @@ describe("ENC rule rows through the built CLI", () => {
     expect(sent).toEqual([base64Part("byte", "small.bin", "YWIAAQo=")]);
   }, 60_000);
 
-  test.todo("ENC-24: each item part of a top-level array of strings or integers is sent under Content-Type: application/json (the raw item text, not JSON) vs the item type's default text/plain, because a top-level array property is encoded per item (3.2.1)", () =>
-    Promise.resolve());
+  test("ENC-24: each item part of a top-level array of strings or integers takes its item type's default text/plain (3.2.1)", async () => {
+    const sent = await parts("3.2.1", ["parts-upload", "--nums", "1", "--tags", "a"]);
+
+    expect(sent).toEqual([text("nums", "1"), text("tags", "a")]);
+  }, 60_000);
 
   test("ENC-28: a 3.2 form body is percent-encoded per WHATWG URL, once", async () => {
     const sent = await sentOnce("3.2.1", [
@@ -541,6 +565,17 @@ const summary = (found: Generated) =>
     String(diagnostic.pointer),
   ]);
 
+// A refusal that drops a whole media alternative is anchored at the media type, with the keyword
+// that caused it first in `related`.
+const anchored = (found: Generated) =>
+  found.diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.severity,
+    diagnostic.scope,
+    String(diagnostic.pointer),
+    String(diagnostic.related?.[0]?.pointer),
+  ]);
+
 const media = "/paths/~1a/post/requestBody/content/multipart~1form-data";
 
 const base64Schema = (line: Line): Members =>
@@ -572,15 +607,39 @@ describe("ENC rule rows through generate()", () => {
         }),
       );
 
-      expect(summary(found)).toEqual([
+      expect(anchored(found)).toEqual([
         [
           "ENC-39/conflicting-transfer-encoding",
           "refusal",
           "element",
+          media,
           `${media}/encoding/file/headers/Content-Transfer-Encoding/schema/enum`,
         ],
       ]);
     });
+  }
+
+  for (const line of ["3.1.2", "3.2.1"] as const) {
+    for (const style of ["spaceDelimited", "pipeDelimited", "deepObject"] as const) {
+      test(`ENC-40: a ${style} multipart part is refused alone at element scope (${line})`, async () => {
+        const found = await inProcess(
+          withMultipart(line, {
+            encoding: { tags: { style } },
+            schema: {
+              properties: {
+                note: { type: "string" },
+                tags: { items: { type: "string" }, type: "array" },
+              },
+              type: "object",
+            },
+          }),
+        );
+
+        expect(summary(found)).toEqual([
+          ["ENC-40/unsupported-part-style", "refusal", "element", `${media}/encoding/tags`],
+        ]);
+      });
+    }
   }
 
   test("ENC-41: contentMediaType and contentEncoding in a 3.0 multipart part schema are refused by 3.0 schema validation", async () => {

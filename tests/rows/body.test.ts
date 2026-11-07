@@ -238,6 +238,13 @@ const fixed = (target: string, contentType: string | undefined, body: string): S
   transferEncoding: undefined,
 });
 
+// A body streamed from stdin: chunked, with no `Content-Length`.
+const chunked = (target: string, contentType: string | undefined, body: string): Sent => ({
+  ...fixed(target, contentType, body),
+  contentLength: undefined,
+  transferEncoding: "chunked",
+});
+
 interface Part {
   readonly body: string;
   readonly headers: readonly string[];
@@ -342,7 +349,21 @@ const summary = (found: Generated) =>
     String(diagnostic.pointer),
   ]);
 
+// A refusal that drops a whole media alternative is anchored at the media type, with the keyword
+// that caused it first in `related`.
+const anchored = (found: Generated) =>
+  found.diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.severity,
+    diagnostic.scope,
+    String(diagnostic.pointer),
+    String(diagnostic.related?.[0]?.pointer),
+  ]);
+
 const content = "/paths/~1a/post/requestBody/content";
+
+const withResponse = (line: Line, response: Members): Members =>
+  members(line, { paths: { "/a": { get: { responses: { "200": response } } } } });
 
 describe("RQB, MED and BIN rows through the built CLI", () => {
   for (const line of lines) {
@@ -496,8 +517,11 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
         expect(exchange.stdout).toBe("0123456789");
       }, 60_000);
 
-      test.todo(`MED-21: a 10-byte upload against maxLength 4 is sent (exit 0, Content-Length 10) vs rejected before sending (${line})`, () =>
-        Promise.resolve());
+      test(`MED-21: a 10-byte upload against maxLength 4 is rejected before sending (${line})`, async () => {
+        const exchange = await run(line, ["bounded-put", "--body-file", file("ten.bin")]);
+
+        expect(usage(exchange)).toEqual(refusedBeforeSending);
+      }, 60_000);
 
       test(`MED-24: a +json vendor media type is treated as JSON (${line})`, async () => {
         const sent = sentOnce(await run(line, ["vendor-create", "--name", "n"]));
@@ -520,8 +544,11 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
     expect(sent).toEqual(fixed("/raw", "application/octet-stream", smallText));
   }, 60_000);
 
-  test.todo("RQB-10: --body-file - from stdin is sent with Content-Length: 5 vs a chunked stream (3.0.4)", () =>
-    Promise.resolve());
+  test("RQB-10: a 3.0 Media Type with no schema streams --body-file - from stdin chunked, with no Content-Length", async () => {
+    const sent = sentOnce(await run("3.0.4", ["raw-put", "--body-file", "-"], small));
+
+    expect(sent).toEqual(chunked("/raw", "application/octet-stream", smallText));
+  }, 60_000);
 
   test("BIN-01: a 3.0 format: binary body streams from a file with Content-Length and downloads to --output", async () => {
     const output = file("download-3.0.4.bin");
@@ -537,8 +564,11 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
     expect(latin1(nodeFs.readFileSync(output))).toBe("downloaded\u0001");
   }, 60_000);
 
-  test.todo("BIN-01: --body-file - from stdin is sent with Content-Length: 5 vs a chunked stream (3.0.4)", () =>
-    Promise.resolve());
+  test("BIN-01: a 3.0 format: binary body streams --body-file - from stdin chunked, with no Content-Length", async () => {
+    const sent = sentOnce(await run("3.0.4", ["binary-put", "--body-file", "-"], small));
+
+    expect(sent).toEqual(chunked("/binary", "application/octet-stream", smallText));
+  }, 60_000);
 
   test("BIN-01: a 3.0 format: binary multipart part is read from a file", async () => {
     const sent = sentOnce(await run("3.0.4", ["files-upload", "--avatar", file("three.bin")]));
@@ -561,8 +591,17 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
     ]);
   }, 60_000);
 
-  test.todo("BIN-02: a 3.0 format: byte form property is a plain string flag, so --data <path> sends the path text as data=<path> vs the file's base64 (3.0.4)", () =>
-    Promise.resolve());
+  test("BIN-02: a 3.0 format: byte form property takes a file or stdin and sends its base64, percent-encoded", async () => {
+    const fromFile = sentOnce(
+      await run("3.0.4", ["encoded-form-create", "--data", file("small.bin")]),
+    );
+    const fromStdin = sentOnce(await run("3.0.4", ["encoded-form-create", "--data", "-"], three));
+
+    expect([fromFile, fromStdin]).toEqual([
+      fixed("/encoded-form", "application/x-www-form-urlencoded", "data=YWIAAQo%3D"),
+      fixed("/encoded-form", "application/x-www-form-urlencoded", "data=YWJj"),
+    ]);
+  }, 60_000);
 
   for (const line of ["3.1.2", "3.2.1"] as const) {
     test(`RQB-09: a schemaless binary body streams from a file with Content-Length (${line})`, async () => {
@@ -571,8 +610,11 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
       expect(sent).toEqual(fixed("/raw", "application/octet-stream", smallText));
     }, 60_000);
 
-    test.todo(`RQB-09: --body-file - from stdin is sent with Content-Length: 5 vs a chunked stream (${line})`, () =>
-      Promise.resolve());
+    test(`RQB-09: a schemaless binary body streams --body-file - from stdin chunked, with no Content-Length (${line})`, async () => {
+      const sent = sentOnce(await run(line, ["raw-put", "--body-file", "-"], small));
+
+      expect(sent).toEqual(chunked("/raw", "application/octet-stream", smallText));
+    }, 60_000);
 
     test(`BIN-03: a typeless contentMediaType body streams from a file and downloads to --output (${line})`, async () => {
       const output = file(`download-${line}.bin`);
@@ -588,8 +630,11 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
       expect(latin1(nodeFs.readFileSync(output))).toBe("downloaded\u0001");
     }, 60_000);
 
-    test.todo(`BIN-03: --body-file - from stdin is sent with Content-Length: 5 vs a chunked stream (${line})`, () =>
-      Promise.resolve());
+    test(`BIN-03: a typeless contentMediaType body streams --body-file - from stdin chunked, with no Content-Length (${line})`, async () => {
+      const sent = sentOnce(await run(line, ["binary-put", "--body-file", "-"], small));
+
+      expect(sent).toEqual(chunked("/binary", "application/octet-stream", smallText));
+    }, 60_000);
 
     test(`BIN-04: contentEncoding base64 and base64url JSON fields send the file's encoding (${line})`, async () => {
       const sent = sentOnce(
@@ -607,8 +652,15 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
       );
     }, 60_000);
 
-    test.todo(`BIN-04: a contentEncoding base64 form property is a plain string flag, so --data <path> sends the path text as data=<path> vs the file's base64 (${line})`, () =>
-      Promise.resolve());
+    test(`BIN-04: a contentEncoding base64 form property reads a file and sends its base64, percent-encoded (${line})`, async () => {
+      const sent = sentOnce(
+        await run(line, ["encoded-form-create", "--data", file("alphabet.bin")]),
+      );
+
+      expect(sent).toEqual(
+        fixed("/encoded-form", "application/x-www-form-urlencoded", "data=%2B%2F8%3D"),
+      );
+    }, 60_000);
 
     test(`BIN-05: format: binary is an annotation; the property stays a string sent as given (${line})`, async () => {
       const sent = sentOnce(await run(line, ["annotated-create", "--blob", "not a path"]));
@@ -706,9 +758,6 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
 
   test.todo("MED-15: a multipart/mixed body with more prefixEncoding entries than items is refused with EMT-1/unsupported-body at operation scope vs the extra entries ignored (3.2.1)", () =>
     Promise.resolve());
-
-  test.todo("MED-26: an array or itemSchema multipart/mixed body is refused with EMT-1/unsupported-body, and a multipart/form-data array of name/value objects generates with no part flags and exits 2 on every run vs ordered parts (3.2.1)", () =>
-    Promise.resolve());
 });
 
 describe("RQB, MED and BIN rows through generate()", () => {
@@ -738,8 +787,28 @@ describe("RQB, MED and BIN rows through generate()", () => {
       ]);
     });
 
-    test.todo(`MED-10: encoding on a JSON response media type generates with no diagnostic vs ignored with a notice (${line})`, () =>
-      Promise.resolve());
+    test(`MED-10: encoding on a JSON response media type is ignored with a notice (${line})`, async () => {
+      const found = await inProcess(
+        withResponse(line, {
+          content: {
+            "application/json": {
+              encoding: { name: { contentType: "text/plain" } },
+              schema: named,
+            },
+          },
+          description: "ok",
+        }),
+      );
+
+      expect(summary(found)).toEqual([
+        [
+          "MED-10/encoding-ignored",
+          "notice",
+          "element",
+          "/paths/~1a/get/responses/200/content/application~1json",
+        ],
+      ]);
+    });
 
     test(`MED-11: an encoding key that names no schema property is refused (${line})`, async () => {
       const found = await inProcess(
@@ -753,11 +822,12 @@ describe("RQB, MED and BIN rows through generate()", () => {
         }),
       );
 
-      expect(summary(found)).toEqual([
+      expect(anchored(found)).toEqual([
         [
           "MED-11/unknown-property",
           "refusal",
           "element",
+          `${content}/multipart~1form-data`,
           `${content}/multipart~1form-data/encoding/ghost`,
         ],
       ]);
@@ -828,22 +898,15 @@ describe("RQB, MED and BIN rows through generate()", () => {
   });
 
   for (const line of lines) {
-    // The refusal is reported twice with identical fields; the distinct diagnostics are asserted.
-    test(`MED-24: an unparsable content key is refused at element scope and the rest generates (${line})`, async () => {
+    test(`MED-24: an unparsable content key is refused once at element scope and the rest generates (${line})`, async () => {
       const found = await inProcess(
         withBody(line, {
           content: { "application/json": { schema: named }, "not a type": { schema: named } },
         }),
       );
-      const distinct = [...new Set(summary(found).map((row) => JSON.stringify(row)))];
 
-      expect(distinct).toEqual([
-        JSON.stringify([
-          "MED-24/invalid-media-type",
-          "refusal",
-          "element",
-          `${content}/not a type`,
-        ]),
+      expect(summary(found)).toEqual([
+        ["MED-24/invalid-media-type", "refusal", "element", `${content}/not a type`],
       ]);
     });
 
@@ -851,6 +914,51 @@ describe("RQB, MED and BIN rows through generate()", () => {
       Promise.resolve());
   }
 
-  test.todo("MED-09: a 3.2 Media Type description generates with no diagnostic vs ignored with a notice (design D-OC5)", () =>
-    Promise.resolve());
+  test("MED-09: a 3.2 Media Type description is ignored with a notice, on a request and a response (design D-OC5)", async () => {
+    const request = await inProcess(
+      withBody("3.2.1", {
+        content: { "application/json": { description: "a name", schema: named } },
+      }),
+    );
+    const response = await inProcess(
+      withResponse("3.2.1", {
+        content: { "application/json": { description: "a name", schema: named } },
+        description: "ok",
+      }),
+    );
+
+    expect([summary(request), summary(response)]).toEqual([
+      [["MED-09/description-ignored", "notice", "element", `${content}/application~1json`]],
+      [
+        [
+          "MED-09/description-ignored",
+          "notice",
+          "element",
+          "/paths/~1a/get/responses/200/content/application~1json",
+        ],
+      ],
+    ]);
+  });
+
+  test("MED-26: a multipart/form-data array body is refused at element scope, and the operation is not generated (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", {
+        content: {
+          "multipart/form-data": {
+            schema: {
+              items: {
+                properties: { name: { type: "string" }, value: { type: "string" } },
+                type: "object",
+              },
+              type: "array",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(summary(found)).toEqual([
+      ["MED-26/array-form-data", "refusal", "element", `${content}/multipart~1form-data`],
+    ]);
+  });
 });
