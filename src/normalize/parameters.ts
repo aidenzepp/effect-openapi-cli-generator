@@ -300,6 +300,9 @@ const decideCookie = (
   };
 };
 
+// In the entry document, official-schema validation (VAL-02 to VAL-04) refuses a style its
+// location does not define before this runs; a parameter in another document-set member, which is
+// not schema-validated, reaches this refusal.
 const styleLocation = refusal(
   "STY-40/style-location",
   "style-values",
@@ -384,6 +387,9 @@ const cookieName = refusal(
   "Use a name made of RFC 9110 token characters",
 );
 
+// In the entry document, official-schema validation (VAL-04) refuses these fields on a querystring
+// parameter before this runs; a parameter in another document-set member, which is not
+// schema-validated, reaches this refusal.
 const querystringSchemaFields = refusal(
   "STY-45/querystring-schema-fields",
   "fixed-fields-for-use-with-schema",

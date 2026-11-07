@@ -370,6 +370,9 @@ const removeStale = (
     (entry) => staleNotice(outputDir, entry),
   ).pipe(Effect.map((all) => all.filter(Option.isSome).map((some) => some.value)));
 
+// Effect's `FileSystem.remove` has no empty-directory removal: it calls `fs.rm`, which fails on a
+// directory unless `recursive` is set, and recursive removal would delete what another party
+// placed. `rmdir` removes the directory only when it is empty.
 const removeEmptyDirectory = (directory: string) =>
   Effect.ignore(Effect.tryPromise(() => rmdir(directory)));
 
