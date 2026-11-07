@@ -107,6 +107,13 @@ describe("deprecated operation notice", () => {
     expect(marked.stdout).toBe(plain.stdout);
   });
 
+  test("OPR-14: deprecated: false writes no notice", async () => {
+    const result = await run({ ...base, deprecated: false });
+
+    expect(result.stderr).toBe("");
+    expect(result.events).toEqual(["request"]);
+  });
+
   test("OPR-14: an operation without the flag writes no notice", async () => {
     const result = await run(base);
 
