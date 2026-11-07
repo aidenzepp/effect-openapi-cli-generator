@@ -963,8 +963,32 @@ const filterRequired = (
   return kept.length > 0 ? kept : undefined;
 };
 
-// The code of a keyword the validation copy removes, or `undefined` when the keyword stays.
-const removalCode = (line: Line, keyword: string, value: Json): string | undefined => {
+// Whether a value is an instance of one of the declared types; no declared type admits any value.
+const conformsTo = (types: readonly string[], value: Json): boolean => {
+  if (types.length === 0) {
+    return true;
+  }
+
+  if (isArray(value)) {
+    return types.includes("array");
+  }
+
+  return isObject(value) ? types.includes("object") : inTypes(types, value);
+};
+
+// The code of a keyword the validation copy removes, or `undefined` when the keyword stays. A 3.0
+// `default` MUST conform to the schema's type (S30-27, D-OC3); one that does not is refused at
+// element scope. In 3.1 and 3.2 `default` is an annotation (SCH-49) and stays.
+const removalCode = (
+  line: Line,
+  node: JsonObject,
+  keyword: string,
+  value: Json,
+): string | undefined => {
+  if (keyword === "default" && line === "3.0" && !conformsTo(typesOf(node), value)) {
+    return "S30-27/nonconforming-default";
+  }
+
   const refused = refusedCode(line, keyword);
   const notAsserted =
     serverValidated.has(keyword) ||
@@ -1018,7 +1042,7 @@ const filterNode =
     const patterned = member(node, "patternProperties") !== undefined;
     const kept: [string, Json][] = [];
     for (const [keyword, value] of Object.entries(node)) {
-      const code = removalCode(recorder.line, keyword, value);
+      const code = removalCode(recorder.line, node, keyword, value);
       if (code !== undefined) {
         record(recorder, "remove", code, [...path, keyword]);
       } else if (keyword === "additionalProperties" && patterned && constrainsKeys(value)) {
@@ -1406,7 +1430,8 @@ const importCopy = (
  * 3.2 is removed with a notice and no effect; an out-of-safe-range integer is asserted as a number
  * (int64 notice); `patternProperties` is removed with a notice, with an `additionalProperties`
  * beside it that rejects or types keys (SCH-15); a name in `required` whose property is read-only
- * is dropped (SCH-45: a notice in 3.1 and 3.2, none in 3.0); a pure alias cycle is refused; then
+ * is dropped (SCH-45: a notice in 3.1 and 3.2, none in 3.0); a 3.0 `default` outside the schema's
+ * type is removed with a refusal (S30-27); a pure alias cycle is refused; then
  * Effect's importer runs, and each node it still rejects becomes `{}` under the code of its D-AD12
  * class. The copy is the stored document minus `edits` (X10); it is recomputed, never edited.
  */
@@ -1506,6 +1531,15 @@ const rules = new Map<string, Rule>([
       anchor: keywordsSection,
       element: "Schema $ref target",
       message: "The $ref target is the document root or another object that is not a schema.",
+      severity: "refusal",
+    },
+  ],
+  [
+    "nonconforming-default",
+    {
+      anchor: keywordsSection,
+      element: "Schema default",
+      message: "The default does not conform to the schema type; it is never sent.",
       severity: "refusal",
     },
   ],
