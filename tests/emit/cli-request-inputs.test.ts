@@ -176,7 +176,7 @@ const generate = (variant: Variant) =>
       plan.domain,
     );
     const apiFiles = yield* emitApi({ api, boundOrigins: bound, plan });
-    const cli = yield* emitCli({ api, config, plan });
+    const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
 
     return { apiFiles, cli, domain };
   });

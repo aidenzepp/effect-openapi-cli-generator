@@ -45,7 +45,8 @@ const prepared = (
     const { api } = yield* normalize(resolution, { config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
-    return { api, config, plan };
+    // Every spec here is 3.1 or 3.2, where no `default` is refused (S30-27 is 3.0 only).
+    return { api, config, plan, validationEdits: [] };
   });
 
 const emitted = (value: Schema.Json, configValue?: Schema.Json) =>
@@ -499,7 +500,7 @@ describe("emitCli: operation-scope refusals", () => {
     expect(text).not.toContain("Schema.fromJsonString");
   });
 
-  test("an array of safe integers is a repeated Flag.Int", async () => {
+  test("an array of safe integers is a repeated integer numeric flag, each a JsonNumber", async () => {
     const output = await emit(
       withPaths({
         "/counters": bodyOperation("counters-create", "counters", {
@@ -509,8 +510,8 @@ describe("emitCli: operation-scope refusals", () => {
       }),
     );
     expect(output.refusals).toEqual([]);
-    expect(contentOf(output, "src/cli/counters.ts")).toContain(
-      'Flag.Int("totals").pipe(Flag.atLeast(0))',
+    expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
+      'Input.numericFlag("totals", "integer").pipe( Flag.map((text) => new Input.JsonNumber(text)), Flag.atLeast(0), )',
     );
   });
 });
@@ -539,7 +540,7 @@ describe("emitCli: XML request bodies", () => {
 });
 
 describe("emitCli: the body field walk", () => {
-  test("an integer field whose $ref chain is a cycle is refused, not emitted as Flag.Int", async () => {
+  test("an integer field whose $ref chain is a cycle is refused, not emitted with a guessed width", async () => {
     const base = await counters({ total: { type: "integer" } });
     const doctored = withBodyDefs(
       base,
@@ -553,7 +554,7 @@ describe("emitCli: the body field walk", () => {
     ]);
   });
 
-  test("an integer field past the visit cap is refused, not emitted as Flag.Int", async () => {
+  test("an integer field past the visit cap is refused, not emitted with a guessed width", async () => {
     const base = await counters({ total: { type: "integer" } });
     const hops = 10_050;
     const chain = Object.fromEntries<Schema.Json>([

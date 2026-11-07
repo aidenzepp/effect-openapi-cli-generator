@@ -54,13 +54,13 @@ import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
  * What the `cli/` layer is emitted from: the normalized `Api`, its name plan, the author config
  * (bin name, environment prefix and the author-owned commands module), and the edits normalize
  * recorded deriving the schemas' validation copy, from which help learns the defaults it refused
- * (S30-27). Absent, no default is refused: a caller that never derived the copy.
+ * (S30-27). Required: a spec with no refused default passes an empty list, written explicitly.
  */
 export interface CliEmitInput {
   readonly api: Api;
   readonly config: AuthorConfig;
   readonly plan: NamePlan;
-  readonly validationEdits?: readonly SchemaEdit[];
+  readonly validationEdits: readonly SchemaEdit[];
 }
 
 /**
@@ -286,9 +286,10 @@ const fieldNode = (
 };
 
 /**
- * Whether an integer field flag fits `Flag.Int`: `int64` when a node on its scalar's `$ref`
- * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `unsettled`
- * when the walk cannot reach that scalar (an unreadable node, a cycle, an exhausted budget).
+ * Which flag an integer field takes: `int64` (`Input.int64Flag`) when a node on its scalar's `$ref`
+ * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `safe`
+ * (`Input.numericFlag`) otherwise, and `unsettled` when the walk cannot reach that scalar (an
+ * unreadable node, a cycle, an exhausted budget).
  */
 type IntegerWidth = "int64" | "safe" | "unsettled";
 
@@ -596,31 +597,43 @@ const positionalEntry = (
     return [positional.identifier, value] as const;
   });
 
-const flagConstructor = (flag: PlannedFlag, kind: string): Expr => {
-  if (flag.boolean || kind === "boolean") {
-    return fn("Flag.Boolean", str(flag.name));
-  }
+// The step that carries a numeric flag's checked text as a `JsonNumber`, so the JSON body or the
+// multipart part sends the operator's digits unchanged (FMT-04).
+const asJsonNumber = fn(
+  "Flag.map",
+  arrow([{ name: I("text") }], newExpr(path("Input.JsonNumber"), [ident(I("text"))])),
+);
 
-  if (kind === "integer") {
-    return fn("Flag.Int", str(flag.name));
-  }
+// A body field flag's constructor and the steps before its presence wrapper.
+interface BodyFlagHead {
+  readonly head: Expr;
+  readonly steps: readonly Expr[];
+}
 
-  return fn("Flag.Finite", str(flag.name));
-};
-
-const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): Expr => {
+// An `integer` or `number` field is checked against the same grammar as an `integer` or `number`
+// parameter (an `int64` one as digits by `Input.int64Flag`), never parsed to a JavaScript number.
+const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): BodyFlagHead => {
   if (kind === "json") {
-    return fn("Input.jsonFlag", str(flag.name));
+    return { head: fn("Input.jsonFlag", str(flag.name)), steps: [] };
   }
 
   if (kind === "integer" && integer === "int64") {
-    return fn("Input.int64Flag", str(flag.name));
+    return { head: fn("Input.int64Flag", str(flag.name)), steps: [] };
   }
 
   // A multipart `file` part flag carries a path, or `-` for stdin.
-  return kind === "string" || kind === "file"
-    ? fn("Flag.String", str(flag.name))
-    : flagConstructor(flag, kind);
+  if (kind === "string" || kind === "file") {
+    return { head: fn("Flag.String", str(flag.name)), steps: [] };
+  }
+
+  if (flag.boolean || kind === "boolean") {
+    return { head: fn("Flag.Boolean", str(flag.name)), steps: [] };
+  }
+
+  return {
+    head: fn("Input.numericFlag", str(flag.name), str(kind === "integer" ? "integer" : "number")),
+    steps: [asJsonNumber],
+  };
 };
 
 // A JSON or form body property the runtime reads from a file and encodes (design 6.3 Binary): its
@@ -764,8 +777,9 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     }
 
     const description = yield* fieldDescription(flag, alternative, schema);
-    const head = bodyFlagHead(flag, source.kind, schema.integer);
+    const { head, steps: carried } = bodyFlagHead(flag, source.kind, schema.integer);
     const steps = [
+      ...carried,
       source.repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
       ...describedBy(description).map((text) => fn("Flag.withDescription", text)),
     ];
@@ -1863,7 +1877,7 @@ export const emitCli = (
       domain: plan.domain,
       line: api.line,
       plan,
-      refusedDefaults: refusedDefaultsOf(input.validationEdits ?? [], defs),
+      refusedDefaults: refusedDefaultsOf(input.validationEdits, defs),
       targets,
     };
     const built = new Map<string, Commands>();
