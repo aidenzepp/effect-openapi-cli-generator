@@ -481,3 +481,33 @@ describe("path items reached through $ref", () => {
     expect(relatedOf(found[0])).toEqual(["/components/pathItems/P/get"]);
   });
 });
+
+describe("PTH-11 Path Item $ref siblings", () => {
+  const lines = ["3.0", "3.1", "3.2"] as const;
+
+  test("a sibling the target also defines is a document refusal at the use site, naming the sibling", () => {
+    for (const line of lines) {
+      const found = check(line, {
+        ...paths({
+          "/a": { $ref: "#/x-items/B", get: op({ operationId: "mine" }), summary: "A" },
+        }),
+        "x-items": { B: { get: op({ operationId: "theirs" }), summary: "B" } },
+      });
+
+      expect(found.map((diagnostic) => [diagnostic.code, diagnostic.scope])).toEqual([
+        ["PTH-11/ref-sibling-conflict", "document"],
+      ]);
+      expect(pointerOf(found[0])).toBe("/paths/~1a");
+      expect(relatedOf(found[0])).toEqual(["/paths/~1a/get", "/paths/~1a/summary"]);
+    }
+  });
+
+  test("a sibling the target lacks raises nothing", () => {
+    const members = {
+      components: { pathItems: { P: { get: op({ operationId: "p" }) } } },
+      ...paths({ "/a": { $ref: "#/components/pathItems/P", summary: "A" } }),
+    };
+
+    expect([rows("3.1", members), rows("3.2", members)]).toEqual([[], []]);
+  });
+});

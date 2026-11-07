@@ -36,6 +36,8 @@ const MediaObject = Schema.Struct({
   schema: Schema.optionalKey(Schema.Unknown),
 });
 
+const HeaderObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknown) });
+
 const isHeaderName = Schema.is(HeaderName);
 
 const isMediaRange = Schema.is(MediaRange);
@@ -48,7 +50,20 @@ interface Rule {
   readonly severity: "notice" | "refusal";
 }
 
+/**
+ * What a 3.0 header notice says: `PRM-32` for a header parameter, `HDR-15` for a schema-serialized
+ * response header (design D-OC9).
+ */
+export const headerPercentEncoding =
+  "The 3.0 text implies percent-encoding of header values; 3.1 calls that a mistake, so none is applied.";
+
 const rules = {
+  "HDR-15/header-percent-encoding": {
+    anchor: "appendix-d-serializing-headers-and-cookies",
+    element: "Response header percent-encoding",
+    message: headerPercentEncoding,
+    severity: "notice",
+  },
   "MED-09/description-ignored": {
     anchor: "media-type-object",
     element: "Media type description",
@@ -236,25 +251,39 @@ const alternativeOf = (
     return Option.some(plain);
   });
 
+// A 3.0 schema-serialized header carries the D-OC9 notice; a content-based one never was
+// percent-encoded.
+const serializedBySchema = (resolution: Resolution, at: CanonicalKey): Effect.Effect<boolean> =>
+  nodeIn(resolution, follow(resolution, at)).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
+    Effect.map((header) => header.schema !== undefined),
+    Effect.orDie,
+  );
+
 const headersOf = (
+  resolution: Resolution,
   headers: readonly string[],
   response: CanonicalKey,
   findings: Finding[],
-): PlainCase["headers"] => {
-  const names: PlainCase["headers"][number][] = [];
-  for (const name of headers) {
-    const at = childKey(response, "headers", name);
-    if (name.toLowerCase() === "content-type") {
-      findings.push({ at, code: "RSP-09/ignored-content-type" });
-    } else if (isHeaderName(name)) {
-      names.push({ name });
-    } else {
-      findings.push({ at, code: "RSP-09/invalid-header-name" });
+): Effect.Effect<PlainCase["headers"]> =>
+  Effect.gen(function* recordHeaders() {
+    const names: PlainCase["headers"][number][] = [];
+    for (const name of headers) {
+      const at = childKey(response, "headers", name);
+      if (name.toLowerCase() === "content-type") {
+        findings.push({ at, code: "RSP-09/ignored-content-type" });
+      } else if (isHeaderName(name)) {
+        names.push({ name });
+        if (resolution.line === "3.0" && (yield* serializedBySchema(resolution, at))) {
+          findings.push({ at, code: "HDR-15/header-percent-encoding" });
+        }
+      } else {
+        findings.push({ at, code: "RSP-09/invalid-header-name" });
+      }
     }
-  }
 
-  return names;
-};
+    return names;
+  });
 
 const docsOf = (
   response: typeof ResponseObject.Type,
@@ -295,7 +324,12 @@ const caseOf = (
         ),
       ),
     );
-    const headers = headersOf(Object.keys(response.headers ?? {}), home, findings);
+    const headers = yield* headersOf(
+      resolution,
+      Object.keys(response.headers ?? {}),
+      home,
+      findings,
+    );
     const rows = [
       keyRow(key),
       "RSP-01",
@@ -357,7 +391,8 @@ const responseKeys = (
  * ascending). A key is an explicit code, a range `1XX` to `5XX` or `default`; a key outside that
  * grammar, a code outside 100 to 599, a content key that is no media type and a header name that is
  * no token are refused at element scope, and a `Content-Type` header is ignored with a notice
- * (`RSP-09`). Headers are recorded by name only: they never change output. An absent Responses
+ * (`RSP-09`). Headers are recorded by name only: they never change output. A 3.0 schema-serialized
+ * header gets a notice that its value is not percent-decoded (`HDR-15`). An absent Responses
  * Object has no cases, and `x-` keys are NZ-5's to account for. Schemas are referenced by `$defs`
  * key, an inline one by `defsKey` of its canonical pointer. A response or media type a reference
  * takes into another document of the set is read there, and its findings name that document.

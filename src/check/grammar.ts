@@ -73,6 +73,14 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
+  "HDR-13/parameter-only-field": {
+    anchor: "header-object",
+    element: "Header Object field",
+    hint: "Remove allowEmptyValue and allowReserved from the Header Object.",
+    message: "A Header Object uses allowEmptyValue or allowReserved, which the text forbids.",
+    scope: "document",
+    severity: "refusal",
+  },
   "MED-24/invalid-media-type": {
     anchor: "media-types",
     element: "Media type key",
@@ -103,6 +111,14 @@ const rules = {
     hint: "Name the header with an RFC 9110 token.",
     message: "A response header name is not an RFC 9110 token.",
     scope: "element",
+    severity: "refusal",
+  },
+  "RSS-04/no-response-code": {
+    anchor: "responses-object",
+    element: "Responses Object",
+    hint: "Add a status code, a status range or default.",
+    message: "A Responses Object has only x- keys, so it holds no response code.",
+    scope: "document",
     severity: "refusal",
   },
   "RSS-10/invalid-status": {
@@ -168,6 +184,14 @@ const rules = {
     hint: "Use an empty array for schemes other than oauth2 and openIdConnect.",
     message: "A 3.0 security requirement lists values for a scheme that takes none.",
     scope: "element",
+    severity: "refusal",
+  },
+  "SRV-04/duplicate-name": {
+    anchor: "server-name",
+    element: "Server name",
+    hint: "Give each server in a list its own name.",
+    message: "A server name is used by an earlier server in the same list.",
+    scope: "operation",
     severity: "refusal",
   },
   "SRV-12/default-not-in-enum": {
@@ -540,6 +564,18 @@ const schemaFindings = (
 
 type HeaderCode = "HDR-01/invalid-header-name" | "RSP-09/invalid-header-name";
 
+// The 3.1 and 3.2 schemas reject both fields on a Header Object; the 3.0 schema permits them.
+const headerFieldFindings = (
+  resolution: Resolution,
+  node: Json | undefined,
+  pointer: string,
+): readonly Finding[] =>
+  resolution.line === "3.0" && isObject(node) && !isReference(node)
+    ? (["allowEmptyValue", "allowReserved"] as const)
+        .filter((field) => node[field] !== undefined)
+        .map((field) => at("HDR-13/parameter-only-field", childPointer(pointer, field))())
+    : [];
+
 // Header, Content, Media Type and Encoding objects refer to each other, so they share one record.
 interface Media {
   readonly encoding: (
@@ -597,6 +633,7 @@ const media: Media = {
   headers: (resolution, headers, pointer, code) =>
     entriesOf(headers).flatMap(([name, header]) => [
       ...(isToken(name) ? [] : [at(code, childPointer(pointer, name))()]),
+      ...headerFieldFindings(resolution, header, childPointer(pointer, name)),
       ...media.header(resolution, header, childPointer(pointer, name)),
     ]),
   mediaType: (resolution, node, pointer) => {
@@ -666,12 +703,23 @@ const responseFindings = (
       ]
     : [];
 
+// The 3.1 and 3.2 schemas refuse a Responses Object of `x-` keys alone; the 3.0 schema counts an
+// `x-` key toward its one required member (D-OC3).
+const extensionsOnly = (resolution: Resolution, responses: Json | undefined): boolean => {
+  const keys = entriesOf(responses).map(([code]) => code);
+
+  return (
+    resolution.line === "3.0" && keys.length > 0 && keys.every((code) => code.startsWith("x-"))
+  );
+};
+
 const responsesFindings = (
   resolution: Resolution,
   responses: Json | undefined,
   pointer: string,
-): readonly Finding[] =>
-  entriesOf(responses).flatMap(([code, response]) =>
+): readonly Finding[] => [
+  ...(extensionsOnly(resolution, responses) ? [at("RSS-04/no-response-code", pointer)()] : []),
+  ...entriesOf(responses).flatMap(([code, response]) =>
     code.startsWith("x-")
       ? []
       : [
@@ -680,7 +728,8 @@ const responsesFindings = (
             : [at("RSS-10/invalid-status", childPointer(pointer, code))()]),
           ...responseFindings(resolution, response, childPointer(pointer, code)),
         ],
-  );
+  ),
+];
 
 const requestBodyFindings = (
   resolution: Resolution,
@@ -790,7 +839,10 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
     ...each("responses", (node, pointer) => responseFindings(resolution, node, pointer)),
     ...each("parameters", (node, pointer) => parameterFindings(resolution, node, pointer)),
     ...each("requestBodies", (node, pointer) => requestBodyFindings(resolution, node, pointer)),
-    ...each("headers", (node, pointer) => media.header(resolution, node, pointer)),
+    ...each("headers", (node, pointer) => [
+      ...headerFieldFindings(resolution, node, pointer),
+      ...media.header(resolution, node, pointer),
+    ]),
     ...each("pathItems", (node, pointer) => items.pathItem(resolution, node, pointer)),
     ...each("callbacks", (node, pointer) => items.callback(resolution, node, pointer)),
     ...each("mediaTypes", (node, pointer) => media.mediaType(resolution, node, pointer)),
@@ -923,13 +975,44 @@ const effectiveServers = (
   );
 };
 
+// A 3.2 server name is unique within its list (D-OC3); no schema enforces it.
+const duplicateNameFindings = (
+  resolution: Resolution,
+  servers: readonly (readonly [Json, string])[],
+): readonly Finding[] => {
+  if (resolution.line !== "3.2") {
+    return [];
+  }
+
+  const seen = new Set<string>();
+
+  return servers.flatMap(([server, pointer]) => {
+    const name = isObject(server) ? stringMember(server, "name") : undefined;
+    if (name === undefined) {
+      return [];
+    }
+
+    if (seen.has(name)) {
+      return [at("SRV-04/duplicate-name", childPointer(pointer, "name"))()];
+    }
+
+    seen.add(name);
+
+    return [];
+  });
+};
+
 const operationServerFindings = (
   resolution: Resolution,
   operation: Operation,
-): readonly Finding[] =>
-  effectiveServers(resolution, operation).flatMap(([server, pointer]) =>
-    serverFindings(resolution, server, pointer).map((finding) => ({ ...finding, operation })),
-  );
+): readonly Finding[] => {
+  const servers = effectiveServers(resolution, operation);
+
+  return [
+    ...servers.flatMap(([server, pointer]) => serverFindings(resolution, server, pointer)),
+    ...duplicateNameFindings(resolution, servers),
+  ].map((finding) => ({ ...finding, operation }));
+};
 
 const schemeNode = (resolution: Resolution, name: string): JsonObject | undefined => {
   const key = implicitComponent(resolution, "securitySchemes", name);
@@ -1106,10 +1189,12 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
 };
 
 /**
- * The spec-text checks on values and grammars (design 3.4 rows 10 to 17): server variables and
- * URLs, security requirement names, media type keys, header-name tokens, discriminators, status
- * keys and patterns, and the 3.0 rows on `items`, `readOnly` and `writeOnly`. Pure over the
- * resolved document; findings are refusals except the 3.0 server default and the pattern notices.
+ * The spec-text checks on values and grammars (design 3.4 rows 10 to 17): server variables, URLs
+ * and 3.2 names, security requirement names, media type keys, header-name tokens, discriminators,
+ * status keys and patterns, and the 3.0 rows the 3.0 schema leaves open: `items`, `readOnly` and
+ * `writeOnly`, a Responses Object of `x-` keys alone and Header `allowEmptyValue` or
+ * `allowReserved`. Pure over the resolved document; findings are refusals except the 3.0 server
+ * default and the pattern notices.
  * Walking allOf, oneOf and anyOf is bounded by `limits.maxNodes` steps; past it the only finding
  * is a document-scope refusal (design 9 I5).
  */

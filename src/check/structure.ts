@@ -69,6 +69,14 @@ const rules = {
     message: "A path parameter has no expression in the path key.",
     scope: "operation",
   },
+  "PTH-11/ref-sibling-conflict": {
+    anchor: "path-item-ref",
+    element: "Path Item $ref",
+    hint: "Keep each field in one of the two Path Item Objects.",
+    message:
+      "A Path Item $ref has a sibling field the referenced Path Item also defines; which applies is undefined.",
+    scope: "document",
+  },
   "PTH-23/method-not-allowed": {
     anchor: "path-item-object",
     element: "additionalOperations key",
@@ -303,6 +311,37 @@ const expressionsOf = (key: string): readonly string[] =>
 
 const normalizedTemplate = (key: string): string => key.replaceAll(expression, "{}");
 
+// A sibling of a Path Item `$ref` that the target also defines leaves the result undefined (D-OC6,
+// DOC-16). The target may sit in any document of the set.
+const refSiblingFindings = (resolution: Resolution): readonly Finding[] => {
+  const paths = isObject(resolution.value) ? resolution.value.paths : undefined;
+
+  return Object.entries(isObject(paths) ? paths : {}).flatMap(([key, value]) => {
+    const use = childPointer("/paths", key);
+    const referenced = resolution.references.has(
+      keyOf({ document: resolution.document, pointer: use }),
+    );
+    const target = referenced ? locate(resolution, use, value) : undefined;
+    if (!isObject(value) || target === undefined) {
+      return [];
+    }
+
+    const shared = Object.keys(value).filter(
+      (member) => member !== "$ref" && Object.hasOwn(target.node, member),
+    );
+
+    return shared.length === 0
+      ? []
+      : [
+          {
+            code: "PTH-11/ref-sibling-conflict",
+            pointer: use,
+            related: shared.map((member) => childPointer(use, member)),
+          },
+        ];
+  });
+};
+
 const componentFindings = (resolution: Resolution): readonly Finding[] => {
   const components = isObject(resolution.value) ? resolution.value.components : undefined;
   if (!isObject(components)) {
@@ -461,6 +500,7 @@ const findingsOf = (resolution: Resolution): readonly Finding[] => {
 
   return [
     ...componentFindings(resolution),
+    ...refSiblingFindings(resolution),
     ...operations.flatMap((operation) =>
       operationFindings(resolution, operation, twinsOf(operation.item)),
     ),

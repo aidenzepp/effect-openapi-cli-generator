@@ -7,6 +7,7 @@ import {
   precedenceOrder,
 } from "../../src/normalize/responses.ts";
 import type { ResponseCase } from "../../src/model/entities.ts";
+import { normalizeParameter } from "../../src/normalize/parameters.ts";
 import type { NormalizedResponses } from "../../src/normalize/responses.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -160,6 +161,80 @@ describe("response headers", () => {
     expect(headerNames(result.responses[0])).toEqual(["X-Rate"]);
     expect(codes(result)).toEqual(["RSP-09/invalid-header-name"]);
     expect(result.diagnostics[0]?.severity).toBe("refusal");
+  });
+});
+
+describe("HDR-15 response header percent-encoding in 3.0", () => {
+  const traced: Members = {
+    "200": {
+      description: "ok",
+      headers: {
+        "Content-Type": { schema: { type: "string" } },
+        "X-Body": { content: { "text/plain": { schema: { type: "string" } } } },
+        "X-Rate": { schema: { type: "integer" } },
+        "X-Trace": { $ref: "#/components/headers/Trace" },
+      },
+    },
+  };
+  const components: Members = { headers: { Trace: { schema: { type: "string" } } } };
+
+  test("each schema-serialized header gets one notice at its use site", () => {
+    const result = normalize("3.0", traced, components);
+    const notices = result.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "HDR-15/header-percent-encoding",
+    );
+
+    expect(notices.map((diagnostic) => text(diagnostic.pointer))).toEqual([
+      `${responsesPointer}/200/headers/X-Rate`,
+      `${responsesPointer}/200/headers/X-Trace`,
+    ]);
+    expect(notices.map((diagnostic) => [diagnostic.severity, diagnostic.scope])).toEqual([
+      ["notice", "element"],
+      ["notice", "element"],
+    ]);
+    expect(codes(result)).toEqual([
+      "RSP-09/ignored-content-type",
+      "HDR-15/header-percent-encoding",
+      "HDR-15/header-percent-encoding",
+    ]);
+  });
+
+  test("the notice says what the PRM-32 header parameter notice says", () => {
+    const notice = normalize("3.0", traced, components).diagnostics.find(
+      (diagnostic) => diagnostic.code === "HDR-15/header-percent-encoding",
+    );
+
+    const value: Json = {
+      info: { title: "t", version: "1" },
+      openapi: openapi["3.0"],
+      paths: {
+        "/a": {
+          get: {
+            parameters: [{ in: "header", name: "X-Rate", schema: {} }],
+            responses: { "200": ok },
+          },
+        },
+      },
+    };
+    const parameter = Effect.runSync(
+      resolve({ document: entry, line: "3.0", value }).pipe(
+        Effect.flatMap((resolution) =>
+          normalizeParameter(resolution, {
+            openapi: openapi["3.0"],
+            pointer: "/paths/~1a/get/parameters/0",
+          }),
+        ),
+      ),
+    );
+    const [prm32] = parameter.diagnostics;
+
+    expect(prm32?.code).toBe("PRM-32/header-percent-encoding");
+    expect(notice?.message).toBe(prm32?.message);
+  });
+
+  test("3.1 and 3.2 headers already agree with the correction", () => {
+    expect(codes(normalize("3.1", traced, components))).toEqual(["RSP-09/ignored-content-type"]);
+    expect(codes(normalize("3.2", traced, components))).toEqual(["RSP-09/ignored-content-type"]);
   });
 });
 
