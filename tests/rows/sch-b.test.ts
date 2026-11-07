@@ -573,8 +573,61 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         expect(noticesOf(line, "SCH-59")).toEqual(noNotices);
       }, 60_000);
 
-      test.todo(`SCH-59: INCONCLUSIVE: no request body is ever built from its schema as XML (XML bodies are opaque, D-SCH3), so the schema-driven XML refusal has no site (${line})`, () =>
-        Promise.resolve());
+      // The one site that would build XML from a schema is a multipart object part typed as XML;
+      // it is refused (D-SCH3, memo 121cf83f B2).
+      test(`SCH-59: a multipart object part typed as XML is refused as XML-01/schema-driven at element scope (${line})`, async () => {
+        const partAt = "/paths/~1a/post/requestBody/content/multipart~1form-data";
+        const found = await inProcess({
+          info: { title: "SCH rows", version: "1.0.0" },
+          openapi: line,
+          paths: {
+            "/a": {
+              post: {
+                operationId: "a",
+                requestBody: {
+                  content: {
+                    "multipart/form-data": {
+                      encoding: { doc: { contentType: "application/xml" } },
+                      schema: {
+                        properties: {
+                          doc: {
+                            properties: { id: { type: "string", xml: { attribute: true } } },
+                            type: "object",
+                            xml: { name: "Doc" },
+                          },
+                        },
+                        type: "object",
+                      },
+                    },
+                  },
+                  required: false,
+                },
+                responses: ok,
+              },
+            },
+          },
+        });
+
+        expect(
+          found.diagnostics
+            .filter((diagnostic) => diagnostic.row === "XML-01")
+            .map((diagnostic) => [
+              diagnostic.code,
+              diagnostic.severity,
+              diagnostic.scope,
+              String(diagnostic.pointer),
+              diagnostic.related?.map((key) => String(key.pointer)),
+            ]),
+        ).toEqual([
+          [
+            "XML-01/schema-driven",
+            "refusal",
+            "element",
+            partAt,
+            [`${partAt}/encoding/doc/contentType`],
+          ],
+        ]);
+      }, 60_000);
 
       test(`SCH-62: an unknown keyword does not change validation (${line})`, async () => {
         const inside = await send(line, "unknown-keyword", "3");
