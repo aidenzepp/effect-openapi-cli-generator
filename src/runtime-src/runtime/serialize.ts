@@ -195,13 +195,18 @@ const encodeUnreserved = (text: string) =>
 const pathReserved = ":[]@!$&'()*+,;=";
 
 /**
- * Reserved characters a query value may pass under `allowReserved`: RFC 3986 reserved less the form
- * delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded. `'` is left out too:
- * under `fetch` the WHATWG URL serializer always sends it as `%27` in an http(s) query, and
- * Effect's `HttpClient` parses every request URL with `new URL`, so it can never go raw (a platform
- * limit, D-OC7). Encoding it here keeps this output equal to the wire, as `queryWireForm` does.
+ * Reserved characters a form-urlencoded value may pass under `allowReserved`: RFC 3986 reserved
+ * less the form delimiters `&`, `=` and `+` and the fragment start `#`, which stay encoded.
  */
-const queryReserved = ":/?[]@!$()*,;";
+const formReserved = ":/?[]@!$'()*,;";
+
+/**
+ * Reserved characters a query value may pass under `allowReserved`: `formReserved` less `'`, which
+ * `fetch` always sends as `%27` in an http(s) query (a platform limit, D-OC7). Effect's
+ * `HttpClient` parses every request URL with `new URL`, so encoding it here keeps this output equal
+ * to the wire, as `queryWireForm` does. A form body is not parsed as a URL, so it keeps `'`.
+ */
+const queryReserved = formReserved.replace("'", "");
 
 const encoder =
   (allowReserved: boolean, passed = pathReserved) =>
@@ -1358,7 +1363,7 @@ const formSafe = /^[\w*.-]$/u;
 /**
  * The WHATWG `application/x-www-form-urlencoded` serializer for one name or value: ASCII
  * alphanumerics and `*-._` pass, a space becomes `+`, every other UTF-8 byte is percent-encoded.
- * Under `allowReserved` the query's reserved set and percent triplets also pass, so `&`, `=`, `+`
+ * Under `allowReserved` the form's reserved set and percent triplets also pass, so `&`, `=`, `+`
  * and `#` stay encoded.
  */
 const formEncoder = (allowReserved: boolean) => (text: string) =>
@@ -1371,7 +1376,7 @@ const formEncoder = (allowReserved: boolean) => (text: string) =>
       return token;
     }
 
-    if (allowReserved && (percentTriplet.test(token) || queryReserved.includes(token))) {
+    if (allowReserved && (percentTriplet.test(token) || formReserved.includes(token))) {
       return token;
     }
 

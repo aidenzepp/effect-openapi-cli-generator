@@ -532,6 +532,15 @@ describe("allowReserved in a query", () => {
     expect(await query(Serialize.form("q", ":/?[]@!$'()*,;", options))).toBe("q=:/?[]@!$%27()*,;");
   });
 
+  test("' is sent raw in an allowReserved form body, which no URL serializer parses", async () => {
+    const body = Serialize.urlEncode(
+      { q: ":/?[]@!$'()*,;" },
+      { properties: [["q", { allowReserved: true }]] },
+    );
+
+    expect(await Effect.runPromise(body)).toBe("q=:/?[]@!$'()*,;");
+  });
+
   test("everything else is still encoded", async () => {
     expect(await query(Serialize.form("q", 'a b|c"d<e>f\\g^h`i{j}k~l-m_n.o', options))).toBe(
       "q=a%20b%7Cc%22d%3Ce%3Ef%5Cg%5Eh%60i%7Bj%7Dk~l-m_n.o",
