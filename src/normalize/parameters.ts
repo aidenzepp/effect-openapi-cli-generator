@@ -856,27 +856,41 @@ const CompositionSchema = Schema.Struct({
 });
 
 // One `objectOnly` walk: each resolved schema is decided once (`memo`), a schema already on the
-// current path is a cycle, and every schema decided is charged to the call's node budget.
+// current path is a cycle, and every schema decided is charged to the call's node budget. `arrays`
+// says whether an array counts with the objects, as it does for PRM-27, whose nested test refuses it.
 interface ObjectWalk {
+  readonly arrays: boolean;
   readonly budget: Budget;
   readonly memo: Map<string, boolean>;
   readonly path: Set<string>;
 }
 
-// What one resolved schema says on its own about admitting only objects, or arrays, which PRM-27's
-// nested test refuses: a declared type list must name nothing else; an untyped schema is read as
-// the emitted object test reads it (an object when it declares `properties`), except that its
-// anyOf and oneOf members, when it has any, decide with it.
+const walkOf = (limits: SchemaLimits, arrays: boolean): ObjectWalk => ({
+  arrays,
+  budget: budgetOf(limits),
+  memo: new Map(),
+  path: new Set(),
+});
+
+// What one resolved schema says on its own about admitting only objects (and arrays, when the walk
+// counts them): a declared type list must name nothing else; an untyped schema is an object when it
+// declares `properties`, except that its anyOf and oneOf members, when it has any, decide with it.
 interface OwnVerdict {
   readonly members: readonly CanonicalKey[];
   readonly only: boolean;
 }
 
-const ownVerdict = (resolution: Resolution, home: CanonicalKey): Effect.Effect<OwnVerdict> =>
+const ownVerdict = (
+  resolution: Resolution,
+  home: CanonicalKey,
+  walk: ObjectWalk,
+): Effect.Effect<OwnVerdict> =>
   Effect.gen(function* own() {
     const types = yield* typesAt(resolution, home);
     if (types.length > 0) {
-      return { members: [], only: types.every((name) => name === "object" || name === "array") };
+      const counted = (name: string) => name === "object" || (walk.arrays && name === "array");
+
+      return { members: [], only: types.every(counted) };
     }
 
     const declared = yield* nodeIn(resolution, home).pipe(
@@ -912,7 +926,7 @@ const objectOnly = (
 
     walk.path.add(id);
 
-    const verdict = yield* ownVerdict(resolution, home);
+    const verdict = yield* ownVerdict(resolution, home, walk);
     let { only } = verdict;
     for (const member of verdict.members) {
       if (only) {
@@ -937,9 +951,25 @@ const admitsNonObject = (
     return Effect.succeed(false);
   }
 
-  const walk: ObjectWalk = { budget: budgetOf(limits), memo: new Map(), path: new Set() };
+  return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, true)).pipe(
+    Effect.map((only) => !only),
+  );
+};
 
-  return objectOnly(resolution, childKey(target, "schema"), walk).pipe(Effect.map((only) => !only));
+// Whether a styled parameter's value is an object (design 6.1): its schema, through `$ref`, admits
+// only objects, by `type: object`, by `properties` with no type, or by anyOf and oneOf members that
+// all do. Emit reads it to take the value as JSON.
+const objectValued = (
+  resolution: Resolution,
+  source: Source,
+  limits: SchemaLimits,
+): Effect.Effect<boolean> => {
+  const { node, target } = source;
+  if (node.schema === undefined) {
+    return Effect.succeed(false);
+  }
+
+  return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, false));
 };
 
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
@@ -958,6 +988,7 @@ const serializationOf = (
   plan: ContentPlan | StylePlan,
   line: Line,
   origin: Related,
+  objectValue: boolean,
 ) => {
   if (plan.kind === "content") {
     return {
@@ -976,6 +1007,7 @@ const serializationOf = (
     allowReserved: plan.allowReserved,
     explode: plan.explode,
     kind: plan.kind,
+    objectValued: objectValue,
     origin,
     rows: sorted(honored ? [plan.row, "PRM-08"] : [plan.row]),
     rules: rules[line],
@@ -1000,24 +1032,29 @@ const build = (
   site: ParameterSite,
   source: Source,
   plan: ContentPlan | StylePlan,
-) => {
-  const { node, reference, target } = source;
-  const origin = { document: resolution.document, pointer: site.pointer };
-  const schemaKey =
-    plan.kind === "content" ? plan.schemaKey : schemaKeyAt(resolution, childKey(target, "schema"));
+  limits: SchemaLimits,
+) =>
+  Effect.gen(function* built() {
+    const { node, reference, target } = source;
+    const origin = { document: resolution.document, pointer: site.pointer };
+    const schemaKey =
+      plan.kind === "content"
+        ? plan.schemaKey
+        : schemaKeyAt(resolution, childKey(target, "schema"));
+    const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
 
-  return Schema.decodeUnknownEffect(Parameter)({
-    deprecated: node.deprecated ?? false,
-    docs: docsOf(reference?.description ?? node.description, reference?.summary),
-    location: node.in,
-    origin,
-    required: node.required ?? false,
-    rows: sorted(parameterRows(node, plan)),
-    schema: { key: schemaKey },
-    serialization: serializationOf(node, plan, resolution.line, origin),
-    wireName: node.name,
-  }).pipe(Effect.orDie);
-};
+    return yield* Schema.decodeUnknownEffect(Parameter)({
+      deprecated: node.deprecated ?? false,
+      docs: docsOf(reference?.description ?? node.description, reference?.summary),
+      location: node.in,
+      origin,
+      required: node.required ?? false,
+      rows: sorted(parameterRows(node, plan)),
+      schema: { key: schemaKey },
+      serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
+      wireName: node.name,
+    }).pipe(Effect.orDie);
+  });
 
 // The schema sites a parameter carries: its `schema`, or its one content entry's `schema`.
 const schemaSitesOf = (resolution: Resolution, source: Source): readonly CanonicalKey[] => {
@@ -1037,8 +1074,8 @@ const schemaSitesOf = (resolution: Resolution, source: Source): readonly Canonic
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
  * refusal (design 2.2, 6.1, 6.2). Defaults come from the line's text, never from a schema
  * `default`. A site the earlier stages should have stopped fails with `ParameterNotReadable`.
- * `limits.maxNodes` bounds the schema walk behind the PRM-27 object test, which fails closed when
- * it is spent.
+ * `limits.maxNodes` bounds each schema walk behind the PRM-27 object test and the `objectValued`
+ * fact, which fail closed when it is spent.
  */
 export const normalizeParameter = (
   resolution: Resolution,
@@ -1083,6 +1120,6 @@ export const normalizeParameter = (
     return {
       _tag: "Implemented",
       diagnostics: yield* diagnostics(decision.findings),
-      parameter: yield* build(resolution, site, source, decision.plan),
+      parameter: yield* build(resolution, site, source, decision.plan, limits),
     };
   });

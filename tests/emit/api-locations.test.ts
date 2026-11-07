@@ -112,7 +112,14 @@ interface Style {
 const cookieParameter = (style: Style) => ({
   ...queryParameter,
   location: "cookie",
-  serialization: { ...style, kind: "style", origin: read0.origin, rows: [], rules: "fixture" },
+  serialization: {
+    ...style,
+    kind: "style",
+    objectValued: false,
+    origin: read0.origin,
+    rows: [],
+    rules: "fixture",
+  },
 });
 
 const querystringParameter = (mediaType: string, required: boolean) => ({

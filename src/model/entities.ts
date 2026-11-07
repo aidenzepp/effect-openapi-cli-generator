@@ -167,13 +167,16 @@ export class Body extends Schema.Class<Body>("Body")({
 
 /**
  * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
- * author config sends in the bracket convention.
+ * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
+ * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
+ * by its style.
  */
 export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
   allowReserved: Schema.Boolean,
   explode: Schema.Boolean,
   kind: Schema.Literal("style"),
   nonStandard,
+  objectValued: Schema.Boolean,
   origin: Origin,
   rows,
   rules,

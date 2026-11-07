@@ -30,6 +30,7 @@ const serialization = {
   allowReserved: false,
   explode: true,
   kind: "style",
+  objectValued: false,
   origin,
   rows,
   rules: "rfc3986-3.1+",

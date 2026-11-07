@@ -61,6 +61,7 @@ const parameterJson = (home: string, parameter: ParameterInput, index: number): 
     allowReserved: false,
     explode: parameter.in === "query",
     kind: "style",
+    objectValued: false,
     origin: origin(`${home}/parameters/${index}`),
     rows: [],
     rules: "3.1",

@@ -20,7 +20,6 @@ import {
   encodesByKey,
   formParts,
   inputKeys,
-  isObjectSchema,
   isScalarArraySchema,
   scalarTypeOf,
   takesJsonContent,
@@ -509,19 +508,8 @@ const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
 
 // Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
 // builder hands to the style serializer. A `content` parameter is one value whatever its schema.
-const isObjectParameter = (parameter: Parameter, context: CommandContext) =>
-  Effect.gen(function* object() {
-    if (parameter.serialization.kind !== "style") {
-      return false;
-    }
-
-    const found = isObjectSchema(context.defs, parameter.schema.key);
-    if (Result.isFailure(found)) {
-      return yield* refuse("unresolved-schema", found.failure);
-    }
-
-    return found.success;
-  });
+const isObjectParameter = ({ serialization }: Parameter): boolean =>
+  serialization.kind === "style" && serialization.objectValued;
 
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
@@ -577,7 +565,7 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
-    const object = yield* isObjectParameter(parameter, context);
+    const object = isObjectParameter(parameter);
     const numeric = yield* numericKindOf(parameter, context);
     let head = fn("Argument.String", str(positional.name));
     if (object) {
@@ -749,7 +737,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       }
 
       const array = styled && (yield* isArrayParameter(parameter, context));
-      const object = yield* isObjectParameter(parameter, context);
+      const object = isObjectParameter(parameter);
       const head = parameterFlagHead(
         flag,
         parameter,
