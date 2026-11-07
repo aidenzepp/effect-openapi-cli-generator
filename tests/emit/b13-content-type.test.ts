@@ -122,10 +122,14 @@ describe("names plan and emitters: a part with several content types", () => {
 
   test("the api/ builder takes the chosen type with the part, and no type without it", () => {
     expect(emitted.api).toContain(
-      'readonly file?: Serialize.ChosenPart<"image/png" | "image/jpeg"> | undefined;',
+      'export type CreateFormFileContentType = "image/png" | "image/jpeg";',
+    );
+    expect(emitted.api).toContain(
+      "readonly file?: Serialize.ChosenPart<CreateFormFileContentType> | undefined;",
     );
     expect(emitted.api).toContain("readonly body: CreateForm;");
-    expect(emitted.api).not.toContain("ContentType");
+    expect(emitted.api).not.toContain("readonly title");
+    expect(emitted.api.match(/ContentType = /gu)).toHaveLength(1);
     expect(emitted.api).toContain("Serialize.formData(input.body.fields, {");
     expect(emitted.api).toContain('["file", input.body.file],');
     expect(emitted.api).toContain('["title", "text/plain"],');

@@ -639,6 +639,52 @@ describe("planNames: a multipart part with several content types (ENC-10)", () =
   });
 });
 
+describe("planNames: one body field of two kinds across alternatives (RQB-03)", () => {
+  // OpenAI's CreateContainerFile shape: one schema behind a JSON and a multipart alternative, so
+  // /file is a plain value in one and a file part in the other.
+  const upload: ApiInput = {
+    defs: {
+      Body: object({ file: { format: "binary", type: "string" }, name: { type: "string" } }),
+    },
+    operations: [
+      {
+        body: [
+          { media: "application/json", schema: "Body" },
+          { codec: "multipart", media: "multipart/form-data", schema: "Body" },
+        ],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  };
+
+  test("the refusal says a field rename cannot separate them and offers no rename", () => {
+    const result = plan(upload);
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("cannot separate");
+    expect(result.diagnostics[0]?.hint).not.toContain(".fields[");
+    expect(result.diagnostics[0]?.hint).toContain('naming.operations["upload"].skip');
+  });
+
+  test("renaming the field does not separate them, and the refusal still offers no rename", () => {
+    const config = makeConfig({
+      naming: { operations: { upload: { fields: { "/file": { flag: "upload-file" } } } } },
+    });
+    const result = plan(upload, config);
+
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("--upload-file");
+    expect(result.diagnostics[0]?.hint).not.toContain(".fields[");
+  });
+});
+
 describe("planNames: multipart part headers (ENC-03)", () => {
   const media = "multipart/form-data";
   const home = `/paths/~1u/post/requestBody/content/${escape(media)}`;

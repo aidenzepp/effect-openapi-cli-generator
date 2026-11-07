@@ -669,6 +669,8 @@ export interface Subject {
 interface Owner {
   readonly field?: string;
   readonly hint: string;
+  // Why no field rename can resolve this owner's collision; the refusal then hints only a skip.
+  readonly split?: string;
   readonly kind: "body" | "parameter" | "positional";
   readonly pointer: string;
 }
@@ -826,6 +828,15 @@ const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => 
 // A body field flag collision is resolved by renaming the field's flag, or by skipping the operation.
 const fieldHint = (site: OverrideSite, field: string): string =>
   `Rename the flag with ${site.configKey}.fields[${JSON.stringify(field)}].flag, or skip the operation with ${site.configKey}.skip.`;
+
+const kindOf = (flag: BodyFlag): string => (flag.repeated ? `repeated ${flag.kind}` : flag.kind);
+
+// One body field that is a different kind of flag in two media alternatives (a plain value in one,
+// a file part in another) keeps one name: fields[...].flag renames it in every alternative.
+const splitReason = (field: string, left: Merged, right: BodyFlag, media: string): string =>
+  ` The body field ${field} is a ${kindOf(left.flag)} flag in ${left.media.join(", ")} and a ${kindOf(right)} flag in ${media}. A rename cannot separate them: fields[...].flag renames the field in every media type.`;
+
+const skipHint = (site: OverrideSite): string => `Skip the operation with ${site.configKey}.skip.`;
 
 // A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
 // names. The config is never inferred.
@@ -1064,6 +1075,10 @@ const draftBody = (
           merged.set(flag.name, { flag, media: [alternative.mediaType], pointer });
         } else if (sameFlag(known.flag, flag)) {
           known.media.push(alternative.mediaType);
+        } else if (known.flag.pointer === flag.pointer) {
+          const split = splitReason(flag.pointer, known, flag, alternative.mediaType);
+          const hint = skipHint(site);
+          addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer, split });
         } else {
           const hint = fieldHint(site, flag.pointer);
           addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer });
@@ -1143,12 +1158,13 @@ const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): vo
       ...new Set(list.flatMap((owner) => (owner.field === undefined ? [] : [owner.field]))),
     ];
     const named = fields.length === 0 ? "" : ` Body fields: ${fields.join(", ")}.`;
+    const split = list.find((owner) => owner.split !== undefined);
     context.collector.report(
       operation,
       `${isParameter ? "PRM-02" : "RQB-03"}/flag-collision`,
       isParameter ? "Parameter" : "Request body",
-      `${summary}${named}`,
-      { hint: primary.hint, pointer: primary.pointer, related },
+      `${summary}${named}${split?.split ?? ""}`,
+      { hint: (split ?? primary).hint, pointer: primary.pointer, related },
     );
   }
 };
