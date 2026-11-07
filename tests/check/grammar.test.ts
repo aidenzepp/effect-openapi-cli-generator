@@ -475,7 +475,7 @@ describe("DSC discriminator rules", () => {
           },
           propertyName: "kind",
         },
-        { oneOf: [{ $ref: "#/components/schemas/Cat" }], required: ["kind"] },
+        { required: ["kind"] },
       ),
     );
 
@@ -543,51 +543,44 @@ describe("DSC discriminator rules", () => {
     }
   });
 
-  test("DSC-05: a oneOf or anyOf branch the explicit mapping leaves unlisted is refused", () => {
+  test("DSC-05: a partial mapping is valid; an unmapped branch keeps its implicit name", () => {
     const dog: Json = {
       properties: { kind: { type: "string" } },
       required: ["kind"],
       type: "object",
     };
-    const tagged = (keyword: "anyOf" | "oneOf", mapping: Json): Members => ({
+    const partial = (keyword: "anyOf" | "oneOf"): Members => ({
       components: {
         schemas: {
           Cat: cat,
           Dog: dog,
           Pet: {
-            discriminator: { mapping, propertyName: "kind" },
+            discriminator: { mapping: { cat: "Cat" }, propertyName: "kind" },
             [keyword]: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],
           },
         },
       },
     });
 
-    for (const keyword of ["oneOf", "anyOf"] as const) {
-      const found = check("3.1", tagged(keyword, { cat: "Cat" }));
-
-      expect(
-        found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
-      ).toEqual([["DSC-05/unlisted-branch", "refusal", "element"]]);
-      expect(pointers(found)).toEqual(["/components/schemas/Pet/discriminator"]);
-      expect(
-        check("3.1", tagged(keyword, { cat: "Cat", dog: "#/components/schemas/Dog" })),
-      ).toEqual([]);
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      for (const keyword of ["oneOf", "anyOf"] as const) {
+        expect(check(line, partial(keyword))).toEqual([]);
+      }
     }
   });
 
-  test("DSC-05: an inline branch cannot be mapped, so an explicit mapping leaves it unlisted", () => {
-    const found = check("3.1", {
+  test("DSC-05: an inline branch beside an explicit mapping is not refused", () => {
+    const inline = {
       ...schemaAt({
         discriminator: { mapping: { cat: "#/components/schemas/Cat" }, propertyName: "kind" },
         oneOf: [{ $ref: "#/components/schemas/Cat" }, cat],
       }),
       components: { schemas: { Cat: cat } },
-    });
+    };
 
-    expect(found.map((diagnostic) => diagnostic.code)).toEqual(["DSC-05/unlisted-branch"]);
-    expect(pointers(found)).toEqual([
-      "/paths/~1a/post/requestBody/content/application~1json/schema/discriminator",
-    ]);
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      expect(check(line, inline)).toEqual([]);
+    }
   });
 
   test("an inline schema in a request body is checked too", () => {

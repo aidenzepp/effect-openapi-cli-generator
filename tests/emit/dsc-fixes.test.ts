@@ -11,10 +11,10 @@ import { DocumentUri } from "../../src/model/brands.ts";
 import type { Json } from "../../src/model/pointer.ts";
 
 // The fixes of m2-dscfx through generate(), with no package build: a discriminator with no
-// composition keyword, or whose explicit mapping leaves a oneOf/anyOf branch unlisted, is refused
-// at element scope at the discriminator (DSC-05, D-OQ9); a multipart part typed as XML over an
-// object schema is schema-driven XML, refused in normalize so the emitter never builds it as a
-// JSON part (XML-01, D-SCH3). An opaque XML body and a JSON object part are unchanged.
+// composition keyword is refused at element scope at the discriminator (DSC-05, D-OQ9); a partial
+// mapping and an inline oneOf branch are valid and refuse nothing; a multipart part typed as XML
+// over an object schema is schema-driven XML, refused in normalize so the emitter never builds it
+// as a JSON part (XML-01, D-SCH3). An opaque XML body and a JSON object part are unchanged.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -93,7 +93,6 @@ const spec: Json = {
       },
       Cat: pet({ kind, meow: { type: "boolean" } }),
       Child: { allOf: [{ $ref: "#/components/schemas/Base" }, { type: "object" }] },
-      Dog: pet({ bark: { type: "boolean" }, kind }),
       Lone: { discriminator: { propertyName: "kind" }, ...pet({ kind }) },
     },
   },
@@ -103,13 +102,6 @@ const spec: Json = {
     "/inherited": post("inherited-create", json({ $ref: "#/components/schemas/Child" })),
     "/json-part": post("json-part-create", multipart("application/json", false)),
     "/lone": post("lone-create", json({ $ref: "#/components/schemas/Lone" })),
-    "/partial": post(
-      "partial-create",
-      json({
-        discriminator: { mapping: { cat: "Cat" }, propertyName: "kind" },
-        oneOf: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],
-      }),
-    ),
     "/xml-body": post("xml-body-create", {
       content: { "application/xml": { schema: { properties: { id: { type: "integer" } } } } },
       required: true,
@@ -123,10 +115,14 @@ const document = Schema.decodeUnknownSync(DocumentUri)("file:///dscfx/openapi.js
 
 const configDocument = Schema.decodeUnknownSync(DocumentUri)("file:///dscfx/author-config.json");
 
-const run = (): Promise<GenerateResult> => {
-  const specPath = nodePath.join(work, "openapi.json");
-  const configPath = nodePath.join(work, "author-config.json");
-  nodeFs.writeFileSync(specPath, `${JSON.stringify(spec)}\n`);
+// Generates one document into its own directory under `work`.
+const run = (name: string, value: Json): Promise<GenerateResult> => {
+  const dir = nodePath.join(work, name);
+  nodeFs.mkdirSync(dir, { recursive: true });
+
+  const specPath = nodePath.join(dir, "openapi.json");
+  const configPath = nodePath.join(dir, "author-config.json");
+  nodeFs.writeFileSync(specPath, `${JSON.stringify(value)}\n`);
   nodeFs.writeFileSync(configPath, `${JSON.stringify(config)}\n`);
 
   return Effect.runPromise(
@@ -134,7 +130,7 @@ const run = (): Promise<GenerateResult> => {
       {
         document,
         generator,
-        outDir: nodePath.join(work, "out"),
+        outDir: nodePath.join(dir, "out"),
         source: { _tag: "File", path: specPath },
         strict: false,
       },
@@ -143,7 +139,7 @@ const run = (): Promise<GenerateResult> => {
   );
 };
 
-const generated = await run();
+const generated = await run("main", spec);
 
 const diagnosticsOf = (code: string) =>
   generated.diagnostics.filter((diagnostic) => diagnostic.code === code);
@@ -152,15 +148,18 @@ const pointersOf = (code: string): readonly string[] =>
   diagnosticsOf(code).map((diagnostic) => String(diagnostic.pointer));
 
 // The emitted command declaration of each operation that has one, read from the output directory.
-const commandOf = (operation: string): readonly string[] =>
-  generated.files
+const commandsOf = (name: string, result: GenerateResult, operation: string): readonly string[] =>
+  result.files
     .filter((file) => file.endsWith(".ts"))
     .flatMap((file) =>
-      nodeFs.readFileSync(nodePath.join(work, "out", file), "utf-8").split("\nexport const "),
+      nodeFs.readFileSync(nodePath.join(work, name, "out", file), "utf-8").split("\nexport const "),
     )
     .filter((declaration) =>
       new RegExp(`Command\\.make\\(\\s*"${operation}"`, "u").test(declaration),
     );
+
+const commandOf = (operation: string): readonly string[] =>
+  commandsOf("main", generated, operation);
 
 const media = (path: string, type: string): string =>
   `/paths/~1${path}/post/requestBody/content/${type.replace("/", "~1")}`;
@@ -173,26 +172,63 @@ describe("DSC-05 refusals through generate()", () => {
     expect(pointersOf("DSC-05/no-composition")).toEqual(["/components/schemas/Lone/discriminator"]);
   });
 
-  test("an explicit mapping that leaves a oneOf branch unlisted is refused at the discriminator", () => {
-    expect(diagnosticsOf("DSC-05/unlisted-branch").map((diagnostic) => diagnostic.scope)).toEqual([
-      "element",
-    ]);
-    expect(pointersOf("DSC-05/unlisted-branch")).toEqual([
-      `${media("partial", "application/json")}/schema/discriminator`,
-    ]);
-  });
-
   test("the allOf base schema is not refused, and every DSC-05 operation still generates", () => {
-    expect([
-      ...pointersOf("DSC-05/no-composition"),
-      ...pointersOf("DSC-05/unlisted-branch"),
-    ]).not.toContain("/components/schemas/Base/discriminator");
+    expect(pointersOf("DSC-05/no-composition")).not.toContain(
+      "/components/schemas/Base/discriminator",
+    );
     expect(
-      ["inherited-create", "lone-create", "partial-create"].map(
-        (operation) => commandOf(operation).length,
-      ),
-    ).toEqual([1, 1, 1]);
+      ["inherited-create", "lone-create"].map((operation) => commandOf(operation).length),
+    ).toEqual([1, 1]);
   });
+});
+
+// A partial mapping (cat mapped, Dog reached by its implicit component name) and a oneOf with an
+// inline branch the discriminator cannot select: both valid on every line (OAS 4.8.25.2).
+const discriminated = (openapi: string): Json => ({
+  components: {
+    schemas: {
+      Cat: pet({ kind, meow: { type: "boolean" } }),
+      Dog: pet({ bark: { type: "boolean" }, kind }),
+    },
+  },
+  info: { title: "dsc mappings", version: "1.0.0" },
+  openapi,
+  paths: {
+    "/inline": post(
+      "inline-create",
+      json({
+        discriminator: { mapping: { cat: "#/components/schemas/Cat" }, propertyName: "kind" },
+        oneOf: [{ $ref: "#/components/schemas/Cat" }, pet({ kind, purr: { type: "boolean" } })],
+      }),
+    ),
+    "/partial": post(
+      "partial-create",
+      json({
+        discriminator: { mapping: { cat: "Cat" }, propertyName: "kind" },
+        oneOf: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],
+      }),
+    ),
+  },
+});
+
+describe("partial mappings and inline branches through generate()", () => {
+  for (const openapi of ["3.0.4", "3.1.2", "3.2.1"]) {
+    test(`${openapi}: both generate with no DSC-05 diagnostic`, async () => {
+      const name = `mappings-${openapi}`;
+      const result = await run(name, discriminated(openapi));
+
+      expect(
+        result.diagnostics
+          .map((diagnostic) => diagnostic.code)
+          .filter((code) => code.startsWith("DSC-05")),
+      ).toEqual([]);
+      expect(
+        ["inline-create", "partial-create"].map(
+          (operation) => commandsOf(name, result, operation).length,
+        ),
+      ).toEqual([1, 1]);
+    });
+  }
 });
 
 // The XML-01 refusal of the multipart `doc` part of one path.
