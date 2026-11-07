@@ -16,7 +16,7 @@ import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
-import { deepObjectExplodeText, partHeader } from "./parameters.ts";
+import { deepObjectExplodeText, formStyleRefusal, partHeader } from "./parameters.ts";
 import type { PartHeaderOutcome } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
@@ -1790,6 +1790,34 @@ const bracketChoice = (input: RuleInput): Finding =>
     input.actual,
   );
 
+// The query style table's refusal for a form property's explicit style fields (design 6.3, through
+// the parameter rule `formStyleRefusal`), placed at the Encoding entry; it drops the alternative.
+const styleRefusalOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<Option.Option<Finding>> =>
+  serialization === undefined
+    ? Effect.succeedNone
+    : formStyleRefusal(ctx.resolution, input.schema, serialization, {
+        maxNodes: ctx.walk.maxNodes,
+      }).pipe(
+        Effect.map(
+          Option.map((found) =>
+            dropping(
+              refusal(
+                found.code,
+                found.anchor,
+                "Encoding style under form-urlencoded",
+                found.message,
+                input.actual,
+                found.hint,
+              ),
+            ),
+          ),
+        ),
+      );
+
 // ENC-12 (design D-OC14): a 3.0 or 3.1 form deepObject with explode false or omitted is exploded,
 // as STY-26 is for a parameter, with that row's notice text.
 const deepObjectExplode = (
@@ -1826,14 +1854,20 @@ const deepObjectOf = (
 
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
-// names the table's type, which changes nothing on the wire. A deepObject over a nested value
-// refuses the alternative unless the author config opts into brackets (PRM-27).
+// names the table's type, which changes nothing on the wire. Style fields the query style table
+// marks not applicable refuse the alternative (STY-17 to STY-24, PRM-27), and a deepObject over a
+// nested value refuses it unless the author config opts into brackets (PRM-27).
 const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
     const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
+    }
+
+    const inapplicable = yield* styleRefusalOf(ctx, input, typing.serialization);
+    if (Option.isSome(inapplicable)) {
+      return { findings: [...typing.findings, inapplicable.value], rule: undefined };
     }
 
     const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);

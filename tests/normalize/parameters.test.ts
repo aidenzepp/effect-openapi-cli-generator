@@ -952,3 +952,38 @@ describe("objectValued: a styled parameter whose schema admits only objects take
     expect(objectValued(query({ schema: ref("O") }), { schemas: { O: flat } })).toBe(true);
   });
 });
+
+const formQuerystring = (encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding,
+      schema: { properties: { ids: { items: string, type: "array" } }, type: "object" },
+    },
+  },
+  in: "querystring",
+  name: "qs",
+  required: true,
+});
+
+describe("STY-43 querystring form content with Encoding Objects is refused, never sent by the default rules", () => {
+  test("STY-43 an encoding entry on form querystring content refuses the parameter at element scope", () => {
+    const outcome = refused(
+      "3.2",
+      formQuerystring({ ids: { explode: false, style: "pipeDelimited" } }),
+    );
+    const [diagnostic] = outcome.diagnostics;
+
+    expect(codes(outcome)).toEqual(["STY-43/querystring-encoding"]);
+    expect(diagnostic?.scope).toBe("element");
+    expect(diagnostic?.severity).toBe("refusal");
+    expect(String(diagnostic?.pointer)).toBe(site);
+    expect(plain(diagnostic?.specSection)).toBe(
+      "https://spec.openapis.org/oas/v3.2.1.html#encoding-object",
+    );
+    expect(outcome.required).toBe(true);
+  });
+
+  test("STY-43 an empty encoding map changes no byte and keeps the parameter", () => {
+    expect(codes(implemented("3.2", formQuerystring({})))).toEqual([]);
+  });
+});

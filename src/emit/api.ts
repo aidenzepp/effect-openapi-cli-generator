@@ -406,7 +406,8 @@ interface ParameterContext {
 
 // A `querystring` parameter (design 6.1): its value is JSON data the runtime serializes by its one
 // media type. Form content declares the object's properties, in document order, with no Encoding
-// fields (a Parameter's `content` carries none), so pair order and the declared names hold.
+// fields: normalize refuses form content that declares any (STY-43/querystring-encoding), so the
+// default form rules are the declared ones, and pair order and the declared names hold.
 const querystringParts = (
   entry: InputKey,
   defs: Defs,

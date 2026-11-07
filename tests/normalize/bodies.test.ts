@@ -1220,3 +1220,57 @@ describe("ENC-12 a form deepObject with explode false or omitted is exploded wit
     expect(codes(implemented("3.2", deepForm({ style: "deepObject" })))).toEqual([]);
   });
 });
+
+const styledForm = (property: Json, encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding: { a: encoding },
+      schema: object({ a: property }),
+    },
+  },
+});
+
+describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table's applicability checks", () => {
+  const array: Json = { items: string, type: "array" };
+  const cases: readonly (readonly [string, Json, Json])[] = [
+    ["STY-18/explode-not-applicable", array, { explode: true, style: "spaceDelimited" }],
+    [
+      "STY-20/explode-not-applicable",
+      array,
+      { allowReserved: true, explode: true, style: "spaceDelimited" },
+    ],
+    ["STY-22/explode-not-applicable", array, { explode: true, style: "pipeDelimited" }],
+    [
+      "STY-24/explode-not-applicable",
+      array,
+      { allowReserved: true, explode: true, style: "pipeDelimited" },
+    ],
+    ["STY-17/primitive-not-applicable", string, { style: "spaceDelimited" }],
+    ["STY-21/primitive-not-applicable", string, { style: "pipeDelimited" }],
+    ["PRM-27/non-object-schema", string, { style: "deepObject" }],
+  ];
+
+  for (const line of lines) {
+    for (const [code, property, encoding] of cases) {
+      test(`${code} ${line} refuses the form alternative at element scope`, () => {
+        const outcome = refused(line, styledForm(property, encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe(code);
+        expect(diagnostic.scope).toBe("element");
+        expect(diagnostic.severity).toBe("refusal");
+        expect(diagnostic.related?.map((at) => String(at.pointer))).toEqual([
+          "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
+        ]);
+      });
+    }
+  }
+
+  test("the style table's legal form encodings are kept", () => {
+    expect(codes(implemented("3.1", styledForm(array, { style: "pipeDelimited" })))).toEqual([]);
+    expect(codes(implemented("3.1", styledForm(array, { style: "spaceDelimited" })))).toEqual([]);
+    expect(
+      codes(implemented("3.2", styledForm(object({ x: string }), { style: "deepObject" }))),
+    ).toEqual([]);
+  });
+});
