@@ -18,6 +18,7 @@ import {
   encodesByKey,
   formParts,
   inputKeys,
+  isObjectSchema,
   isScalarArraySchema,
   scalarTypeOf,
   takesJsonContent,
@@ -486,6 +487,22 @@ const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
     return array.success;
   });
 
+// Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
+// builder hands to the style serializer. A `content` parameter is one value whatever its schema.
+const isObjectParameter = (parameter: Parameter, context: CommandContext) =>
+  Effect.gen(function* object() {
+    if (parameter.serialization.kind !== "style") {
+      return false;
+    }
+
+    const found = isObjectSchema(context.defs, parameter.schema.key);
+    if (Result.isFailure(found)) {
+      return yield* refuse("unresolved-schema", found.failure);
+    }
+
+    return found.success;
+  });
+
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
 // `content` parameter is one value whatever its schema, so it has none.
@@ -540,13 +557,18 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
+    const object = yield* isObjectParameter(parameter, context);
     const numeric = yield* numericKindOf(parameter, context);
-    const head =
-      numeric === undefined
-        ? fn("Argument.String", str(positional.name))
-        : fn("Input.numericArgument", str(positional.name), str(numeric));
+    let head = fn("Argument.String", str(positional.name));
+    if (object) {
+      head = fn("Input.jsonArgument", str(positional.name));
+    } else if (numeric !== undefined) {
+      head = fn("Input.numericArgument", str(positional.name), str(numeric));
+    }
+
     const described = describedBy(parameterDescription(parameter));
     const value = pipe(head, [
+      ...(object ? [fn("Argument.withMetavar", str("json"))] : []),
       ...(array ? [fn("Argument.atLeast", num(1))] : []),
       ...deprecation(parameter, "Input.deprecatedArgument", positional.name),
       ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
@@ -643,11 +665,12 @@ const fieldDescription = (
 // A parameter flag's constructor. A `content` parameter's value (any location, `querystring`
 // included) is JSON data under JSON media and form querystring media (design 6.1), decoded the way
 // a non-flattened JSON field flag is, and the operator's string under any other media; a boolean
-// styled parameter is negatable, and an `integer` or `number` one (per item for an array) is checked
-// against its grammar.
+// styled parameter is negatable, an object one takes JSON, and an `integer` or `number` one (per item
+// for an array) is checked against its grammar.
 const parameterFlagHead = (
   flag: PlannedFlag,
   parameter: Parameter,
+  object: boolean,
   numeric: NumericKind | undefined,
 ): Expr => {
   const { location, serialization } = parameter;
@@ -655,6 +678,10 @@ const parameterFlagHead = (
     return takesJsonContent(location, serialization.mediaType)
       ? fn("Input.jsonFlag", str(flag.name))
       : fn("Flag.String", str(flag.name));
+  }
+
+  if (object) {
+    return fn("Input.jsonFlag", str(flag.name));
   }
 
   if (flag.boolean) {
@@ -690,11 +717,18 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       }
 
       const array = styled && (yield* isArrayParameter(parameter, context));
-      const head = parameterFlagHead(flag, parameter, yield* numericKindOf(parameter, context));
+      const object = yield* isObjectParameter(parameter, context);
+      const head = parameterFlagHead(
+        flag,
+        parameter,
+        object,
+        yield* numericKindOf(parameter, context),
+      );
       const presence = parameter.required ? [] : [path("Flag.optional")];
       // A deprecated parameter's notice goes outside the presence wrapper, which settles whether
       // the operator gave the flag (PRM-07).
       const steps = [
+        ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
         ...deprecation(parameter, "Input.deprecated", flag.name),
         ...describedBy(parameterDescription(parameter)).map((text) =>

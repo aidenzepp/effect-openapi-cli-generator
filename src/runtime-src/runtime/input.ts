@@ -597,6 +597,22 @@ const reviveIntegers: Reviver = (key, value, context) => {
     : revive(key, value, context);
 };
 
+// The one parse behind `jsonFlag` and `jsonArgument`: the decoded value, or the value-free error
+// `failure` builds.
+const parsedJson =
+  (failure: () => CliError.CliError) =>
+  (raw: string): Effect.Effect<JsonNode, CliError.CliError> =>
+    Effect.try({
+      catch: failure,
+      try: () => {
+        if (nestsTooDeep(raw)) {
+          throw new RangeError("JSON nesting is too deep");
+        }
+
+        return bunJson.parse(raw, reviveIntegers);
+      },
+    });
+
 /**
  * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
  * uses (digits past 2^53 stay a `JsonNumber`, objects have no prototype). A text that is not JSON,
@@ -605,17 +621,17 @@ const reviveIntegers: Reviver = (key, value, context) => {
  */
 export const jsonFlag = (name: string) =>
   Flag.String(name).pipe(
-    Flag.mapEffect((raw) =>
-      Effect.try({
-        catch: () => asCliError(usage(name, "is not valid JSON")),
-        try: () => {
-          if (nestsTooDeep(raw)) {
-            throw new RangeError("JSON nesting is too deep");
-          }
+    Flag.mapEffect(parsedJson(() => asCliError(usage(name, "is not valid JSON")))),
+  );
 
-          return bunJson.parse(raw, reviveIntegers);
-        },
-      }),
+/**
+ * The positional argument twin of `jsonFlag` for an object-schema path parameter: its text parsed
+ * the same way. A text that is not JSON fails with an error that names `<name>` and never the text.
+ */
+export const jsonArgument = (name: string) =>
+  Argument.String(name).pipe(
+    Argument.mapEffect(
+      parsedJson(() => asCliError(new UsageError({ message: `<${name}>: is not valid JSON` }))),
     ),
   );
 

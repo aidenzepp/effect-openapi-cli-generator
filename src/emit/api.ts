@@ -185,6 +185,19 @@ export const isScalarArraySchema = (defs: Defs, key: string): Result.Result<bool
   Result.map(scalarValueOf(defs, key), ({ array, type }) => array && type !== undefined);
 
 /**
+ * Whether a stored parameter schema is an object through its `$ref` chain (design 6.1): `type:
+ * "object"`, or no `type` and `properties`. Its styled value is JSON data the operator gives as an
+ * object, which the runtime expands by its style. A type list is not one. The failure is the store
+ * key that does not resolve.
+ */
+export const isObjectSchema = (defs: Defs, key: string): Result.Result<boolean, string> =>
+  Result.map(settle(defs, own(defs, key), key), (node) => {
+    const type = own(node, "type");
+
+    return type === undefined ? own(node, "properties") !== undefined : type === "object";
+  });
+
+/**
  * The scalar `type` of a stored parameter schema through its `$ref` chain, or of its `items` for an
  * array (`"boolean"`, `"integer"`, `"number"` or `"string"`). A 3.1 type list, an untyped schema
  * and an array of objects or arrays have none. The failure is the store key that does not resolve.
@@ -508,9 +521,20 @@ const parameterParts = (
       return yield* refuse("unresolved-schema", array.failure);
     }
 
-    const valueType = array.success
-      ? typeReadonlyArray(typeKeyword("string"))
-      : typeKeyword(boolean.success ? "boolean" : "string");
+    const object = isObjectSchema(defs, parameter.schema.key);
+    if (Result.isFailure(object)) {
+      return yield* refuse("unresolved-schema", object.failure);
+    }
+
+    // An object's value is JSON data, as a `content` parameter's is; the runtime refuses a member
+    // that is itself an object or array.
+    let valueType = typeKeyword(boolean.success ? "boolean" : "string");
+    if (object.success) {
+      valueType = typeRef(I("Serialize"), [M("Json")]);
+    } else if (array.success) {
+      valueType = typeReadonlyArray(typeKeyword("string"));
+    }
+
     const field: Field = {
       key,
       optional: !parameter.required,
