@@ -1,0 +1,238 @@
+{
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "headerKey": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      },
+      "queryKey": {
+        "in": "query",
+        "name": "api_key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Security requirement rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/and": {
+      "get": {
+        "operationId": "and-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "headerKey": []
+          }
+        ]
+      }
+    },
+    "/anon": {
+      "get": {
+        "operationId": "anon-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {},
+          {
+            "headerKey": []
+          }
+        ]
+      }
+    },
+    "/denied": {
+      "get": {
+        "operationId": "denied-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": []
+      }
+    },
+    "/none": {
+      "get": {
+        "operationId": "none-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": []
+      }
+    },
+    "/or": {
+      "get": {
+        "operationId": "or-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "queryKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/override": {
+      "get": {
+        "operationId": "override-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/roles": {
+      "get": {
+        "operationId": "roles-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "headerKey": ["admin"]
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/root": {
+      "get": {
+        "operationId": "root-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/undeclared": {
+      "get": {
+        "operationId": "undeclared-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        },
+        "security": [
+          {
+            "missingKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "headerKey": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}

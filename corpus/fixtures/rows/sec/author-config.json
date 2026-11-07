@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "sec",
+  "envPrefix": "SEC",
+  "package": {
+    "name": "sec-witness-cli",
+    "version": "0.1.0"
+  }
+}
