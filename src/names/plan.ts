@@ -116,8 +116,13 @@ export interface PlannedCommand {
 }
 
 /**
+ * The api namespace alias of `api/root.ts`; no group's planned `namespace` takes it.
+ */
+export const rootNamespace = "Root";
+
+/**
  * One command group from a tag; `parent` is the parent tag of a 3.2 chain and `namespace` the api
- * namespace alias the group's `cli/` module imports.
+ * namespace alias the group's `cli/` modules import, planned once and unique across api modules.
  */
 export interface PlannedGroup {
   readonly commands: readonly PlannedCommand[];

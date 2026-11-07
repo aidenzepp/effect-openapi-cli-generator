@@ -16,6 +16,7 @@ import {
   makeCollector,
   overrideSite,
   reservedEnvNames,
+  rootNamespace,
   siteOf,
   suffixed,
 } from "./plan.ts";
@@ -1128,6 +1129,49 @@ const namespaceOf = (node: GroupNode, blocked: (candidate: string) => boolean): 
   };
 };
 
+// The depth of a group in its chain: 0 for a top-level group.
+const depthOf = (node: GroupNode, byTag: ReadonlyMap<string, GroupNode>): number => {
+  let depth = 0;
+  let { parent } = node;
+  while (parent !== undefined) {
+    depth += 1;
+    parent = byTag.get(parent)?.parent;
+  }
+
+  return depth;
+};
+
+/**
+ * Every group's api namespace, planned once and unique across all api modules: `Root` is
+ * `api/root.ts`, and a namespace `N` also claims `NCli`, the alias its `cli/` module is imported
+ * under. Groups take their namespace shallowest first, then by group path (`tag`), so the first
+ * group to fold to a name keeps it and every later one takes the next free numeric suffix
+ * (`Accounts`, `Accounts2`, ...) past the claimed names and the names its importers bind.
+ */
+const planNamespaces = (
+  nodes: readonly GroupNode[],
+  blockedFor: (node: GroupNode) => (candidate: string) => boolean,
+): ReadonlyMap<GroupNode, GroupNamespace> => {
+  const byTag = new Map(nodes.map((node) => [node.tag, node]));
+  const order = Order.combine(
+    Order.mapInput(Order.Number, (node: GroupNode) => depthOf(node, byTag)),
+    Order.mapInput(Order.String, (node: GroupNode) => node.tag),
+  );
+  const claimed = new Set([rootNamespace, `${rootNamespace}Cli`]);
+  const planned = new Map<GroupNode, GroupNamespace>();
+  for (const node of Arr.sort(nodes, order)) {
+    const importers = blockedFor(node);
+    const blocked = (candidate: string): boolean =>
+      claimed.has(candidate) || claimed.has(`${candidate}Cli`) || importers(candidate);
+    const namespace = namespaceOf(node, blocked);
+    claimed.add(namespace.namespace);
+    claimed.add(`${namespace.namespace}Cli`);
+    planned.set(node, namespace);
+  }
+
+  return planned;
+};
+
 // The modules (by container) an alias command calls into: an alias in one container calls its
 // primary's builder in the primary's container (design 4.4). `hosts` maps a primary container to
 // the containers holding its aliases, `targets` the reverse.
@@ -1266,19 +1310,24 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     // `cli/root.ts` is offered every api namespace beside its own bindings, so no namespace may
     // take one of the root module's names.
     const links = aliasLinks(finals);
-    const used = [...firstUses(finals)].map(([node, first]) => {
+    const firsts = firstUses(finals);
+    const namespacesOf = planNamespaces([...firsts.keys()], (node) => {
       const importers = [node.tag, root, ...(links.hosts.get(node.tag) ?? [])].map(imports);
-      const blocked = (candidate: string): boolean =>
-        fixedNamespaces.has(candidate) || importers.some((names) => names.has(candidate));
 
-      return { first, namespace: namespaceOf(node, blocked), node };
+      return (candidate) =>
+        fixedNamespaces.has(candidate) || importers.some((names) => names.has(candidate));
+    });
+    const used = [...firsts].flatMap(([node, first]) => {
+      const namespace = namespacesOf.get(node);
+
+      return namespace === undefined ? [] : [{ first, namespace, node }];
     });
     const namespaces = new Map(used.map(({ namespace, node }) => [node.tag, namespace.namespace]));
-    // The api namespaces a container's aliases call into; `Root` is `api/root.ts` (emit/cli).
+    // The api namespaces a container's aliases call into.
     const foreign = (container: string): ReadonlySet<string> =>
       new Set(
         [...(links.targets.get(container) ?? [])].flatMap((target) => {
-          const namespace = target === root ? "Root" : namespaces.get(target);
+          const namespace = target === root ? rootNamespace : namespaces.get(target);
 
           return namespace === undefined ? [] : [namespace];
         }),
