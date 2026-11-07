@@ -858,70 +858,193 @@ describe("STY rows through generate()", () => {
   }, 60_000);
 });
 
-// What the built CLI gets wrong. An object-schema parameter gets `Flag.String` or
-// `Argument.String`, so the operator cannot give an object: in every line the probe sent the path
-// text `R,100,G,200` under `simple` as `/objects/R%2C100%2CG%2C200`, `--qo R=100` under `form` as
-// `qo=R%3D100` and `--x-o R,100` as the header text `R,100`, and `deepObject` refused both
-// `--deep R=100` and `--deep '{"R":100}'` with exit 2 (it receives a string). The object vectors
-// above pass on the runtime serializer, so each of these rows is partial.
-describe("STY rows the product gets wrong", () => {
-  test.todo("STY-01: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as R%2C100%2CG%2C200) vs ;color=R,100,G,200,B,150", () =>
-    Promise.resolve());
+// Object vectors through the built CLI: an object-schema parameter takes JSON (m2-objp2), so the
+// style example's object reaches the wire. Member order is the operator's, which is the wire order.
+const objectJson = '{"R":100,"G":200,"B":150}';
 
-  test.todo("STY-02: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as R%2C100%2CG%2C200) vs ;R=100;G=200;B=150", () =>
-    Promise.resolve());
+const reservedJson = '{"R":"a/b:c","G":"d&e=f+g#h"}';
 
-  test.todo("STY-03: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as R%2C100%2CG%2C200) vs .R,100,G,200,B,150", () =>
-    Promise.resolve());
+// The deepObject query of the style example's object under a parameter name.
+const deepOf = (name: string): string => `${name}%5BR%5D=100&${name}%5BG%5D=200&${name}%5BB%5D=150`;
 
-  test.todo("STY-04: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as R%2C100%2CG%2C200) vs .R=100.G=200.B=150", () =>
-    Promise.resolve());
+// The deepObject query of the reserved members under a parameter name, values unencoded but & = + #.
+const reservedDeepOf = (name: string): string =>
+  `${name}%5BR%5D=a/b:c&${name}%5BG%5D=d%26e%3Df%2Bg%23h`;
 
-  test.todo("STY-05: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as /objects/R%2C100%2CG%2C200) vs R,100,G,200,B,150", () =>
-    Promise.resolve());
+// What the CLI sent for one object path positional, for `/objects/{o}` query and header flags.
+const objectsWith = (
+  target: string,
+  headers: readonly (readonly [string, string])[] = [],
+): Exchange => ({ exitCode: 0, sent: [{ headers, target }] });
 
-  test.todo("STY-06: object vector through the built CLI: an object-schema path parameter is a string positional (R,100,G,200 is sent as R%2C100%2CG%2C200) vs R=100,G=200,B=150", () =>
-    Promise.resolve());
+const deepLines: readonly Line[] = ["3.0.4", "3.1.2"];
 
-  test.todo("STY-13: object vector through the built CLI: an object-schema query parameter is a string flag (--qo R=100 is sent as qo=R%3D100) vs R=100&G=200&B=150", () =>
-    Promise.resolve());
+describe("STY object vectors through the built CLI", () => {
+  for (const line of lines) {
+    describe(line, () => {
+      test(`STY-01: matrix of an object is ;color=R,100,G,200,B,150 (${line})`, async () => {
+        expect(await run(line, ["objects-matrix", objectJson])).toEqual(
+          sentTo("/objects-matrix/;color=R,100,G,200,B,150"),
+        );
+      }, 60_000);
 
-  test.todo("STY-14: object vector through the built CLI: an object-schema query parameter is a string flag (--qo R=100 is sent as qo=R%3D100) vs color=R,100,G,200,B,150", () =>
-    Promise.resolve());
+      test(`STY-02: exploded matrix of an object is ;R=100;G=200;B=150 (${line})`, async () => {
+        expect(await run(line, ["objects-matrix-x", objectJson])).toEqual(
+          sentTo("/objects-matrix-x/;R=100;G=200;B=150"),
+        );
+      }, 60_000);
 
-  test.todo("STY-17: object vector through the built CLI: an object-schema query parameter is a string flag (--qo R=100 is sent as qo=R%3D100) vs color=R%20100%20G%20200%20B%20150", () =>
-    Promise.resolve());
+      test(`STY-03: label of an object is .R,100,G,200,B,150 (${line})`, async () => {
+        expect(await run(line, ["objects-label", objectJson])).toEqual(
+          sentTo("/objects-label/.R,100,G,200,B,150"),
+        );
+      }, 60_000);
 
-  test.todo("STY-17: a spaceDelimited query parameter over a primitive schema generates with no diagnostic in every line vs refused at generation", () =>
-    Promise.resolve());
+      test(`STY-04: exploded label of an object is .R=100.G=200.B=150; a member holding . is refused (${line})`, async () => {
+        const vector = await run(line, ["objects-label-x", objectJson]);
+        const dotted = await run(line, ["objects-label-x", '{"R":"1.5"}']);
 
-  test.todo("STY-21: object vector through the built CLI: an object-schema query parameter is a string flag (--qo R=100 is sent as qo=R%3D100) vs color=R%7C100%7CG%7C200%7CB%7C150", () =>
-    Promise.resolve());
+        expect([vector, dotted]).toEqual([
+          sentTo("/objects-label-x/.R=100.G=200.B=150"),
+          refusedBeforeSending,
+        ]);
+      }, 60_000);
 
-  test.todo("STY-21: a pipeDelimited query parameter over a primitive schema generates with no diagnostic in every line vs refused at generation", () =>
-    Promise.resolve());
+      test(`STY-05: simple of an object is R,100,G,200,B,150 (${line})`, async () => {
+        expect(await run(line, ["objects", objectJson])).toEqual(
+          sentTo("/objects/R,100,G,200,B,150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-25: through the built CLI the deepObject flag is a string flag: --deep R=100 and --deep '{"R":100}' exit 2 with no request vs color%5BR%5D=100&color%5BG%5D=200&color%5BB%5D=150`, () =>
-    Promise.resolve());
+      test(`STY-06: exploded simple of an object is R=100,G=200,B=150 (${line})`, async () => {
+        expect(await run(line, ["objects-simple-x", objectJson])).toEqual(
+          sentTo("/objects-simple-x/R=100,G=200,B=150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-26: through the built CLI the deepObject flag is a string flag: --deepn R=100 and --deepn '{"R":100}' exit 2 with no request vs the bytes STY-25 sends`, () =>
-    Promise.resolve());
+      test(`STY-13: form of an object is R=100&G=200&B=150 (${line})`, async () => {
+        expect(await run(line, ["objects", objectJson, "--qo", objectJson])).toEqual(
+          sentTo("/objects/R,100,G,200,B,150?R=100&G=200&B=150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-27: through the built CLI the deepObject flag is a string flag: --deep R=100 and --deep '{"R":100}' exit 2 with no request vs one byte-identical query for explode true, false and omitted`, () =>
-    Promise.resolve());
+      test(`STY-14: non-exploded form of an object is color=R,100,G,200,B,150 (${line})`, async () => {
+        expect(await run(line, ["objects-form", "--color", objectJson])).toEqual(
+          sentTo("/objects-form?color=R,100,G,200,B,150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-28: through the built CLI the deepObject flag is a string flag: --deepr R=100 and --deepr '{"R":100}' exit 2 with no request vs color%5BR%5D=a/b:c with reserved value characters unencoded`, () =>
-    Promise.resolve());
+      test(`STY-17: spaceDelimited of an object is color=R%20100%20G%20200%20B%20150 (${line})`, async () => {
+        expect(await run(line, ["objects-space", "--color", objectJson])).toEqual(
+          sentTo("/objects-space?color=R%20100%20G%20200%20B%20150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-29: through the built CLI the deepObject flag is a string flag: --deepnr R=100 and --deepnr '{"R":100}' exit 2 with no request vs the bytes STY-28 sends`, () =>
-    Promise.resolve());
+      test(`STY-21: pipeDelimited of an object is color=R%7C100%7CG%7C200%7CB%7C150 (${line})`, async () => {
+        expect(await run(line, ["objects-pipe", "--color", objectJson])).toEqual(
+          sentTo("/objects-pipe?color=R%7C100%7CG%7C200%7CB%7C150"),
+        );
+      }, 60_000);
 
-  test.todo(`STY-30: through the built CLI the deepObject flag is a string flag: --deepr R=100 and --deepr '{"R":100}' exit 2 with no request vs one byte-identical query for explode true, false and omitted`, () =>
-    Promise.resolve());
+      test(`STY-31: a simple header object is R,100,G,200,B,150 and a member holding , is refused (${line})`, async () => {
+        const vector = await run(line, ["objects", objectJson, "--x-o", objectJson]);
+        const comma = await run(line, ["objects", objectJson, "--x-o", '{"R":"1,2"}']);
 
-  test.todo("STY-31: object vector through the built CLI: an object-schema header parameter is a string flag (--x-o R,100 is sent as the text R,100, unsplit and unchecked) vs an object serialized R,100,G,200,B,150 with a member holding , refused", () =>
-    Promise.resolve());
+        expect([vector, comma]).toEqual([
+          objectsWith("/objects/R,100,G,200,B,150", [["x-o", "R,100,G,200,B,150"]]),
+          refusedBeforeSending,
+        ]);
+      }, 60_000);
 
-  test.todo("STY-32: object vector through the built CLI: an object-schema header parameter is a string flag (--x-o R,100 is sent as the text R,100, unsplit and unchecked) vs an object serialized R=100,G=200,B=150 with a member holding , refused", () =>
-    Promise.resolve());
+      test(`STY-32: an exploded simple header object is R=100,G=200,B=150 and a member holding , is refused (${line})`, async () => {
+        const vector = await run(line, ["objects-header-x", "--x-color", objectJson]);
+        const comma = await run(line, ["objects-header-x", "--x-color", '{"R":"1,2"}']);
+
+        expect([vector, comma]).toEqual([
+          objectsWith("/objects-header-x", [["x-color", "R=100,G=200,B=150"]]),
+          refusedBeforeSending,
+        ]);
+      }, 60_000);
+    });
+  }
+
+  for (const line of deepLines) {
+    describe(line, () => {
+      test(`STY-25: deepObject is deep%5BR%5D=100&deep%5BG%5D=200&deep%5BB%5D=150 (${line})`, async () => {
+        expect(await run(line, ["deep", "--deep", objectJson])).toEqual(
+          sentTo(`/deep?${deepOf("deep")}`),
+        );
+      }, 60_000);
+
+      test(`STY-26: deepObject with explode omitted sends what STY-25 sends (${line})`, async () => {
+        expect(await run(line, ["deep", "--deepn", objectJson])).toEqual(
+          sentTo(`/deep?${deepOf("deepn")}`),
+        );
+      }, 60_000);
+
+      test(`STY-28: deepObject with allowReserved passes reserved value characters unencoded (${line})`, async () => {
+        expect(await run(line, ["deep", "--deepr", reservedJson])).toEqual(
+          sentTo(`/deep?${reservedDeepOf("deepr")}`),
+        );
+      }, 60_000);
+
+      test(`STY-29: deepObject with allowReserved and explode omitted sends what STY-28 sends (${line})`, async () => {
+        expect(await run(line, ["deep", "--deepnr", reservedJson])).toEqual(
+          sentTo(`/deep?${reservedDeepOf("deepnr")}`),
+        );
+      }, 60_000);
+    });
+  }
+
+  test("STY-27: 3.2 deepObject sends one byte-identical query for explode true, false and omitted", async () => {
+    const sent = [
+      await run("3.2.1", ["deep", "--deep", objectJson]),
+      await run("3.2.1", ["deep", "--deepf", objectJson]),
+      await run("3.2.1", ["deep", "--deepn", objectJson]),
+    ];
+
+    expect(sent).toEqual([
+      sentTo(`/deep?${deepOf("deep")}`),
+      sentTo(`/deep?${deepOf("deepf")}`),
+      sentTo(`/deep?${deepOf("deepn")}`),
+    ]);
+  }, 60_000);
+
+  test("STY-30: 3.2 deepObject with allowReserved sends one byte-identical query for explode true, false and omitted", async () => {
+    const sent = [
+      await run("3.2.1", ["deep", "--deeprt", reservedJson]),
+      await run("3.2.1", ["deep", "--deeprf", reservedJson]),
+      await run("3.2.1", ["deep", "--deepr", reservedJson]),
+    ];
+
+    expect(sent).toEqual([
+      sentTo(`/deep?${reservedDeepOf("deeprt")}`),
+      sentTo(`/deep?${reservedDeepOf("deeprf")}`),
+      sentTo(`/deep?${reservedDeepOf("deepr")}`),
+    ]);
+  }, 60_000);
+});
+
+describe("STY delimited styles over a primitive through generate()", () => {
+  for (const line of lines) {
+    test(`STY-17: a spaceDelimited query parameter over a primitive schema is refused at generation (${line})`, async () => {
+      const found = await inProcess(
+        withParameters(line, [queryParameter(text, { explode: false, style: "spaceDelimited" })]),
+      );
+
+      expect(summary(found)).toEqual([
+        ["STY-17/primitive-not-applicable", "refusal", "element", parameterPointer],
+      ]);
+    });
+
+    test(`STY-21: a pipeDelimited query parameter over a primitive schema is refused at generation (${line})`, async () => {
+      const found = await inProcess(
+        withParameters(line, [queryParameter(text, { explode: false, style: "pipeDelimited" })]),
+      );
+
+      expect(summary(found)).toEqual([
+        ["STY-21/primitive-not-applicable", "refusal", "element", parameterPointer],
+      ]);
+    });
+  }
 });

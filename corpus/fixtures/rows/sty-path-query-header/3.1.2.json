@@ -147,6 +147,297 @@
         }
       }
     },
+    "/objects-form": {
+      "get": {
+        "operationId": "objects-form",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-header-x": {
+      "get": {
+        "operationId": "objects-header-x",
+        "parameters": [
+          {
+            "explode": true,
+            "in": "header",
+            "name": "X-Color",
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-label-x/{color}": {
+      "get": {
+        "operationId": "objects-label-x",
+        "parameters": [
+          {
+            "explode": true,
+            "in": "path",
+            "name": "color",
+            "required": true,
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "label"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-label/{color}": {
+      "get": {
+        "operationId": "objects-label",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "path",
+            "name": "color",
+            "required": true,
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "label"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-matrix-x/{color}": {
+      "get": {
+        "operationId": "objects-matrix-x",
+        "parameters": [
+          {
+            "explode": true,
+            "in": "path",
+            "name": "color",
+            "required": true,
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "matrix"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-matrix/{color}": {
+      "get": {
+        "operationId": "objects-matrix",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "path",
+            "name": "color",
+            "required": true,
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "matrix"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-pipe": {
+      "get": {
+        "operationId": "objects-pipe",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "pipeDelimited"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-simple-x/{color}": {
+      "get": {
+        "operationId": "objects-simple-x",
+        "parameters": [
+          {
+            "explode": true,
+            "in": "path",
+            "name": "color",
+            "required": true,
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/objects-space": {
+      "get": {
+        "operationId": "objects-space",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "properties": {
+                "B": {
+                  "type": "integer"
+                },
+                "G": {
+                  "type": "integer"
+                },
+                "R": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "spaceDelimited"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/objects/{o}": {
       "get": {
         "operationId": "objects",
