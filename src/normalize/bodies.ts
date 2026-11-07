@@ -1,11 +1,15 @@
-import { Array as Arr, Data, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body } from "../model/entities.ts";
+import type { DiscriminatorHint } from "../model/entities.ts";
+import { nodeAt as jsonAt } from "../model/json-tree.ts";
+import { childPointer, formatPointer } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
-import { defaultLimits } from "../resolve/index.ts";
+import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
@@ -1966,6 +1970,178 @@ const emptyContent = (line: Line, at: CanonicalKey): Finding =>
     "The request body declares no media type, so nothing can be sent.",
     at,
   );
+
+// --- The discriminator hint (design D-OQ9) ---
+
+const Discriminated = Schema.Struct({
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  discriminator: Schema.Struct({
+    mapping: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+    propertyName: Schema.NonEmptyString,
+  }),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+});
+
+const EntryComponents = Schema.Struct({
+  components: Schema.optionalKey(
+    Schema.Struct({ schemas: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)) }),
+  ),
+});
+
+type Hint = typeof DiscriminatorHint.Encoded;
+
+type Branch = Hint["branches"][number];
+
+const jsonIn = (resolution: Resolution, key: CanonicalKey): Json | undefined => {
+  const document = resolution.documents.get(key.document);
+
+  return document === undefined ? undefined : jsonAt(document, key.pointer);
+};
+
+// Whether an element-scope refusal of check names the Discriminator Object of `root`: DSC-03,
+// 04, 05, 09 and 10 all sit at or below it, so none is listed by code.
+const discriminatorRefused = (findings: readonly Diagnostic[], root: CanonicalKey): boolean => {
+  const at = childPointer(root.pointer, "discriminator");
+
+  return findings.some(
+    (finding) =>
+      finding.severity === "refusal" &&
+      finding.scope === "element" &&
+      finding.document === root.document &&
+      (finding.pointer === at || finding.pointer.startsWith(`${at}/`)),
+  );
+};
+
+interface Component {
+  readonly key: CanonicalKey;
+  readonly name: string;
+}
+
+// The entry's component schemas, in document key order.
+const entrySchemas = (resolution: Resolution): readonly Component[] => {
+  const names = Option.match(Schema.decodeUnknownOption(EntryComponents)(resolution.value), {
+    onNone: (): readonly string[] => [],
+    onSome: (root) => Object.keys(root.components?.schemas ?? {}),
+  });
+
+  return names.map((name) => ({
+    key: { document: resolution.document, pointer: formatPointer(["components", "schemas", name]) },
+    name,
+  }));
+};
+
+// The entry components whose own `allOf[<i>]` references `root` directly (DSC-11).
+const allOfChildren = (
+  resolution: Resolution,
+  components: readonly Component[],
+  root: CanonicalKey,
+): readonly CanonicalKey[] => {
+  const parents = new Set(
+    (allOfReferrers(resolution).get(keyOf(root)) ?? []).map((site) =>
+      keyOf({ document: site.document, pointer: site.pointer.replace(/\/allOf\/\d+$/u, "") }),
+    ),
+  );
+
+  return components.flatMap((component) =>
+    parents.has(keyOf(component.key)) ? [component.key] : [],
+  );
+};
+
+// The composition that lists the branches itself: `oneOf` wins over `anyOf`.
+const listedKeyword = (node: typeof Discriminated.Type): "anyOf" | "oneOf" | undefined => {
+  if ((node.oneOf ?? []).length > 0) {
+    return "oneOf";
+  }
+
+  return (node.anyOf ?? []).length > 0 ? "anyOf" : undefined;
+};
+
+// The usable discriminator of the schema at `site`, after its `$ref` chain; none when check
+// refused it or no branch is found.
+const hintAt = (
+  resolution: Resolution,
+  site: CanonicalKey,
+  checkFindings: readonly Diagnostic[],
+): Hint | undefined => {
+  const root = settle(resolution, site);
+  const node = Option.getOrUndefined(
+    Schema.decodeUnknownOption(Discriminated)(jsonIn(resolution, root)),
+  );
+  if (node === undefined || discriminatorRefused(checkFindings, root)) {
+    return undefined;
+  }
+
+  const components = entrySchemas(resolution);
+  const names = new Map(components.map((component) => [keyOf(component.key), component.name]));
+  const listed = listedKeyword(node);
+  const targets =
+    listed === undefined
+      ? allOfChildren(resolution, components, root)
+      : (node[listed] ?? []).map((_, index) =>
+          settle(resolution, childKey(root, listed, String(index))),
+        );
+  const mapped = Object.entries(node.discriminator.mapping ?? {}).flatMap(([label, value]) =>
+    Predicate.isString(value)
+      ? Option.match(implicitComponent(resolution, "schemas", value), {
+          onNone: () => [],
+          onSome: (key) => [[keyOf(key), label] as const],
+        })
+      : [],
+  );
+  const branches = targets.map((target, index): Branch => {
+    const key = keyOf(target);
+    const component = names.get(key);
+    const labels = mapped.flatMap(([at, label]) => (at === key ? [label] : []));
+
+    return component === undefined
+      ? { index, labels }
+      : { component, index, labels: labels.length === 0 ? [component] : labels };
+  });
+
+  return branches.length === 0
+    ? undefined
+    : {
+        branches,
+        keyword: listed ?? "allOf",
+        propertyName: node.discriminator.propertyName,
+      };
+};
+
+/**
+ * Adds the discriminator hint to each alternative of a request body whose root schema, after its
+ * `$ref` chain, has a usable discriminator (design D-OQ9): the composition keyword, the property,
+ * and the branches in composition order, each labeled by the mapping keys that target it, else by
+ * its entry component name (implicit mapping); an inline branch has no label. With no `oneOf` or
+ * `anyOf`, the branches are the entry components whose `allOf` references the schema (DSC-11). A
+ * discriminator any element-scope refusal in `checkFindings` names gets no hint. The hint never
+ * changes validation (DSC-06).
+ */
+export const hintDiscriminators = (
+  resolution: Resolution,
+  body: Body,
+  checkFindings: readonly Diagnostic[],
+): Effect.Effect<Body> =>
+  Effect.gen(function* hint() {
+    const hints = body.alternatives.map((alternative) =>
+      alternative.schema === undefined
+        ? undefined
+        : hintAt(resolution, childKey(alternative.origin, "schema"), checkFindings),
+    );
+    if (hints.every((found) => found === undefined)) {
+      return body;
+    }
+
+    const plain = yield* Schema.encodeEffect(Body)(body);
+
+    return yield* Schema.decodeUnknownEffect(Body)({
+      ...plain,
+      alternatives: plain.alternatives.map((alternative, index) => {
+        const found = hints[index];
+
+        return found === undefined ? alternative : { ...alternative, discriminator: found };
+      }),
+    });
+  }).pipe(Effect.orDie);
 
 /**
  * Normalizes one Request Body Object into a `Body` whose alternatives are the media types that

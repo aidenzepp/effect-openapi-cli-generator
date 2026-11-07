@@ -132,12 +132,19 @@ export const normalize = (
       document: resolution.document,
       openapi,
     };
-    const schemes = yield* normalizeSecuritySchemes(resolution, {
-      config: context.config,
-      configDocument: context.configDocument,
-    });
+    const schemes = yield* normalizeSecuritySchemes(
+      resolution,
+      { config: context.config, configDocument: context.configDocument },
+      context.checkFindings,
+    );
     const schemas = yield* normalizeSchemas(resolution, { maxNodes: limits.maxNodes });
-    const assembly = yield* assembleOperations(resolution, schemes, servers, limits);
+    const assembly = yield* assembleOperations(
+      resolution,
+      schemes,
+      servers,
+      context.checkFindings,
+      limits,
+    );
     const policy = yield* normalizeSecurityPolicy(resolution, schemes);
     const rootServers = effectiveServers(
       {

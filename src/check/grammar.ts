@@ -1,12 +1,11 @@
 import { Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
-import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
-import { defaultLimits, implicitComponent } from "../resolve/index.ts";
+import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { escapeToken, formatPointer, parseFragment, childPointer } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
@@ -307,54 +306,17 @@ const isMediaRange = (name: string): boolean =>
 const compilesWithU = (source: string): boolean =>
   Exit.isSuccess(Effect.runSyncExit(Effect.try(() => new RegExp(source, "u"))));
 
-const fragmentPointer = (fragment: string): string | undefined => {
-  const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
-
-  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
-};
-
 const at =
   (code: Code, pointer: string) =>
   (extra: Partial<Finding> = {}): Finding => ({ code, pointer, ...extra });
 
-// A discriminator mapping value: a component schema name first, else a reference into the set.
-const mappingResolves = (resolution: Resolution, value: string): boolean => {
-  if (isObject(nodeAt(resolution.value, `/components/schemas/${escapeToken(value)}`))) {
-    return true;
-  }
-
-  const resolved = resolveUri(value, resolution.base);
-  const hash = resolved?.indexOf("#") ?? -1;
-  const resource = resolved === undefined ? undefined : stripFragment(resolved);
-  const retrieval = stripFragment(resolveUri(resolution.document, resolution.document) ?? "");
-  const inSet = resource === resolution.base || resource === retrieval;
-  const pointer =
-    resolved === undefined || hash === -1 || !inSet
-      ? undefined
-      : fragmentPointer(resolved.slice(hash + 1));
-
-  return pointer !== undefined && isObject(nodeAt(resolution.value, pointer));
-};
-
-// The schemas some allOf member references: the base schemas of the allOf discriminator pattern,
-// where the discriminator sits on the base and the children reference it (DSC-05, DSC-11).
-const allOfBases = new WeakMap<Resolution, ReadonlySet<string>>();
-
-const allOfBasesOf = (resolution: Resolution): ReadonlySet<string> => {
-  const known = allOfBases.get(resolution);
-  if (known !== undefined) {
-    return known;
-  }
-
-  const bases = new Set(
-    [...resolution.references.values()].flatMap((reference) =>
-      /\/allOf\/\d+$/u.test(reference.site.pointer) ? [keyOf(reference.target)] : [],
-    ),
-  );
-  allOfBases.set(resolution, bases);
-
-  return bases;
-};
+// A discriminator mapping value: a component schema name first, else a reference into the set
+// (`implicitComponent`); either way the target must be a Schema Object.
+const mappingResolves = (resolution: Resolution, value: string): boolean =>
+  Option.match(implicitComponent(resolution, "schemas", value), {
+    onNone: () => false,
+    onSome: (key) => isObject(nodeAt(resolution.value, key.pointer)),
+  });
 
 // One checkGrammar call's walk through allOf, oneOf and anyOf: answers already settled, the
 // schemas being walked (by depth) and the steps left. Reuse across members is a DAG, so each
@@ -490,7 +452,8 @@ const discriminatorFindings = (
 ): readonly Finding[] => {
   const base = childPointer(place.pointer, "discriminator");
   const self = keyOf({ document: place.document, pointer: place.pointer });
-  if (!composes(place.node) && !allOfBasesOf(resolution).has(self)) {
+  // An allOf base: the discriminator sits on the base and the children reference it (DSC-11).
+  if (!composes(place.node) && !allOfReferrers(resolution).has(self)) {
     return [at("DSC-05/no-composition", base)()];
   }
 

@@ -24,6 +24,50 @@
         },
         "required": ["petType", "bark"],
         "type": "object"
+      },
+      "Hound": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Pet"
+          },
+          {
+            "properties": {
+              "howl": {
+                "type": "boolean"
+              }
+            },
+            "required": ["howl"],
+            "type": "object"
+          }
+        ]
+      },
+      "Kitty": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Pet"
+          },
+          {
+            "properties": {
+              "purr": {
+                "type": "boolean"
+              }
+            },
+            "required": ["purr"],
+            "type": "object"
+          }
+        ]
+      },
+      "Pet": {
+        "discriminator": {
+          "propertyName": "petType"
+        },
+        "properties": {
+          "petType": {
+            "type": "string"
+          }
+        },
+        "required": ["petType"],
+        "type": "object"
       }
     }
   },
@@ -51,6 +95,68 @@
                 "discriminator": {
                   "propertyName": "petType"
                 }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/based": {
+      "post": {
+        "operationId": "based",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/mixed": {
+      "post": {
+        "operationId": "mixed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "cat": "Cat"
+                  },
+                  "propertyName": "petType"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Cat"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Dog"
+                  },
+                  {
+                    "properties": {
+                      "petType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["petType"],
+                    "type": "object"
+                  }
+                ]
               }
             }
           },

@@ -3,8 +3,14 @@ import { readFileSync } from "node:fs";
 import { Effect, Option, Schema } from "effect";
 import { loadBytes } from "../../src/load/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
-import { defsKey } from "../../src/resolve/canonical.ts";
-import { implicitComponent, operationById, referenceAt, resolve } from "../../src/resolve/index.ts";
+import { defsKey, keyOf } from "../../src/resolve/canonical.ts";
+import {
+  allOfReferrers,
+  implicitComponent,
+  operationById,
+  referenceAt,
+  resolve,
+} from "../../src/resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
@@ -12,6 +18,8 @@ import type { Line } from "../../src/validate/index.ts";
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
 
 const openapi: Record<Line, string> = { "3.0": "3.0.3", "3.1": "3.1.1", "3.2": "3.2.0" };
+
+const lines: readonly Line[] = ["3.0", "3.1", "3.2"];
 
 interface Members {
   readonly [key: string]: Json;
@@ -605,6 +613,22 @@ describe("DOC-20, SEC-10 implicit connections from the entry document", () => {
     ).toBe(true);
   });
 
+  test("DSC-03 DSC-08 a schema name that is not a component name is a URI resolved inside the set on every line", () => {
+    const inSet = "./openapi.json#/components/schemas/Pet";
+    const outside = "./other.json#/components/schemas/Pet";
+
+    expect(
+      lines.map((line) => implicitComponent(resolved(line, spec(line, members)), "schemas", inSet)),
+    ).toEqual(
+      lines.map(() => Option.some({ document: entry, pointer: "/components/schemas/Pet" })),
+    );
+    expect(
+      lines.map((line) =>
+        Option.isNone(implicitComponent(resolved(line, spec(line, members)), "schemas", outside)),
+      ),
+    ).toEqual(lines.map(() => true));
+  });
+
   test("SEC-10 3.2 refuses scheme component names that parse as URIs", () => {
     const resolution = resolved("3.2", uriLikeScheme("3.2"));
 
@@ -613,5 +637,37 @@ describe("DOC-20, SEC-10 implicit connections from the entry document", () => {
       "/components/securitySchemes/https:~1~1evil.example~1s",
     );
     expect(codes(resolved("3.1", uriLikeScheme("3.1")))).toEqual([]);
+  });
+});
+
+const schemaRef = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
+
+describe("DSC-05 DSC-11 allOf referrers", () => {
+  const members: Members = {
+    components: {
+      schemas: {
+        Cat: { allOf: [schemaRef("Pet"), { type: "object" }] },
+        Dog: { allOf: [{ type: "object" }, schemaRef("Pet")] },
+        Either: { oneOf: [schemaRef("Pet"), schemaRef("Cat")] },
+        Pet: { type: "object" },
+      },
+    },
+  };
+
+  test("maps each schema to the allOf members that reference it, from every component", () => {
+    const resolution = resolved("3.1", spec("3.1", members));
+    const referrers = allOfReferrers(resolution);
+    const sites = (name: string) =>
+      new Set(
+        (
+          referrers.get(keyOf({ document: entry, pointer: `/components/schemas/${name}` })) ?? []
+        ).map((site) => site.pointer),
+      );
+
+    expect([sites("Pet"), sites("Cat")]).toEqual([
+      new Set(["/components/schemas/Cat/allOf/0", "/components/schemas/Dog/allOf/1"]),
+      new Set(),
+    ]);
+    expect(allOfReferrers(resolution)).toBe(referrers);
   });
 });

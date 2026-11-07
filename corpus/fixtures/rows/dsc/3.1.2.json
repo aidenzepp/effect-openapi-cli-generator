@@ -63,6 +63,48 @@
         }
       }
     },
+    "/mixed": {
+      "post": {
+        "operationId": "mixed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "cat": "Cat"
+                  },
+                  "propertyName": "petType"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Cat"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Dog"
+                  },
+                  {
+                    "properties": {
+                      "petType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["petType"],
+                    "type": "object"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/tagged": {
       "post": {
         "operationId": "tagged",

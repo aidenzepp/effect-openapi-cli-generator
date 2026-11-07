@@ -633,8 +633,11 @@ describe("DOC, VAL and CMP rows through generate()", () => {
           set: { [`${remote}/full.json`]: fullMember(line) },
         });
 
-        expect(summary(found).filter(([code]) => code === "SEC-09/undeclared-scheme")).toEqual([
-          ["SEC-09/undeclared-scheme", "refusal", "element", "/security/0/memberKey"],
+        // Check refuses the name once, at operation scope, since no alternative remains; normalize
+        // adds no second SEC-09 or SEC-10 diagnostic.
+        const code = line === "3.2.1" ? "SEC-10/unresolved-scheme" : "SEC-09/unresolved-scheme";
+        expect(summary(found).filter(([row]) => /^SEC-(?:09|10)\//u.test(String(row)))).toEqual([
+          [code, "refusal", "operation", "/security/0/memberKey"],
         ]);
         expect(found.commands).toEqual([]);
       }, 60_000);
