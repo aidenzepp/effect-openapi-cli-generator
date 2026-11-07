@@ -609,11 +609,38 @@ describe("PTH and OPR rows through generate()", () => {
         expect([emptyPaths.diagnostics, emptyItem.diagnostics]).toEqual([[], []]);
       }, 60_000);
 
-      test.todo(`OPR-06: getPet and GetPet raise OPR-06/command-collision at both operations vs two distinct commands (${line})`, () =>
-        Promise.resolve());
+      // Design 4.4 refuses colliding visible command names with a hint, with no automatic rename
+      // (memo 121cf83f, B3).
+      test(`OPR-06: getPet and GetPet fold to one command name and raise OPR-06/command-collision at both operations (${line})`, async () => {
+        const found = await inProcess(
+          withPaths(line, {
+            "/a": { get: operation({ operationId: "getPet" }) },
+            "/b": { get: operation({ operationId: "GetPet" }) },
+          }),
+        );
 
-      test.todo(`PTH-11: a Path Item $ref beside a get the target also defines raises no diagnostic vs a PTH-11 refusal (${line})`, () =>
-        Promise.resolve());
+        expect(summary(found)).toEqual([
+          ["OPR-06/command-collision", "refusal", "operation"],
+          ["OPR-06/command-collision", "refusal", "operation"],
+        ]);
+        expect(pointers(found)).toEqual(["/paths/~1a/get", "/paths/~1b/get"]);
+      }, 60_000);
+
+      test(`PTH-11: a Path Item $ref beside a get the target also defines is refused, naming the shared field (${line})`, async () => {
+        const found = await inProcess(
+          withPaths(
+            line,
+            { "/a": { $ref: "#/x-path-items/A", get: operation() } },
+            { "x-path-items": { A: { get: operation() } } },
+          ),
+        );
+
+        expect(summary(found)).toEqual([["PTH-11/ref-sibling-conflict", "refusal", "document"]]);
+        expect(pointers(found)).toEqual(["/paths/~1a"]);
+        expect(found.diagnostics[0]?.related?.map((site) => String(site.pointer))).toEqual([
+          "/paths/~1a/get",
+        ]);
+      }, 60_000);
     });
   }
 
