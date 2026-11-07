@@ -1,0 +1,14 @@
+{
+  "allowInsecure": true,
+  "binName": "nmx",
+  "envPrefix": "NMX",
+  "naming": {
+    "operations": {
+      "getWidget": { "command": "show-all", "group": "inventory" }
+    }
+  },
+  "package": {
+    "name": "naming-extensions-cli",
+    "version": "0.1.0"
+  }
+}
