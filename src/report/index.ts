@@ -2,7 +2,7 @@ import { Array as Arr, Effect, Order, Schema } from "effect";
 import type { Types } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
@@ -133,14 +133,7 @@ export type GeneratorOutcome =
     }
   | { readonly _tag: "LockHeld" };
 
-const tokenOrder = Order.make<string>((left, right) =>
-  /^(?:0|[1-9][0-9]*)$/u.test(left) && /^(?:0|[1-9][0-9]*)$/u.test(right)
-    ? Order.Number(Number(left), Number(right))
-    : Order.String(left, right),
-);
-
-// Diagnostic order (design 3.7) over use sites: document index, then pointer token by token with
-// array indices numerically. `diagnostic.ts` keeps its pointer order private, so this repeats it.
+// Diagnostic order (design 3.7) over use sites: document index, then pointer.
 interface UseSite {
   readonly document: string;
   readonly pointer: string;
@@ -153,7 +146,7 @@ const useSiteOrder = (documents: readonly string[]): Order.Order<UseSite> =>
 
       return index === -1 ? documents.length : index;
     }),
-    Order.mapInput(Order.Array(tokenOrder), (entry: UseSite) => entry.pointer.split("/").slice(1)),
+    Order.mapInput(pointerOrder, (entry: UseSite) => entry.pointer),
   );
 
 const entryAt = (origin: { readonly document: string; readonly pointer: string }) =>
