@@ -24,6 +24,7 @@ import { Diagnostic, sortDiagnostics } from "./model/diagnostic.ts";
 import { Api } from "./model/entities.ts";
 import type { Operation } from "./model/entities.ts";
 import { planNames } from "./names/index.ts";
+import { overrideSite } from "./names/plan.ts";
 import type { NamePlan, PlannedCommand, PlannedGroup } from "./names/index.ts";
 import { normalize } from "./normalize/index.ts";
 import type { NormalizeError } from "./normalize/index.ts";
@@ -31,7 +32,12 @@ import { distinctDiagnostics } from "./normalize/operations.ts";
 import { normalizeSchemas } from "./normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaImportDefect } from "./normalize/schemas.ts";
 import { boundOrigins } from "./normalize/servers.ts";
-import { makeGenerationReport, nonStandardEntries, printGenerationReport } from "./report/index.ts";
+import {
+  makeGenerationReport,
+  nonStandardEntries,
+  printGenerationReport,
+  skippedEntries,
+} from "./report/index.ts";
 import type { GenerationReportValue } from "./report/index.ts";
 import { resolve } from "./resolve/index.ts";
 import type { Resolution, ResolveMember } from "./resolve/index.ts";
@@ -589,6 +595,13 @@ export const generate = (
       // The names plan reports renames as notices only; it carries no from/to pairs yet.
       renames: [],
       schemes: api.securitySchemes,
+      // The names plan emits no command for these (design 8.2); the same rule picks them here.
+      skipped: skippedEntries(
+        api.operations.filter(
+          (operation) => overrideSite(author.value, operation).override?.skip === true,
+        ),
+        order,
+      ),
       version,
     });
     const files: readonly EmittedFile[] = [
