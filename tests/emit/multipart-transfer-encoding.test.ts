@@ -83,7 +83,7 @@ const specOf = (line: Line, doc: Schema.Json, encoding?: Schema.Json): Schema.Js
 const generate = (line: Line, value: Schema.Json) =>
   Effect.gen(function* generated() {
     const resolution = yield* resolve({ document, line, value });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
     const schemas = yield* normalizeSchemas(resolution);
     const plan = yield* planNames(api, { config, configDocument, strict: false });
     const context = { config, configDocument, document, openapi: api.openapi };

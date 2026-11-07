@@ -179,7 +179,11 @@ describe("PRM-27 strict: a form deepObject over a nested property refuses its al
       package: { name: "example-cli", version: "1.0.0" },
     });
     const { api, diagnostics } = Effect.runSync(
-      normalize(resolutionOf(bodyOf(nestedProperties)), { config, configDocument: configUri }),
+      normalize(resolutionOf(bodyOf(nestedProperties)), {
+        checkFindings: [],
+        config,
+        configDocument: configUri,
+      }),
     );
 
     expect(api.operations).toEqual([]);

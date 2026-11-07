@@ -42,7 +42,7 @@ const prepared = (
   Effect.gen(function* generate() {
     const config = yield* decodeAuthorConfig(configValue, { document: configDocument });
     const resolution = yield* resolve({ document, line, value });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
     // Every spec here is 3.1 or 3.2, where no `default` is refused (S30-27 is 3.0 only).

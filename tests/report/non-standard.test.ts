@@ -108,7 +108,11 @@ const normalizedWith = (deepObjectBrackets: boolean) =>
     Effect.gen(function* build() {
       const config = yield* configWith(deepObjectBrackets);
       const resolution = yield* resolve({ document, line: "3.1", value: spec });
-      const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
+      const { api, diagnostics } = yield* normalize(resolution, {
+        checkFindings: [],
+        config,
+        configDocument,
+      });
       const encoded: Encoded = Schema.encodeSync(Api)(api);
       const reversed = Schema.decodeUnknownSync(Api)({
         ...encoded,

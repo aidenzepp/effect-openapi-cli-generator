@@ -232,7 +232,7 @@ const normalized = (required: boolean, schema: Json) => {
     },
   };
   const resolution = Effect.runSync(resolve({ document: entry, line: "3.1", value }));
-  const result = Effect.runSync(normalize(resolution, config));
+  const result = Effect.runSync(normalize(resolution, { ...config, checkFindings: [] }));
 
   // The resolver reports `$dynamicRef`; normalization reports the rest and does not repeat it.
   return {

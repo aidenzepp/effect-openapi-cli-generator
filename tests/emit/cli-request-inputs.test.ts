@@ -80,7 +80,7 @@ const config = await Effect.runPromise(
 const resolution = await Effect.runPromise(resolve({ document, line: "3.1", value: spec }));
 
 const { api: normalized } = await Effect.runPromise(
-  normalize(resolution, { config, configDocument }),
+  normalize(resolution, { checkFindings: [], config, configDocument }),
 );
 
 const schemas = await Effect.runPromise(normalizeSchemas(resolution));

@@ -33,7 +33,9 @@ const run = (paths: Json, members: readonly ResolveMember[] = []): Normalization
       members,
       value: { info: { title: "t", version: "1" }, openapi: "3.1.1", paths },
     }).pipe(
-      Effect.flatMap((resolution) => normalize(resolution, { config, configDocument: configUri })),
+      Effect.flatMap((resolution) =>
+        normalize(resolution, { checkFindings: [], config, configDocument: configUri }),
+      ),
     ),
   );
 

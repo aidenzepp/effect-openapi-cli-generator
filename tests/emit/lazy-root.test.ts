@@ -36,7 +36,7 @@ const emitted = Effect.gen(function* emit() {
     document: configDocument,
   });
   const resolution = yield* resolve({ document, line: "3.2", value: readJson("openapi.json") });
-  const { api } = yield* normalize(resolution, { config, configDocument });
+  const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
   const plan = yield* planNames(api, { config, configDocument, strict: false });
   const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
   const entry = yield* emitEntryFiles(config);

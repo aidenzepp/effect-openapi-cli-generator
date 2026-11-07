@@ -59,7 +59,11 @@ const run = (line: Line, parameter: Json, setting: Switch) =>
       },
     }).pipe(
       Effect.flatMap((resolution) =>
-        normalize(resolution, { config: configs[setting], configDocument: configUri }),
+        normalize(resolution, {
+          checkFindings: [],
+          config: configs[setting],
+          configDocument: configUri,
+        }),
       ),
     ),
   );

@@ -39,7 +39,7 @@ const pipeline = Effect.gen(function* generate() {
     document: configDocument,
   });
   const resolution = yield* resolve({ document, line: "3.1", value: golden });
-  const { api } = yield* normalize(resolution, { config, configDocument });
+  const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
   const plan = yield* planNames(api, { config, configDocument, strict: false });
   const context = { config, configDocument, document, openapi: api.openapi };
   const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;

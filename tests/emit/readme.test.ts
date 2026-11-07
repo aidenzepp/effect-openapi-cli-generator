@@ -41,7 +41,11 @@ const prepared = (value: Schema.Json) =>
   Effect.gen(function* prepare() {
     const config = yield* decodeAuthorConfig(configJson, { document: configDocument });
     const resolution = yield* resolve({ document, line: "3.1", value });
-    const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
+    const { api, diagnostics } = yield* normalize(resolution, {
+      checkFindings: [],
+      config,
+      configDocument,
+    });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
     return { api, config, diagnostics: [...diagnostics, ...plan.diagnostics], plan };
