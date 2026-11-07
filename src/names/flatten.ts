@@ -6,6 +6,7 @@ import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
+import type { Line } from "../validate/index.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
@@ -187,6 +188,11 @@ interface Ctx {
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
+  /**
+   * 3.0 only: a read-only property is not offered as a flag (S30-31, D-SCH2). 3.1 and 3.2 keep
+   * it (SCH-51).
+   */
+  readonly readOnlyOmitted: boolean;
   readonly memo: Map<string, Result.Result<Classified, FlattenError> | typeof inProgress>;
   visits: number;
 }
@@ -217,12 +223,14 @@ const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
+  line: Line | undefined,
 ): Ctx => ({
   base64Fields: codec === "json" || codec === "form",
   base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
+  readOnlyOmitted: line === "3.0",
   styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
@@ -522,6 +530,30 @@ const classify = (
   return Result.succeed(leaf(ctx, schema, type));
 };
 
+// Whether a property schema is `readOnly: true` itself or at the end of one `$ref` (S30-31).
+const isReadOnly = (ctx: Ctx, schema: Schema.Json): boolean => {
+  if (!isObject(schema)) {
+    return false;
+  }
+
+  if (schema.readOnly === true) {
+    return true;
+  }
+
+  const { $ref } = schema;
+  if (!Predicate.isString($ref) || !$ref.startsWith(refPrefix)) {
+    return false;
+  }
+
+  const target = ctx.defs[$ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~")];
+
+  return isObject(target) && target.readOnly === true;
+};
+
+// A property the line does not offer as a flag: it gets no flag and no skip notice.
+const omitted = (ctx: Ctx, schema: Schema.Json): boolean =>
+  ctx.readOnlyOmitted && isReadOnly(ctx, schema);
+
 interface Walk {
   readonly flags: readonly BodyFlag[];
   readonly skipped: readonly SkippedProperty[];
@@ -542,6 +574,10 @@ const walkProperties = (
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (omitted(ctx, child)) {
+      continue;
     }
 
     const tokens = [...at.tokens, key];
@@ -606,7 +642,7 @@ const walkParts = (
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
     }
 
-    if (ctx.styleRefused.has(key)) {
+    if (ctx.styleRefused.has(key) || omitted(ctx, child)) {
       continue;
     }
 
@@ -685,12 +721,16 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * flags and no field flags. A multipart part reads its transfer encoding from
  * `alternative.encoding` (absent: no rules), never from its schema. Work is bounded: each `$defs`
  * key is classified once per call, and node visits, including every property entry, share one
- * budget (`BodyBudgetExceeded`).
+ * budget (`BodyBudgetExceeded`). On the 3.0 `line`, a property or part whose schema is
+ * `readOnly: true`, directly or through one `$ref`, gets no flag and no skip notice (S30-31,
+ * D-SCH2); `--body` and `--body-file` still send it as given. Without a `line`, as on 3.1 and 3.2,
+ * a read-only property keeps its flag (SCH-51).
  */
 export const flattenBody = (
   defs: Defs,
   alternative: Pick<MediaAlternative, "codec" | "schema"> &
     Partial<Pick<MediaAlternative, "encoding">>,
+  line?: Line,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
   if (codec === "binary") {
@@ -708,7 +748,7 @@ export const flattenBody = (
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs, codec, alternative.encoding ?? []);
+  const ctx = newCtx(defs, codec, alternative.encoding ?? [], line);
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));
