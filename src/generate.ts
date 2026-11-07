@@ -495,7 +495,11 @@ const analyze = (
       return yield* refused("document")(order(early));
     }
 
-    const normalized = yield* normalize(resolution, { config, configDocument });
+    const normalized = yield* normalize(resolution, {
+      checkFindings: checked,
+      config,
+      configDocument,
+    });
     const api = withoutRefused(normalized.api, checked);
     const diagnostics = order([...early, ...normalized.diagnostics]);
     if (diagnostics.some(isDocumentRefusal)) {

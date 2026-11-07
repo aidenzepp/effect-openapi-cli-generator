@@ -19,9 +19,11 @@ import { effectiveServers } from "./servers.ts";
 import type { ServersContext } from "./servers.ts";
 
 /**
- * What normalization needs besides the resolution: the author config and the document it came from.
+ * What normalization needs besides the resolution: the author config, the document it came from,
+ * and the findings the spec-text check stage raised for this run (`checkSpecText`).
  */
 export interface NormalizeContext {
+  readonly checkFindings: readonly Diagnostic[];
   readonly config: AuthorConfig;
   readonly configDocument: typeof DocumentUri.Type;
 }

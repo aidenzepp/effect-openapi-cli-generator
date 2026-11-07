@@ -51,7 +51,10 @@ const normalizedApi = (line: Line, properties: Json, schemas?: Json) => {
   const value = documentOf(line, properties, schemas);
   const resolution = Effect.runSync(resolve({ document: entry, line, value }));
 
-  return { resolution, result: Effect.runSync(normalize(resolution, config)) };
+  return {
+    resolution,
+    result: Effect.runSync(normalize(resolution, { ...config, checkFindings: [] })),
+  };
 };
 
 // The refusals of one 3.0 operation whose JSON body property `size` has `size`, and whether the

@@ -165,7 +165,11 @@ describe("author-supplied security", () => {
         },
       }).pipe(
         Effect.flatMap((resolution) =>
-          normalize(resolution, { config: configOf(added), configDocument: configUri }),
+          normalize(resolution, {
+            checkFindings: [],
+            config: configOf(added),
+            configDocument: configUri,
+          }),
         ),
       ),
     );

@@ -94,7 +94,11 @@ const emitted = (properties: Readonly<Record<string, Schema.Json>>, line: Line =
     Effect.gen(function* generate() {
       const author = yield* decodeAuthorConfig(config, { document: configDocument });
       const resolution = yield* resolve({ document, line, value: spec(line, properties) });
-      const { api } = yield* normalize(resolution, { config: author, configDocument });
+      const { api } = yield* normalize(resolution, {
+        checkFindings: [],
+        config: author,
+        configDocument,
+      });
       const plan = yield* planNames(api, { config: author, configDocument, strict: false });
       const output = yield* emitCli({ api, config: author, plan, validationEdits: [] });
       const flags = plan.groups

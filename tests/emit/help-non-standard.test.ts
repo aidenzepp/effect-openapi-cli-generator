@@ -207,7 +207,7 @@ describe("the emitted help of a deprecated scheme", () => {
           line: "3.1",
           value: readJson("openapi.json"),
         });
-        const { api } = yield* normalize(resolution, { config, configDocument });
+        const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
         const deprecated = Schema.decodeUnknownSync(Api)({
           ...Schema.encodeSync(Api)(api),
           securitySchemes: api.securitySchemes.map((scheme) => ({

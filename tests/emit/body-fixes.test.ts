@@ -69,7 +69,11 @@ const uploads = async (line: Line, value: Schema.Json) => {
   const emitted = await Effect.runPromise(
     Effect.gen(function* generated() {
       const resolution = yield* resolve({ document, line, value });
-      const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
+      const { api, diagnostics } = yield* normalize(resolution, {
+        checkFindings: [],
+        config,
+        configDocument,
+      });
       const plan = yield* planNames(api, { config, configDocument, strict: false });
       const context = { config, configDocument, document, openapi: api.openapi };
       const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;

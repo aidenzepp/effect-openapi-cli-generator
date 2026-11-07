@@ -127,8 +127,16 @@ const unmark = (api: Api): Api =>
 const generated = await Effect.runPromise(
   Effect.gen(function* generated() {
     const resolution = yield* resolve({ document, line: "3.1", value: spec });
-    const { api: markedApi } = yield* normalize(resolution, { config, configDocument });
-    const off = yield* normalize(resolution, { config: configOff, configDocument });
+    const { api: markedApi } = yield* normalize(resolution, {
+      checkFindings: [],
+      config,
+      configDocument,
+    });
+    const off = yield* normalize(resolution, {
+      checkFindings: [],
+      config: configOff,
+      configDocument,
+    });
     const schemas = yield* normalizeSchemas(resolution);
     const planOf = (model: Api) => planNames(model, { config, configDocument, strict: false });
     const context = { config, configDocument, document, openapi: markedApi.openapi };
