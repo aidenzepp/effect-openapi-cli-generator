@@ -429,8 +429,11 @@ describe("FMT-01 to FMT-28 through the built CLI and generate()", () => {
         ]);
       }, 60_000);
 
-      test.todo(`FMT-04: a double JSON body field flag sends --ratio 0.10000000000000000001 as {"ratio":0.1} (Flag.Finite reads a JS number) vs its digits unchanged (${line})`, () =>
-        Promise.resolve());
+      test(`FMT-04: a double JSON body field flag sends --ratio 0.10000000000000000001 with its digits unchanged (${line})`, async () => {
+        const body = await run(line, ["count", "--ratio", "0.10000000000000000001"]);
+
+        expect(body).toEqual(sentOnce("/count", '{"ratio":0.10000000000000000001}'));
+      }, 60_000);
 
       test(`FMT-08: a date value, conforming or not, is sent as given and the format is server-validated with a notice (${line})`, async () => {
         expect(await stringRow(line, "date")).toEqual(sentAsGiven(line, "date"));
@@ -469,8 +472,11 @@ describe("FMT-01 to FMT-28 through the built CLI and generate()", () => {
         ]);
       }, 60_000);
 
-      test.todo(`FMT-10: a format byte JSON body property is a base64 file flag (--encoded "not base64!" exits 2, nothing sent) vs a string sent as given (${line})`, () =>
-        Promise.resolve());
+      test(`FMT-10: a format byte JSON body property is a string sent as given (${line})`, async () => {
+        const body = await run(line, ["annotated", "--encoded", "not base64!"]);
+
+        expect(body).toEqual(sentOnce("/annotated", '{"encoded":"not base64!"}'));
+      }, 60_000);
 
       test(`FMT-11: a time value, conforming or not, is sent as given and the format is server-validated with a notice (${line})`, async () => {
         expect(await stringRow(line, "time")).toEqual(sentAsGiven(line, "time"));
