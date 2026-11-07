@@ -443,22 +443,22 @@ describe("emitCli: operation-scope refusals", () => {
     [
       "an array of inline int64",
       { items: { format: "int64", type: "integer" }, type: "array" },
-      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+      'Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.atLeast(0)',
     ],
     [
       "an array of $ref int64",
       { items: { $ref: "#/components/schemas/Int64" }, type: "array" },
-      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+      'Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.atLeast(0)',
     ],
     [
       "an array with an unsafe bound",
       { items: { maximum: 1e300, type: "integer" }, type: "array" },
-      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+      'Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.atLeast(0)',
     ],
     [
       "an array with an unsafe exclusive bound",
       { items: { exclusiveMinimum: -1e300, type: "integer" }, type: "array" },
-      'Input.int64Flag("total").pipe(Flag.atLeast(0)',
+      'Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.atLeast(0)',
     ],
   ];
 
@@ -479,7 +479,9 @@ describe("emitCli: operation-scope refusals", () => {
         },
       });
       expect(output.refusals).toEqual([]);
-      expect(contentOf(output, "src/cli/counters.ts")).toContain(expected);
+      expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
+        expected,
+      );
       expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
     });
   }
@@ -511,7 +513,7 @@ describe("emitCli: operation-scope refusals", () => {
     );
     expect(output.refusals).toEqual([]);
     expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
-      'Input.numericFlag("totals", "integer").pipe( Flag.map((text) => new Input.JsonNumber(text)), Flag.atLeast(0), )',
+      'Input.numericFlag("totals", "integer").pipe( Flag.map((text) => new Input.JsonNumber(text)), Flag.withMetavar("integer"), Flag.atLeast(0), )',
     );
   });
 });
@@ -776,7 +778,9 @@ describe("emitCli: multipart request bodies", () => {
     const text = contentOf(output, "src/cli/imports.ts") ?? "";
     expect(format(text)).toEqual({ exitCode: 0, stdout: text });
     expect(text).toContain('import * as Multipart from "../runtime/multipart.ts";');
-    expect(text).toContain('count: Input.int64Flag("count").pipe(Flag.optional),');
+    expect(text).toContain(
+      'count: Input.int64Flag("count").pipe(Flag.withMetavar("integer"), Flag.optional),',
+    );
     expect(text).toContain(
       'file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("The CSV.")),',
     );

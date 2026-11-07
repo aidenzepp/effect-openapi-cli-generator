@@ -610,6 +610,10 @@ interface BodyFlagHead {
   readonly steps: readonly Expr[];
 }
 
+// The help label of a numeric field flag: its `NumericKind`, where the string flag under it would
+// show `string`.
+const numericMetavar = (kind: NumericKind): Expr => fn("Flag.withMetavar", str(kind));
+
 // An `integer` or `number` field is checked against the same grammar as an `integer` or `number`
 // parameter (an `int64` one as digits by `Input.int64Flag`), never parsed to a JavaScript number.
 const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): BodyFlagHead => {
@@ -618,7 +622,7 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): B
   }
 
   if (kind === "integer" && integer === "int64") {
-    return { head: fn("Input.int64Flag", str(flag.name)), steps: [] };
+    return { head: fn("Input.int64Flag", str(flag.name)), steps: [numericMetavar("integer")] };
   }
 
   // A multipart `file` part flag carries a path, or `-` for stdin.
@@ -630,9 +634,11 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): B
     return { head: fn("Flag.Boolean", str(flag.name)), steps: [] };
   }
 
+  const numeric: NumericKind = kind === "integer" ? "integer" : "number";
+
   return {
-    head: fn("Input.numericFlag", str(flag.name), str(kind === "integer" ? "integer" : "number")),
-    steps: [asJsonNumber],
+    head: fn("Input.numericFlag", str(flag.name), str(numeric)),
+    steps: [asJsonNumber, numericMetavar(numeric)],
   };
 };
 
