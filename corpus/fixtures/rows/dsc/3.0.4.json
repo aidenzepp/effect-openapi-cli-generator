@@ -1,0 +1,173 @@
+{
+  "components": {
+    "schemas": {
+      "Cat": {
+        "properties": {
+          "meow": {
+            "type": "boolean"
+          },
+          "petType": {
+            "type": "string"
+          }
+        },
+        "required": ["petType", "meow"],
+        "type": "object"
+      },
+      "Dog": {
+        "properties": {
+          "bark": {
+            "type": "boolean"
+          },
+          "petType": {
+            "type": "string"
+          }
+        },
+        "required": ["petType", "bark"],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Discriminator and XML rows witness (DSC-01 to XML-08)",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.4",
+  "paths": {
+    "/any-tagged": {
+      "post": {
+        "operationId": "any-tagged",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Cat"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Dog"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "petType"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/tagged": {
+      "post": {
+        "operationId": "tagged",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "cat": "Cat",
+                    "dog": "#/components/schemas/Dog"
+                  },
+                  "propertyName": "petType"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Cat"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Dog"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/untagged": {
+      "post": {
+        "operationId": "untagged",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Cat"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Dog"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/xml": {
+      "post": {
+        "operationId": "xml",
+        "requestBody": {
+          "content": {
+            "application/xml": {
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "xml": {
+                      "attribute": true
+                    }
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string",
+                      "xml": {
+                        "name": "tag"
+                      }
+                    },
+                    "type": "array",
+                    "xml": {
+                      "wrapped": true
+                    }
+                  }
+                },
+                "type": "object",
+                "xml": {
+                  "name": "item",
+                  "namespace": "https://example.com/ns",
+                  "prefix": "ex"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}
