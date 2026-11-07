@@ -10,6 +10,13 @@ const environmentNamePattern = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/u;
 
 const parameterKeyPattern = /^(?:cookie|header|path|query):.+$/u;
 
+// A body field's RFC 6901 pointer relative to the body root, as its flag carries it (`/meta/name`):
+// one or more `/`-led tokens, `~` only as `~0` or `~1`. The whole body (`""`) is not a field.
+const fieldPointerPattern = /^(?:\/(?:[^/~]|~[01])*)+$/u;
+
+// A flag name as the kebab fold writes one: dot-separated kebab segments, each led by a letter.
+const flagNamePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/u;
+
 const rowId = "CFG-1";
 
 // semver 2.0.0 (semver.org), whose grammar is visible ASCII with no whitespace, so the version is
@@ -56,6 +63,10 @@ const AddedSecurity = Schema.Struct({
 
 const ParameterOverride = Schema.Struct({ flag: Schema.optionalKey(Schema.NonEmptyString) });
 
+const FieldOverride = Schema.Struct({
+  flag: Schema.String.pipe(Schema.check(Schema.isPattern(flagNamePattern))),
+});
+
 // An alias group, like the naming extensions' group keys (design 4.4): a dotted string split at
 // `.`, or an array whose elements are kept whole; no segment is empty.
 const aliasGroup = Schema.Union([
@@ -82,6 +93,13 @@ const ConfigAlias = Schema.Struct({
 const OperationOverride = Schema.Struct({
   aliases: Schema.optionalKey(Schema.Array(ConfigAlias)),
   command: Schema.optionalKey(Schema.NonEmptyString),
+  // Renames a body field's flag, keyed by the field's pointer relative to the body root.
+  fields: Schema.optionalKey(
+    Schema.Record(
+      Schema.String.pipe(Schema.check(Schema.isPattern(fieldPointerPattern))),
+      FieldOverride,
+    ),
+  ),
   group: Schema.optionalKey(Schema.NonEmptyString),
   parameters: Schema.optionalKey(
     Schema.Record(
@@ -165,6 +183,8 @@ type Kind = "invalid" | "missing" | "unknown";
 
 type Rule =
   | "invalid-bin-name"
+  | "invalid-field-flag"
+  | "invalid-field-pointer"
   | "invalid-version"
   | "invalid-value"
   | "missing-bin-name"
@@ -212,7 +232,16 @@ const isUnsupportedKey = (path: readonly string[]): boolean =>
 const isCommandsModule = (path: readonly string[]): boolean =>
   path.length === 2 && path[0] === "commands" && path[1] === "module";
 
+// `naming.<operations|byPointer>.<key>.fields.<pointer>`, then `.flag` for the value.
+const isField = (path: readonly string[], depth: number): boolean =>
+  path.length === depth && path[0] === "naming" && path[3] === "fields";
+
 const ruleOf = ({ kind, path }: Finding): Rule => {
+  // A record key that fails its pattern is an excess key to the decoder.
+  if (isField(path, 5) && kind === "unknown") {
+    return "invalid-field-pointer";
+  }
+
   if (kind === "unknown") {
     return isUnsupportedKey(path) ? "unsupported-key" : "unknown-key";
   }
@@ -225,6 +254,10 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
     return "unsafe-commands-module";
   }
 
+  if (isField(path, 6) && path[5] === "flag" && kind === "invalid") {
+    return "invalid-field-flag";
+  }
+
   if (isVersion(path) && kind === "invalid") {
     return "invalid-version";
   }
@@ -234,6 +267,10 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
 
 const messages: Readonly<Record<Rule, string>> = {
   "invalid-bin-name": "binName must match ^[a-z][a-z0-9-]*$.",
+  "invalid-field-flag":
+    "A body field flag must be a kebab name such as foo-bar, with dots between nested segments.",
+  "invalid-field-pointer":
+    "A fields key must be the body field's RFC 6901 pointer from the body root, such as /meta/name.",
   "invalid-value": "An author config value is not valid.",
   "invalid-version": "package.version must be a semver 2.0.0 version such as 1.2.3.",
   "missing-bin-name": "The author config has no binName.",

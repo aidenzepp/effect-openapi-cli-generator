@@ -797,6 +797,18 @@ const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => 
     : `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`;
 };
 
+// A body field flag collision is resolved by renaming the field's flag, or by skipping the operation.
+const fieldHint = (site: OverrideSite, field: string): string =>
+  `Rename the flag with ${site.configKey}.fields[${JSON.stringify(field)}].flag, or skip the operation with ${site.configKey}.skip.`;
+
+// A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
+// names. The config is never inferred.
+const renamed = (site: OverrideSite, flag: BodyFlag): BodyFlag => {
+  const configured = isWholeBody(flag.kind) ? undefined : own(site.override?.fields, flag.pointer);
+
+  return configured === undefined ? flag : { ...flag, name: configured.flag, notes: [] };
+};
+
 const draftBody = (
   subject: Subject,
   context: DraftContext,
@@ -805,8 +817,9 @@ const draftBody = (
   Effect.gen(function* draft() {
     const { operation, site } = subject;
     const { collector } = context;
-    const hint = `${site.configKey}.skip`;
     const merged = new Map<string, Merged>();
+    const fields = new Set<string>();
+    let flattenedAll = true;
     for (const alternative of operation.body?.alternatives ?? []) {
       const { pointer } = alternative.origin;
       const flattened = flattenBody(context.defs, alternative);
@@ -822,6 +835,7 @@ const draftBody = (
           "The body schema exceeds the node budget.",
           { pointer },
         );
+        flattenedAll = false;
         continue;
       }
 
@@ -835,22 +849,40 @@ const draftBody = (
         );
       }
 
-      for (const flag of flattened.success.flags) {
+      for (const flag of flattened.success.flags.map((found) => renamed(site, found))) {
+        fields.add(flag.pointer);
+
         const known = merged.get(flag.name);
         if (known === undefined) {
           merged.set(flag.name, { flag, media: [alternative.mediaType], pointer });
         } else if (sameFlag(known.flag, flag)) {
           known.media.push(alternative.mediaType);
         } else {
+          const hint = fieldHint(site, flag.pointer);
           addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer });
         }
+      }
+    }
+
+    // A refused alternative's fields are unknown, so its operation's keys are not judged.
+    for (const field of flattenedAll ? Object.keys(site.override?.fields ?? {}) : []) {
+      if (!fields.has(field)) {
+        collector.unmatched(
+          `${site.configPointer}/fields/${escapeToken(field)}`,
+          "The operation's request body has no field flag at this pointer.",
+        );
       }
     }
 
     return [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
       if (!isWholeBody(flag.kind)) {
-        const owner: Owner = { field: flag.pointer, hint, kind: "body", pointer };
+        const owner: Owner = {
+          field: flag.pointer,
+          hint: fieldHint(site, flag.pointer),
+          kind: "body",
+          pointer,
+        };
         addOwner(owners, flag.name, owner);
         if (boolean) {
           addOwner(owners, `no-${flag.name}`, owner);
