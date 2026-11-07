@@ -124,6 +124,7 @@ const querystring = (required: boolean) => ({
   required,
   schema: { key: objectKey },
   serialization: {
+    encoding: [],
     kind: "content",
     mediaType: "application/x-www-form-urlencoded",
     origin: read0.origin,

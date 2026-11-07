@@ -128,6 +128,7 @@ const querystringParameter = (mediaType: string, required: boolean) => ({
   required,
   schema: { key: objectKey },
   serialization: {
+    encoding: [],
     kind: "content",
     mediaType,
     origin: read0.origin,

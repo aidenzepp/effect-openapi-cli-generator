@@ -87,11 +87,17 @@ export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleS
 }) {}
 
 /**
- * A parameter written in `content` form.
+ * A parameter written in `content` form. `encoding` holds the rules of a 3.2 `querystring`
+ * parameter's form-urlencoded content, one per declared property in document order, decided as a
+ * form body alternative's are (design 6.1, 6.3); it is empty for any other content.
  */
 export class ContentSerialization extends Schema.Class<ContentSerialization>(
   "ContentSerialization",
 )({
+  // An `EncodingRule`'s part headers carry a `Serialization`, so the reference is suspended and its
+  // type stated: inferring it would be circular.
+  // oxlint-disable-next-line eslint/no-use-before-define -- read lazily, after both classes exist
+  encoding: Schema.Array(Schema.suspend((): Schema.Codec<EncodingRule, unknown> => EncodingRule)),
   kind: Schema.Literal("content"),
   mediaType: MediaType,
   origin: Origin,

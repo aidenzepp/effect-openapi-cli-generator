@@ -157,7 +157,11 @@ const stylesOf = (location: Location, line: Line): readonly StyleName[] =>
 const defaultStyle = (location: Location): StyleName =>
   location === "path" || location === "header" ? "simple" : "form";
 
-interface Finding {
+/**
+ * One diagnostic a parameter rule produces, before it is placed at a site. Form Encoding entries
+ * reuse the style table's refusals through `formStyleRefusal` (design 6.3).
+ */
+export interface Finding {
   readonly anchor: string;
   readonly code: string;
   readonly element: string;
@@ -430,11 +434,8 @@ const explodeNotApplicableFinding = (row: string): Finding =>
     "The style table defines no value type for this style with explode true.",
   );
 
-const decideContent = (
-  node: ParameterNode,
-  mediaType: string,
-  schemaKey: Option.Option<string>,
-): Decision => {
+const decideContent = (node: ParameterNode, content: Content): Decision => {
+  const { mediaType, schemaKey } = content;
   if (Option.isNone(Schema.decodeUnknownOption(MediaType)(mediaType))) {
     return refuse(
       refusal(
@@ -519,6 +520,25 @@ interface Traits {
   readonly primitive: boolean;
 }
 
+// The style table's applicability checks (design 6.1): explode true where no value type fits,
+// a delimited style over a primitive, and deepObject over a schema that admits non-objects
+// (PRM-27). Query parameters and form Encoding entries (design 6.3) share them.
+const inapplicable = (
+  row: string,
+  style: StyleName,
+  traits: Pick<Traits, "nonObject" | "primitive">,
+): Finding | undefined => {
+  if (explodeNotApplicable.has(row)) {
+    return explodeNotApplicableFinding(row);
+  }
+
+  if (delimitedStyles.has(style) && traits.primitive) {
+    return primitiveNotApplicableFinding(row);
+  }
+
+  return style === "deepObject" && traits.nonObject ? nonObjectSchema : undefined;
+};
+
 const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision => {
   const location = node.in;
   const style = node.style ?? defaultStyle(location);
@@ -542,17 +562,10 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
     return refuse(styleLocation);
   }
 
-  if (explodeNotApplicable.has(row)) {
-    return refuse(explodeNotApplicableFinding(row));
-  }
-
-  if (delimitedStyles.has(style) && traits.primitive) {
-    return refuse(primitiveNotApplicableFinding(row));
-  }
-
   // PRM-27: a deepObject over a schema that admits non-objects is refused, bracket switch or not.
-  if (deepRow !== undefined && traits.nonObject) {
-    return refuse(nonObjectSchema);
+  const blocked = inapplicable(row, style, traits);
+  if (blocked !== undefined) {
+    return refuse(blocked);
   }
 
   // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
@@ -621,7 +634,15 @@ const decideName = (node: ParameterNode): Decision | undefined => {
   return node.in === "cookie" && !cookieNameToken.test(node.name) ? refuse(cookieName) : undefined;
 };
 
-type Media = Option.Option<readonly [string, Option.Option<string>]>;
+// A parameter's one content entry: its media type and the schema key of its media type object.
+// A `querystring` form entry's Encoding Objects are decided by the body form rules (design 6.1), in
+// the operation assembly.
+interface Content {
+  readonly mediaType: string;
+  readonly schemaKey: Option.Option<string>;
+}
+
+type Media = Option.Option<Content>;
 
 // STY-45: a querystring is content only.
 const usesSchemaFields = (node: ParameterNode): boolean =>
@@ -642,7 +663,7 @@ const decide = (node: ParameterNode, line: Line, media: Media, traits: Traits): 
 
   return Option.match(media, {
     onNone: () => decideStyle(node, line, traits),
-    onSome: ([mediaType, schemaKey]) => decideContent(node, mediaType, schemaKey),
+    onSome: (content) => decideContent(node, content),
   });
 };
 
@@ -671,21 +692,24 @@ const contractReason = (
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
 
-// The schema key of a content entry's media type object, which 3.2 lets be a reference.
-const mediaSchemaKey = (
+// A content entry's media type object, which 3.2 lets be a reference: its schema key.
+const mediaContent = (
   resolution: Resolution,
+  mediaType: string,
   mediaSite: CanonicalKey,
-): Effect.Effect<Option.Option<string>> => {
+): Effect.Effect<Content> => {
   const home = follow(resolution, mediaSite);
 
   return nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(MediaTypeObject)),
-    Effect.map((media) =>
-      media.schema === undefined
-        ? Option.none()
-        : Option.some(schemaKeyAt(resolution, childKey(home, "schema"))),
-    ),
-    Effect.orElseSucceed(() => Option.none<string>()),
+    Effect.map((media): Content => ({
+      mediaType,
+      schemaKey:
+        media.schema === undefined
+          ? Option.none()
+          : Option.some(schemaKeyAt(resolution, childKey(home, "schema"))),
+    })),
+    Effect.orElseSucceed((): Content => ({ mediaType, schemaKey: Option.none() })),
   );
 };
 
@@ -985,14 +1009,55 @@ const objectValued = (
   return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, false));
 };
 
+/**
+ * The query style table's refusal for one form-urlencoded Encoding entry (design 6.3: `style`,
+ * `explode` and `allowReserved` apply as for query parameters), by the checks query parameters use:
+ * STY-18/20/22/24 explode not applicable, STY-17/21 a delimited style over a primitive, and PRM-27
+ * a deepObject over a schema that admits non-objects. `given` holds the entry's explicit fields;
+ * the query defaults fill the rest. `schema` is the property's schema site, through `$ref`;
+ * `limits` bounds the PRM-27 walk, which fails closed. `None` means the table does not refuse
+ * the entry, or its style is outside the query table and is not decided here.
+ */
+export const formStyleRefusal = (
+  resolution: Resolution,
+  schema: CanonicalKey | undefined,
+  given: {
+    readonly allowReserved?: boolean;
+    readonly explode?: boolean;
+    readonly style?: StyleName;
+  },
+  limits: SchemaLimits = {},
+): Effect.Effect<Option.Option<Finding>> =>
+  Effect.gen(function* refusalOf() {
+    const style = given.style ?? "form";
+    const allowReserved = given.allowReserved === true;
+    const row =
+      style === "deepObject"
+        ? deepObjectRow(resolution.line, given.explode === true, allowReserved)
+        : rowOf.get(rowKey("query", style, given.explode ?? style === "form", allowReserved));
+    if (row === undefined) {
+      return Option.none();
+    }
+
+    const types = schema === undefined ? [] : yield* typesAt(resolution, schema);
+    const nonObject =
+      style === "deepObject" &&
+      schema !== undefined &&
+      !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+
+    return Option.fromUndefinedOr(
+      inapplicable(row, style, { nonObject, primitive: types.length > 0 && !compound(types) }),
+    );
+  });
+
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
   if (mediaType === undefined) {
     return Effect.succeed(Option.none());
   }
 
-  return mediaSchemaKey(resolution, childKey(source.target, "content", mediaType)).pipe(
-    Effect.map((key) => Option.some([mediaType, key] as const)),
+  return mediaContent(resolution, mediaType, childKey(source.target, "content", mediaType)).pipe(
+    Effect.map(Option.some),
   );
 };
 
@@ -1004,7 +1069,9 @@ const serializationOf = (
   objectValue: boolean,
 ) => {
   if (plan.kind === "content") {
+    // The operation assembly fills a `querystring` form entry's rules (design 6.1).
     return {
+      encoding: [],
       kind: plan.kind,
       mediaType: plan.mediaType,
       origin,
@@ -1200,7 +1267,7 @@ export const partHeader = (
     };
     const decision = Option.match(yield* mediaOf(resolution, source), {
       onNone: () => decideStyle(node, resolution.line, traits),
-      onSome: ([mediaType, schemaKey]) => decideContent(node, mediaType, schemaKey),
+      onSome: (content) => decideContent(node, content),
     });
     if (decision._tag === "Refuse") {
       return unsupported(decision.finding.message);

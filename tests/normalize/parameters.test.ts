@@ -952,3 +952,35 @@ describe("objectValued: a styled parameter whose schema admits only objects take
     expect(objectValued(query({ schema: ref("O") }), { schemas: { O: flat } })).toBe(true);
   });
 });
+
+const formQuerystring = (encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding,
+      schema: { properties: { ids: { items: string, type: "array" } }, type: "object" },
+    },
+  },
+  in: "querystring",
+  name: "qs",
+  required: true,
+});
+
+// The body form rules decide the Encoding Objects in the operation assembly (design 6.1; witness
+// tests/emit/querystring-encoding.test.ts), so the parameter rules neither refuse nor ignore them.
+describe("STY-43 querystring form content with Encoding Objects reaches the body form rules", () => {
+  test("STY-43 an encoding entry no longer refuses the parameter, which starts with no rules", () => {
+    const outcome = implemented(
+      "3.2",
+      formQuerystring({ ids: { explode: false, style: "pipeDelimited" } }),
+    );
+
+    expect(codes(outcome)).toEqual([]);
+    expect(outcome.parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
+  });
+
+  test("STY-43 every content serialization starts with an empty rule list", () => {
+    const { parameter } = implemented("3.2", formQuerystring({}));
+
+    expect(parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
+  });
+});

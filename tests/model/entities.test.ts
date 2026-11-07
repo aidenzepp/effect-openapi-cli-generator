@@ -249,6 +249,32 @@ describe("model entities", () => {
     expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64url" })).toBe(false);
   });
 
+  test("a content serialization carries its querystring form rules, and states none explicitly", () => {
+    const content = {
+      kind: "content",
+      mediaType: "application/x-www-form-urlencoded",
+      origin,
+      rows,
+      rules: "oas-3.2",
+      schema: schemaRef,
+    };
+    const formRule = {
+      contentType: [],
+      headers: [],
+      origin,
+      rows,
+      serialization: { explode: false, style: "pipeDelimited" },
+      target: { kind: "property", name: "ids" },
+    };
+
+    expect(decodes(Serialization, { ...content, encoding: [formRule] })).toBe(true);
+    expect(decodes(Serialization, { ...content, encoding: [] })).toBe(true);
+    expect(decodes(Serialization, content)).toBe(false);
+    expect(
+      decodes(Serialization, { ...content, encoding: [{ ...formRule, target: { kind: "x" } }] }),
+    ).toBe(false);
+  });
+
   test("a cookie or header apiKey name must be a token", () => {
     const cookie = (name: string) => ({
       ...securityScheme,

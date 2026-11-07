@@ -405,8 +405,8 @@ interface ParameterContext {
 }
 
 // A `querystring` parameter (design 6.1): its value is JSON data the runtime serializes by its one
-// media type. Form content declares the object's properties, in document order, with no Encoding
-// fields (a Parameter's `content` carries none), so pair order and the declared names hold.
+// media type. Form content declares the object's properties in document order, each with the
+// Encoding Object fields of its rule, as a form body's properties are (design 6.3).
 const querystringParts = (
   entry: InputKey,
   defs: Defs,
@@ -427,11 +427,16 @@ const querystringParts = (
     const { mediaType } = serialization;
     const options: (readonly [string, Expr])[] = [["required", bool(parameter.required)]];
     if (essence(mediaType) === formMedia) {
-      const { properties } = objectSchemas(defs, serialization.schema.key);
-      options.push([
-        "properties",
-        arr([...properties.keys()].map((name) => arr([str(name), obj([])]))),
-      ]);
+      const names = [...objectSchemas(defs, serialization.schema.key).properties.keys()];
+      const properties = yield* Effect.all(
+        names.map((name) =>
+          // oxlint-disable-next-line eslint/no-use-before-define -- the body encoders own it; called after load
+          formEncoding(serialization, name).pipe(
+            Effect.map((encoding) => arr([str(name), encoding])),
+          ),
+        ),
+      );
+      options.push(["properties", arr(properties)]);
     }
 
     const value = member(ident(I("input")), yield* memberName(key));
@@ -844,7 +849,7 @@ interface BodyParts {
 // One form-urlencoded property's Encoding Object fields: those its rule sets, `style` only when a
 // query style (design 6.3). An explicit Encoding `contentType` has no runtime input yet.
 const formEncoding = (
-  alternative: MediaAlternative,
+  alternative: Pick<MediaAlternative, "encoding" | "mediaType">,
   name: string,
 ): Effect.Effect<Expr, ApiEmitError> => {
   const rule = alternative.encoding.find(
