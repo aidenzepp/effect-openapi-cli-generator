@@ -59,7 +59,7 @@ const Record = Schema.Struct({
 // `skipped` is optional so a hand-built report naming no skip still decodes; the generator always
 // writes it.
 const Report = Schema.Struct({
-  notices: Schema.Array(Record),
+  notices: Schema.Array(Schema.Struct({ ...Record.fields, code: Schema.String })),
   refusals: Schema.Array(Record),
   skipped: Schema.optionalKey(
     Schema.Array(Schema.Struct({ document: Schema.String, pointer: Schema.String })),
@@ -93,6 +93,11 @@ const labelOf = (entry: string, document: string): string => {
 
   return [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/");
 };
+
+// Notice codes that account for every element at or below their pointer within the operation that
+// holds it, because the notice says that whole subtree is not sent. Every other notice accounts
+// only for the element at its exact pointer.
+const subtreeNotices: ReadonlySet<string> = new Set(["OPR-10/body-ignored"]);
 
 const key = (document: string, pointer: string): string => `${document}\u0000${pointer}`;
 
@@ -145,8 +150,9 @@ const carries = (command: Command, element: WalkElement): boolean => {
  *   carries it; with no inheriting operation it affects no request.
  * - An element-scope refusal covers its pointer and descendants; an operation-scope refusal its
  *   subtree and that operation's inherited elements; a document-scope refusal its document.
- * - A notice covers only the element at its exact pointer, never an operation; such elements are
- *   listed in `byNotice`.
+ * - A notice covers only the element at its exact pointer, never an operation, except that a notice
+ *   whose code is in `subtreeNotices` covers every element at or below its pointer within the
+ *   operation holding it; such elements are listed in `byNotice`.
  *
  * A command whose pointer is no walked operation is invented, as is a command's request media,
  * response key, security alternative or server that its operation neither declares nor inherits,
@@ -166,6 +172,7 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
     const notices = new Set(
       labelled(report.notices).map((record) => key(record.document, record.pointer)),
     );
+    const subtrees = labelled(report.notices).filter((record) => subtreeNotices.has(record.code));
     const skipped = new Set(
       labelled(report.skipped ?? []).map((record) => key(record.document, record.pointer)),
     );
@@ -235,8 +242,24 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
         .every((operation) => carried(operation, element));
     };
 
-    const noticed = (element: WalkElement): boolean =>
-      element.kind !== "operation" && notices.has(siteOf(element));
+    const noticed = (element: WalkElement): boolean => {
+      if (element.kind === "operation") {
+        return false;
+      }
+
+      const owner = ownerOf(element);
+
+      return (
+        notices.has(siteOf(element)) ||
+        (owner !== undefined &&
+          subtrees.some(
+            (record) =>
+              record.document === label(element.document) &&
+              within(record.pointer, owner.pointer) &&
+              within(element.pointer, record.pointer),
+          ))
+      );
+    };
 
     const invented = description.commands.flatMap((command): readonly Invented[] => {
       const site = { document: command.document, path: command.path, pointer: command.pointer };
