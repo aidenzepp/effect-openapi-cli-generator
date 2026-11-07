@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Stream } from "effect";
 import type { HttpBody } from "effect/http";
 import { formData } from "../../src/runtime-src/runtime/multipart.ts";
-import type { Part } from "../../src/runtime-src/runtime/multipart.ts";
+import type { Part, PartEncoding } from "../../src/runtime-src/runtime/multipart.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 const boundary = "testboundary";
@@ -20,14 +20,20 @@ const textOf = async (parts: readonly Part[]) => {
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("");
 };
 
-// Bytes that separate the two alphabets: 0xfb 0xff 0xfe is "+//+" in base64 and "-__-" in base64url.
+// Bytes whose base64 uses the alphabet's last two characters: 0xfb 0xff 0xfe is "+//+" in base64
+// and would be "-__-" in base64url.
 const alphabetBytes = Uint8Array.from([0xfb, 0xff, 0xfe, 0x01]);
 
+// A content encoding the type does not admit, as an untyped caller could pass it.
+const encodedAs = (contentEncoding: string): PartEncoding =>
+  // SAFETY: deliberately unsound; the writer must refuse what the type would reject.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the refusal under test is for values outside the type
+  ({ contentEncoding }) as PartEncoding;
+
 describe("multipart base64 transfer encoding", () => {
-  test("base64, base64url and a plain binary part sit side by side, byte for byte", async () => {
+  test("a base64 part and a plain binary part sit side by side, byte for byte", async () => {
     const text = await textOf([
       { body: Stream.make(alphabetBytes), contentEncoding: "base64", name: "a" },
-      { body: Stream.make(alphabetBytes), contentEncoding: "base64url", name: "b" },
       { body: encoder.encode("plain"), contentType: "application/octet-stream", name: "c" },
     ]);
 
@@ -38,11 +44,6 @@ describe("multipart base64 transfer encoding", () => {
         "Content-Transfer-Encoding: base64",
         "",
         "+//+AQ==",
-        "--testboundary",
-        'Content-Disposition: form-data; name="b"',
-        "Content-Transfer-Encoding: base64url",
-        "",
-        "-__-AQ==",
         "--testboundary",
         'Content-Disposition: form-data; name="c"',
         "Content-Type: application/octet-stream",
@@ -93,20 +94,18 @@ describe("multipart base64 transfer encoding", () => {
     expect(text.split("\r\n")).toHaveLength(7);
   });
 
-  test("a base64url file in uneven chunks matches the one-shot encoding", async () => {
-    const source = Uint8Array.from({ length: 1000 }, (_, index) => (index * 97 + 3) % 256);
-    const chunks = [
-      source.slice(0, 1),
-      source.slice(1, 5),
-      source.slice(5, 998),
-      source.slice(998),
-    ];
-    const text = await textOf([
-      { body: Stream.fromIterable(chunks), contentEncoding: "base64url", name: "f" },
-    ]);
+  test.each(["base64url", "quoted-printable", "BASE64", "b\u0000"])(
+    "a part with contentEncoding %p is refused before any bytes (R34, ENC-37)",
+    async (contentEncoding) => {
+      const parts: readonly Part[] = [
+        { body: Stream.make(alphabetBytes), name: "b", ...encodedAs(contentEncoding) },
+      ];
+      const error = await Effect.runPromise(Effect.flip(formData(parts, { boundary })));
 
-    expect(text.split("\r\n")[4]).toBe(source.toBase64({ alphabet: "base64url" }));
-  });
+      expect(error).toMatchObject({ _tag: "UsageError" });
+      expect(error.message).not.toContain(contentEncoding);
+    },
+  );
 
   test("a part without contentEncoding gets no Content-Transfer-Encoding header", async () => {
     const text = await textOf([{ body: encoder.encode("x"), name: "a" }]);

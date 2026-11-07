@@ -52,7 +52,7 @@ import type { DirectRoute } from "./client.ts";
 import { redirectLoop, withUserAgent } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
-import { dropTrailingFragment, longestFormBytes, scrub } from "./redact.ts";
+import { dropTrailingFragment, longestFormBytes, scrubAround } from "./redact.ts";
 import {
   classify,
   isBodiless,
@@ -291,6 +291,13 @@ const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
  */
 export const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
 
+/**
+ * Credential values scrubbed, then the text sanitized, then scrubbed again (design 7.4, audit
+ * S2), so neither a credential holding a removed character nor one split by them survives.
+ */
+const scrubbedAndSanitized = (text: string, credentials: readonly Credential[]): string =>
+  scrubAround(text, credentials, sanitize);
+
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
 const oneByteLimit = 128;
 
@@ -333,15 +340,15 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
 };
 
 /**
- * The excerpt of an error body: sanitized, then credential values scrubbed, then bounded to
- * `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
+ * The excerpt of an error body: credential values scrubbed, sanitized and scrubbed again, then
+ * bounded to `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
  * `ApiResponseError` refuses an excerpt over 64 KiB (audit F6).
  */
 export const boundedExcerpt = (
   text: string,
   maxBytes: number,
   credentials: readonly Credential[],
-): string => truncateUtf8(scrub(sanitize(text), credentials), maxBytes);
+): string => truncateUtf8(scrubbedAndSanitized(text, credentials), maxBytes);
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
 // larger than the limit, so each chunk is cut at the remaining budget instead.
@@ -375,7 +382,7 @@ const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
  * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
  * form, so a credential cut by the limit is still found and scrubbed. When the read stops at that
  * budget, an incomplete character and any trailing partial credential are dropped first; then the
- * text is scrubbed, sanitized and bounded.
+ * text is scrubbed, sanitized, scrubbed again and bounded.
  */
 export const readExcerpt = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
@@ -393,7 +400,11 @@ export const readExcerpt = <E, R>(
     const text =
       read.length < budget
         ? new TextDecoder().decode(read)
-        : dropTrailingFragment(new TextDecoder().decode(read, { stream: true }), credentials);
+        : dropTrailingFragment(
+            new TextDecoder().decode(read, { stream: true }),
+            credentials,
+            sanitize,
+          );
 
     return boundedExcerpt(text, maxBytes, credentials);
   });
@@ -422,7 +433,7 @@ const isKnownError = (error: unknown): error is KnownError =>
 const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
 
 const singleLine = (text: string, credentials: readonly Credential[]): string =>
-  oneLine(scrub(sanitize(text), credentials));
+  oneLine(scrubbedAndSanitized(text, credentials));
 
 /**
  * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
@@ -449,15 +460,21 @@ export const renderError = (error: KnownError, credentials: readonly Credential[
 
 const base = CliOutput.defaultFormatter({ colors: false });
 
-const valueFreeMessage = (error: CliError.CliError): string => {
-  if (error._tag !== "InvalidValue") {
-    return base.formatCliError(error);
-  }
-
+const invalidValueMessage = (error: CliError.InvalidValue): string => {
   const subject = error.kind === "flag" ? `flag --${error.option}` : `argument <${error.option}>`;
 
   return `Invalid value for ${subject}. Run with --help for usage.`;
 };
+
+const valueFreeMessage = (error: CliError.CliError): string =>
+  error._tag === "InvalidValue" ? invalidValueMessage(error) : base.formatCliError(error);
+
+const errorsText = (messages: readonly string[]): string =>
+  messages.length === 0
+    ? ""
+    : `\nERROR${messages.length === 1 ? "" : "S"}\n${messages
+        .map((message) => `  ${message}`)
+        .join("\n")}`;
 
 /**
  * Renders a `CliError.InvalidValue` by `kind` and `option` only: its `value` is the raw flag text
@@ -466,13 +483,8 @@ const valueFreeMessage = (error: CliError.CliError): string => {
  */
 export const valueFreeFormatter: CliOutput.Formatter = {
   formatCliError: valueFreeMessage,
-  formatError: (error) => `\nERROR\n  ${valueFreeMessage(error)}`,
-  formatErrors: (errors) =>
-    errors.length === 0
-      ? ""
-      : `\nERROR${errors.length === 1 ? "" : "S"}\n${errors
-          .map((error) => `  ${valueFreeMessage(error)}`)
-          .join("\n")}`,
+  formatError: (error) => errorsText([valueFreeMessage(error)]),
+  formatErrors: (errors) => errorsText(errors.map(valueFreeMessage)),
   formatHelpDoc: base.formatHelpDoc,
   formatVersion: base.formatVersion,
 };
@@ -507,17 +519,20 @@ const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
     yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
   }).pipe(Effect.ignore);
 
+const rawMessage = (error: CliError.CliError): string =>
+  error._tag === "InvalidValue" ? invalidValueMessage(error) : error.message;
+
 /**
  * The text printed on stderr for a `CliError`, or `undefined` when there is nothing to print:
- * help with no parse errors, which `Command.run` has already presented. Parse errors go through
- * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value.
+ * help with no parse errors, which `Command.run` has already presented. It has the layout of
+ * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value; other
+ * messages stay raw, because the default formatter escapes C0 characters into text that no longer
+ * matches a credential holding them (audit S2). The caller scrubs and sanitizes the result.
  */
 const renderCliError = (error: CliError.CliError): string | undefined => {
-  if (error._tag !== "ShowHelp") {
-    return valueFreeFormatter.formatError(error);
-  }
+  const errors = error._tag === "ShowHelp" ? error.errors : [error];
 
-  return error.errors.length === 0 ? undefined : valueFreeFormatter.formatErrors(error.errors);
+  return errors.length === 0 ? undefined : errorsText(errors.map(rawMessage));
 };
 
 /**
@@ -564,7 +579,7 @@ const renderCause = <E>(
 
     return text === undefined
       ? Effect.failCause(cause)
-      : reportOnce(scrub(sanitize(text), credentials), failure.value);
+      : reportOnce(scrubbedAndSanitized(text, credentials), failure.value);
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
