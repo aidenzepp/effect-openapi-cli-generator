@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "stypqh",
+  "envPrefix": "STYPQH",
+  "package": {
+    "name": "sty-path-query-header-witness-cli",
+    "version": "0.1.0"
+  }
+}
