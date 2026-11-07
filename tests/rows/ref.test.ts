@@ -875,13 +875,56 @@ describe("REF rows through resolve()", () => {
       ]);
     });
 
-    // The pointer resolves into the $id resource with no diagnostic at all.
-    test.todo(`REF-14: a JSON Pointer crossing a schema $id resolves with no diagnostic vs a generator warning (${line})`, () =>
-      Promise.resolve());
+    test(`REF-14: a JSON Pointer crossing a schema $id resolves with a REF-14/pointer-crosses-id notice at the site (${line})`, () => {
+      const found = resolveSet(
+        line,
+        members(line, {
+          components: {
+            schemas: {
+              S: {
+                $defs: { T: { type: "string" } },
+                $id: "https://example.com/s.json",
+                type: "object",
+              },
+            },
+          },
+          ...schemaUse({ $ref: "#/components/schemas/S/$defs/T" }),
+        }),
+      );
 
-    // The $id index covers the entryHref only (the DOC-17 residual).
-    test.todo(`REF-14: a $ref to a $id declared in another supplied document is refused as REF-16/outside-set vs resolves (${line})`, () =>
-      Promise.resolve());
+      expect([found.failure, found.diagnostics, found.references]).toEqual([
+        undefined,
+        [["REF-14/pointer-crosses-id", "element", entryHref, "/paths/~1a/get/parameters/0/schema"]],
+        [
+          [
+            "/paths/~1a/get/parameters/0/schema",
+            "schema",
+            entryHref,
+            "/components/schemas/S/$defs/T",
+            0,
+          ],
+        ],
+      ]);
+    });
+
+    test(`REF-14: a $ref to a $id declared in another supplied document resolves (${line})`, () => {
+      const other = "https://other.example.com/schemas.json";
+      const found = resolveSet(
+        line,
+        members(line, schemaUse({ $ref: "https://example.com/schemas/pet" })),
+        [
+          {
+            uri: other,
+            value: { $defs: { Pet: { $id: "https://example.com/schemas/pet", type: "object" } } },
+          },
+        ],
+      );
+
+      expect([found.failure, found.references]).toEqual([
+        undefined,
+        [["/paths/~1a/get/parameters/0/schema", "schema", other, "/$defs/Pet", 0]],
+      ]);
+    });
   }
 
   test("REF-17: a reference by the member's $self resolves, and the member's own relative references resolve against its $self (3.2.1)", () => {
