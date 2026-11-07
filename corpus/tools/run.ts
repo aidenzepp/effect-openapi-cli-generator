@@ -9,8 +9,10 @@ import type { GenerateRefused } from "../../src/generate.ts";
 import { loadBytes } from "../../src/load/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { collectInformational } from "../../src/normalize/informational.ts";
+import { VerdictCoverage } from "../../src/model/verdict.ts";
+import type { GenerationReportValue } from "../../src/report/index.ts";
 import { makeVerdict, printVerdict } from "../../src/report/verdict.ts";
-import type { VerdictValue } from "../../src/report/verdict.ts";
+import type { CommandNameSource, VerdictValue } from "../../src/report/verdict.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import { Description } from "../../src/runtime-src/runtime/describe.ts";
 import { lineOf } from "../../src/validate/dispatch.ts";
@@ -178,12 +180,72 @@ const describeInvented = (invented: Invented): string => {
   return invented.kind === "server" ? `${head} ${invented.url}` : head;
 };
 
-// The verdict's `coverage.missing` lists what nothing accounts for and what nothing in the spec
-// stands behind; elements accounted only by a notice already appear in `notices`.
-const missingOf = (coverage: Coverage): readonly string[] => [
-  ...coverage.missing.map(describeElement),
-  ...coverage.invented.map(describeInvented),
-];
+type CoverageEntries = typeof VerdictCoverage.Encoded;
+
+// A walk element as the verdict lists it: its use site, its kind and the kind's value.
+const elementEntry = (element: WalkElement): CoverageEntries["missing"][number] => {
+  const site = { document: element.document, pointer: element.pointer };
+
+  if (element.kind === "parameter") {
+    return { ...site, in: element.in, kind: element.kind, name: element.name };
+  }
+
+  if (element.kind === "requestMedia") {
+    return { ...site, kind: element.kind, mediaType: element.mediaType };
+  }
+
+  if (element.kind === "response") {
+    return { ...site, key: element.key, kind: element.kind };
+  }
+
+  if (element.kind === "securityAlternative") {
+    return { ...site, kind: element.kind, schemes: element.schemes };
+  }
+
+  return element.kind === "server"
+    ? { ...site, kind: element.kind, url: element.url }
+    : { ...site, kind: element.kind };
+};
+
+// A claim as the verdict lists it: its kind, the command's path and the value.
+const inventedEntry = (invented: Invented): CoverageEntries["invented"][number] => {
+  const { path } = invented;
+
+  if (invented.kind === "requestMedia") {
+    return { kind: invented.kind, mediaType: invented.mediaType, path };
+  }
+
+  if (invented.kind === "response") {
+    return { key: invented.key, kind: invented.kind, path };
+  }
+
+  if (invented.kind === "securityAlternative") {
+    return { kind: invented.kind, path, schemes: invented.schemes };
+  }
+
+  return invented.kind === "server"
+    ? { kind: invented.kind, path, url: invented.url }
+    : { kind: invented.kind, path };
+};
+
+const decodeCoverage = Schema.decodeEffect(VerdictCoverage);
+
+// The verdict's coverage (design 8.2): each list typed, none of them text.
+const coverageEntries = (coverage: Coverage) =>
+  decodeCoverage({
+    byNotice: coverage.byNotice.map(elementEntry),
+    checked: true,
+    invented: coverage.invented.map(inventedEntry),
+    missing: coverage.missing.map(elementEntry),
+  });
+
+type CommandNameValue = GenerationReportValue["commandNames"][number];
+
+// `tag` and `none` name groups only; a command carrying one is a generator bug the run reports.
+const commandSourced = (
+  name: CommandNameValue,
+): name is CommandNameValue & { readonly command: CommandNameSource } =>
+  name.command !== "tag" && name.command !== "none";
 
 /**
  * The causes a coverage join reports, one line each naming the spec id and the element: what
@@ -338,12 +400,15 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
       total,
     };
 
+    const { commandNames, nonStandard } = generated.report;
     const verdict = makeVerdict({
+      commandNames: commandNames.filter(commandSourced),
       corpusVersion,
-      coverage: { checked: true, missing: missingOf(coverage) },
+      coverage: yield* coverageEntries(coverage),
       diagnostics: generated.diagnostics,
       generator: { config: configName, configSha256: sha256Hex(configBytes), version },
       informational,
+      nonStandard,
       operations,
       spec: { id: entry.id, openapi: openapi.openapi, sha256: entry.sha256 },
       twinEquality: { checked: twin.checked, equal: twin.checked && twin.differing.length === 0 },
@@ -354,6 +419,9 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
       other: [
         ...(verdict.verdict === "refused" ? [`${entry.id}: verdict is refused`] : []),
         ...twin.differing.map((file) => `${entry.id}: YAML twin differs at ${file}`),
+        ...commandNames
+          .filter((name) => !commandSourced(name))
+          .map((name) => `${entry.id}: command ${name.path.join(" ")} has a group name source`),
       ],
     };
     const summary = [
