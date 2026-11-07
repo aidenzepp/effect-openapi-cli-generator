@@ -326,13 +326,23 @@ const isScalar = (value: string): value is Scalar => scalarKinds.has(value);
 
 const isBareSchema = (schema: SchemaNode): boolean => Object.keys(schema).length === 0;
 
+const identityEncodings: ReadonlySet<string> = new Set(["7bit", "8bit", "binary"]);
+
+// A `contentEncoding` that sends the bytes as they are: `binary`, `7bit` or `8bit`, any case.
+const isIdentityEncoding = (value: Schema.Json | undefined): boolean =>
+  Predicate.isString(value) && identityEncodings.has(value.toLowerCase());
+
 /**
- * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, or 3.1+ `contentMediaType`
- * without a `contentEncoding`, or a schema with no keyword at all. `format: byte`, any
- * `contentEncoding` and any other type are text.
+ * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, a string whose
+ * `contentEncoding` is an identity encoding (`binary`, `7bit`, `8bit`, any case), or 3.1+
+ * `contentMediaType` without a `contentEncoding`, or a schema with no keyword at all.
+ * `format: byte`, any other `contentEncoding` and any other type are text.
  */
 const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
-  if (type === "string" && schema.format === "binary") {
+  if (
+    type === "string" &&
+    (schema.format === "binary" || isIdentityEncoding(schema.contentEncoding))
+  ) {
     return true;
   }
 

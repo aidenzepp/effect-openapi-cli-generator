@@ -401,6 +401,25 @@ describe("flattenBody: multipart and xml", () => {
     ]);
   });
 
+  test.each(["binary", "7bit", "8bit", "BINARY", "7Bit", "8BIT"])(
+    "a string part with identity contentEncoding %s is a file part sent as raw bytes",
+    (contentEncoding) => {
+      const flattened = run(
+        { Root: object({ doc: { contentEncoding, type: "string" } }) },
+        "multipart",
+      );
+      expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "file"]]);
+    },
+  );
+
+  test("a part with any other contentEncoding stays text", () => {
+    const flattened = run(
+      { Root: object({ doc: { contentEncoding: "quoted-printable", type: "string" } }) },
+      "multipart",
+    );
+    expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "string"]]);
+  });
+
   test("a part whose Encoding rule is base64 is a file part; the rule decides, not the schema", () => {
     const defs = {
       Root: object({
