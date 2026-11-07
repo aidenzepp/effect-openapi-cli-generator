@@ -135,6 +135,10 @@ interface Record {
   readonly scope: "document" | "element" | "operation";
 }
 
+interface Notice extends Record {
+  readonly code: string;
+}
+
 // Only the report fields the checker reads.
 const decodeReport = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -146,15 +150,17 @@ const decodeReport = Schema.decodeUnknownSync(
   ),
 );
 
-// The golden report with records appended, named by the entry URI as the generator names them.
+// Report records named by the entry URI as the generator names them.
+const named = <R extends Record>(list: readonly R[] = []) =>
+  list.map((record) => ({ ...record, document: entry }));
+
+// The golden report with records appended.
 const withRecords = (records: {
-  readonly notices?: readonly Record[];
+  readonly notices?: readonly Notice[];
   readonly refusals?: readonly Record[];
   readonly skipped?: readonly string[];
 }): string => {
   const report = decodeReport(goldenRun().report);
-  const named = (list: readonly Record[] = []) =>
-    list.map((record) => ({ ...record, document: entry }));
   const skipped = (records.skipped ?? []).map((pointer) => ({
     document: entry,
     pointer,
@@ -173,6 +179,9 @@ const coverage = (describeText: string, report: string = goldenRun().report): Co
 
 const pointers = (result: Coverage): readonly string[] =>
   result.missing.map((element) => element.pointer);
+
+const at = (elements: Coverage["missing"]): readonly string[] =>
+  elements.map((element) => element.pointer);
 
 describe("coverage check", () => {
   test("the golden spec passes: every walked element is in --describe or the report", () => {
@@ -358,7 +367,7 @@ describe("coverage check", () => {
         ...command,
         flags: command.flags.filter((flag) => flag.pointer !== header),
       })),
-      withRecords({ notices: [{ pointer: header, scope: "element" }] }),
+      withRecords({ notices: [{ code: "PAR-01/test", pointer: header, scope: "element" }] }),
     );
 
     expect(result.missing).toEqual([]);
@@ -368,7 +377,7 @@ describe("coverage check", () => {
   test("a notice at an operation pointer does not cover a dropped command or its subtree", () => {
     const result = coverage(
       dropCommand(update),
-      withRecords({ notices: [{ pointer: update, scope: "operation" }] }),
+      withRecords({ notices: [{ code: "OPR-01/test", pointer: update, scope: "operation" }] }),
     );
 
     expect(pointers(result)).toContain(update);
@@ -410,9 +419,14 @@ const command = (fields: Partial<Command>): Command => ({
   ...fields,
 });
 
-const joinSpec = (spec: Json, commands: readonly Command[], report?: Json): Coverage =>
+const joinSpec = (
+  spec: Json,
+  commands: readonly Command[],
+  report?: Json,
+  line: "3.0" | "3.1" = "3.1",
+): Coverage =>
   Effect.runSync(
-    resolve({ document: entry, line: "3.1", value: spec }).pipe(
+    resolve({ document: entry, line, value: spec }).pipe(
       Effect.flatMap((resolution) =>
         coverageOf({
           describe: encodeDescription({ commands, describeVersion: 1 }),
@@ -480,6 +494,35 @@ describe("coverage join without a build", () => {
         command({ method: "POST", pointer: "/paths/~1a/post" }),
       ]).missing.map((element) => element.pointer),
     ).toEqual(["/paths/~1a/parameters/0"]);
+  });
+
+  test("an OPR-10/body-ignored notice credits the media below its request body, other codes only their pointer", () => {
+    const spec: Json = {
+      ...bare,
+      openapi: "3.0.0",
+      paths: {
+        "/a": {
+          get: {
+            requestBody: {
+              content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const body = "/paths/~1a/get/requestBody";
+    const media = `${body}/content/application~1x-www-form-urlencoded`;
+    const noticeAt = (code: string) => ({
+      notices: [{ code, document: entry, pointer: body, scope: "element" }],
+      refusals: [],
+    });
+    const join = (report?: Json) => joinSpec(spec, [command({})], report, "3.0");
+
+    expect(at(join().missing)).toEqual([media]);
+    expect(at(join(noticeAt("OPR-10/body-ignored")).missing)).toEqual([]);
+    expect(at(join(noticeAt("OPR-10/body-ignored")).byNotice)).toEqual([media]);
+    expect(at(join(noticeAt("OPR-10/body-refused")).missing)).toEqual([media]);
   });
 
   test("skipping an operation leaves root servers and security carried by the emitted commands", () => {
