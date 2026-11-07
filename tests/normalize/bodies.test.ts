@@ -10,6 +10,7 @@ import {
   normalizeBody,
 } from "../../src/normalize/bodies.ts";
 import type { BodyOutcome } from "../../src/normalize/bodies.ts";
+import { deepObjectExplodeText } from "../../src/normalize/parameters.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
@@ -1089,5 +1090,46 @@ describe("DSC-01 DSC-07 DSC-09 DSC-11 the discriminator hint", () => {
 
   test("a body with no discriminator has no hint", () => {
     expect(hintOf("3.1", { oneOf: [schemaRef("Cat"), schemaRef("Dog")] }).hint).toBeUndefined();
+  });
+});
+
+const deepForm = (encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding: { a: encoding },
+      schema: object({ a: object({ x: string }) }),
+    },
+  },
+});
+
+describe("ENC-12 a form deepObject with explode false or omitted is exploded with the STY-26 notice", () => {
+  const encodingAt =
+    "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a";
+
+  for (const line of ["3.0", "3.1"] as const) {
+    for (const [label, encoding] of [
+      ["omitted", { style: "deepObject" }],
+      ["false", { explode: false, style: "deepObject" }],
+    ] as const) {
+      test(`ENC-12 ${line} explode ${label}: one notice at the Encoding entry, sharing the STY-26 text`, () => {
+        const outcome = implemented(line, deepForm(encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe("ENC-12/explode-no-effect");
+        expect(diagnostic.severity).toBe("notice");
+        expect(String(diagnostic.pointer)).toBe(encodingAt);
+        expect(diagnostic.message).toBe(deepObjectExplodeText);
+        expect(plain(diagnostic.specSection)).toBe(
+          `https://spec.openapis.org/oas/v${specVersion[line]}.html#encoding-explode`,
+        );
+        expect(only(only(outcome.body.alternatives).encoding).serialization).toEqual(encoding);
+      });
+    }
+  }
+
+  test("ENC-12 explode true on 3.0 and 3.1, and any explode on 3.2, raise no notice", () => {
+    expect(codes(implemented("3.0", deepForm({ explode: true, style: "deepObject" })))).toEqual([]);
+    expect(codes(implemented("3.1", deepForm({ explode: true, style: "deepObject" })))).toEqual([]);
+    expect(codes(implemented("3.2", deepForm({ style: "deepObject" })))).toEqual([]);
   });
 });

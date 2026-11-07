@@ -15,6 +15,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { deepObjectExplodeText } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
@@ -1725,6 +1726,25 @@ const bracketChoice = (input: RuleInput): Finding =>
     input.actual,
   );
 
+// ENC-12 (design D-OC14): a 3.0 or 3.1 form deepObject with explode false or omitted is exploded,
+// as STY-26 is for a parameter, with that row's notice text.
+const deepObjectExplode = (
+  line: Line,
+  serialization: PlainSerialization | undefined,
+  actual: CanonicalKey,
+): readonly Finding[] =>
+  line !== "3.2" && serialization?.style === "deepObject" && serialization.explode !== true
+    ? [
+        notice(
+          "ENC-12/explode-no-effect",
+          "encoding-explode",
+          "Encoding deepObject explode",
+          deepObjectExplodeText,
+          actual,
+        ),
+      ]
+    : [];
+
 // What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
 // bracket convention (the author config's switch, never defaulted or inferred).
 const deepObjectOf = (
@@ -1796,6 +1816,7 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       findings: [
         ...typing.findings,
         ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
         ...formIgnored(node, input.actual),
       ],
       rule,
