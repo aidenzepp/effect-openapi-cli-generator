@@ -41,11 +41,22 @@ const run = (root: string, ...args: string[]) => {
     stdout: "pipe",
   });
 
+  const output = result.stdout.toString().split("\n").filter(Boolean);
+
   return {
     code: result.exitCode,
-    lines: result.stdout.toString().split("\n").filter(Boolean),
+    lines: output.filter((line) => !line.startsWith("total ")),
+    totals: output.filter((line) => line.startsWith("total ")),
   };
 };
+
+/**
+ * The seven totals lines, in the tool's fixed order, from per-status counts.
+ */
+const totals = (counts: Readonly<Record<string, number>>) =>
+  ["covered", "partial", "todo", "missing", "informational", "deferred", "delegated"].map(
+    (status) => `total ${status} ${counts[status] ?? 0}`,
+  );
 
 /**
  * Write a mini tree and run the tool over it through `--root`.
@@ -396,5 +407,88 @@ describe("inventory-trace delegated rows", () => {
     );
 
     expect(lines).toEqual(["ZZZ-01 covered"]);
+  });
+});
+
+describe("inventory-trace totals", () => {
+  const tree = {
+    deferred: [
+      { deferred: "response", milestone2: "request", row: "MED-03" },
+      { deferred: "whole", row: "OAF-01" },
+    ],
+    rows: [
+      { id: "ZZZ-01" },
+      { id: "ZZZ-02" },
+      { id: "ZZZ-03" },
+      { coveredBy: ["ZZZ-02"], id: "ZZZ-04" },
+      { id: "ZZZ-05" },
+      { disposition: "informational" as const, id: "INF-01" },
+      { id: "OAF-01" },
+      { id: "MED-03" },
+      { id: "RSP-04" },
+    ],
+    split: [...split, { halves: ["request", "response"], row: "RSP-04" }],
+    tests: {
+      "a.test.ts": [
+        titled("ZZZ-01: x", "ZZZ-05: y", "MED-03 (request): z", "RSP-04 (request): w"),
+        todo("ZZZ-02: x"),
+        todo("ZZZ-05: z"),
+      ].join("\n"),
+    },
+  };
+
+  test("totals follow the row lines, one per status, counting a split row once by its worst half", () => {
+    const { lines, totals: printed } = trace(tree);
+
+    expect(lines).toEqual([
+      "ZZZ-01 covered",
+      "ZZZ-02 todo",
+      "ZZZ-03 missing",
+      "ZZZ-04 delegated",
+      "ZZZ-05 partial (1 passing, 1 todo)",
+      "INF-01 informational",
+      "OAF-01 deferred",
+      "MED-03 (request) covered",
+      "MED-03 (response) deferred",
+      "RSP-04 (request) covered",
+      "RSP-04 (response) missing",
+    ]);
+    expect(printed).toEqual(
+      totals({
+        covered: 1,
+        deferred: 2,
+        delegated: 1,
+        informational: 1,
+        missing: 2,
+        partial: 1,
+        todo: 1,
+      }),
+    );
+  });
+
+  test("--check prints the same totals and keeps its exit status", () => {
+    const strict = trace(tree, "--check");
+    const lenient = trace(
+      { ...tree, rows: tree.rows.filter((r) => r.id !== "ZZZ-03" && r.id !== "RSP-04") },
+      "--check",
+      "--allow-todo",
+    );
+
+    expect(strict.totals).toEqual(trace(tree).totals);
+    expect(strict.code).toBe(1);
+    expect(lenient.totals).toEqual(
+      totals({ covered: 1, deferred: 2, delegated: 1, informational: 1, partial: 1, todo: 1 }),
+    );
+    expect(lenient.code).toBe(0);
+  });
+
+  test("--only totals count only the matching rows", () => {
+    expect(trace(tree, "--only", "^(ZZZ-0[12]|MED-03)$").totals).toEqual(
+      totals({ covered: 1, deferred: 1, todo: 1 }),
+    );
+  });
+
+  test("an empty selection prints every total as zero", () => {
+    expect(trace(tree, "--only", "^NONE-01$").totals).toEqual(totals({}));
   });
 });
