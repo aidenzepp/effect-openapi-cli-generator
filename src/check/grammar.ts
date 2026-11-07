@@ -40,6 +40,24 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
+  "DSC-05/no-composition": {
+    anchor: "discriminator-object",
+    element: "Discriminator",
+    hint: "Put the discriminator beside oneOf or anyOf, or on a base schema that allOf children reference.",
+    message:
+      "A discriminator is legal only with oneOf, anyOf or allOf, and this schema uses none. The discriminator is not used.",
+    scope: "element",
+    severity: "refusal",
+  },
+  "DSC-05/unlisted-branch": {
+    anchor: "discriminator-object",
+    element: "Discriminator mapping",
+    hint: "Map every oneOf or anyOf branch, by component name or reference.",
+    message:
+      "The discriminator mapping leaves a oneOf or anyOf branch unlisted. The discriminator is not used.",
+    scope: "element",
+    severity: "refusal",
+  },
   "DSC-09/property-not-required": {
     anchor: "discriminator-object",
     element: "Discriminator propertyName",
@@ -308,10 +326,12 @@ const at =
   (code: Code, pointer: string) =>
   (extra: Partial<Finding> = {}): Finding => ({ code, pointer, ...extra });
 
-// A discriminator mapping value: a component schema name first, else a reference into the set.
-const mappingResolves = (resolution: Resolution, value: string): boolean => {
-  if (isObject(nodeAt(resolution.value, `/components/schemas/${escapeToken(value)}`))) {
-    return true;
+// A discriminator mapping value's schema in the entry document, as a pointer: a component schema
+// name first, else a reference into the set.
+const mappingTarget = (resolution: Resolution, value: string): string | undefined => {
+  const named = `/components/schemas/${escapeToken(value)}`;
+  if (isObject(nodeAt(resolution.value, named))) {
+    return named;
   }
 
   const resolved = resolveUri(value, resolution.base);
@@ -324,7 +344,34 @@ const mappingResolves = (resolution: Resolution, value: string): boolean => {
       ? undefined
       : fragmentPointer(resolved.slice(hash + 1));
 
-  return pointer !== undefined && isObject(nodeAt(resolution.value, pointer));
+  return pointer !== undefined && isObject(nodeAt(resolution.value, pointer)) ? pointer : undefined;
+};
+
+const mappingResolves = (resolution: Resolution, value: string): boolean =>
+  mappingTarget(resolution, value) !== undefined;
+
+// The schema a site ends at, through its reference chain, as a map key.
+const endOf = (resolution: Resolution, site: CanonicalKey): string =>
+  keyOf(resolution.references.get(keyOf(site))?.target ?? site);
+
+// The schemas some allOf member references: the base schemas of the allOf discriminator pattern,
+// where the discriminator sits on the base and the children reference it (DSC-05, DSC-11).
+const allOfBases = new WeakMap<Resolution, ReadonlySet<string>>();
+
+const allOfBasesOf = (resolution: Resolution): ReadonlySet<string> => {
+  const known = allOfBases.get(resolution);
+  if (known !== undefined) {
+    return known;
+  }
+
+  const bases = new Set(
+    [...resolution.references.values()].flatMap((reference) =>
+      /\/allOf\/\d+$/u.test(reference.site.pointer) ? [keyOf(reference.target)] : [],
+    ),
+  );
+  allOfBases.set(resolution, bases);
+
+  return bases;
 };
 
 // One checkGrammar call's walk through allOf, oneOf and anyOf: answers already settled, the
@@ -451,12 +498,53 @@ const requiresAt = (
 const requires = (resolution: Resolution, place: Place, name: string): boolean =>
   requiresAt(resolution, searchOf(resolution), place, name, 0).found;
 
+const composes = (node: JsonObject): boolean =>
+  ["allOf", "anyOf", "oneOf"].some((keyword) => listOf(node[keyword]).length > 0);
+
+// DSC-05: with an explicit mapping, every oneOf and anyOf branch is a mapping or defaultMapping
+// target. An inline branch cannot be one; an unresolved reference is reported where it sits.
+const unlistedBranch = (
+  resolution: Resolution,
+  place: Place,
+  discriminator: JsonObject,
+): boolean => {
+  const values = [
+    ...entriesOf(discriminator.mapping).map(([, value]) => value),
+    ...(resolution.line === "3.2" ? [discriminator.defaultMapping] : []),
+  ];
+  const listed = new Set(
+    values.flatMap((value) => {
+      const pointer = Predicate.isString(value) ? mappingTarget(resolution, value) : undefined;
+
+      return pointer === undefined ? [] : [endOf(resolution, entrySite(resolution, pointer))];
+    }),
+  );
+
+  return ["oneOf", "anyOf"].some((keyword) =>
+    listOf(place.node[keyword]).some((member, index) => {
+      const site = {
+        document: place.document,
+        pointer: childPointer(childPointer(place.pointer, keyword), String(index)),
+      };
+      const unresolved =
+        isObject(member) && isReference(member) && !resolution.references.has(keyOf(site));
+
+      return !unresolved && !listed.has(endOf(resolution, site));
+    }),
+  );
+};
+
 const discriminatorFindings = (
   resolution: Resolution,
   place: Place,
   discriminator: JsonObject,
 ): readonly Finding[] => {
   const base = childPointer(place.pointer, "discriminator");
+  const self = keyOf({ document: place.document, pointer: place.pointer });
+  if (!composes(place.node) && !allOfBasesOf(resolution).has(self)) {
+    return [at("DSC-05/no-composition", base)()];
+  }
+
   const name = stringMember(discriminator, "propertyName");
   const required = name !== undefined && requires(resolution, place, name);
   const defaultMapping = stringMember(discriminator, "defaultMapping");
@@ -479,8 +567,12 @@ const discriminatorFindings = (
     !mappingResolves(resolution, defaultMapping)
       ? [at("DSC-04/unresolved-target", childPointer(base, "defaultMapping"))()]
       : [];
+  const unlisted =
+    entriesOf(discriminator.mapping).length > 0 && unlistedBranch(resolution, place, discriminator)
+      ? [at("DSC-05/unlisted-branch", base)()]
+      : [];
 
-  return [...property, ...optional, ...mapped, ...fallback];
+  return [...property, ...optional, ...mapped, ...unlisted, ...fallback];
 };
 
 const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Finding[] => {
