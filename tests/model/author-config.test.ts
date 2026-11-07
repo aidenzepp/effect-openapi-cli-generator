@@ -207,6 +207,35 @@ describe("decodeAuthorConfig", () => {
     ]);
   });
 
+  test("a body field flag rename keyed by its body pointer decodes", () => {
+    const fields = { "/foo_bar": { flag: "foo-bar-raw" }, "/meta/name": { flag: "meta.label" } };
+    const input = { ...sample, naming: { operations: { "things-make": { fields } } } };
+
+    expect(encode(input)).toEqual(input);
+  });
+
+  test("a body field key that is not a pointer is refused at its config pointer", () => {
+    for (const key of ["foo_bar", "", "/a~2b"]) {
+      const naming = { operations: { make: { fields: { [key]: { flag: "foo" } } } } };
+      const found = refusals({ ...sample, naming });
+
+      expect(found.map((d) => `${d.pointer}|${d.code}|${d.scope}`)).toEqual([
+        `/naming/operations/make/fields/${key.replaceAll("~", "~0").replaceAll("/", "~1")}|CFG-1/invalid-field-pointer|document`,
+      ]);
+      expect(found[0]?.message).toContain("RFC 6901");
+    }
+  });
+
+  test("a body field flag that is not a flag name is refused at its config pointer", () => {
+    for (const flag of ["", "Foo", "foo bar", "--foo", "foo-", "1foo", "foo..bar", "foo_bar"]) {
+      const naming = { byPointer: { "/paths/~1x/post": { fields: { "/x": { flag } } } } };
+
+      expect(keys({ ...sample, naming })).toEqual([
+        "/naming/byPointer/~1paths~1~01x~1post/fields/~1x/flag|CFG-1/invalid-field-flag",
+      ]);
+    }
+  });
+
   test("pointers escape slash and tilde in keys", () => {
     expect(keys({ ...sample, "a/b~c": 1 })).toEqual(["/a~1b~0c|CFG-1/unknown-key"]);
   });
