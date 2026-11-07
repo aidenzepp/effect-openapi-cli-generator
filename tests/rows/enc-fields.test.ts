@@ -18,7 +18,9 @@ import type { GeneratedPackage } from "../support/generated-cli.ts";
 // from `contentType`, part headers, `style`, `explode` and `allowReserved` on form and multipart
 // bodies, and 3.2 nested encoding. One generated package per version line, built once, run against
 // the capture server; the diagnostic rows call `generate()` in process. A row the product gets
-// wrong is a `test.todo` with what was observed.
+// wrong is a `test.todo` with what was observed. ENC-07, ENC-08, ENC-09 and ENC-16 are deferred to
+// Milestone 3; the M2 refusal tests pin today's refusal of nested multipart/mixed parts until
+// M3-MP2 and M3-MP3 replace them.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -303,6 +305,8 @@ const multipart = "multipart/form-data";
 const urlEncoded = "application/x-www-form-urlencoded";
 
 interface Generated {
+  // The emitted commands' paths; empty for a refused run.
+  readonly commands: readonly (readonly string[])[];
   readonly diagnostics: readonly Diagnostic[];
   /**
    * The generated package directory of a run that was not refused.
@@ -342,7 +346,11 @@ const inProcess = async (document: Members): Promise<Generated> => {
     ).pipe(Effect.provide(layer)),
   );
   if (Exit.isSuccess(exit)) {
-    return { diagnostics: exit.value.diagnostics, out: nodePath.join(dir, "out") };
+    return {
+      commands: exit.value.report.commandNames.map((command) => command.path),
+      diagnostics: exit.value.diagnostics,
+      out: nodePath.join(dir, "out"),
+    };
   }
 
   const [failure] = exit.cause.reasons.flatMap((reason) =>
@@ -352,7 +360,7 @@ const inProcess = async (document: Members): Promise<Generated> => {
     throw new Error(`generate failed for a reason other than a refusal: ${String(exit.cause)}`);
   }
 
-  return { diagnostics: failure.diagnostics };
+  return { commands: [], diagnostics: failure.diagnostics };
 };
 
 // Each diagnostic as code, severity, scope, pointer, and the pointer of its first related entry
@@ -375,6 +383,24 @@ const string: Members = { type: "string" };
 const objectOf = (properties: Members): Members => ({ properties, type: "object" });
 
 const strings: Members = { items: string, type: "array" };
+
+const mixedPart = "multipart/mixed";
+
+// What a refused operation leaves: the one EMT-1 refusal, no command, and a CLI that never calls
+// the operation's request builder, so nothing can be sent for it.
+const refusedOperation = (found: Generated) => ({
+  builderCalled: nodeFs
+    .readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8")
+    .includes("postA"),
+  commands: found.commands,
+  diagnostics: summary(found),
+});
+
+const unsupportedBody = {
+  builderCalled: false,
+  commands: [],
+  diagnostics: [["EMT-1/unsupported-body", "refusal", "operation", "/paths/~1a/post", "undefined"]],
+};
 
 describe("ENC field rows through generate()", () => {
   for (const line of lines) {
@@ -635,17 +661,68 @@ describe("ENC field rows through generate()", () => {
     ]);
   });
 
-  test.todo("ENC-07: a multipart/mixed part with a nested encoding refuses the operation with EMT-1/unsupported-body vs nested parts sent by property name (3.2.1)", () =>
-    Promise.resolve());
+  // Milestone 3 (M3-MP2, M3-MP3) sends one level of nested multipart/mixed parts; until then the
+  // operation is refused, and these tests pin that refusal.
+  test("M2 refusal of ENC-07 (M3-MP2): a multipart/mixed part with a nested encoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, encoding: { x: {} } } },
+        schema: objectOf({ a: objectOf({ x: string }) }),
+      }),
+    );
 
-  test.todo("ENC-08: a multipart/mixed part with a nested prefixEncoding refuses the operation with EMT-1/unsupported-body vs nested parts sent by position (3.2.1)", () =>
-    Promise.resolve());
+    expect(refusedOperation(found)).toEqual(unsupportedBody);
+  });
 
-  test.todo("ENC-09: a multipart/mixed part with a nested itemEncoding is refused with ENC-09/nested-item-encoding at element scope vs each nested item part encoded by it (3.2.1)", () =>
-    Promise.resolve());
+  test("M2 refusal of ENC-08 (M3-MP3): a multipart/mixed part with a nested prefixEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, prefixEncoding: [{}] } },
+        schema: objectOf({ a: strings }),
+      }),
+    );
 
-  test.todo("ENC-16: one nested encoding level refuses the operation with EMT-1/unsupported-body vs one level sent as nested multipart/mixed parts (3.2.1)", () =>
-    Promise.resolve());
+    expect(refusedOperation(found)).toEqual(unsupportedBody);
+  });
+
+  test("M2 refusal of ENC-09 (M3-MP3): a multipart/mixed part with a nested itemEncoding is refused with ENC-09/nested-item-encoding at element scope (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, itemEncoding: {} } },
+        schema: objectOf({ a: strings }),
+      }),
+    );
+
+    expect(summary(found)).toEqual([
+      [
+        "ENC-09/nested-item-encoding",
+        "refusal",
+        "element",
+        multipartAt,
+        `${multipartAt}/encoding/a/itemEncoding`,
+      ],
+    ]);
+  });
+
+  test("M2 refusal of ENC-16 (M3-MP2): one nested encoding level refuses the operation with EMT-1/unsupported-body, by name and by position, so nothing is sent (3.2.1)", async () => {
+    const byName = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, encoding: { x: { contentType: mixedPart } } } },
+        schema: objectOf({ a: objectOf({ x: string }) }),
+      }),
+    );
+    const byPosition = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, prefixEncoding: [{ contentType: mixedPart }] } },
+        schema: objectOf({ a: strings }),
+      }),
+    );
+
+    expect([refusedOperation(byName), refusedOperation(byPosition)]).toEqual([
+      unsupportedBody,
+      unsupportedBody,
+    ]);
+  });
 
   test("ENC-16: encoding nested two levels deep is refused at element scope, by name and by position (3.2.1)", async () => {
     const mixed = "multipart/mixed";

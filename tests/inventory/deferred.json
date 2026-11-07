@@ -2,6 +2,34 @@
   {
     "deferred": "whole",
     "milestone": 3,
+    "owner": "M3-MP2",
+    "reason": "3.2 nested multipart encoding, one level, by name and by position (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses such a body (EMT-1/unsupported-body; a nested itemEncoding as ENC-09/nested-item-encoding)",
+    "row": "ENC-07"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP3",
+    "reason": "3.2 nested multipart encoding, one level, by name and by position (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses such a body (EMT-1/unsupported-body; a nested itemEncoding as ENC-09/nested-item-encoding)",
+    "row": "ENC-08"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP3",
+    "reason": "3.2 nested multipart encoding, one level, by name and by position (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses such a body (EMT-1/unsupported-body; a nested itemEncoding as ENC-09/nested-item-encoding)",
+    "row": "ENC-09"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP2",
+    "reason": "3.2 nested multipart encoding, one level, by name and by position (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses such a body (EMT-1/unsupported-body; a nested itemEncoding as ENC-09/nested-item-encoding)",
+    "row": "ENC-16"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
     "owner": "M3-PW1, M3-PW2, M3-WS6",
     "reason": "the value redacted in echo, diagnostics and logs (design §7.5, R4)",
     "row": "FMT-05"
@@ -13,6 +41,27 @@
     "owner": "M3-SQ3, M3-WS1",
     "reason": "items split and emitted one JSON value per line. The req-test half (streamed sequential upload) is Milestone 2's: SU-1, witnessed by WT-BODY as `MED-03 (request): …`",
     "row": "MED-03"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP1",
+    "reason": "3.2 positional multipart/mixed request bodies (prefixEncoding, itemEncoding), one ordered --part flag (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses the operation with EMT-1/unsupported-body",
+    "row": "MED-07"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP1",
+    "reason": "3.2 positional multipart/mixed request bodies (prefixEncoding, itemEncoding), one ordered --part flag (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses the operation with EMT-1/unsupported-body",
+    "row": "MED-08"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP1",
+    "reason": "3.2 positional multipart/mixed request bodies (prefixEncoding, itemEncoding), one ordered --part flag (design §6.3); sequenced to Milestone 3 by the operator (mail 10a031f3; D-AD18 stands). Milestone 2 refuses the operation with EMT-1/unsupported-body",
+    "row": "MED-15"
   },
   {
     "deferred": "whole",
@@ -48,6 +97,13 @@
     "owner": "M3-SQ1, M3-SQ2, M3-SQ3, M3-WS1",
     "reason": "sequential output (NDJSON, JSON-seq, SSE) through runtime/sequential.ts",
     "row": "MED-20"
+  },
+  {
+    "deferred": "whole",
+    "milestone": 3,
+    "owner": "M3-MP1",
+    "reason": "3.2 fixed part order for multipart bodies (array schema or itemSchema; multipart/form-data as an array of name/value objects) (design §6.3); sequenced to Milestone 3 by the operator (decision d5ef783f; D-AD18 stands). Milestone 2 refuses a multipart/form-data array body with MED-26/array-form-data at element scope",
+    "row": "MED-26"
   },
   {
     "deferred": "whole",
