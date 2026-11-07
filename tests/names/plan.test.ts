@@ -912,6 +912,28 @@ describe("planNames: root module reservations", () => {
   });
 });
 
+describe("planNames: package import reservations", () => {
+  test("groups that fold to a name a cli module imports take a suffixed namespace", () => {
+    const tags = ["effect", "groups", "layer", "schema", "users"];
+    const result = plan({
+      operations: tags.map((tag) => ({
+        method: "GET",
+        operationId: `list-${tag}`,
+        path: `/${tag}`,
+        tags: [tag],
+      })),
+    });
+
+    expect(result.groups.map((group) => [group.name, String(group.namespace)])).toEqual([
+      ["effect", "Effect2"],
+      ["groups", "Groups2"],
+      ["layer", "Layer2"],
+      ["schema", "Schema2"],
+      ["users", "Users"],
+    ]);
+  });
+});
+
 const imports = (commands: readonly PlannedCommand[], domain: NamePlan["domain"]) =>
   commands.flatMap((command) =>
     (command.operation.body?.alternatives ?? []).flatMap((alternative) => {

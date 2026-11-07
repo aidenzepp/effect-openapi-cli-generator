@@ -12,7 +12,9 @@ import { runtimeFiles } from "../../src/emit/runtime-files.generated.ts";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Server } from "../../src/model/entities.ts";
+import { packageImports, rootNamespaceImports, runtimeNamespaces } from "../../src/names/domain.ts";
 import { planNames } from "../../src/names/index.ts";
+import { reservedCliNames } from "../../src/names/reserved.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
 import { resolve } from "../../src/resolve/index.ts";
@@ -97,21 +99,54 @@ const planned = (value: Schema.Json) =>
     return { api, config, plan: yield* planNames(api, { config, configDocument, strict: false }) };
   });
 
-const emitted = Effect.gen(function* emit() {
-  const { api, config, plan } = yield* planned(spec);
-  const context = { config, configDocument, document, openapi: api.openapi };
-  const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
-  const apiFiles = yield* emitApi({ api, boundOrigins: bound, plan });
-  const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
-  const scaffold = yield* emitPackageFiles(config, generator);
+const emittedFor = (value: Schema.Json) =>
+  Effect.gen(function* emit() {
+    const { api, config, plan } = yield* planned(value);
+    const context = { config, configDocument, document, openapi: api.openapi };
+    const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
+    const apiFiles = yield* emitApi({ api, boundOrigins: bound, plan });
+    const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
+    const scaffold = yield* emitPackageFiles(config, generator);
 
-  return { apiFiles, cli, plan, scaffold };
-});
+    return { apiFiles, cli, plan, scaffold };
+  });
+
+type Emitted = Effect.Success<ReturnType<typeof emittedFor>>;
+
+const emitted = emittedFor(spec);
 
 const run = () => Effect.runPromise(emitted);
 
 const contentOf = (files: readonly EmittedFile[], path: string): string =>
   files.find((file) => file.path === path)?.content ?? "";
+
+// Writes the emitted api and cli modules, the runtime and the scaffold's tsconfig under scratch
+// and runs tsc over them.
+const typecheck = ({ apiFiles, cli, scaffold }: Emitted) => {
+  const files: readonly EmittedFile[] = [
+    ...apiFiles,
+    ...cli.files,
+    ...Object.entries(runtimeFiles).map(([key, content]) => ({ content, path: `src/${key}` })),
+  ];
+  const tsconfig = contentOf(scaffold, "tsconfig.json");
+
+  nodeFs.rmSync(scratch, { force: true, recursive: true });
+  nodeFs.mkdirSync(scratch, { recursive: true });
+  nodeFs.writeFileSync(nodePath.join(scratch, "tsconfig.json"), tsconfig);
+  nodeFs.symlinkSync(nodePath.join(root, "node_modules"), nodePath.join(scratch, "node_modules"));
+  for (const file of files) {
+    const target = nodePath.join(scratch, ...file.path.split("/"));
+    nodeFs.mkdirSync(nodePath.dirname(target), { recursive: true });
+    nodeFs.writeFileSync(target, file.content);
+  }
+
+  const result = Bun.spawnSync([tsc, "--noEmit", "-p", nodePath.join(scratch, "tsconfig.json")], {
+    cwd: scratch,
+  });
+  nodeFs.rmSync(scratch, { force: true, recursive: true });
+
+  return { result, tsconfig };
+};
 
 // Every `import * as <name> from "<from>"` line of a module.
 const namespaceImports = (content: string): readonly (readonly [string, string])[] =>
@@ -160,30 +195,70 @@ describe("api namespaces of groups that fold to one name", () => {
   });
 
   test("the emitted api and cli modules type-check", async () => {
-    const { apiFiles, cli, scaffold } = await run();
-    const files: readonly EmittedFile[] = [
-      ...apiFiles,
-      ...cli.files,
-      ...Object.entries(runtimeFiles).map(([key, content]) => ({ content, path: `src/${key}` })),
-    ];
-    const tsconfig = contentOf(scaffold, "tsconfig.json");
-    expect(tsconfig).not.toBe("");
+    const { result, tsconfig } = typecheck(await run());
 
-    nodeFs.rmSync(scratch, { force: true, recursive: true });
-    nodeFs.mkdirSync(scratch, { recursive: true });
-    nodeFs.writeFileSync(nodePath.join(scratch, "tsconfig.json"), tsconfig);
-    nodeFs.symlinkSync(nodePath.join(root, "node_modules"), nodePath.join(scratch, "node_modules"));
-    for (const file of files) {
-      const target = nodePath.join(scratch, ...file.path.split("/"));
-      nodeFs.mkdirSync(nodePath.dirname(target), { recursive: true });
-      nodeFs.writeFileSync(target, file.content);
+    expect(tsconfig).not.toBe("");
+    expect(new TextDecoder().decode(result.stdout)).toBe("");
+    expect(result.exitCode).toBe(0);
+  }, 120_000);
+});
+
+// Groups that fold to a name every cli module imports from a package (`Schema`, `Layer` from
+// `effect`) take a suffixed namespace, so no cli module binds the name twice.
+const importNamePaths = {
+  "/layer": {
+    get: { operationId: "getLayer", responses: ok, "x-fern-sdk-group-name": "layer" },
+  },
+  "/schema": {
+    get: { operationId: "getSchema", responses: ok, "x-fern-sdk-group-name": "schema" },
+  },
+};
+
+describe("api namespaces of groups that fold to a package import name", () => {
+  test("are suffixed and the cli modules emit", async () => {
+    const value = specOf(importNamePaths);
+    const { cli, plan } = await Effect.runPromise(emittedFor(value));
+
+    expect(
+      Object.fromEntries(plan.groups.map((group) => [group.name, String(group.namespace)])),
+    ).toEqual({
+      layer: "Layer2",
+      schema: "Schema2",
+    });
+    expect(cli.files.map((file) => file.path)).toContain("src/cli/schema.ts");
+  });
+});
+
+// Every name a cli module binds from an import it always writes (the package imports, the runtime
+// namespaces and the `cli/root.ts` namespaces) whose kebab form a group may take: `describe`,
+// `output` and `base-url` are reserved cli names, refused as group names before any fold.
+const kebab = (name: string): string => name.replaceAll(/(?<=[a-z])(?=[A-Z])/gu, "-").toLowerCase();
+
+const importNames = [...packageImports, ...runtimeNamespaces, ...rootNamespaceImports]
+  .map(([name]) => name)
+  .filter((name) => !reservedCliNames.has(kebab(name)));
+
+// One group per import name, its group name the kebab form that folds back to it.
+const everyImportNamePaths = Object.fromEntries(
+  importNames.map((name) => [
+    `/${kebab(name)}`,
+    { get: { operationId: `get${name}`, responses: ok, "x-fern-sdk-group-name": kebab(name) } },
+  ]),
+);
+
+describe("a group named after each import name", () => {
+  test("takes neither the name nor a Cli alias of one, and the modules type-check", async () => {
+    const emittedAll = await Effect.runPromise(emittedFor(specOf(everyImportNamePaths)));
+    const taken = new Set(importNames);
+    const namespaces = emittedAll.plan.groups.map((group) => String(group.namespace));
+
+    expect(namespaces).toHaveLength(importNames.length);
+    for (const namespace of namespaces) {
+      expect(taken.has(namespace)).toBe(false);
+      expect(taken.has(`${namespace}Cli`)).toBe(false);
     }
 
-    const result = Bun.spawnSync([tsc, "--noEmit", "-p", nodePath.join(scratch, "tsconfig.json")], {
-      cwd: scratch,
-    });
-    nodeFs.rmSync(scratch, { force: true, recursive: true });
-
+    const { result } = typecheck(emittedAll);
     expect(new TextDecoder().decode(result.stdout)).toBe("");
     expect(result.exitCode).toBe(0);
   }, 120_000);
