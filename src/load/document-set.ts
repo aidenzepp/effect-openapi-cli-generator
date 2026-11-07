@@ -2,6 +2,7 @@ import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "e
 import { pathToFileURL } from "node:url";
 import { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
+import { retrievalBase } from "../resolve/base-uri.ts";
 import {
   defaultLimits,
   LoadRefusal,
@@ -41,7 +42,7 @@ export interface DocumentSet {
 }
 
 /**
- * Most documents one set holds (design 3.3 budgets).
+ * Most documents one set holds, the entry included (design 3.3 budgets).
  */
 export const maxDocuments = 32;
 
@@ -113,19 +114,57 @@ const withPath = (refusal: LoadRefusal, path: string): LoadRefusal => {
   );
 };
 
+/**
+ * The members loaded so far and the entry's retrieval URI, when the caller names it.
+ */
+interface Loading {
+  readonly documents: Map<Document, SetMember>;
+  readonly entry: Document | undefined;
+}
+
+/**
+ * Whether `uri` names the resource `known` names, in the resolver's normal form, so that two
+ * spellings (scheme or host case, `./`, a fragment) of one retrieval URI are one document.
+ */
+const sameResource = (uri: string, known: string): boolean =>
+  retrievalBase(uri) === retrievalBase(known);
+
+/**
+ * `uri` collides with a member, or spells the entry's URI differently. A member under the entry's
+ * exact URI is left to `setMembers`, which accepts it only when it is the entry's own file.
+ */
+const isDuplicate = ({ documents, entry }: Loading, uri: Document): boolean =>
+  (entry !== undefined && uri !== entry && sameResource(uri, entry)) ||
+  [...documents.keys()].some((known) => sameResource(uri, known));
+
+/**
+ * Whether one more document under `uri` overflows the budget. The entry always holds a slot: its
+ * own when it is already a member, a reserved one otherwise. With no entry named, the slot is
+ * reserved anyway, so the set never exceeds the budget.
+ */
+const overflows = ({ documents, entry }: Loading, uri: string): boolean => {
+  const entrySlot = entry !== undefined && documents.has(entry) ? 0 : 1;
+
+  return uri !== entry && documents.size + entrySlot >= maxDocuments;
+};
+
 const loadPair = (
-  documents: ReadonlyMap<Document, SetMember>,
+  loading: Loading,
   pair: DocumentPair,
   verify?: VerifyOpened,
-): Effect.Effect<readonly [Document, SetMember], LoadRefusal, FileSystem.FileSystem> => {
+): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> => {
   const uri = decodeUri(pair.uri);
 
   if (uri._tag === "None") {
     return refuse("REF-16/relative-uri", pair);
   }
 
-  if (documents.has(uri.value)) {
+  if (isDuplicate(loading, uri.value)) {
     return duplicateUri(pair);
+  }
+
+  if (overflows(loading, uri.value)) {
+    return refuse("REF-16/document-limit", pair);
   }
 
   const read =
@@ -136,10 +175,15 @@ const loadPair = (
   return read.pipe(
     Effect.flatMap((bytes) =>
       loadBytes(bytes, { document: uri.value }).pipe(
-        Effect.map((loaded): readonly [Document, SetMember] => [
-          uri.value,
-          { ...loaded, path: pair.path, sha256: sha256Hex(bytes) },
-        ]),
+        Effect.flatMap((loaded) =>
+          Effect.sync(() => {
+            loading.documents.set(uri.value, {
+              ...loaded,
+              path: pair.path,
+              sha256: sha256Hex(bytes),
+            });
+          }),
+        ),
       ),
     ),
     Effect.mapError((refusal) => withPath(refusal, pair.path)),
@@ -147,6 +191,12 @@ const loadPair = (
 };
 
 export interface DocumentSetOptions {
+  /**
+   * The entry document's retrieval URI. It holds one slot of the budget, which a member under the
+   * same URI shares, and a member spelling it differently is a duplicate. Without it a slot is
+   * still reserved for the entry, so a `--ref-root` holding the entry admits one document fewer.
+   */
+  readonly entry?: Document;
   /**
    * A directory whose JSON and YAML files are preloaded (`--ref-root`, design 3.3, P10).
    */
@@ -209,22 +259,11 @@ const sameCheckedFile =
       return yield* same ? Effect.void : outsideRoot(real);
     }).pipe(Effect.provide(Path.layer));
 
-const preloadFile = (documents: Map<Document, SetMember>, realRoot: string, real: string) => {
-  const pair: DocumentPair = { path: real, uri: pathToFileURL(real).href };
-
-  return documents.size >= maxDocuments
-    ? refuse("REF-16/document-limit", pair)
-    : loadPair(documents, pair, sameCheckedFile(realRoot, real)).pipe(
-        Effect.flatMap(([uri, member]) =>
-          Effect.sync(() => {
-            documents.set(uri, member);
-          }),
-        ),
-      );
-};
+const preloadFile = (loading: Loading, realRoot: string, real: string) =>
+  loadPair(loading, { path: real, uri: pathToFileURL(real).href }, sameCheckedFile(realRoot, real));
 
 const preloadRoot = (
-  documents: Map<Document, SetMember>,
+  loading: Loading,
   root: string,
 ): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> =>
   Effect.gen(function* preload() {
@@ -269,7 +308,7 @@ const preloadRoot = (
 
         seenFiles.add(real);
 
-        return preloadFile(documents, realRoot, real);
+        return preloadFile(loading, realRoot, real);
       };
 
       /**
@@ -333,32 +372,25 @@ const preloadRoot = (
 /**
  * Loads every pair through the bounded loader, in order, then the files under `options.refRoot`
  * (sorted, each keyed by the `file:` URL of its real path), into a set keyed by retrieval URI. All
- * documents count toward one budget and share one duplicate check. The
- * first refusal ends the load; every refusal is a document-scope diagnostic whose `hint` is the
- * offending pair's path, never the file's content.
+ * documents, the entry included, count toward one budget of `maxDocuments` and share one duplicate
+ * check that compares retrieval URIs in normal form. The first refusal ends the load; every
+ * refusal is a document-scope diagnostic whose `hint` is the offending pair's path, never the
+ * file's content.
  */
 export const makeDocumentSet = (
   pairs: readonly DocumentPair[],
   options: DocumentSetOptions = {},
 ): Effect.Effect<DocumentSet, LoadRefusal, FileSystem.FileSystem> =>
   Effect.gen(function* load() {
-    const overflow = pairs[maxDocuments];
-
-    if (overflow !== undefined) {
-      return yield* refuse("REF-16/document-limit", overflow);
-    }
-
-    const documents = new Map<Document, SetMember>();
+    const loading: Loading = { documents: new Map(), entry: options.entry };
 
     for (const pair of pairs) {
-      const [uri, member] = yield* loadPair(documents, pair);
-
-      documents.set(uri, member);
+      yield* loadPair(loading, pair);
     }
 
     if (options.refRoot !== undefined) {
-      yield* preloadRoot(documents, options.refRoot);
+      yield* preloadRoot(loading, options.refRoot);
     }
 
-    return { documents };
+    return { documents: loading.documents };
   });

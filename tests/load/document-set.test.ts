@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { makeDocumentSet, maxDocuments } from "../../src/load/document-set.ts";
-import type { DocumentPair } from "../../src/load/document-set.ts";
+import type { DocumentPair, DocumentSetOptions } from "../../src/load/document-set.ts";
 
 const fixture = (name: string) =>
   path.join(import.meta.dir, "..", "fixtures", "document-set", "pairs", name);
@@ -19,10 +19,20 @@ const owner = fixture("owner.yaml");
 
 const hash = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
-const run = (pairs: readonly DocumentPair[]) =>
-  makeDocumentSet(pairs).pipe(Effect.provide(BunFileSystem.layer));
+const run = (pairs: readonly DocumentPair[], options: DocumentSetOptions = {}) =>
+  makeDocumentSet(pairs, options).pipe(Effect.provide(BunFileSystem.layer));
 
-const refusal = (pairs: readonly DocumentPair[]) => Effect.runPromise(Effect.flip(run(pairs)));
+const refusal = (pairs: readonly DocumentPair[], options: DocumentSetOptions = {}) =>
+  Effect.runPromise(Effect.flip(run(pairs, options)));
+
+/**
+ * `count` pairs over one file, each under its own retrieval URI.
+ */
+const numbered = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    path: pet,
+    uri: `https://example.com/doc-${index}.json`,
+  }));
 
 describe("document set: --document pairs", () => {
   test("two valid pairs load keyed by their retrieval URIs", async () => {
@@ -94,19 +104,50 @@ describe("document set: --document pairs", () => {
     expect(error.diagnostic.hint).toBe(owner);
   });
 
-  test("the 33rd document is refused and exactly 32 load", async () => {
-    const pairs = (count: number) =>
-      Array.from({ length: count }, (_, index) => ({
-        path: pet,
-        uri: `https://example.com/doc-${index}.json`,
-      }));
-    const set = await Effect.runPromise(run(pairs(maxDocuments)));
-    const error = await refusal(pairs(maxDocuments + 1));
+  test.each([
+    ["https://example.com/doc.json", "HTTPS://Example.COM/doc.json"],
+    ["https://example.com/a/doc.json", "https://example.com/a/./doc.json"],
+    ["https://example.com/doc.json", "https://example.com/doc.json#part"],
+  ])("%s then %s is refused as a duplicate naming the second path", async (first, second) => {
+    const error = await refusal([
+      { path: pet, uri: first },
+      { path: owner, uri: second },
+    ]);
 
-    expect(set.documents.size).toBe(32);
+    expect(error.diagnostic.code).toBe("REF-16/duplicate-uri");
+    expect(error.diagnostic.scope).toBe("document");
+    expect(error.diagnostic.hint).toBe(owner);
+  });
+
+  test("a pair spelling the entry's retrieval URI differently is refused naming its path", async () => {
+    const error = await refusal([{ path: pet, uri: "HTTPS://Example.com/entry.json" }], {
+      entry: uri("https://example.com/entry.json"),
+    });
+
+    expect(error.diagnostic.code).toBe("REF-16/duplicate-uri");
+    expect(error.diagnostic.hint).toBe(pet);
+  });
+
+  test.each([
+    ["no entry named", {}],
+    ["an entry outside the pairs", { entry: uri("https://example.com/entry.json") }],
+  ])("with %s, 31 pairs load and the 32nd is refused", async (_, options) => {
+    const set = await Effect.runPromise(run(numbered(maxDocuments - 1), options));
+    const error = await refusal(numbered(maxDocuments), options);
+
+    expect(set.documents.size).toBe(31);
     expect(error.diagnostic.code).toBe("REF-16/document-limit");
     expect(error.diagnostic.scope).toBe("document");
     expect(error.diagnostic.hint).toBe(pet);
+  });
+
+  test("a pair under the entry's own retrieval URI spends no second slot", async () => {
+    const entry = uri("https://example.com/doc-0.json");
+    const set = await Effect.runPromise(run(numbered(maxDocuments), { entry }));
+    const error = await refusal(numbered(maxDocuments + 1), { entry });
+
+    expect(set.documents.size).toBe(32);
+    expect(error.diagnostic.code).toBe("REF-16/document-limit");
   });
 
   test("a pair whose path is a symlink loads, keeping the pair's URI and path", async () => {

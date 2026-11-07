@@ -1,6 +1,6 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import { afterEach, describe, expect, test } from "bun:test";
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
@@ -22,7 +22,8 @@ import {
   maxWalkEntries,
   resolveUnderRoot,
 } from "../../src/load/document-set.ts";
-import type { DocumentPair } from "../../src/load/document-set.ts";
+import { DocumentUri } from "../../src/model/brands.ts";
+import type { DocumentPair, DocumentSetOptions } from "../../src/load/document-set.ts";
 
 const fixtures = path.join(import.meta.dir, "..", "fixtures", "document-set", "ref-root");
 
@@ -54,11 +55,26 @@ afterEach(() => {
   }
 });
 
-const run = (pairs: readonly DocumentPair[], refRoot: string) =>
-  makeDocumentSet(pairs, { refRoot }).pipe(Effect.provide(BunFileSystem.layer));
+const run = (
+  pairs: readonly DocumentPair[],
+  refRoot: string,
+  options: Omit<DocumentSetOptions, "refRoot"> = {},
+) => makeDocumentSet(pairs, { ...options, refRoot }).pipe(Effect.provide(BunFileSystem.layer));
 
-const refusal = (pairs: readonly DocumentPair[], refRoot: string) =>
-  Effect.runPromise(Effect.flip(run(pairs, refRoot)));
+const refusal = (
+  pairs: readonly DocumentPair[],
+  refRoot: string,
+  options: Omit<DocumentSetOptions, "refRoot"> = {},
+) => Effect.runPromise(Effect.flip(run(pairs, refRoot, options)));
+
+/**
+ * `count` pairs over one file outside the root, each under its own retrieval URI.
+ */
+const numbered = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    path: path.join(fixtures, "outside.json"),
+    uri: `https://example.com/doc-${index}.json`,
+  }));
 
 /**
  * The FileSystem with a hook that fires once, synchronously, the first time `target` is opened or
@@ -208,20 +224,38 @@ describe("document set: --ref-root", () => {
     ]);
   });
 
-  test("the budget counts both sources", async () => {
+  test("the budget counts both sources and the entry outside the root", async () => {
     const { root } = workspace();
-    const pet = path.join(fixtures, "outside.json");
-    const pairs = (count: number) =>
-      Array.from({ length: count }, (_, index) => ({
-        path: pet,
-        uri: `https://example.com/doc-${index}.json`,
-      }));
-    const fits = await Effect.runPromise(run(pairs(maxDocuments - 2), root));
-    const error = await refusal(pairs(maxDocuments - 1), root);
+    const fits = await Effect.runPromise(run(numbered(maxDocuments - 3), root));
+    const error = await refusal(numbered(maxDocuments - 2), root);
+
+    expect(fits.documents.size).toBe(maxDocuments - 1);
+    expect(error.diagnostic.code).toBe("REF-16/document-limit");
+    expect(error.diagnostic.scope).toBe("document");
+  });
+
+  test("an entry inside the root is one of the 32 documents, not a second slot", async () => {
+    const { root } = workspace();
+    const entry = Schema.decodeUnknownSync(DocumentUri)(
+      pathToFileURL(path.join(root, "a.json")).href,
+    );
+    const fits = await Effect.runPromise(run(numbered(maxDocuments - 2), root, { entry }));
+    const error = await refusal(numbered(maxDocuments - 1), root, { entry });
 
     expect(fits.documents.size).toBe(maxDocuments);
     expect(error.diagnostic.code).toBe("REF-16/document-limit");
-    expect(error.diagnostic.scope).toBe("document");
+  });
+
+  test("a --document URI spelling a preloaded file's URI differently is refused", async () => {
+    const { root } = workspace();
+    const spelled = pathToFileURL(path.join(root, "a.json")).href.replace(/^file:/u, "FILE:");
+    const error = await refusal(
+      [{ path: path.join(fixtures, "outside.json"), uri: spelled }],
+      root,
+    );
+
+    expect(error.diagnostic.code).toBe("REF-16/duplicate-uri");
+    expect(error.diagnostic.hint).toBe(realpathSync(path.join(root, "a.json")));
   });
 
   test("a --document URI equal to a preloaded file's URI is refused", async () => {
