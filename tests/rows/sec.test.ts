@@ -607,6 +607,29 @@ describe("SEC rows through generate()", () => {
     expect(requirement(found.root, "x")).toBe('[["headerKey"]];');
   }, 60_000);
 
+  test("SEC-10: a 3.2 Security Scheme component name that parses as a URI is refused by schema validation before resolve", async () => {
+    const uriName = "https://evil.example/s";
+    const found = await inProcess({
+      entry: {
+        ...members("3.2.1", { "/x": operation("x", [{ [uriName]: [] }, { headerKey: [] }]) }),
+        components: { securitySchemes: { headerKey: keyScheme, [uriName]: keyScheme } },
+      },
+      name: "openapi.json",
+    });
+
+    // Validation refuses the document, so resolve never sees the name and no SEC-10 code is raised.
+    expect(summary(found.diagnostics)).toEqual([
+      [
+        "VAL-04",
+        "VAL-04/schema-invalid",
+        "refusal",
+        "document",
+        "/components/securitySchemes/https:~1~1evil.example~1s",
+      ],
+    ]);
+    expect(found.commands).toEqual([]);
+  }, 60_000);
+
   test("SEC-12: a 3.0 non-OAuth requirement with values is refused at element scope at the name", async () => {
     const found = await fixture("3.0.4");
 
