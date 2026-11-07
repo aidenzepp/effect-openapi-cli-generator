@@ -225,6 +225,13 @@ describe("emitReadme", () => {
     expect(fenced(refusals)).toEqual(['GET "/gone"']);
   });
 
+  test("tells users to write a value that starts with a dash as --flag=-value", async () => {
+    const usage = section(emitReadme(await input()).content, "Usage");
+
+    expect(usage).toContain("Write a flag value that starts with `-` as `--flag=-value`");
+    expect(usage).toContain("no `-h` or `-v` short form");
+  });
+
   test("publishes the reserved CLI names in the usage section", async () => {
     const usage = section(emitReadme(await input()).content, "Usage");
 
