@@ -9,6 +9,7 @@ import { generate, GenerateRefused } from "../../src/generate.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import type { Json } from "../../src/model/pointer.ts";
+import { partOptions } from "../../src/runtime-src/runtime/input.ts";
 import { dispatchResponse } from "../../src/runtime-src/runtime/negotiate.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { HeaderList } from "../fixtures/capture-server.ts";
@@ -281,6 +282,33 @@ const withHeader = (line: Line, header: Members): string =>
   withResponses(line, { "200": { description: "ok", headers: { "X-H": header } } });
 
 const headerPointer = `${responsesPointer}/200/headers/X-H`;
+
+// A multipart body whose part `a` declares `headers` in its Encoding Object.
+const withPartHeaders = (line: Line, headers: Members): string =>
+  JSON.stringify({
+    info: { title: "Responses rows", version: "1.0.0" },
+    openapi: line,
+    paths: {
+      "/a": {
+        post: {
+          operationId: "a-post",
+          requestBody: {
+            content: {
+              "multipart/form-data": {
+                encoding: { a: { headers } },
+                schema: { properties: { a: { type: "string" } }, type: "object" },
+              },
+            },
+          },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+    },
+  });
+
+// The emitted command module of an accepted run.
+const rootModule = (found: Generated): string =>
+  found.code.find(([path]) => path === nodePath.join("src", "cli", "root.ts"))?.[1] ?? "";
 
 const text200 = { "200": { description: "ok" } };
 
@@ -737,13 +765,31 @@ describe("RSS, RSP and HDR rows in generation", () => {
         ]);
       }, 60_000);
 
-      // Declared part headers refuse the whole operation (EMT-1/unsupported-body), so neither a
-      // part Header Object nor its `required` reaches the request.
-      test.todo(`HDR-01: a multipart part header refuses the operation with EMT-1/unsupported-body vs the part Header Object sent with the part (${line})`, () =>
-        Promise.resolve());
+      // The built CLI sending the header values in the part's head is tests/emit/phdr.test.ts.
+      test(`HDR-01: a multipart part Header Object is a --<part>-<header> flag serialized as a header parameter with the part (${line})`, async () => {
+        const found = await inProcess(
+          withPartHeaders(line, { "X-Trace": { schema: stringSchema } }),
+        );
+        const cli = rootModule(found);
 
-      test.todo(`HDR-03: a required multipart part header refuses the operation with EMT-1/unsupported-body vs the required part header enforced (${line})`, () =>
-        Promise.resolve());
+        expect(summary(found)).toEqual([]);
+        expect(cli).toContain('["a-x-trace", Option.isSome(flags.aXTrace), false]');
+        expect(cli).toContain(
+          'Serialize.header("X-Trace", Option.getOrUndefined(flags.aXTrace), {',
+        );
+      }, 60_000);
+
+      test(`HDR-03: a required multipart part header is required when its part is sent (${line})`, async () => {
+        const found = await inProcess(
+          withPartHeaders(line, { "X-Trace": { required: true, schema: stringSchema } }),
+        );
+        const missing = Effect.runSyncExit(partOptions("a", true, [["a-x-trace", false, true]]));
+        const unsent = Effect.runSyncExit(partOptions("a", false, [["a-x-trace", false, true]]));
+
+        expect(summary(found)).toEqual([]);
+        expect(rootModule(found)).toContain('["a-x-trace", Option.isSome(flags.aXTrace), true]');
+        expect([Exit.isFailure(missing), Exit.isSuccess(unsent)]).toEqual([true, true]);
+      }, 60_000);
     });
   }
 
@@ -801,15 +847,56 @@ describe("RSS, RSP and HDR rows in generation", () => {
   }
 
   // The 3.0 schema permits both a Responses Object of `x-` keys and the two fields on a Header
-  // Object, and the generator adds no rule of its own: each generates with no diagnostic.
-  test.todo("RSS-04: a 3.0.4 Responses Object of x- keys alone generates with no diagnostic vs refused (3.0.4)", () =>
-    Promise.resolve());
+  // Object, so the generator's own check refuses them (D-OC3).
+  test("RSS-04: a 3.0.4 Responses Object of x- keys alone is refused (3.0.4)", async () => {
+    const found = await inProcess(withResponses("3.0.4", { "x-note": "only an extension" }));
 
-  test.todo("HDR-13: allowEmptyValue or allowReserved on a 3.0.4 Header Object generates with no diagnostic vs refused (3.0.4)", () =>
-    Promise.resolve());
+    expect(rowSummary(found, "RSS-04")).toEqual([
+      ["RSS-04/no-response-code", "refusal", "document", responsesPointer],
+    ]);
+  }, 60_000);
 
-  // The fixture's schema-serialized response headers (traced-get, typed-get) generate with only the
-  // RSP-09 Content-Type notice.
-  test.todo("HDR-15: a schema-serialized response header in a 3.0.4 document generates with no diagnostic vs a notice per occurrence that header values are not percent-decoded (3.0.4)", () =>
-    Promise.resolve());
+  test("HDR-13: allowEmptyValue and allowReserved on a 3.0.4 Header Object are refused (3.0.4)", async () => {
+    const empty = await inProcess(
+      withHeader("3.0.4", { allowEmptyValue: true, schema: stringSchema }),
+    );
+    const reserved = await inProcess(
+      withHeader("3.0.4", { allowReserved: true, schema: stringSchema }),
+    );
+
+    expect([rowSummary(empty, "HDR-13"), rowSummary(reserved, "HDR-13")]).toEqual([
+      [["HDR-13/parameter-only-field", "refusal", "document", `${headerPointer}/allowEmptyValue`]],
+      [["HDR-13/parameter-only-field", "refusal", "document", `${headerPointer}/allowReserved`]],
+    ]);
+  }, 60_000);
+
+  test("HDR-15: each schema-serialized response header in a 3.0.4 document carries a notice that header values are not percent-decoded; a content-based one does not (3.0.4)", async () => {
+    const found = await inProcess(
+      withResponses("3.0.4", {
+        "200": {
+          description: "ok",
+          headers: {
+            "X-A": { schema: stringSchema },
+            "X-B": { schema: stringSchema },
+            "X-C": { content: { "text/plain": { schema: stringSchema } } },
+          },
+        },
+      }),
+    );
+
+    expect(rowSummary(found, "HDR-15")).toEqual([
+      [
+        "HDR-15/header-percent-encoding",
+        "notice",
+        "element",
+        `${responsesPointer}/200/headers/X-A`,
+      ],
+      [
+        "HDR-15/header-percent-encoding",
+        "notice",
+        "element",
+        `${responsesPointer}/200/headers/X-B`,
+      ],
+    ]);
+  }, 60_000);
 });

@@ -672,8 +672,61 @@ describe("S30-02 to S30-36 through the built 3.0.4 CLI and generate()", () => {
     ]).toEqual([0, 1, "application/xml", xmlText]);
   }, 60_000);
 
-  test.todo("S30-33: INCONCLUSIVE: no request body is ever built from its schema as XML (XML bodies are opaque, D-SCH3), so the schema-driven XML refusal has no site (3.0.4)", () =>
-    Promise.resolve());
+  // The one site that would build XML from a schema is a multipart object part typed as XML; it is
+  // refused (D-SCH3, memo 121cf83f B2).
+  test("S30-33: a multipart object part typed as XML is refused as XML-01/schema-driven at element scope (3.0.4)", async () => {
+    const partAt = "/paths/~1a/post/requestBody/content/multipart~1form-data";
+    const found = await inProcess({
+      info: { title: "S30 rows", version: "1.0.0" },
+      openapi: line,
+      paths: {
+        "/a": {
+          post: {
+            operationId: "a",
+            requestBody: {
+              content: {
+                "multipart/form-data": {
+                  encoding: { doc: { contentType: "application/xml" } },
+                  schema: {
+                    properties: {
+                      doc: {
+                        properties: { id: { type: "string", xml: { attribute: true } } },
+                        type: "object",
+                        xml: { name: "Doc" },
+                      },
+                    },
+                    type: "object",
+                  },
+                },
+              },
+              required: false,
+            },
+            responses: ok,
+          },
+        },
+      },
+    });
+
+    expect(
+      found.diagnostics
+        .filter((diagnostic) => diagnostic.row === "XML-01")
+        .map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.severity,
+          diagnostic.scope,
+          String(diagnostic.pointer),
+          diagnostic.related?.map((key) => String(key.pointer)),
+        ]),
+    ).toEqual([
+      [
+        "XML-01/schema-driven",
+        "refusal",
+        "element",
+        partAt,
+        [`${partAt}/encoding/doc/contentType`],
+      ],
+    ]);
+  }, 60_000);
 
   test("SCO-02: const in a 3.0 schema is refused at its pointer (3.0.4)", async () => {
     const found = await inProcess(withBody(line, { const: "x", type: "string" }));

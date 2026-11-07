@@ -910,8 +910,17 @@ describe("RQB, MED and BIN rows through generate()", () => {
       ]);
     });
 
-    test.todo(`MED-25: an object schema on multipart/mixed is refused as EMT-1/unsupported-body at operation scope, pointer /paths/~1a/post, vs a MED-25 refusal of the alternative at element scope (${line})`, () =>
-      Promise.resolve());
+    test(`MED-25: an object schema on multipart/mixed refuses that alternative at element scope and the rest generates (${line})`, async () => {
+      const found = await inProcess(
+        withBody(line, {
+          content: { "application/json": { schema: named }, "multipart/mixed": { schema: named } },
+        }),
+      );
+
+      expect(summary(found)).toEqual([
+        ["MED-25/unnamed-parts", "refusal", "element", `${content}/multipart~1mixed`],
+      ]);
+    });
   }
 
   test("MED-09: a 3.2 Media Type description is ignored with a notice, on a request and a response (design D-OC5)", async () => {

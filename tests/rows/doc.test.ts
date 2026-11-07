@@ -793,10 +793,40 @@ describe("DOC, VAL and CMP rows through generate()", () => {
         ]);
       }, 60_000);
 
-      // One node referenced as a Parameter and as a Header generates; 3.0.4 adds one
-      // PRM-32/header-percent-encoding notice, the others nothing.
-      test.todo(`DOC-19: a component Parameter also referenced as a response Header generates with no refusal vs a refusal naming both pointers (${line})`, () =>
-        Promise.resolve());
+      test(`DOC-19: a component Parameter also referenced as a response Header is refused, naming both pointers (${line})`, async () => {
+        const found = await inProcess({
+          entry: members(line, {
+            components: {
+              parameters: { P: { in: "header", name: "X-P", schema: { type: "string" } } },
+            },
+            paths: {
+              "/a": {
+                get: operation({
+                  parameters: [{ $ref: "#/components/parameters/P" }],
+                  responses: {
+                    "200": {
+                      description: "ok",
+                      headers: { "X-P": { $ref: "#/components/parameters/P" } },
+                    },
+                  },
+                }),
+              },
+            },
+          }),
+        });
+
+        expect([summary(found), related(found)]).toEqual([
+          [
+            [
+              "DOC-19/two-object-types",
+              "refusal",
+              "document",
+              "/paths/~1a/get/responses/200/headers/X-P",
+            ],
+          ],
+          [["/components/parameters/P"]],
+        ]);
+      }, 60_000);
     });
   }
 
@@ -952,10 +982,21 @@ describe("DOC, VAL and CMP rows through generate()", () => {
       ]);
     }, 60_000);
 
-    // The $id index covers the entry only: a $id declared in another supplied document is never
-    // found.
-    test.todo(`DOC-17: a $ref to a $id declared in a later supplied document is refused as REF-16/outside-set vs resolves (${line})`, () =>
-      Promise.resolve());
+    test(`DOC-17: a $ref to a $id declared in a later supplied document resolves (${line})`, async () => {
+      const found = await inProcess({
+        entry: members(line, schemaBody({ $ref: `${remote}/pet` })),
+        set: {
+          [`${remote}/first.json`]: { Other: { type: "string" } },
+          [`${remote}/second.json`]: { $defs: { Pet: { $id: `${remote}/pet`, type: "object" } } },
+        },
+      });
+
+      expect([found.failure, found.diagnostics, found.commands]).toEqual([
+        undefined,
+        [],
+        ["/paths/~1a/post"],
+      ]);
+    }, 60_000);
   }
 
   test("DOC-05: the OAS dialect ids are accepted, the 3.1 text id with an SCH-01 notice (3.1.2)", async () => {

@@ -661,6 +661,31 @@
         }
       }
     },
+    "/pattern-properties": {
+      "post": {
+        "operationId": "pattern-properties",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "patternProperties": {
+                  "^x-": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/prefix-items": {
       "post": {
         "operationId": "prefix-items",

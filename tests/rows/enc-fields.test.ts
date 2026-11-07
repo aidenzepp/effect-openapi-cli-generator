@@ -447,8 +447,19 @@ describe("ENC field rows through generate()", () => {
       expect(cli).not.toContain("Content-Transfer-Encoding");
     });
 
-    test.todo(`ENC-10: a part contentType of two media types refuses the operation with EMT-1/unsupported-body vs a --<part>-content-type choice with no sniffing default (${line})`, () =>
-      Promise.resolve());
+    test(`ENC-10: a part contentType of two media types is a --<part>-content-type choice, required with the part and with no sniffing default (${line})`, async () => {
+      const found = await inProcess(
+        withBody(line, multipart, {
+          encoding: { a: { contentType: "text/csv, text/plain" } },
+          schema: objectOf({ a: string }),
+        }),
+      );
+      const cli = nodeFs.readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8");
+
+      expect(summary(found)).toEqual([]);
+      expect(cli).toContain('Flag.Literals("a-content-type", ["text/csv", "text/plain"])');
+      expect(cli).toContain('["a-content-type", Option.isSome(flags.aContentType), true]');
+    });
 
     test(`ENC-11: part headers under a form alternative are ignored with a notice (${line})`, async () => {
       const found = await inProcess(
@@ -518,8 +529,19 @@ describe("ENC field rows through generate()", () => {
       ]);
     });
 
-    test.todo(`ENC-12: a form deepObject with explode omitted raises no diagnostic vs a notice per occurrence as for STY-26 (${line})`, () =>
-      Promise.resolve());
+    test(`ENC-12: a form deepObject with explode omitted carries a notice per occurrence, as for STY-26 (${line})`, async () => {
+      const found = await inProcess(
+        withBody(line, urlEncoded, {
+          encoding: { a: { style: "deepObject" }, b: { style: "deepObject" } },
+          schema: objectOf({ a: objectOf({ x: string }), b: objectOf({ y: string }) }),
+        }),
+      );
+
+      expect(summary(found).filter(([code]) => code === "ENC-12/explode-no-effect")).toEqual([
+        ["ENC-12/explode-no-effect", "notice", "element", `${formAt}/encoding/a`, "undefined"],
+        ["ENC-12/explode-no-effect", "notice", "element", `${formAt}/encoding/b`, "undefined"],
+      ]);
+    });
   }
 
   test("ENC-12: style fields on a 3.0 multipart part are ignored with a notice, and the part keeps its default type", async () => {

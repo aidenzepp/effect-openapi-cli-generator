@@ -695,8 +695,19 @@ describe("PRM rows through the built CLI", () => {
     ]);
   });
 
-  test.todo("PRM-22: INCONCLUSIVE: a schema-based scalar parameter is a string flag, so the operator has no null to give (--maybe null sends the text null); RFC 6570 undefined is reached only by omitting the flag", () =>
-    Promise.resolve());
+  // A schema-based scalar parameter is a string flag, so the operator has no null to give: RFC 6570
+  // undefined is reached by omitting the flag, which sends no pair (memo 121cf83f, B4).
+  for (const line of lines) {
+    test(`PRM-22: an omitted nullable scalar flag sends no pair; --maybe null sends the text null (${line})`, async () => {
+      const omitted = await run(line, ["types-get", "--ratio", "1"]);
+      const given = await run(line, ["types-get", "--ratio", "1", "--maybe", "null"]);
+
+      expect([omitted, given]).toEqual([
+        sentOnce("/types?ratio=1"),
+        sentOnce("/types?ratio=1&maybe=null"),
+      ]);
+    }, 60_000);
+  }
 });
 
 describe("PRM rows through generate()", () => {

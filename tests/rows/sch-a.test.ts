@@ -466,8 +466,15 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         ]);
       }, 60_000);
 
-      test.todo(`SCH-15: patternProperties generates with a SCH-15/not-asserted notice and a violating value is sent vs input violating it rejected before send (${line})`, () =>
-        Promise.resolve());
+      // Design D-AD12: patternProperties is server-validated (memo 121cf83f, B1).
+      test(`SCH-15: patternProperties is not asserted; a violating value is sent exactly as given (${line})`, async () => {
+        const violating = await send(line, "pattern-properties", '{"x-a": "not an integer"}');
+
+        expect(violating).toEqual(sentAsGiven("pattern-properties", '{"x-a": "not an integer"}'));
+        expect(noticesOf(line, "SCH-15")).toEqual(
+          notAsserted("SCH-15", `${schemaAt("pattern-properties")}/patternProperties`),
+        );
+      }, 60_000);
 
       test(`SCH-16: dependentSchemas is not asserted; a violating value is sent exactly as given (${line})`, async () => {
         const violating = await send(line, "dependent-schemas", '{"a": 1}');
