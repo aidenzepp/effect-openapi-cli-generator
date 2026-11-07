@@ -14,9 +14,11 @@ import { follow, nodeIn } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
- * an alternative naming one is refused with it rather than treated as undeclared.
+ * an alternative naming one is refused with it rather than treated as undeclared. `checkRefused`
+ * holds the pointers of the requirement names check refused as unresolved.
  */
 export interface SchemeNormalization {
+  readonly checkRefused: ReadonlySet<string>;
   readonly diagnostics: readonly Diagnostic[];
   readonly schemes: readonly SecurityScheme[];
   // The author-supplied requirement (D-OQ3 (b)), carried here so every policy built from these
@@ -390,16 +392,25 @@ const addedSchemes = (declared: ReadonlySet<string>, author: AuthorSecurity | un
   return { built, names: entries.map(([name]) => name) };
 };
 
+// The codes check raises at a requirement name that reaches no scheme (src/check/grammar.ts).
+const unresolvedCodes: ReadonlySet<string> = new Set([
+  "SEC-09/unresolved-scheme",
+  "SEC-10/unresolved-scheme",
+]);
+
 /**
  * Normalizes `components.securitySchemes` into scheme entities (design 6.5). A scheme that cannot
  * be modelled is refused at element scope and listed in `unusable`. An `oauth2` or `openIdConnect`
  * scheme stays modelled and its token acquisition is refused at element scope (D-SEC1). With
  * `author`, the schemes of `security.add` follow the declared ones, marked `author-supplied`; a
  * name that is also declared is refused at document scope and the declared scheme stays.
+ * `checkFindings` are the spec-text check findings of the run; a requirement name they refuse as
+ * unresolved gets no second diagnostic from `normalizeSecurityPolicy`.
  */
 export const normalizeSecuritySchemes = (
   resolution: Resolution,
   author?: AuthorSecurity,
+  checkFindings: readonly Diagnostic[] = [],
 ): Effect.Effect<SchemeNormalization> =>
   Effect.gen(function* normalize() {
     const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
@@ -431,6 +442,14 @@ export const normalizeSecuritySchemes = (
         : { document: author.configDocument, requirement };
 
     return {
+      checkRefused: new Set(
+        checkFindings
+          .filter(
+            (finding) =>
+              finding.document === resolution.document && unresolvedCodes.has(finding.code),
+          )
+          .map((finding) => finding.pointer),
+      ),
       diagnostics,
       schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
       supplied,
@@ -522,19 +541,8 @@ interface Judged {
   readonly use?: readonly { readonly scheme: string; readonly scopes: readonly string[] }[];
 }
 
-// Whether check refused this spec requirement name (src/check/grammar.ts `requirementFindings`,
-// SEC-09 or SEC-10 `unresolved-scheme`): the same implicit connection reaches no object.
-const checkRefused = (resolution: Resolution, name: string): boolean =>
-  Option.match(implicitComponent(resolution, "securitySchemes", name), {
-    onNone: () => true,
-    onSome: (key) =>
-      nodeAt(resolution, follow(resolution, key)).pipe(
-        Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
-        Option.isNone,
-      ),
-  });
-
 interface Named {
+  readonly checkRefused: ReadonlySet<string>;
   readonly name: string;
   readonly pointer: string;
   readonly resolved: string;
@@ -546,19 +554,20 @@ interface Named {
 // The refusal of a requirement name that names no usable scheme, or `checked` when check already
 // raised the one diagnostic for it; either way its alternative is dropped.
 const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
-  const { name, pointer, resolved } = named;
+  const { name, resolved } = named;
+  const pointer = `${named.pointer}/${escapeToken(name)}`;
   if (named.unusable.has(resolved)) {
     return {
       anchor: "security-requirements-name",
       code: "SEC-02/unusable-scheme",
       element: "Security Requirement Object",
       message: "The requirement names a security scheme that is refused.",
-      pointer: `${pointer}/${escapeToken(name)}`,
+      pointer,
       related: formatPointer(["components", "securitySchemes", resolved]),
     };
   }
 
-  if (!named.supplied && checkRefused(resolution, name)) {
+  if (!named.supplied && named.checkRefused.has(pointer)) {
     return "checked";
   }
 
@@ -567,7 +576,7 @@ const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" 
     code: `${resolution.line === "3.2" ? "SEC-10" : "SEC-09"}/undeclared-scheme`,
     element: "Security Requirement Object",
     message: "The requirement names a security scheme that is not declared.",
-    pointer: `${pointer}/${escapeToken(name)}`,
+    pointer,
   };
 };
 
@@ -596,7 +605,14 @@ const judge = (
     if (declared !== undefined && stagedRules.has(declared.kind.type)) {
       staged.add(declared.kind.type);
     } else if (declared === undefined) {
-      const refusal = nameRefusal(resolution, { name, pointer, resolved, supplied, unusable });
+      const refusal = nameRefusal(resolution, {
+        checkRefused: schemes.checkRefused,
+        name,
+        pointer,
+        resolved,
+        supplied,
+        unusable,
+      });
       if (refusal === "checked") {
         refused = true;
       } else {

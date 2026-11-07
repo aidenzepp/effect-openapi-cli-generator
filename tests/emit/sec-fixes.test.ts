@@ -35,7 +35,7 @@ const run = (line: Line, members: { readonly [key: string]: Json }, operation?: 
         value: { info: { title: "t", version: "1" }, openapi: openapi[line], ...members },
       });
       const checked = yield* checkSpecText(resolution);
-      const schemes = yield* normalizeSecuritySchemes(resolution);
+      const schemes = yield* normalizeSecuritySchemes(resolution, undefined, checked);
       const policy = yield* normalizeSecurityPolicy(resolution, schemes, operation);
 
       return { checked, policy };

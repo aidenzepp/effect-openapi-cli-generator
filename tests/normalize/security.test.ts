@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { checkSpecText } from "../../src/check/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
-import type { Diagnostic } from "../../src/model/diagnostic.ts";
+import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { normalizeSecurityPolicy, normalizeSecuritySchemes } from "../../src/normalize/security.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -15,7 +16,8 @@ interface Members {
   readonly [key: string]: Json;
 }
 
-const run = (line: Line, members: Members, operation?: string) =>
+// `checked` replaces check's own findings for the run; omitted, check runs on the spec.
+const run = (line: Line, members: Members, operation?: string, checked?: readonly Diagnostic[]) =>
   Effect.runSync(
     Effect.gen(function* normalize() {
       const resolution = yield* resolve({
@@ -28,7 +30,8 @@ const run = (line: Line, members: Members, operation?: string) =>
           ...members,
         },
       });
-      const schemes = yield* normalizeSecuritySchemes(resolution);
+      const findings = checked ?? (yield* checkSpecText(resolution));
+      const schemes = yield* normalizeSecuritySchemes(resolution, undefined, findings);
       const policy = yield* normalizeSecurityPolicy(resolution, schemes, operation);
 
       return { policy, schemes };
@@ -335,6 +338,65 @@ describe("token acquisition stays refused", () => {
 
     expect(codes(schemes.diagnostics)).toEqual(["SSC-19/token-acquisition"]);
     expect(schemes.diagnostics[0]?.hint).not.toContain("Milestone 3");
+  });
+});
+
+// A check finding at `pointer`, for a run that replaces check's own.
+const unresolved = (code: string, pointer: string): Diagnostic =>
+  Schema.decodeUnknownSync(Diagnostic)({
+    code,
+    document: entry,
+    element: "Security Requirement Object",
+    message: "The requirement names a security scheme that does not resolve.",
+    openapi: "3.2.0",
+    pointer,
+    row: code.split("/")[0],
+    scope: "element",
+    severity: "refusal",
+    specSection: "https://spec.openapis.org/oas/v3.2.0#security-requirement-object",
+  });
+
+describe("names check refused", () => {
+  // Normalize reads check's findings and never re-derives them. Each spec below is one where the
+  // implicit connection and the findings disagree, so only reading the findings passes.
+  test("a finding at the name suppresses normalize's own, though the name reaches an object", () => {
+    // The URI reaches an object that is no component scheme: the connection finds it, check has
+    // no finding of its own, and only the injected one says refused.
+    const name = "#/components/schemas/X";
+    const members = {
+      components: { schemas: { X: { type: "object" } }, securitySchemes: { key: keyed } },
+      security: [{ [name]: [] }],
+    };
+    const pointer = "/security/0/#~1components~1schemas~1X";
+
+    expect(codes(run("3.2", members, undefined, []).policy.diagnostics)).toEqual([
+      "SEC-10/undeclared-scheme",
+    ]);
+
+    const { policy } = run("3.2", members, undefined, [
+      unresolved("SEC-10/unresolved-scheme", pointer),
+    ]);
+
+    expect(policy.policy.alternatives).toEqual([]);
+    expect(codes(policy.diagnostics)).toEqual([]);
+  });
+
+  test("no finding at the name keeps normalize's own, though the name reaches nothing", () => {
+    const { policy } = run("3.1", { security: [{ missing: [] }] }, undefined, []);
+
+    expect(policy.policy.alternatives).toEqual([]);
+    expect(policy.diagnostics.map((d) => [d.code, d.scope, d.pointer])).toEqual([
+      ["SEC-09/undeclared-scheme", "element", "/security/0/missing"],
+    ]);
+  });
+
+  test("a finding with another code or pointer suppresses nothing", () => {
+    const { policy } = run("3.1", { security: [{ missing: [] }] }, undefined, [
+      unresolved("SEC-09/unresolved-scheme", "/security/0/other"),
+      unresolved("SEC-06/no-satisfiable-alternative", "/security/0/missing"),
+    ]);
+
+    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
   });
 });
 

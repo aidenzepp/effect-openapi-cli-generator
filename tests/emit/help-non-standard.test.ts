@@ -142,14 +142,16 @@ describe("help marks non-standard flags", () => {
   test("the command carries one NON-STANDARD line naming the marked flags", () => {
     const help = operationHelp(inputFor(true));
 
-    expect(titles(help)).toEqual(["REQUEST", "RESPONSES", "NON-STANDARD"]);
+    // Every command has an AUTH line; `security: []` reads "no authentication".
+    expect(titles(help)).toEqual(["REQUEST", "AUTH", "RESPONSES", "NON-STANDARD"]);
+    expect(help.sections[1]?.[1]).toBe("no authentication");
     expect(help.sections.at(-1)?.[1]).toBe("--q, --filter, --filter.a (deepObjectBrackets)");
   });
 
   test("an unmarked command renders the unmarked text", () => {
     const help = operationHelp(inputFor(false));
 
-    expect(titles(help)).toEqual(["REQUEST", "RESPONSES"]);
+    expect(titles(help)).toEqual(["REQUEST", "AUTH", "RESPONSES"]);
     expect(help.flags).toEqual({
       filter: "body /filter",
       "filter.a": "body /filter/a",
