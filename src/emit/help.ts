@@ -16,12 +16,14 @@ export interface HelpBodyField {
 }
 
 /**
- * Where a flag's value lands: a parameter (`negatable` for a three-state boolean) or a body
- * property at an RFC 6901 pointer inside the body, with that property's annotations.
+ * Where a flag's value lands: a parameter (`negatable` for a three-state boolean), a body property
+ * at an RFC 6901 pointer inside the body, with that property's annotations, or the `Content-Type`
+ * of the multipart part at `part`, one of `choices`.
  */
 export type HelpFlagSource =
   | { readonly _tag: "Body"; readonly field?: HelpBodyField; readonly pointer: string }
-  | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter };
+  | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter }
+  | { readonly _tag: "PartOption"; readonly choices: readonly string[]; readonly part: string };
 
 /**
  * A flag or argument by its visible name, without `--`.
@@ -118,6 +120,10 @@ const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
     return bodyMarked(operation, source.pointer);
   }
 
+  if (source._tag === "PartOption") {
+    return false;
+  }
+
   const { serialization } = source.parameter;
 
   return serialization.kind === "style" && serialization.nonStandard === "deepObjectBrackets";
@@ -126,6 +132,10 @@ const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
 const locationNote = (source: HelpFlagSource, name: string): string => {
   if (source._tag === "Body") {
     return `body ${line(source.pointer)}`;
+  }
+
+  if (source._tag === "PartOption") {
+    return `content type of multipart part ${line(propertyOf(source.part))}`;
   }
 
   const { location, wireName } = source.parameter;
@@ -329,15 +339,27 @@ const refusedLine = (input: HelpInput): string | undefined => {
 const isArgument = (flag: HelpFlag): boolean =>
   flag.source._tag === "Parameter" && flag.source.parameter.location === "path";
 
-const isDeprecated = ({ source }: HelpFlag): boolean =>
-  source._tag === "Parameter" ? source.parameter.deprecated : source.field?.deprecated === true;
+const isDeprecated = ({ source }: HelpFlag): boolean => {
+  if (source._tag === "PartOption") {
+    return false;
+  }
+
+  return source._tag === "Parameter"
+    ? source.parameter.deprecated
+    : source.field?.deprecated === true;
+};
 
 // A schema value as help shows it: a string as itself, anything else as JSON.
 const valueText = (value: Json): string =>
   line(Predicate.isString(value) ? value : JSON.stringify(value));
 
-// A body field's schema notes: its allowed values, its default and its read-only mark.
+// A body field's schema notes: its allowed values, its default and its read-only mark. A part
+// option lists its choices.
 const fieldNotes = (source: HelpFlagSource): readonly string[] => {
+  if (source._tag === "PartOption") {
+    return [`choices: ${source.choices.map(line).join(", ")}`];
+  }
+
   const field = source._tag === "Body" ? source.field : undefined;
   if (field === undefined) {
     return [];

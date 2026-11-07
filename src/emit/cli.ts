@@ -46,6 +46,7 @@ import {
   printModule,
   str,
   typeKeyword,
+  typeLiteral,
   typeReadonlyArray,
 } from "./printer.ts";
 import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
@@ -771,6 +772,16 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return [flag.identifier, pipe(head, steps)] as const;
     }
 
+    // A part option takes one of the listed values, with no default (ENC-10).
+    if (source._tag === "PartOption") {
+      const choices = arr(source.option.choices.map((choice) => str(choice)));
+
+      return [
+        flag.identifier,
+        pipe(fn("Flag.Literals", str(flag.name), choices), [path("Flag.optional")]),
+      ] as const;
+    }
+
     const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
@@ -791,6 +802,7 @@ const flagValue = (key: string) => memberName(key).pipe(Effect.map((name) => mem
 
 interface BodyPlan {
   readonly args: readonly Entry[];
+  readonly inputs?: readonly Entry[];
   readonly domain: readonly string[];
   readonly head: Expr;
   readonly parameter: string;
@@ -998,9 +1010,40 @@ const formAssertion = (
     };
   });
 
+// Whether the operator gave a part's flag at least once.
+const partSent = (part: FormPart) =>
+  Effect.map(flagValue(part.flag.identifier), (value) =>
+    part.flag.source._tag === "Body" && part.flag.source.repeated
+      ? fn("Option.isSome", fn("Option.fromIterable", value))
+      : fn("Option.isSome", value),
+  );
+
+// A part type the operator chooses (ENC-10): `Input.partOptions` refuses its flag without the part
+// and a sent part without its flag, before any request, and the builder input carries the chosen
+// type. An unsent part carries no type, so the first listed type only fills that input.
+const chosenType = (part: FormPart) =>
+  Effect.gen(function* chosen() {
+    const { contentType } = part;
+    const [first] = contentType._tag === "Chosen" ? contentType.choices : [];
+    if (contentType._tag === "Declared" || first === undefined) {
+      return Option.none();
+    }
+
+    const value = yield* flagValue(contentType.flag.identifier);
+    const option = arr([str(contentType.flag.name), fn("Option.isSome", value), bool(true)]);
+
+    return Option.some({
+      check: fn("Input.partOptions", str(part.flag.name), yield* partSent(part), arr([option])),
+      input: [
+        contentType.key,
+        fn("Option.getOrElse", value, arrow([], str(first), typeLiteral(first))),
+      ] as const,
+    });
+  });
+
 // A `multipart/form-data` alternative's body: the part values, asserted against its schema and
 // then streamed by the `api/` builder through the runtime writer (design 6.3). There is no
-// whole-body flag (D-ENC1 a).
+// whole-body flag (D-ENC1 a). `inputs` are the builder's chosen part types.
 const formBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
@@ -1013,31 +1056,43 @@ const formBody = (
     }
 
     const entries: Entry[] = [];
+    const checks: Expr[] = [];
+    const inputs: Entry[] = [];
     for (const part of parts.success) {
       entries.push([part.name, yield* partValues(part)]);
+
+      const chosen = yield* chosenType(part);
+      if (Option.isSome(chosen)) {
+        checks.push(chosen.value.check);
+        inputs.push(chosen.value.input);
+      }
     }
 
     const assertion = yield* formAssertion(command, alternative, parts.success, context);
+    const values = fn("Effect.all", obj(entries));
+    const [check, ...more] = checks;
+    const ordered = [...more, values].map((next) => fn("Effect.andThen", next));
 
     return {
-      args: [["body", ident(I("parts"))]],
+      args: [["body", ident(I("parts"))], ...inputs],
       domain: assertion.domain,
-      head: fn("Effect.all", obj(entries)),
+      head: check ?? values,
+      inputs,
       parameter: "parts",
-      steps: assertion.steps,
+      steps: check === undefined ? assertion.steps : [...ordered, ...assertion.steps],
     } satisfies BodyPlan;
   });
 
 // The body flags that do not apply to one alternative, each mapped to whether the operator gave
-// it (`Input.selectBody`'s `foreign`): a field or part flag whose media does not list the key, and
-// `--body` and `--body-file` for a multipart key (D-ENC1 a). A binary or XML key keeps its own
-// `--body` refusal.
+// it (`Input.selectBody`'s `foreign`): a field, part or part option flag whose media does not list
+// the key, and `--body` and `--body-file` for a multipart key (D-ENC1 a). A binary or XML key keeps
+// its own `--body` refusal.
 const foreignFlags = (command: PlannedCommand, alternative: MediaAlternative) =>
   Effect.gen(function* foreign() {
     const entries: Entry[] = [];
     for (const flag of command.flags) {
       const { source } = flag;
-      if (source._tag !== "Body") {
+      if (source._tag === "Parameter") {
         continue;
       }
 
@@ -1049,7 +1104,8 @@ const foreignFlags = (command: PlannedCommand, alternative: MediaAlternative) =>
       }
 
       const value = yield* flagValue(flag.identifier);
-      const given = source.repeated ? fn("Option.fromIterable", value) : value;
+      const repeated = source._tag === "Body" && source.repeated;
+      const given = repeated ? fn("Option.fromIterable", value) : value;
       entries.push([flag.name, fn("Option.isSome", given)]);
     }
 
@@ -1065,12 +1121,14 @@ const choiceEntry = (
 ) =>
   Effect.gen(function* entry() {
     if (alternative.codec !== "multipart") {
-      return yield* alternativeBody(command, alternative, required, context);
+      const body = yield* alternativeBody(command, alternative, required, context);
+
+      return { ...body, inputs: [] };
     }
 
     const form = yield* formBody(command, alternative, context);
 
-    return { domain: form.domain, value: pipe(form.head, form.steps ?? []) };
+    return { domain: form.domain, inputs: form.inputs, value: pipe(form.head, form.steps ?? []) };
   });
 
 // A lone alternative is built directly. Several, or a range key, go into the `Input.selectBody`
@@ -1108,10 +1166,14 @@ const bodyPlan = (
     const alternatives: Entry[] = [];
     const domain: string[] = [];
     const foreign: Entry[] = [];
+    const inputs = new Map<string, Expr>();
     for (const alternative of body.alternatives) {
       const built = yield* choiceEntry(command, alternative, body.required, context);
       alternatives.push([alternative.mediaType, built.value]);
       domain.push(...built.domain);
+      for (const [key, value] of built.inputs) {
+        inputs.set(key, value);
+      }
 
       const misplaced = yield* foreignFlags(command, alternative);
       if (misplaced.length > 0) {
@@ -1131,7 +1193,7 @@ const bodyPlan = (
 
     return Option.some({
       args: encodesByKey(body.alternatives)
-        ? [["body", selected]]
+        ? [["body", selected], ...inputs]
         : [
             ["body", member(selected, M("body"))],
             ["contentType", member(selected, M("contentType"))],
@@ -1178,6 +1240,12 @@ const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFla
         return [{ name: flag.name, source: { _tag: "Body", field, pointer: source.wireName } }];
       }
 
+      if (source._tag === "PartOption") {
+        const { choices } = source.option;
+
+        return [{ name: flag.name, source: { _tag: "PartOption", choices, part: source.part } }];
+      }
+
       const parameter = parameterOf(operation, source.location, source.wireName);
 
       return parameter === undefined
@@ -1201,9 +1269,10 @@ const describeParameters = (command: PlannedCommand): Expr =>
       .filter((flag) => !isWholeBody(flag))
       .map((flag) => {
         const { source } = flag;
-        const location = source._tag === "Body" ? "body" : source.location;
+        const location = source._tag === "Parameter" ? source.location : "body";
+        const wireName = source._tag === "PartOption" ? source.part : source.wireName;
 
-        return [flag.name, bindingOf(location, source.pointer, source.wireName)] as const;
+        return [flag.name, bindingOf(location, source.pointer, wireName)] as const;
       }),
   ]);
 

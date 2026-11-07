@@ -13,6 +13,7 @@ import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
+import type { FlagSource } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
 import { JsDocText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
@@ -585,15 +586,61 @@ const parameterParts = (
   });
 
 /**
- * One `multipart/form-data` part a command sends: its part flag, its part name, its Encoding
- * `contentType` and, from its Encoding rule, its transfer encoding.
+ * A part's `Content-Type`: the one media type its Encoding `contentType` lists, or the operator's
+ * choice among several (design 6.3, ENC-10), with the `Input` key that carries it, the listed
+ * types, and the `--<part>-content-type` flag.
+ */
+export type PartType =
+  | { readonly _tag: "Declared"; readonly mediaType: string }
+  | {
+      readonly _tag: "Chosen";
+      readonly choices: readonly string[];
+      readonly flag: PlannedFlag;
+      readonly key: string;
+    };
+
+type ChosenType = Extract<PartType, { readonly _tag: "Chosen" }>;
+
+/**
+ * One `multipart/form-data` part a command sends: its part flag, its part name, its `Content-Type`
+ * and, from its Encoding rule, its transfer encoding.
  */
 export interface FormPart {
   readonly contentEncoding?: "base64";
-  readonly contentType: string;
+  readonly contentType: PartType;
   readonly flag: PlannedFlag;
   readonly name: string;
 }
+
+/**
+ * The `Input` keys of the part content types an operation's operator chooses (ENC-10), by part
+ * name: `<part> content type` folded to camel case, renamed by numeric suffix past the parameter
+ * keys and each other. Keys never depend on flag spelling.
+ */
+export const contentTypeKeys = (operation: Operation): ReadonlyMap<string, string> => {
+  const taken = new Set([...fixedInputKeys, ...inputKeys(operation).map(({ key }) => key)]);
+  const keys = new Map<string, string>();
+  for (const alternative of operation.body?.alternatives ?? []) {
+    for (const { contentType, target } of alternative.encoding) {
+      if (
+        alternative.codec !== "multipart" ||
+        target.kind !== "property" ||
+        contentType.length < 2 ||
+        keys.has(target.name)
+      ) {
+        continue;
+      }
+
+      const folded = foldIdentifier(`${target.name} content type`, "camel");
+      const base = Result.isSuccess(folded) ? folded.success.name : "partContentType";
+      const key = taken.has(base) ? suffixed(base, (candidate) => taken.has(candidate)) : base;
+      taken.add(key);
+      keys.set(target.name, key);
+    }
+  }
+
+  return keys;
+};
 
 // The runtime writes `Content-Transfer-Encoding` for a part with a transfer encoding, so a declared
 // header of that name is not sent beside it (design 6.3 Multipart transfer encoding).
@@ -602,7 +649,9 @@ const sentHeaders = (rule: EncodingRule): EncodingRule["headers"] =>
     ? rule.headers
     : rule.headers.filter((header) => header.name.toLowerCase() !== "content-transfer-encoding");
 
-const isPartFlag = (flag: PlannedFlag, mediaType: string): boolean =>
+type PartFlag = PlannedFlag & { readonly source: Extract<FlagSource, { readonly _tag: "Body" }> };
+
+const isPartFlag = (flag: PlannedFlag, mediaType: string): flag is PartFlag =>
   flag.source._tag === "Body" &&
   flag.source.kind !== "body" &&
   flag.source.kind !== "body-file" &&
@@ -614,8 +663,30 @@ interface OrderedPart extends FormPart {
 
 interface PartContext {
   readonly alternative: MediaAlternative;
+  readonly flags: readonly PlannedFlag[];
+  readonly keys: ReadonlyMap<string, string>;
   readonly schemas: ObjectSchemas;
 }
+
+// The flag that chooses a part's `Content-Type` among `choices` under the context's alternative.
+const choiceOf = (
+  context: PartContext,
+  name: string,
+  pointer: string,
+  choices: readonly string[],
+): ChosenType | undefined => {
+  const flag = context.flags.find(
+    ({ source }) =>
+      source._tag === "PartOption" &&
+      source.part === pointer &&
+      source.media.includes(context.alternative.mediaType),
+  );
+  const key = context.keys.get(name);
+
+  return flag === undefined || key === undefined
+    ? undefined
+    : { _tag: "Chosen", choices, flag, key };
+};
 
 // The reason a body's multipart alternative is not one the writer sends, or `undefined`.
 const alternativeProblem = (alternative: MediaAlternative): string | undefined => {
@@ -634,7 +705,7 @@ const alternativeProblem = (alternative: MediaAlternative): string | undefined =
 };
 
 // One part flag's part, with the index of its Encoding rule, or the reason it is refused.
-const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedPart, string> => {
+const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart, string> => {
   const { alternative } = context;
   const pointer = flag.source.wireName;
   const [name, ...rest] = pointer.split("/").slice(1).map(unescape);
@@ -664,9 +735,17 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`a style for multipart part ${pointer}`);
   }
 
-  const [contentType] = rule.contentType;
-  if (contentType === undefined || rule.contentType.length > 1 || contentType.includes("*")) {
+  const [first] = rule.contentType;
+  if (first === undefined || rule.contentType.some((type) => type.includes("*"))) {
     return Result.fail(`one content type for multipart part ${pointer}`);
+  }
+
+  const contentType: PartType | undefined =
+    rule.contentType.length === 1
+      ? { _tag: "Declared", mediaType: first }
+      : choiceOf(context, name, pointer, rule.contentType);
+  if (contentType === undefined) {
+    return Result.fail(`a content type flag for multipart part ${pointer}`);
   }
 
   const part = { contentType, flag, name, order };
@@ -685,7 +764,8 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
  * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
  * positional parts, a nested part, part headers (a declared `Content-Transfer-Encoding` beside
  * the rule's transfer encoding aside), a part style other than exploded `form`, a part whose
- * `contentType` is not one concrete media type, and a required part the names plan gave no flag.
+ * `contentType` lists a range, a part listing several types with no `--<part>-content-type` flag,
+ * and a required part the names plan gave no flag.
  */
 export const formParts = (
   command: PlannedCommand,
@@ -698,7 +778,12 @@ export const formParts = (
   }
 
   const key = alternative.schema?.key ?? "";
-  const context: PartContext = { alternative, schemas: objectSchemas(defs, key) };
+  const context: PartContext = {
+    alternative,
+    flags: command.flags,
+    keys: contentTypeKeys(command.operation),
+    schemas: objectSchemas(defs, key),
+  };
   const parts: OrderedPart[] = [];
   for (const flag of command.flags) {
     if (isPartFlag(flag, alternative.mediaType)) {
@@ -772,9 +857,11 @@ export const encodesByKey = (alternatives: readonly MediaAlternative[]): boolean
   );
 
 // How one alternative's body value is typed and sent: `encode` takes the value and the
-// `Content-Type` expressions; `typed` is whether it reads the second.
+// `Content-Type` expressions; `typed` is whether it reads the second; `fields` are the `Input`
+// fields it reads beside the body, one per chosen part type.
 interface Encoder {
   readonly encode: (value: Expr, contentType: Expr) => Expr;
+  readonly fields?: readonly Field[];
   readonly type: TypeExpr;
   readonly typed: boolean;
 }
@@ -827,13 +914,28 @@ const encoderOf = (
       return Option.none();
     }
 
-    const entries = parts.success.map(({ contentEncoding, contentType, name }) =>
-      arr([
-        str(name),
-        str(contentType),
-        ...(contentEncoding === undefined ? [] : [str(contentEncoding)]),
-      ]),
-    );
+    // A chosen part type is read from its `Input` key; the `cli/` step refuses a sent part
+    // without one (ENC-10).
+    const fields: Field[] = [];
+    const entries: Expr[] = [];
+    for (const { contentEncoding, contentType, name } of parts.success) {
+      const sent =
+        contentType._tag === "Declared"
+          ? str(contentType.mediaType)
+          : member(ident(I("input")), yield* memberName(contentType.key));
+      if (contentType._tag === "Chosen") {
+        fields.push({
+          key: contentType.key,
+          optional: false,
+          type: typeUnion(contentType.choices.map((choice) => typeLiteral(choice))),
+        });
+      }
+
+      entries.push(
+        arr([str(name), sent, ...(contentEncoding === undefined ? [] : [str(contentEncoding)])]),
+      );
+    }
+
     const options = obj([
       ["parts", arr(entries)],
       ["required", required],
@@ -841,6 +943,7 @@ const encoderOf = (
 
     return Option.some<Encoder>({
       encode: (value) => fn("formData", [value, options]),
+      fields,
       type: typeRef(I("Serialize"), [M("FormFields")]),
       typed: false,
     });
@@ -854,6 +957,7 @@ const encoderOf = (
 const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifier.Type) =>
   Effect.gen(function* chosen() {
     const fields: Field[] = [];
+    const typeFields = new Map<string, Field>();
     const table: (readonly [string, Expr])[] = [];
     for (const alternative of command.operation.body?.alternatives ?? []) {
       const found = yield* encoderOf(command, alternative, defs);
@@ -870,6 +974,10 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
       }
 
       fields.push({ key: mediaType, optional: false, type: encoder.type });
+      for (const field of encoder.fields ?? []) {
+        typeFields.set(field.key, field);
+      }
+
       table.push([
         mediaType,
         arrow(params, encoder.encode(ident(I("body")), ident(I("contentType")))),
@@ -887,6 +995,7 @@ const chosenParts = (command: PlannedCommand, defs: Defs, name: typeof Identifie
           optional: false,
           type: typeRef(I("Serialize"), [M("Chosen")], [typeRef(name)]),
         },
+        ...typeFields.values(),
       ],
     } satisfies BodyParts;
   });
@@ -920,7 +1029,7 @@ const bodyParts = (
       return {
         declarations: [],
         entry: ["body", encoder.encode(value, str(first.mediaType))],
-        fields: [{ key: "body", optional: false, type: encoder.type }],
+        fields: [{ key: "body", optional: false, type: encoder.type }, ...(encoder.fields ?? [])],
       };
     }
 

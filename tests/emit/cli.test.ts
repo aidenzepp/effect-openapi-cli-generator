@@ -856,18 +856,26 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/imports.ts")).not.toContain("meta");
   });
 
-  test("part headers and several part content types are refused, not guessed", async () => {
+  test("part headers are refused, not guessed", async () => {
     const headers = {
       file: { headers: { "X-Rate": { schema: { type: "integer" } } } },
     };
-    const types = { file: { contentType: "text/csv, application/json" } };
 
     expect(await multipartRefusals(multipart(importSchema, headers))).toEqual([
       { reason: "unsupported-body", subject: "part headers for multipart part /file" },
     ]);
-    expect(await multipartRefusals(multipart(importSchema, types))).toEqual([
-      { reason: "unsupported-body", subject: "one content type for multipart part /file" },
-    ]);
+  });
+
+  test("several part content types are the operator's --<part>-content-type choice", async () => {
+    const types = { file: { contentType: "text/csv, application/json" } };
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(importSchema, types)) }),
+    );
+    const text = contentOf(output, "src/cli/imports.ts") ?? "";
+
+    expect(output.refusals).toEqual([]);
+    expect(text).toContain('Flag.Literals("file-content-type", ["text/csv", "application/json"])');
+    expect(text).toContain('["file-content-type", Option.isSome(flags.fileContentType), true]');
   });
 
   test("a multipart/mixed body is refused", async () => {
