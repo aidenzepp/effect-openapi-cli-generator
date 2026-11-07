@@ -444,6 +444,16 @@ const bare: Json = {
   paths: { "/a": { get: { responses: { "200": { description: "ok" } } } } },
 };
 
+// A flag collision at `/a`'s path-item parameter as the names stage refuses it: once per operation,
+// at the colliding parameter's pointer, naming the operation it refuses.
+const collision = (method: string): Json => ({
+  code: "PRM-02/flag-collision",
+  document: entry,
+  operation: { method, path: "/a" },
+  pointer: "/paths/~1a/parameters/0",
+  scope: "operation",
+});
+
 describe("coverage join without a build", () => {
   test("the default / server is not invented when no level declares servers", () => {
     const result = joinSpec(bare, [command({ servers: ["/"] })]);
@@ -494,6 +504,27 @@ describe("coverage join without a build", () => {
         command({ method: "POST", pointer: "/paths/~1a/post" }),
       ]).missing.map((element) => element.pointer),
     ).toEqual(["/paths/~1a/parameters/0"]);
+  });
+
+  test("an operation-scope refusal at a path-item parameter credits the operations it names", () => {
+    const spec: Json = {
+      ...bare,
+      paths: {
+        "/a": {
+          get: { responses: { "200": { description: "ok" } } },
+          parameters: [{ in: "query", name: "q" }],
+          post: { responses: { "200": { description: "ok" } } },
+        },
+      },
+    };
+    const missing = (refusals: readonly Json[]) =>
+      joinSpec(spec, [], { notices: [], refusals }).missing.map((element) => element.pointer);
+
+    expect(missing([collision("GET"), collision("POST")])).toEqual([]);
+    expect(missing([collision("GET")])).toEqual([
+      "/paths/~1a/post",
+      "/paths/~1a/post/responses/200",
+    ]);
   });
 
   test("an OPR-10/body-ignored notice credits the media below its request body, other codes only their pointer", () => {

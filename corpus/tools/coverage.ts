@@ -49,9 +49,11 @@ export class CoverageMismatch extends Data.TaggedError("CoverageMismatch")<Cover
 export type CoverageError = Schema.SchemaError | WalkError;
 
 // Only the fields the join reads. The checker decodes the report itself instead of importing the
-// generator's report codec, which would pull in the model it checks (design 8.3).
+// generator's report codec, which would pull in the model it checks (design 8.3). `operation` is the
+// request method token and path template of the operation a diagnostic concerns.
 const Record = Schema.Struct({
   document: Schema.String,
+  operation: Schema.optionalKey(Schema.Struct({ method: Schema.String, path: Schema.String })),
   pointer: Schema.String,
   scope: Schema.Literals(["document", "operation", "element"]),
 });
@@ -137,10 +139,11 @@ const carries = (command: Command, element: WalkElement): boolean => {
  * Joins the walk with `--describe` and the generation report (design 8.3, R11).
  *
  * - An operation is accounted for by a command at its `(document, pointer)`, by a document-scope
- *   refusal or an operation-scope refusal at, above or anywhere inside it, or by the report's
- *   `skipped` entry at its pointer (an author-config skip, design 8.2). A skipped operation is
- *   treated like a refused one: its subtree is accounted for, and its inherited elements need no
- *   command of it, so root servers and security stay carried by the emitted commands.
+ *   refusal, by an operation-scope refusal at, above or anywhere inside it or naming it (its method
+ *   and path, as a refusal at a path-item parameter it inherits does), or by the report's `skipped`
+ *   entry at its pointer (an author-config skip, design 8.2). A skipped operation is treated like a
+ *   refused one: its subtree is accounted for, and its inherited elements need no command of it, so
+ *   root servers and security stay carried by the emitted commands.
  * - An element under an operation is accounted for when every command for THAT operation (its primary
  *   name and each `x-forge-aliases` alias, design 8.3 Aliases) carries it: a parameter by flag
  *   pointer, request media and response keys by value as the spec spells them, a security
@@ -193,16 +196,24 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
           operation.document === element.document && within(element.pointer, operation.pointer),
       );
 
+    // An operation-scope refusal names the operation it refuses. Its pointer may sit outside that
+    // operation, at a path-item parameter the operation inherits, so the name decides; method and
+    // path identify one operation of the entry's `paths`, whichever document the refusal names.
+    // The report spells the method as the request token, the walk as the path-item key.
+    const names = (record: (typeof refusals)[number], operation: Operation): boolean =>
+      record.operation?.method === operation.method.toUpperCase() &&
+      record.operation.path === operation.path;
     // A refusal or an author-config skip: either way the operation has no command by decision.
     const refused = (operation: Operation): boolean =>
       skipped.has(siteOf(operation)) ||
       refusals.some(
         (record) =>
-          record.document === label(operation.document) &&
-          (record.scope === "document" ||
-            (record.scope === "operation" &&
-              (within(operation.pointer, record.pointer) ||
-                within(record.pointer, operation.pointer)))),
+          (record.scope === "operation" && names(record, operation)) ||
+          (record.document === label(operation.document) &&
+            (record.scope === "document" ||
+              (record.scope === "operation" &&
+                (within(operation.pointer, record.pointer) ||
+                  within(record.pointer, operation.pointer))))),
       );
     // An element- or operation-scope refusal covers its subtree; never used for an operation.
     const refusedElement = (element: WalkElement): boolean =>
