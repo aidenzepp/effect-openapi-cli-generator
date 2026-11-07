@@ -285,6 +285,27 @@ describe("coverage check", () => {
     expect(refused.invented).toEqual([]);
   });
 
+  test("an operation-scope refusal anchored inside the operation refuses that operation", () => {
+    const dropped = dropCommand(update);
+    const refused = coverage(
+      dropped,
+      withRecords({ refusals: [{ pointer: `${update}/tags/0`, scope: "operation" }] }),
+    );
+
+    expect(pointers(coverage(dropped))).toContain(update);
+    expect(refused.missing).toEqual([]);
+    expect(refused.invented).toEqual([]);
+  });
+
+  test("an element-scope refusal below an operation leaves the operation counted", () => {
+    const result = coverage(
+      dropCommand(update),
+      withRecords({ refusals: [{ pointer: `${update}/tags/0`, scope: "element" }] }),
+    );
+
+    expect(pointers(result)).toContain(update);
+  });
+
   test("an element-scope refusal covers its descendants", () => {
     const result = coverage(
       editCommand(setAvatar, (command) => ({ ...command, requestMedia: [] })),

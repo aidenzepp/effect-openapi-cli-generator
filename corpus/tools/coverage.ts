@@ -123,8 +123,8 @@ const carries = (command: Command, element: WalkElement): boolean => {
 /**
  * Joins the walk with `--describe` and the generation report (design 8.3, R11).
  *
- * - An operation is accounted for by a command at its `(document, pointer)`, or by an operation- or
- *   document-scope refusal.
+ * - An operation is accounted for by a command at its `(document, pointer)`, or by a document-scope
+ *   refusal or an operation-scope refusal at, above or anywhere inside it.
  * - An element under an operation is accounted for when every command for THAT operation (its primary
  *   name and each `x-forge-aliases` alias, design 8.3 Aliases) carries it: a parameter by flag
  *   pointer, request media and response keys by value as the spec spells them, a security
@@ -177,7 +177,9 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
         (record) =>
           record.document === label(operation.document) &&
           (record.scope === "document" ||
-            (record.scope === "operation" && within(operation.pointer, record.pointer))),
+            (record.scope === "operation" &&
+              (within(operation.pointer, record.pointer) ||
+                within(record.pointer, operation.pointer)))),
       );
     // An element- or operation-scope refusal covers its subtree; never used for an operation.
     const refusedElement = (element: WalkElement): boolean =>
