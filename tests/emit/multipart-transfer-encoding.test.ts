@@ -96,7 +96,7 @@ const generate = (line: Line, value: Schema.Json) =>
     );
     const domain = yield* emitDomainSchemas(schemas.validation.definitions, roots, plan.domain);
     const apiFiles = yield* emitApi({ api, boundOrigins: bound, plan });
-    const cli = yield* emitCli({ api, config, plan });
+    const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
 
     return { apiFiles, cli, domain };
   });

@@ -6,13 +6,17 @@ import type { MediaAlternative } from "../../src/model/entities.ts";
 
 type Defs = Readonly<Record<string, Schema.Json>>;
 
+// The line these tests flatten on unless one names its own: 3.1, where a read-only property keeps
+// its flag and `format: byte` is text.
+const defaultLine = "3.1";
+
 type Alternative = Pick<MediaAlternative, "codec" | "schema">;
 
 const alternative = (codec: Alternative["codec"], key: string | undefined): Alternative =>
   key === undefined ? { codec } : { codec, schema: { key } };
 
 const run = (defs: Defs, codec: Alternative["codec"] = "json", key: string | null = "Root") => {
-  const result = flattenBody(defs, alternative(codec, key ?? undefined));
+  const result = flattenBody(defs, alternative(codec, key ?? undefined), defaultLine);
   if (Result.isFailure(result)) {
     throw new Error(`flattenBody failed with ${result.failure._tag}`);
   }
@@ -169,6 +173,7 @@ describe("flattenBody", () => {
     const result = flattenBody(
       { Root: object({ x: { $ref: "#/$defs/Nope" } }) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("UnresolvedBodyRef");
   });
@@ -213,6 +218,7 @@ describe("flattenBody", () => {
     const cycle = flattenBody(
       { A: { $ref: "#/$defs/A" }, Root: object({ x: { $ref: "#/$defs/A" } }) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(cycle) && cycle.failure._tag).toBe("UnresolvedBodyRef");
   });
@@ -222,9 +228,11 @@ describe("flattenBody", () => {
   }, 5000);
 
   test("a diamond fan-out resolves at depth 30 and is a cheap typed failure past the 64-hop cap", () => {
-    expect(Result.isSuccess(flattenBody(fanOut(30), alternative("json", "Root")))).toBe(true);
+    expect(
+      Result.isSuccess(flattenBody(fanOut(30), alternative("json", "Root"), defaultLine)),
+    ).toBe(true);
 
-    const deep = flattenBody(fanOut(64), alternative("json", "Root"));
+    const deep = flattenBody(fanOut(64), alternative("json", "Root"), defaultLine);
     expect(Result.isFailure(deep) && deep.failure._tag).toBe("UnresolvedBodyRef");
   }, 5000);
 
@@ -287,6 +295,7 @@ describe("flattenBody", () => {
         Root: { allOf: members.map(([key]) => ({ $ref: `#/$defs/${key}` })) },
       },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
 
@@ -297,13 +306,18 @@ describe("flattenBody", () => {
         Root: { allOf: [{ $ref: "#/$defs/M0" }, { $ref: "#/$defs/M1" }] },
       },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isSuccess(small)).toBe(true);
   }, 5000);
 
   test("a body that exceeds the shared visit budget is a typed BodyBudgetExceeded", () => {
     const members = Array.from({ length: 20_000 }, () => ({ type: "string" }));
-    const result = flattenBody({ Root: { allOf: members } }, alternative("json", "Root"));
+    const result = flattenBody(
+      { Root: { allOf: members } },
+      alternative("json", "Root"),
+      defaultLine,
+    );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
 
@@ -323,6 +337,7 @@ describe("flattenBody", () => {
     const result = flattenBody(
       { Root: object(uses), Shared: object(empties) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
@@ -429,11 +444,15 @@ describe("flattenBody: multipart and xml", () => {
         text: { contentEncoding: "base64", type: "string" },
       }),
     } satisfies Defs;
-    const result = flattenBody(defs, {
-      codec: "multipart",
-      encoding: ["b64", "bytes", "many"].map(base64Rule),
-      schema: { key: "Root" },
-    });
+    const result = flattenBody(
+      defs,
+      {
+        codec: "multipart",
+        encoding: ["b64", "bytes", "many"].map(base64Rule),
+        schema: { key: "Root" },
+      },
+      defaultLine,
+    );
     if (Result.isFailure(result)) {
       throw new Error(`flattenBody failed with ${result.failure._tag}`);
     }

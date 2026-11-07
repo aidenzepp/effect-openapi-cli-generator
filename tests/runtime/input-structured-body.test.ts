@@ -153,7 +153,7 @@ describe("Input.structuredBody", () => {
       { body: "{not json" },
       { body: "[1]", fields: { "/name": Option.some("x") } },
       { body: '{"name":1}', schema: Person },
-      { fields: { "/count": Option.some(new Input.JsonNumber("1.5")) } },
+      { fields: { "/count": Option.some(new Input.JsonNumber("1.5x")) } },
     ];
 
     const structuredRefusals = await Promise.all(cases.map(structuredFailure));

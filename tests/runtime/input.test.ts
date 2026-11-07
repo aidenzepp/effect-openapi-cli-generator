@@ -670,12 +670,28 @@ describe("Input.mergeBody", () => {
     expect(text).toBe('{"tags":["a","b"]}');
   });
 
-  test("an int64 field flag that is not digits is a UsageError that omits the value", async () => {
+  test("a number field flag arrives as its text: decimals and exponents are not reformatted", async () => {
+    const text = await run(
+      mergedText({
+        fields: {
+          "/count": Option.some(new Input.JsonNumber("0.10000000000000000001")),
+          "/list": [new Input.JsonNumber("1.50"), new Input.JsonNumber("-2.5e-3")],
+          "/name": Option.some("n"),
+        },
+        schema: Schema.Struct({ ...Person.fields, list: Schema.Array(Schema.Number) }),
+      }),
+    );
+
+    expect(text).toBe('{"count":0.10000000000000000001,"list":[1.50,-2.5e-3],"name":"n"}');
+  });
+
+  test("a field JsonNumber that is not a JSON number is a UsageError that omits the value", async () => {
     const error = await run(
       failure({ fields: { "/count": Option.some(new Input.JsonNumber("12x-secret")) } }),
     );
 
     expect(error._tag).toBe("UsageError");
+    expect(error.message).toBe("--body: a number field is not a JSON number");
     expect(JSON.stringify(error)).not.toContain("12x-secret");
   });
 

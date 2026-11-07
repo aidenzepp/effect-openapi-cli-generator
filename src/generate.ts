@@ -550,7 +550,8 @@ export const generate = (
       return yield* refused("document")(planned);
     }
 
-    // normalize keeps the stored schemas only; the domain emitter reads their validation copy.
+    // normalize keeps the stored schemas only; the domain emitter reads their validation copy, and
+    // help reads the defaults its edits refused.
     const schemas = yield* normalizeSchemas(resolution);
     const domain = yield* emitDomainSchemas(
       schemas.validation.definitions,
@@ -562,7 +563,12 @@ export const generate = (
       boundOrigins: (servers) => boundOrigins(servers, serversContext).origins,
       plan,
     });
-    const cli = yield* emitCli({ api, config: author.value, plan });
+    const cli = yield* emitCli({
+      api,
+      config: author.value,
+      plan,
+      validationEdits: schemas.validation.edits,
+    });
     const commands = commandOrder(plan);
     const emitted = yield* Effect.all(
       refusedOperations(cli.refusals).map((refusal) => emitRefusal(api, refusal, commands)),

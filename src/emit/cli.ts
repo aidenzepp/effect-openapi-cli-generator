@@ -2,8 +2,8 @@ import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } 
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
-import { validationCopy } from "../normalize/schemas.ts";
-import type { Line } from "../validate/index.ts";
+import type { SchemaEdit } from "../normalize/schemas.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
@@ -51,13 +51,16 @@ import {
 import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
 
 /**
- * What the `cli/` layer is emitted from: the normalized `Api`, its name plan, and the author config
- * (bin name, environment prefix and the author-owned commands module).
+ * What the `cli/` layer is emitted from: the normalized `Api`, its name plan, the author config
+ * (bin name, environment prefix and the author-owned commands module), and the edits normalize
+ * recorded deriving the schemas' validation copy, from which help learns the defaults it refused
+ * (S30-27). Required: a spec with no refused default passes an empty list, written explicitly.
  */
 export interface CliEmitInput {
   readonly api: Api;
   readonly config: AuthorConfig;
   readonly plan: NamePlan;
+  readonly validationEdits: readonly SchemaEdit[];
 }
 
 /**
@@ -283,9 +286,10 @@ const fieldNode = (
 };
 
 /**
- * Whether an integer field flag fits `Flag.Int`: `int64` when a node on its scalar's `$ref`
- * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `unsettled`
- * when the walk cannot reach that scalar (an unreadable node, a cycle, an exhausted budget).
+ * Which flag an integer field takes: `int64` (`Input.int64Flag`) when a node on its scalar's `$ref`
+ * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `safe`
+ * (`Input.numericFlag`) otherwise, and `unsettled` when the walk cannot reach that scalar (an
+ * unreadable node, a cycle, an exhausted budget).
  */
 type IntegerWidth = "int64" | "safe" | "unsettled";
 
@@ -320,23 +324,28 @@ type Work =
   | { readonly _tag: "Direct"; readonly node: FieldNode }
   | { readonly _tag: "Expand"; readonly json: Schema.Json };
 
-// The text encoding of a base64 string node: `contentEncoding` wins over 3.0 `format: byte`.
-const encodingOf = (node: FieldNode): FieldEncoding | undefined => {
+// The text encoding of a base64 string node: `contentEncoding` on every line, or `format: byte`
+// without one on 3.0 only (FMT-10), as `flattenBody` reads it.
+const encodingOf = (node: FieldNode, line: SpecLine): FieldEncoding | undefined => {
   if (node.contentEncoding === "base64" || node.contentEncoding === "base64url") {
     return node.contentEncoding;
   }
 
-  return node.contentEncoding === undefined && node.format === "byte" ? "base64" : undefined;
+  return line === "3.0" && node.contentEncoding === undefined && node.format === "byte"
+    ? "base64"
+    : undefined;
 };
 
-// The stored `$defs` and the nodes among them whose `default` normalize refused (S30-27).
+// The stored `$defs`, the nodes among them whose `default` normalize refused (S30-27), and the
+// OpenAPI line, which decides whether `format: byte` is a base64 encoding.
 interface FieldStore {
   readonly defs: Defs;
+  readonly line: SpecLine;
   readonly refusedDefaults: ReadonlySet<Schema.Json>;
 }
 
 const fieldSchema = (
-  { defs, refusedDefaults }: FieldStore,
+  { defs, line, refusedDefaults }: FieldStore,
   rootKey: string,
   pointer: string,
   repeated: boolean,
@@ -417,7 +426,7 @@ const fieldSchema = (
   };
 
   const last = field.nodes.at(-1);
-  const encoding = last === undefined ? undefined : encodingOf(last);
+  const encoding = last === undefined ? undefined : encodingOf(last, line);
 
   const bounds = field.nodes.flatMap((node) =>
     node.maxLength === undefined ? [] : [node.maxLength],
@@ -588,31 +597,43 @@ const positionalEntry = (
     return [positional.identifier, value] as const;
   });
 
-const flagConstructor = (flag: PlannedFlag, kind: string): Expr => {
-  if (flag.boolean || kind === "boolean") {
-    return fn("Flag.Boolean", str(flag.name));
-  }
+// The step that carries a numeric flag's checked text as a `JsonNumber`, so the JSON body or the
+// multipart part sends the operator's digits unchanged (FMT-04).
+const asJsonNumber = fn(
+  "Flag.map",
+  arrow([{ name: I("text") }], newExpr(path("Input.JsonNumber"), [ident(I("text"))])),
+);
 
-  if (kind === "integer") {
-    return fn("Flag.Int", str(flag.name));
-  }
+// A body field flag's constructor and the steps before its presence wrapper.
+interface BodyFlagHead {
+  readonly head: Expr;
+  readonly steps: readonly Expr[];
+}
 
-  return fn("Flag.Finite", str(flag.name));
-};
-
-const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): Expr => {
+// An `integer` or `number` field is checked against the same grammar as an `integer` or `number`
+// parameter (an `int64` one as digits by `Input.int64Flag`), never parsed to a JavaScript number.
+const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): BodyFlagHead => {
   if (kind === "json") {
-    return fn("Input.jsonFlag", str(flag.name));
+    return { head: fn("Input.jsonFlag", str(flag.name)), steps: [] };
   }
 
   if (kind === "integer" && integer === "int64") {
-    return fn("Input.int64Flag", str(flag.name));
+    return { head: fn("Input.int64Flag", str(flag.name)), steps: [] };
   }
 
   // A multipart `file` part flag carries a path, or `-` for stdin.
-  return kind === "string" || kind === "file"
-    ? fn("Flag.String", str(flag.name))
-    : flagConstructor(flag, kind);
+  if (kind === "string" || kind === "file") {
+    return { head: fn("Flag.String", str(flag.name)), steps: [] };
+  }
+
+  if (flag.boolean || kind === "boolean") {
+    return { head: fn("Flag.Boolean", str(flag.name)), steps: [] };
+  }
+
+  return {
+    head: fn("Input.numericFlag", str(flag.name), str(kind === "integer" ? "integer" : "number")),
+    steps: [asJsonNumber],
+  };
 };
 
 // A JSON or form body property the runtime reads from a file and encodes (design 6.3 Binary): its
@@ -756,8 +777,9 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     }
 
     const description = yield* fieldDescription(flag, alternative, schema);
-    const head = bodyFlagHead(flag, source.kind, schema.integer);
+    const { head, steps: carried } = bodyFlagHead(flag, source.kind, schema.integer);
     const steps = [
+      ...carried,
       source.repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
       ...describedBy(description).map((text) => fn("Flag.withDescription", text)),
     ];
@@ -1790,35 +1812,27 @@ const childAt = (json: Schema.Json | undefined, token: string): Schema.Json | un
 /**
  * The stored nodes whose `default` normalize refused (S30-27, D-OC3: a refused default is not
  * shown): the validation copy's edits under that code, located in `defs`, so help reads the one
- * fact normalize records rather than re-checking conformance. Only the 3.0 line refuses a default,
- * so other lines skip deriving the copy. Normalize derived the same copy from the same definitions
- * and budget, so a failure here is a defect.
+ * fact normalize records rather than re-checking conformance. Only the 3.0 line records one.
  */
-const refusedDefaultsOf = (line: Line, defs: Defs): Effect.Effect<ReadonlySet<Schema.Json>> =>
-  Effect.gen(function* refusedDefaults() {
-    if (line !== "3.0") {
-      return new Set();
+const refusedDefaultsOf = (edits: readonly SchemaEdit[], defs: Defs): ReadonlySet<Schema.Json> => {
+  const nodes = new Set<Schema.Json>();
+  for (const edit of edits) {
+    if (edit.code !== refusedDefaultCode) {
+      continue;
     }
 
-    const copy = yield* Effect.orDie(validationCopy(line, new Map(Object.entries(defs))));
-    const nodes = new Set<Schema.Json>();
-    for (const edit of copy.edits) {
-      if (edit.code !== refusedDefaultCode) {
-        continue;
-      }
-
-      let node: Schema.Json | undefined = own(defs, edit.key);
-      for (const token of edit.path.slice(0, -1)) {
-        node = childAt(node, token);
-      }
-
-      if (node !== undefined) {
-        nodes.add(node);
-      }
+    let node: Schema.Json | undefined = own(defs, edit.key);
+    for (const token of edit.path.slice(0, -1)) {
+      node = childAt(node, token);
     }
 
-    return nodes;
-  });
+    if (node !== undefined) {
+      nodes.add(node);
+    }
+  }
+
+  return nodes;
+};
 
 /**
  * Emits the V1 `cli/` layer (design 4.1, 4.4, 4.6, 4.8, 5, 6.6, 8.3; §14 D4, D5): `cli/<group>.ts`
@@ -1861,8 +1875,9 @@ export const emitCli = (
       booleans: new Map(),
       defs,
       domain: plan.domain,
+      line: api.line,
       plan,
-      refusedDefaults: yield* refusedDefaultsOf(api.line, defs),
+      refusedDefaults: refusedDefaultsOf(input.validationEdits, defs),
       targets,
     };
     const built = new Map<string, Commands>();

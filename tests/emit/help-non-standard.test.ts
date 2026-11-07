@@ -217,7 +217,7 @@ describe("the emitted help of a deprecated scheme", () => {
         });
         const plan = yield* planNames(deprecated, { config, configDocument, strict: false });
 
-        return yield* emitCli({ api: deprecated, config, plan });
+        return yield* emitCli({ api: deprecated, config, plan, validationEdits: [] });
       }),
     );
     const users = output.files.find((file) => file.path === "src/cli/users.ts")?.content ?? "";

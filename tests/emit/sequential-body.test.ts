@@ -78,7 +78,7 @@ const generate = (value: Schema.Json) =>
     const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
     const domain = yield* emitDomainSchemas(schemas.validation.definitions, [], plan.domain);
     const apiFiles = yield* emitApi({ api, boundOrigins: bound, plan });
-    const cli = yield* emitCli({ api, config, plan });
+    const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
 
     return { apiFiles, cli, domain };
   });

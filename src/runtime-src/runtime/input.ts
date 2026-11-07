@@ -316,9 +316,10 @@ export const sequentialBody = (options: {
 };
 
 /**
- * A JSON number kept as its source text. A field flag for an `int64` property passes its digit
- * string this way; a merged body marks any number whose text `JSON.parse` would change (digits
- * past 2^53, `1.50`, `1e2`). `mergeBody` writes it with `JSON.rawJSON` at serialization only.
+ * A JSON number kept as its source text. A field flag for an `integer` or `number` property passes
+ * the operator's text this way; a merged body marks any number whose text `JSON.parse` would
+ * change (digits past 2^53, `1.50`, `1e2`). `mergeBody` writes it with `JSON.rawJSON` at
+ * serialization only.
  */
 export class JsonNumber {
   readonly text: string;
@@ -337,7 +338,7 @@ const jsonNumberGrammar = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 export const isJsonNumberText = (text: string): boolean => jsonNumberGrammar.test(text);
 
 /**
- * A field flag's value: a scalar, an `int64` digit string as a `JsonNumber`, or a decoded JSON
+ * A field flag's value: a scalar, a number field's text as a `JsonNumber`, or a decoded JSON
  * value (an object, an array, `null`) for a property that is not flattened (design 4.5).
  */
 export type FieldValue =
@@ -581,8 +582,8 @@ const revive: Reviver = (_key, value, context) => {
   return isObject(value) ? bare(value) : value;
 };
 
-// A field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2` decode
-// to the same number, and a `JsonNumber` in a field must be a digit string.
+// A JSON field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2`
+// decode to the same number.
 // A number that overflows (`1e400`) decodes to Infinity, which `JSON.stringify` would send as
 // `null`; it throws here, and the flag's catch turns that into a value-free failure.
 const reviveIntegers: Reviver = (key, value, context) => {
@@ -696,8 +697,10 @@ const supplied = (value: Fields[string]): FieldValue | FileField | undefined => 
   return value.length === 0 ? undefined : value;
 };
 
-// Walks a field value with an explicit stack, so a deep value cannot overflow it. After a
-// "fine" verdict `toNode` recurses at most `maxJsonDepth` levels.
+// Walks a field value with an explicit stack, so a deep value cannot overflow it. A `JsonNumber` is
+// checked against the JSON number grammar only: whether it is an integer is the flag's check
+// (`int64Flag`, `numericFlag`). After a "fine" verdict `toNode` recurses at most `maxJsonDepth`
+// levels.
 const inspectField = (root: FieldValue): "badNumber" | "fine" | "tooDeep" => {
   const pending: { readonly depth: number; readonly value: FieldValue }[] = [
     { depth: 0, value: root },
@@ -707,7 +710,7 @@ const inspectField = (root: FieldValue): "badNumber" | "fine" | "tooDeep" => {
     const { depth, value } = item;
 
     if (value instanceof JsonNumber) {
-      if (!int64Digits.test(value.text)) {
+      if (!isJsonNumberText(value.text)) {
         return "badNumber";
       }
     } else if (Array.isArray(value) || Predicate.isObject(value)) {
@@ -875,7 +878,7 @@ const mergeSources = (
       const verdict = inspectField(value);
 
       if (verdict === "badNumber") {
-        return yield* Effect.fail(usage(flag, "an integer field is not a digit string"));
+        return yield* Effect.fail(usage(flag, "a number field is not a JSON number"));
       }
 
       if (verdict === "tooDeep") {

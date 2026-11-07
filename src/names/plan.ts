@@ -15,7 +15,7 @@ import type {
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { escapeToken } from "../model/pointer.ts";
-import type { Line } from "../validate/index.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 
 /**
  * A path parameter as a positional argument; `name` is its metavar.
@@ -632,7 +632,7 @@ export interface DraftContext {
   readonly collector: Collector;
   readonly credentialFlags: ReadonlySet<string>;
   readonly defs: Readonly<Record<string, Schema.Json>>;
-  readonly line: Line;
+  readonly line: SpecLine;
 }
 
 export interface Subject {

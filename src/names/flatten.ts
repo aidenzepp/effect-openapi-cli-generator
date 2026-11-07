@@ -6,7 +6,7 @@ import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
-import type { Line } from "../validate/index.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
@@ -175,6 +175,11 @@ interface Ctx {
    */
   readonly base64Fields: boolean;
   /**
+   * 3.0 only: `format: byte` marks a base64 string (D-ENC). On 3.1 and 3.2 it is an annotation and
+   * only `contentEncoding` does (FMT-10).
+   */
+  readonly byteIsBase64: boolean;
+  /**
    * Multipart only: the parts whose Encoding rule sends them base64 encoded. Each is a `file`
    * part: the runtime encodes the file's bytes, so typed text is never encoded in their place.
    */
@@ -223,10 +228,11 @@ const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
-  line: Line | undefined,
+  line: SpecLine,
 ): Ctx => ({
   base64Fields: codec === "json" || codec === "form",
   base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
+  byteIsBase64: line === "3.0",
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
@@ -368,14 +374,15 @@ const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
 };
 
 /**
- * A base64 string property (design 6.3 Binary): 3.0 `format: byte`, or 3.1+ `contentEncoding`
- * `base64` or `base64url`. Other encodings and other types are text.
+ * A base64 string property (design 6.3 Binary): `contentEncoding` `base64` or `base64url` on every
+ * line, or `format: byte` without a `contentEncoding` where `byteIsBase64` (3.0). Other encodings,
+ * 3.1 and 3.2 `format: byte` (FMT-10) and other types are text.
  */
-const isBase64 = (schema: SchemaNode, type: SchemaNode["type"]): boolean =>
+const isBase64 = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): boolean =>
   type === "string" &&
   (schema.contentEncoding === "base64" ||
     schema.contentEncoding === "base64url" ||
-    (schema.contentEncoding === undefined && schema.format === "byte"));
+    (ctx.byteIsBase64 && schema.contentEncoding === undefined && schema.format === "byte"));
 
 /**
  * The `allOf` merge: every member an object, and a key two members declare equal in both (its
@@ -440,7 +447,7 @@ const leaf = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): Classifie
     return { _tag: "Scalar", kind: "file", repeated: false };
   }
 
-  if (ctx.base64Fields && isBase64(schema, type)) {
+  if (ctx.base64Fields && isBase64(ctx, schema, type)) {
     return { _tag: "Scalar", kind: "file", repeated: false };
   }
 
@@ -723,14 +730,15 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * key is classified once per call, and node visits, including every property entry, share one
  * budget (`BodyBudgetExceeded`). On the 3.0 `line`, a property or part whose schema is
  * `readOnly: true`, directly or through one `$ref`, gets no flag and no skip notice (S30-31,
- * D-SCH2); `--body` and `--body-file` still send it as given. Without a `line`, as on 3.1 and 3.2,
- * a read-only property keeps its flag (SCH-51).
+ * D-SCH2); `--body` and `--body-file` still send it as given. On 3.1 and 3.2 a read-only property
+ * keeps its flag (SCH-51). `format: byte` makes a JSON or form property a base64 `file` flag on 3.0
+ * only; on 3.1 and 3.2 it is a `string` flag sent as given (FMT-10).
  */
 export const flattenBody = (
   defs: Defs,
   alternative: Pick<MediaAlternative, "codec" | "schema"> &
     Partial<Pick<MediaAlternative, "encoding">>,
-  line?: Line,
+  line: SpecLine,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
   if (codec === "binary") {
