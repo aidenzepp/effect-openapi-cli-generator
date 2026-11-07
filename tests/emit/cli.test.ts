@@ -896,6 +896,55 @@ describe("emitCli: multipart request bodies", () => {
     expect(text).toContain("Effect.flatMap((parts) => Imports.create({ body: parts })),");
   });
 
+  // ENC-08 is deferred (M3-MP3): a nested prefixEncoding fails closed whether the part schema
+  // lists `items` (a part flag) or `prefixItems` (no part flag, an RQB-03 notice).
+  test.each([
+    ["items", { items: { type: "string" }, type: "array" }],
+    ["prefixItems", { prefixItems: [{ type: "string" }], type: "array" }],
+  ])("a nested prefixEncoding over %s refuses its operation", async (_, parts) => {
+    const output = await Effect.runPromise(
+      emitCli(
+        await input(
+          {
+            ...spec,
+            openapi: "3.2.0",
+            paths: {
+              ...paths,
+              "/imports": importsOperation(
+                multipart(
+                  { properties: { parts }, type: "object" },
+                  {
+                    parts: {
+                      contentType: "multipart/mixed",
+                      prefixEncoding: [{ contentType: "text/plain" }],
+                    },
+                  },
+                ),
+              ),
+            },
+          },
+          configJson,
+          "3.2",
+        ),
+      ),
+    );
+
+    expect(contentOf(output, "src/cli/imports.ts")).toBeUndefined();
+    expect(
+      output.refusals.map((refusal) => ({
+        reason: refusal.reason,
+        scope: refusal.scope,
+        subject: refusal.subject,
+      })),
+    ).toEqual([
+      {
+        reason: "unsupported-body",
+        scope: "operation",
+        subject: "nested parts in multipart part /parts",
+      },
+    ]);
+  });
+
   test("a multipart/mixed body is refused", async () => {
     // Untyped: normalization refuses an object schema on multipart/mixed first (MED-25).
     expect(await multipartRefusals({ "multipart/mixed": { schema: {} } })).toEqual([
