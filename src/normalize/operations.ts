@@ -18,7 +18,7 @@ import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
 import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import { normalizeBody } from "./bodies.ts";
+import { hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
 import { normalizeParameter } from "./parameters.ts";
 import type { ParameterNotReadable, ParameterOutcome } from "./parameters.ts";
@@ -352,6 +352,7 @@ interface Assembled {
 
 interface Shared {
   readonly cache: Map<string, ParameterOutcome>;
+  readonly checkFindings: readonly Diagnostic[];
   readonly context: ServersContext;
   readonly limits: ResolveLimits;
   readonly resolution: Resolution;
@@ -473,10 +474,15 @@ const assembleBody = (
     }
 
     const outcome = yield* normalizeBody(shared.resolution, site, shared.limits);
+    if (outcome._tag === "Refused") {
+      return { diagnostics: outcome.diagnostics, refusedRequired: outcome.required };
+    }
 
-    return outcome._tag === "Implemented"
-      ? { body: outcome.body, diagnostics: outcome.diagnostics, refusedRequired: false }
-      : { diagnostics: outcome.diagnostics, refusedRequired: outcome.required };
+    return {
+      body: yield* hintDiscriminators(shared.resolution, outcome.body, shared.checkFindings),
+      diagnostics: outcome.diagnostics,
+      refusedRequired: false,
+    };
   });
 
 const serverSource = (pointer: string, value: Json | undefined): Effect.Effect<ServerSource> =>
@@ -828,15 +834,25 @@ export const distinctDiagnostics = (diagnostics: readonly Diagnostic[]): readonl
  * parameter or a required body is refused, or when every listed security alternative is refused
  * (`[]` and a remaining `{}` alternative are not). A path or method key the check stage refused
  * is not read. A site the earlier stages should have stopped fails as in the stage that reads it.
+ * `checkFindings` are the spec-text check findings of the run: a body discriminator they refuse
+ * gets no hint.
  */
 export const assembleOperations = (
   resolution: Resolution,
   schemes: SchemeNormalization,
   context: ServersContext,
+  checkFindings: readonly Diagnostic[],
   limits: ResolveLimits = defaultLimits,
 ): Effect.Effect<OperationAssembly, OperationsError> =>
   Effect.gen(function* assemble() {
-    const shared: Shared = { cache: new Map(), context, limits, resolution, schemes };
+    const shared: Shared = {
+      cache: new Map(),
+      checkFindings,
+      context,
+      limits,
+      resolution,
+      schemes,
+    };
     const assembled = yield* Effect.forEach(rawOperations(resolution), (raw) =>
       assembleOne(shared, raw),
     );

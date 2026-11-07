@@ -29,13 +29,12 @@ type Document = typeof DocumentUri.Type;
 /**
  * The design 2.2 `Shape` facts of one stored schema, which flattening and serialization read: the
  * declared type set, property names in source order, `required`, whether items are declared, the
- * `$defs` key a `$ref` names, the binary and content-encoding markers, and the discriminator
- * property. A marker the schema does not carry is `undefined`.
+ * `$defs` key a `$ref` names, and the binary and content-encoding markers. A marker the schema does
+ * not carry is `undefined`. The discriminator is a body fact (`MediaAlternative.discriminator`).
  */
 export interface SchemaFacts {
   readonly contentEncoding: string | undefined;
   readonly contentMediaType: string | undefined;
-  readonly discriminator: string | undefined;
   readonly format: "binary" | "byte" | undefined;
   readonly items: boolean;
   readonly properties: readonly string[];
@@ -509,14 +508,10 @@ const factsOf = (node: Json): SchemaFacts => {
   const properties = member(object, "properties");
   const ref = stringMember(object, "$ref");
   const format = stringMember(object, "format");
-  const discriminator = member(object, "discriminator");
 
   return {
     contentEncoding: stringMember(object, "contentEncoding"),
     contentMediaType: stringMember(object, "contentMediaType"),
-    discriminator: isObject(discriminator)
-      ? stringMember(discriminator, "propertyName")
-      : undefined,
     format: format === "binary" || format === "byte" ? format : undefined,
     items: member(object, "items") !== undefined || member(object, "prefixItems") !== undefined,
     properties: isObject(properties) ? Object.keys(properties) : [],

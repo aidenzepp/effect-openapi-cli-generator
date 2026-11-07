@@ -17,9 +17,10 @@ import type { GeneratedPackage } from "../support/generated-cli.ts";
 // The Milestone 2 witness for the Discriminator Object rows DSC-01 to DSC-11 and the XML Object
 // rows XML-01 to XML-08: one generated package per version line, built once, run against the
 // capture server; the generation rows call `generate()` in process. The discriminator is a hint
-// only (design D-OQ9), so validation stays plain `oneOf`/`anyOf`; an XML body is opaque and sent
-// byte for byte (design D-SCH3). A row the product gets wrong is a `test.todo` with what was
-// observed.
+// only (design D-OQ9): help prints it as the VARIANTS line and validation stays plain
+// `oneOf`/`anyOf`; an XML body is opaque and sent byte for byte, and a multipart part typed as XML
+// over an object schema is refused (design D-SCH3). A row the product gets wrong is a `test.todo`
+// with what was observed.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -347,6 +348,86 @@ const optional = (line: Line, discriminator: Members): Members =>
 const discriminatorAt =
   "/paths/~1a/post/requestBody/content/application~1json/schema/discriminator";
 
+// The VARIANTS lines of a command's help, trimmed.
+const variants = async (line: Line, command: string): Promise<readonly string[]> => {
+  const help = await invoke(line, [command, "--help"]);
+
+  return help.stdout
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith("VARIANTS "));
+};
+
+const taggedLine = 'VARIANTS  application/json oneOf by petType: "cat" (Cat), "dog" (Dog)';
+
+const anyTaggedLine = 'VARIANTS  application/json anyOf by petType: "Cat" (Cat), "Dog" (Dog)';
+
+const mixedLine =
+  'VARIANTS  application/json oneOf by petType: "cat" (Cat), "Dog" (Dog), oneOf/2 (inline, no petType value)';
+
+const basedLine = 'VARIANTS  application/json allOf by petType: "Hound" (Hound), "Kitty" (Kitty)';
+
+// A one-operation document whose optional multipart body has an object part `doc`, typed
+// application/xml by its Encoding Object, with the given schema.
+const xmlPartDocument = (line: Line, doc: Members): Members => ({
+  info: { title: "XML rows", version: "1.0.0" },
+  openapi: line,
+  paths: {
+    "/a": {
+      post: {
+        operationId: "a",
+        requestBody: {
+          content: {
+            "multipart/form-data": {
+              encoding: { doc: { contentType: "application/xml" } },
+              schema: { properties: { doc, name: { type: "string" } }, type: "object" },
+            },
+          },
+          required: false,
+        },
+        responses: ok,
+      },
+    },
+  },
+});
+
+const partAt = "/paths/~1a/post/requestBody/content/multipart~1form-data";
+
+// The XML-01 schema-driven refusal of the `doc` part, and whether the generation was refused.
+const xmlPartOutcome = async (line: Line, doc: Members) => {
+  const found = await inProcess(xmlPartDocument(line, doc));
+
+  return {
+    diagnostics: found.diagnostics
+      .filter((diagnostic) => diagnostic.code === "XML-01/schema-driven")
+      .map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.severity,
+        diagnostic.scope,
+        String(diagnostic.pointer),
+        diagnostic.related?.map((key) => String(key.pointer)),
+      ]),
+    refused: found.refused,
+  };
+};
+
+// The part is refused at the multipart media type, its contentType first in related; the optional
+// body's operation still generates.
+const xmlPartRefused = {
+  diagnostics: [
+    ["XML-01/schema-driven", "refusal", "element", partAt, [`${partAt}/encoding/doc/contentType`]],
+  ],
+  refused: false,
+};
+
+const idProperty: Members = { id: { type: "integer" } };
+
+const docPart = (extra: Members, properties: Members): Members => ({
+  properties,
+  type: "object",
+  ...extra,
+});
+
 describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
   for (const line of lines) {
     describe(line, () => {
@@ -364,12 +445,15 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
         ]);
       }, 60_000);
 
-      // `tagged --help` prints `POST /tagged, body application/json (required)` and no branch.
-      test.todo(`DSC-01: tagged help labels no branch by its mapped value vs branches labeled cat and dog (${line})`, () =>
-        Promise.resolve());
+      test(`DSC-01: tagged help labels each branch by its mapped value and component (${line})`, async () => {
+        expect(await variants(line, "tagged")).toEqual([taggedLine]);
+      }, 60_000);
 
-      test.todo(`DSC-02: tagged help names no petType branch grouping vs the branches grouped under petType (${line})`, () =>
-        Promise.resolve());
+      test(`DSC-02: tagged help groups the body branches under the petType property (${line})`, async () => {
+        const [found] = await variants(line, "tagged");
+
+        expect(found?.startsWith("VARIANTS  application/json oneOf by petType: ")).toBe(true);
+      }, 60_000);
 
       test(`DSC-03: mapping values naming a component and a URI resolve with no diagnostic (${line})`, () => {
         expect(rowOutcome(fixtureRun(line), "DSC-03")).toEqual(generatedClean);
@@ -386,8 +470,21 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
         });
       });
 
-      test.todo(`DSC-05: a discriminator on a schema with no oneOf, anyOf or allOf generates with no diagnostic vs refused with the discriminator pointer (${line})`, () =>
-        Promise.resolve());
+      test(`DSC-05: a discriminator on a schema with no oneOf, anyOf or allOf is refused at element scope and the operation still generates (${line})`, async () => {
+        const found = await inProcess(
+          withBody(line, {
+            discriminator: { propertyName: "petType" },
+            properties: { petType: { type: "string" } },
+            required: ["petType"],
+            type: "object",
+          }),
+        );
+
+        expect(rowOutcome(found, "DSC-05")).toEqual({
+          diagnostics: [["DSC-05/no-composition", "refusal", "element", discriminatorAt]],
+          refused: false,
+        });
+      });
 
       test(`DSC-06: the same bodies are sent or rejected identically with and without the discriminator (${line})`, async () => {
         const outcomes = async (command: string) => [
@@ -430,8 +527,12 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
         expect(found.refused).toBe(false);
       });
 
-      test.todo(`DSC-07: no implicit mapped label is derived for any branch vs Cat labeled by its component name and the inline branch unlabeled (${line})`, () =>
-        Promise.resolve());
+      test(`DSC-07: an unmapped component branch is labeled by its component name and an inline branch is unlabeled (${line})`, async () => {
+        expect([await variants(line, "mixed"), await variants(line, "any-tagged")]).toEqual([
+          [mixedLine],
+          [anyTaggedLine],
+        ]);
+      }, 60_000);
 
       test(`DSC-08: a value that is both a name and a relative URI resolves as a name; ./ forces a URI (${line})`, async () => {
         const name = await inProcess(tagged(line, { mapping: { cat: "Cat" } }));
@@ -513,10 +614,10 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
       }
 
       if (line === "3.0.4") {
-        // `Shape.discriminator` holds the property name only; no mapping or label is derived, so
-        // no component is searched for `allOf` children.
-        test.todo(`DSC-11: no allOf child search exists, so an allOf child in an unreferenced component is not found vs found (${line})`, () =>
-          Promise.resolve());
+        // Hound and Kitty extend Pet through allOf and no operation references either.
+        test(`DSC-11: the allOf children of a discriminating base are found among every entry component (${line})`, async () => {
+          expect(await variants(line, "based")).toEqual([basedLine]);
+        }, 60_000);
       }
 
       // Every XML row: the schema's `xml` fields are never consulted for an XML body, which is the
@@ -528,48 +629,79 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
         expect(rowOutcome(fixtureRun(line), "XML-01")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-01: a multipart part with contentType application/xml over an object schema is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-01: a multipart part with contentType application/xml over an object schema is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(await xmlPartOutcome(line, docPart({}, idProperty))).toEqual(xmlPartRefused);
+      });
 
       test(`XML-02: an XML body is opaque, so xml.name is never consulted and the file is sent byte for byte (${line})`, async () => {
         expect(await xmlUpload(line)).toEqual(uploadedAsGiven);
         expect(rowOutcome(fixtureRun(line), "XML-02")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-02: a multipart part with contentType application/xml whose schema sets xml.name is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-02: a multipart part with contentType application/xml whose schema sets xml.name is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(
+          await xmlPartOutcome(line, docPart({ xml: { name: "document" } }, idProperty)),
+        ).toEqual(xmlPartRefused);
+      });
 
       test(`XML-03: an XML body is opaque, so xml.namespace is never consulted and the file is sent byte for byte (${line})`, async () => {
         expect(await xmlUpload(line)).toEqual(uploadedAsGiven);
         expect(rowOutcome(fixtureRun(line), "XML-03")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-03: a multipart part with contentType application/xml whose schema sets xml.namespace is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-03: a multipart part with contentType application/xml whose schema sets xml.namespace is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(
+          await xmlPartOutcome(
+            line,
+            docPart({ xml: { namespace: "https://example.com/ns" } }, idProperty),
+          ),
+        ).toEqual(xmlPartRefused);
+      });
 
       test(`XML-04: an XML body is opaque, so xml.prefix is never consulted and the file is sent byte for byte (${line})`, async () => {
         expect(await xmlUpload(line)).toEqual(uploadedAsGiven);
         expect(rowOutcome(fixtureRun(line), "XML-04")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-04: a multipart part with contentType application/xml whose schema sets xml.prefix is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-04: a multipart part with contentType application/xml whose schema sets xml.prefix is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(
+          await xmlPartOutcome(
+            line,
+            docPart({ xml: { namespace: "https://example.com/ns", prefix: "ex" } }, idProperty),
+          ),
+        ).toEqual(xmlPartRefused);
+      });
 
       test(`XML-05: an XML body is opaque, so xml.attribute is never consulted and the file is sent byte for byte (${line})`, async () => {
         expect(await xmlUpload(line)).toEqual(uploadedAsGiven);
         expect(rowOutcome(fixtureRun(line), "XML-05")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-05: a multipart part with contentType application/xml whose schema sets xml.attribute is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-05: a multipart part with contentType application/xml whose schema sets xml.attribute is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(
+          await xmlPartOutcome(
+            line,
+            docPart({}, { id: { type: "integer", xml: { attribute: true } } }),
+          ),
+        ).toEqual(xmlPartRefused);
+      });
 
       test(`XML-06: an XML body is opaque, so xml.wrapped is never consulted and the file is sent byte for byte (${line})`, async () => {
         expect(await xmlUpload(line)).toEqual(uploadedAsGiven);
         expect(rowOutcome(fixtureRun(line), "XML-06")).toEqual(generatedClean);
       }, 60_000);
 
-      test.todo(`XML-06: a multipart part with contentType application/xml whose schema sets xml.wrapped is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-        Promise.resolve());
+      test(`XML-06: a multipart part with contentType application/xml whose schema sets xml.wrapped is refused as schema-driven XML at the media type (${line})`, async () => {
+        expect(
+          await xmlPartOutcome(
+            line,
+            docPart(
+              {},
+              { tags: { items: { type: "string" }, type: "array", xml: { wrapped: true } } },
+            ),
+          ),
+        ).toEqual(xmlPartRefused);
+      });
 
       if (line === "3.2.1") {
         test(`XML-07: an XML body is opaque, so xml.nodeType is never consulted and the file is sent byte for byte (${line})`, async () => {
@@ -577,8 +709,11 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
           expect(rowOutcome(fixtureRun(line), "XML-07")).toEqual(generatedClean);
         }, 60_000);
 
-        test.todo(`XML-07: a multipart part with contentType application/xml whose schema sets xml.nodeType is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-          Promise.resolve());
+        test(`XML-07: a multipart part with contentType application/xml whose schema sets xml.nodeType is refused as schema-driven XML at the media type (${line})`, async () => {
+          expect(
+            await xmlPartOutcome(line, docPart({ xml: { nodeType: "element" } }, idProperty)),
+          ).toEqual(xmlPartRefused);
+        });
       }
 
       if (line !== "3.0.4") {
@@ -587,8 +722,11 @@ describe("DSC-01 to XML-08 through the built CLI and generate()", () => {
           expect(rowOutcome(fixtureRun(line), "XML-08")).toEqual(generatedClean);
         }, 60_000);
 
-        test.todo(`XML-08: a multipart part with contentType application/xml over a nullable property is built from the schema as a JSON part with no diagnostic vs refused with the pointer and the XML Object section (${line})`, () =>
-          Promise.resolve());
+        test(`XML-08: a multipart part with contentType application/xml over a nullable property is refused as schema-driven XML at the media type (${line})`, async () => {
+          expect(
+            await xmlPartOutcome(line, docPart({}, { note: { type: ["string", "null"] } })),
+          ).toEqual(xmlPartRefused);
+        });
       }
     });
   }

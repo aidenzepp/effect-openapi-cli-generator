@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { EncodingRule, MediaAlternative } from "../../src/model/entities.ts";
-import { BodyNodeBudget, BodyNotReadable, normalizeBody } from "../../src/normalize/bodies.ts";
+import { checkSpecText } from "../../src/check/index.ts";
+import {
+  BodyNodeBudget,
+  BodyNotReadable,
+  hintDiscriminators,
+  normalizeBody,
+} from "../../src/normalize/bodies.ts";
 import type { BodyOutcome } from "../../src/normalize/bodies.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -926,5 +932,111 @@ describe("REF-18 node-budget: allOf members shared by many parents are expanded 
       expect(failure.diagnostic.code).toBe("REF-18/node-budget");
       expect(failure.diagnostic.scope).toBe("document");
     }
+  });
+});
+
+const schemaRef = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
+
+// A pet component that requires `petType` and its own boolean.
+const pet = (own: string): Json => ({
+  properties: { [own]: { type: "boolean" }, petType: { type: "string" } },
+  required: ["petType", own],
+  type: "object",
+});
+
+describe("DSC-01 DSC-07 DSC-09 DSC-11 the discriminator hint", () => {
+  const pets: Members = { Cat: pet("meow"), Dog: pet("bark") };
+
+  // The hint on the one alternative of a JSON body, after check's findings are read.
+  const hintOf = (line: Line, schema: Json, schemas: Members = pets) => {
+    const requestBody = { content: { "application/json": { schema } }, required: true };
+    const value = documentOf(line, requestBody, { schemas });
+    const resolution = Effect.runSync(resolve({ document: entry, line, value }));
+    const findings = Effect.runSync(checkSpecText(resolution));
+    const outcome = Effect.runSync(
+      normalizeBody(resolution, { openapi: openapi[line], pointer: site }),
+    );
+    if (outcome._tag !== "Implemented") {
+      throw new Error(`expected Implemented, got ${outcome._tag}`);
+    }
+
+    const body = Effect.runSync(hintDiscriminators(resolution, outcome.body, findings));
+
+    return {
+      codes: findings.map((finding) => finding.code),
+      hint: body.alternatives[0]?.discriminator,
+    };
+  };
+
+  test("DSC-09 a refused discriminator (the witness optional document, 3.1.2) yields no hint", () => {
+    const found = hintOf("3.1", {
+      discriminator: { propertyName: "petType" },
+      oneOf: [
+        { properties: { petType: { type: "string" }, purr: { type: "boolean" } }, type: "object" },
+        schemaRef("Dog"),
+      ],
+    });
+
+    expect(found).toEqual({ codes: ["DSC-09/property-not-required"], hint: undefined });
+  });
+
+  test("DSC-01 DSC-07 branches are labeled by mapping keys, else the component name; inline is unlabeled", () => {
+    for (const line of lines) {
+      const found = hintOf(line, {
+        discriminator: {
+          mapping: { cat: "Cat", kitty: "#/components/schemas/Cat" },
+          propertyName: "petType",
+        },
+        oneOf: [
+          schemaRef("Cat"),
+          schemaRef("Dog"),
+          { properties: { petType: { type: "string" } }, required: ["petType"], type: "object" },
+        ],
+      });
+
+      expect(found).toEqual({
+        codes: [],
+        hint: {
+          branches: [
+            { component: "Cat", index: 0, labels: ["cat", "kitty"] },
+            { component: "Dog", index: 1, labels: ["Dog"] },
+            { index: 2, labels: [] },
+          ],
+          keyword: "oneOf",
+          propertyName: "petType",
+        },
+      });
+    }
+  });
+
+  test("DSC-11 an allOf base lists the entry components whose allOf references it, in key order", () => {
+    const base: Json = {
+      discriminator: { propertyName: "petType" },
+      properties: { petType: { type: "string" } },
+      required: ["petType"],
+      type: "object",
+    };
+    const found = hintOf("3.0", schemaRef("Pet"), {
+      Hound: { allOf: [schemaRef("Pet"), { properties: { bark: { type: "boolean" } } }] },
+      Kitty: { allOf: [schemaRef("Pet"), { properties: { meow: { type: "boolean" } } }] },
+      Other: { oneOf: [schemaRef("Pet")] },
+      Pet: base,
+    });
+
+    expect(found).toEqual({
+      codes: [],
+      hint: {
+        branches: [
+          { component: "Hound", index: 0, labels: ["Hound"] },
+          { component: "Kitty", index: 1, labels: ["Kitty"] },
+        ],
+        keyword: "allOf",
+        propertyName: "petType",
+      },
+    });
+  });
+
+  test("a body with no discriminator has no hint", () => {
+    expect(hintOf("3.1", { oneOf: [schemaRef("Cat"), schemaRef("Dog")] }).hint).toBeUndefined();
   });
 });

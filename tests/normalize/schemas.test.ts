@@ -163,7 +163,6 @@ describe("store", () => {
     expect(result.facts.get("Pet")).toEqual({
       contentEncoding: undefined,
       contentMediaType: undefined,
-      discriminator: "kind",
       format: undefined,
       items: false,
       properties: ["name", "kind"],

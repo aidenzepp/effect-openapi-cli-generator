@@ -103,7 +103,29 @@ export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
 }) {}
 
 /**
+ * One branch of a discriminated body: its composition `index`, the entry component it names when
+ * its `$ref` chain ends at one, and the discriminator values that select it, in mapping order.
+ */
+export const DiscriminatorBranch = Schema.Struct({
+  component: Schema.optionalKey(Schema.NonEmptyString),
+  index: Schema.Int,
+  labels: Schema.Array(Schema.String),
+});
+
+/**
+ * The usable discriminator of a request body's root schema, a hint that never changes validation
+ * (design D-OQ9, DSC-06). `keyword` is the composition its branches come from; for `allOf`, the
+ * branches are the entry components whose own `allOf` references the schema (DSC-11).
+ */
+export const DiscriminatorHint = Schema.Struct({
+  branches: Schema.Array(DiscriminatorBranch),
+  keyword: Schema.Literals(["allOf", "anyOf", "oneOf"]),
+  propertyName: Schema.NonEmptyString,
+});
+
+/**
  * One media type a body or response offers; `codec` is derived from the media type.
+ * `discriminator` is set on a request body alternative only.
  */
 export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlternative")({
   codec: Schema.Literals([
@@ -117,6 +139,7 @@ export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlter
     "text",
     "xml",
   ]),
+  discriminator: Schema.optionalKey(DiscriminatorHint),
   encoding: Schema.Array(EncodingRule),
   itemEncoding: Schema.optionalKey(EncodingRule),
   itemSchema: Schema.optionalKey(SchemaRef),

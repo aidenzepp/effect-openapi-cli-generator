@@ -1,7 +1,7 @@
 import { Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
-import type { Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
 import type { Json } from "../model/pointer.ts";
 
 /**
@@ -155,6 +155,36 @@ const requestLine = (operation: Operation): string => {
   }
 
   return parts.join(", ");
+};
+
+type Hint = typeof DiscriminatorHint.Type;
+
+// One branch of a discriminated body: the JSON-quoted values that select it, then its component;
+// a branch no value selects names its place in the composition.
+const branchText = (hint: Hint, branch: Hint["branches"][number]): string => {
+  const place = `${hint.keyword}/${branch.index}`;
+  if (branch.labels.length === 0) {
+    return `${place} (inline, no ${line(hint.propertyName)} value)`;
+  }
+
+  const values = branch.labels.map((label) => line(JSON.stringify(label))).join(" | ");
+
+  return `${values} (${branch.component === undefined ? place : line(branch.component)})`;
+};
+
+// The VARIANTS line: each hinted body alternative's branches by discriminator value (D-OQ9).
+const variantsLine = (operation: Operation): string | undefined => {
+  const hinted = (operation.body?.alternatives ?? []).flatMap(({ discriminator, mediaType }) =>
+    discriminator === undefined
+      ? []
+      : [
+          `${mediaType} ${discriminator.keyword} by ${line(discriminator.propertyName)}: ${discriminator.branches
+            .map((branch) => branchText(discriminator, branch))
+            .join(", ")}`,
+        ],
+  );
+
+  return hinted.length === 0 ? undefined : hinted.join("; ");
 };
 
 const kindNote = (scheme: SecurityScheme): string => {
@@ -324,16 +354,19 @@ const nonStandardLine = (input: HelpInput): string | undefined => {
 /**
  * The description and generated notes of one command, from the model alone: source prose first,
  * then the wire name and location of each argument and flag (with a body field's allowed values,
- * default and read-only and deprecated marks), and the REQUEST, AUTH, RESPONSES and
- * REFUSED lines. The REFUSED line lists the command's refused elements by wire name and reason.
+ * default and read-only and deprecated marks), and the REQUEST, VARIANTS, AUTH, RESPONSES and
+ * REFUSED lines. VARIANTS lists a discriminated body's branches and is absent without a hint; the
+ * REFUSED line lists the command's refused elements by wire name and reason.
  */
 export const operationHelp = (input: HelpInput): OperationHelp => {
   const { operation } = input;
   const auth = authLine(input);
   const refused = refusedLine(input);
   const nonStandard = nonStandardLine(input);
+  const variants = variantsLine(operation);
   const sections: (readonly [string, string])[] = [
     ["REQUEST", requestLine(operation)],
+    ...(variants === undefined ? [] : [["VARIANTS", variants] as const]),
     ["AUTH", auth],
   ];
 

@@ -513,3 +513,57 @@ describe("several media types", () => {
     );
   });
 });
+
+const hint = (keyword: string, branches: readonly Schema.Json[]) => ({
+  branches,
+  keyword,
+  propertyName: "petType",
+});
+
+// The help of the golden operation with the given body alternatives.
+const withAlternatives = (alternatives: readonly Schema.Json[]) =>
+  operationHelp({
+    ...input,
+    operation: Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      body: { ...operationPlain.body, alternatives },
+    }),
+  });
+
+const titles = (help: ReturnType<typeof operationHelp>) => help.sections.map(([title]) => title);
+
+describe("DSC-01 DSC-02 DSC-07 VARIANTS", () => {
+  const mixed = hint("oneOf", [
+    { component: "Cat", index: 0, labels: ["cat"] },
+    { component: "Dog", index: 1, labels: ["Dog"] },
+    { index: 2, labels: [] },
+  ]);
+
+  test("a hinted alternative prints one VARIANTS line directly after REQUEST", () => {
+    const help = withAlternatives([{ ...media("application/json"), discriminator: mixed }]);
+
+    expect(titles(help)).toEqual(["REQUEST", "VARIANTS", "AUTH", "RESPONSES"]);
+    expect(sectionText(help, "VARIANTS")).toBe(
+      'application/json oneOf by petType: "cat" (Cat), "Dog" (Dog), oneOf/2 (inline, no petType value)',
+    );
+  });
+
+  test("two hinted alternatives join with '; ' and an unhinted one adds nothing", () => {
+    const help = withAlternatives([
+      { ...media("application/json"), discriminator: mixed },
+      media("text/plain"),
+      {
+        ...media("application/vnd.pet+json"),
+        discriminator: hint("anyOf", [{ component: "Cat", index: 0, labels: ["a", "b"] }]),
+      },
+    ]);
+
+    expect(sectionText(help, "VARIANTS")).toBe(
+      'application/json oneOf by petType: "cat" (Cat), "Dog" (Dog), oneOf/2 (inline, no petType value); application/vnd.pet+json anyOf by petType: "a" | "b" (Cat)',
+    );
+  });
+
+  test("no hinted alternative prints no VARIANTS section", () => {
+    expect(titles(operationHelp(input))).not.toContain("VARIANTS");
+  });
+});
