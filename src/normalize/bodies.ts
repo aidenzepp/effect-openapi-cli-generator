@@ -202,6 +202,10 @@ const codecOf = (base: string): Codec => {
 interface Finding {
   readonly anchor: string;
   readonly code: string;
+  /**
+   * The refusal drops its whole media alternative; `anchorDrops` moves it to the media type.
+   */
+  readonly drops?: true;
   readonly element: string;
   readonly hint?: string;
   readonly message: string;
@@ -230,6 +234,18 @@ const notice = (
   message: string,
   at: CanonicalKey,
 ): Finding => ({ anchor, at, code, element, message, severity: "notice" });
+
+// A refusal whose part, rule or key leaves its media alternative with nothing to send.
+const dropping = (finding: Finding): Finding => ({ ...finding, drops: true });
+
+// A refusal that drops a whole alternative is reported at that media type, its own keyword first
+// in `related`, so the report names what was dropped and coverage credits it.
+const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly Finding[] =>
+  findings.map((finding) =>
+    finding.drops === true
+      ? { ...finding, at: home, related: [finding.at, ...(finding.related ?? [])] }
+      : finding,
+  );
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -632,12 +648,14 @@ const contentTypeIgnored = (actual: CanonicalKey): Finding =>
   );
 
 const invalidContentType = (input: RuleInput): Finding =>
-  refusal(
-    "ENC-02/invalid-content-type",
-    "encoding-content-type",
-    "Encoding contentType",
-    `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
-    childKey(input.actual, "contentType"),
+  dropping(
+    refusal(
+      "ENC-02/invalid-content-type",
+      "encoding-content-type",
+      "Encoding contentType",
+      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
+      childKey(input.actual, "contentType"),
+    ),
   );
 
 interface Typing {
@@ -748,12 +766,14 @@ const headersOf = (
         );
       } else if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
         findings.push(
-          refusal(
-            "ENC-03/invalid-header-name",
-            "encoding-headers",
-            "Encoding header name",
-            `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
-            at,
+          dropping(
+            refusal(
+              "ENC-03/invalid-header-name",
+              "encoding-headers",
+              "Encoding header name",
+              `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
+              at,
+            ),
           ),
         );
 
@@ -803,7 +823,7 @@ const nestingRefusal = (
   element: string,
   message: string,
   actual: CanonicalKey,
-): Finding => refusal(code, "nested-encoding", element, message, actual);
+): Finding => dropping(refusal(code, "nested-encoding", element, message, actual));
 
 interface Nesting {
   readonly findings: readonly Finding[];
@@ -917,8 +937,14 @@ const transferAnchor = (line: Line): string =>
 // Transfer encodings are case-insensitive tokens (RFC 2045 6.1).
 const isBase64 = (value: string): boolean => value.toLowerCase() === "base64";
 
-// What one schema declares: 3.0 `format: byte` (ENC-38), 3.1+ `contentEncoding` (ENC-37). Only
-// base64 has a writer, so any other `contentEncoding` refuses the part.
+// The identity encodings of RFC 2045 6.2: the part is not transformed.
+const identityEncodings: ReadonlySet<string> = new Set(["7bit", "8bit", "binary"]);
+
+const isIdentity = (value: string): boolean => identityEncodings.has(value.toLowerCase());
+
+// What one schema declares: 3.0 `format: byte` (ENC-38), 3.1+ `contentEncoding` (ENC-37). base64
+// has a writer; an identity encoding sends the part raw, as a 3.0 `format: binary` part is, with no
+// Content-Transfer-Encoding line of its own. Any other `contentEncoding` refuses the part.
 const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResult | undefined => {
   if (line === "3.0") {
     return facts.format === "byte" ? base64Transfer("ENC-38") : undefined;
@@ -929,17 +955,23 @@ const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResu
     return undefined;
   }
 
-  return isBase64(declared.value)
-    ? base64Transfer("ENC-37")
+  if (isBase64(declared.value)) {
+    return base64Transfer("ENC-37");
+  }
+
+  return isIdentity(declared.value)
+    ? { ...noTransfer, row: "ENC-37" }
     : {
         ...noTransfer,
-        finding: refusal(
-          "ENC-37/unsupported-content-encoding",
-          transferAnchor(line),
-          "Multipart part contentEncoding",
-          `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is not base64, the one transfer encoding a part is sent with.`,
-          childKey(declared.at, "contentEncoding"),
-          "Use contentEncoding base64, or remove it to send the part as is",
+        finding: dropping(
+          refusal(
+            "ENC-37/unsupported-content-encoding",
+            transferAnchor(line),
+            "Multipart part contentEncoding",
+            `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
+            childKey(declared.at, "contentEncoding"),
+            "Use contentEncoding base64 or binary, or remove it to send the part as is",
+          ),
         ),
       };
 };
@@ -952,18 +984,20 @@ const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResul
     declaredTransfer(ctx.line, label, facts) ??
     (facts.items === undefined ? undefined : declaredTransfer(ctx.line, label, facts.items)) ??
     noTransfer;
-  if (input.depth === 0 || found.row === undefined) {
+  if (input.depth === 0 || found.encoding === undefined) {
     return found;
   }
 
   return {
     ...noTransfer,
-    finding: refusal(
-      `${found.row}/nested-transfer-encoding`,
-      transferAnchor(ctx.line),
-      "Transfer encoding of a nested part",
-      `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
-      input.actual,
+    finding: dropping(
+      refusal(
+        `${found.row}/nested-transfer-encoding`,
+        transferAnchor(ctx.line),
+        "Transfer encoding of a nested part",
+        `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
+        input.actual,
+      ),
     ),
   };
 };
@@ -1004,13 +1038,15 @@ const transferConflict = (
 
     return keyword === undefined
       ? undefined
-      : refusal(
-          "ENC-39/conflicting-transfer-encoding",
-          transferAnchor(ctx.line),
-          "Encoding header Content-Transfer-Encoding",
-          `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
-          childKey(at, keyword),
-          "Remove the header, or let its schema admit base64",
+      : dropping(
+          refusal(
+            "ENC-39/conflicting-transfer-encoding",
+            transferAnchor(ctx.line),
+            "Encoding header Content-Transfer-Encoding",
+            `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
+            childKey(at, keyword),
+            "Remove the header, or let its schema admit base64",
+          ),
         );
   });
 
@@ -1281,12 +1317,14 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
     if (!declared.has(name) && line !== "3.2") {
       return {
         findings: [
-          refusal(
-            "MED-11/unknown-property",
-            "media-type-encoding",
-            "Media type encoding key",
-            `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
-            actual,
+          dropping(
+            refusal(
+              "MED-11/unknown-property",
+              "media-type-encoding",
+              "Media type encoding key",
+              `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
+              actual,
+            ),
           ),
         ],
         refused: true,
@@ -1466,13 +1504,15 @@ const formIgnored = (node: EncodingNode, actual: CanonicalKey): readonly Finding
 ];
 
 const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
-  refusal(
-    "ENC-02/form-content-type",
-    "encoding-content-type",
-    "Encoding contentType under form-urlencoded",
-    `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
-    childKey(input.actual, "contentType"),
-    `Remove contentType, or set it to ${expected}`,
+  dropping(
+    refusal(
+      "ENC-02/form-content-type",
+      "encoding-content-type",
+      "Encoding contentType under form-urlencoded",
+      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
+      childKey(input.actual, "contentType"),
+      `Remove contentType, or set it to ${expected}`,
+    ),
   );
 
 const isCompound = (types: readonly string[]): boolean =>
@@ -1516,17 +1556,17 @@ const isNested = (
     return false;
   });
 
-const compoundNested = (home: CanonicalKey, input: RuleInput): Finding => ({
-  ...refusal(
-    "PRM-27/compound-nested",
-    "style-values",
-    "Encoding style deepObject under form-urlencoded",
-    `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
-    home,
-    "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
-  ),
-  related: [input.actual],
-});
+const compoundNested = (input: RuleInput): Finding =>
+  dropping(
+    refusal(
+      "PRM-27/compound-nested",
+      "style-values",
+      "Encoding style deepObject under form-urlencoded",
+      `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
+      input.actual,
+      "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
+    ),
+  );
 
 const bracketChoice = (input: RuleInput): Finding =>
   notice(
@@ -1556,11 +1596,7 @@ const deepObjectOf = (
 // them the value is sent by the default table, so an explicit contentType is kept only when it
 // names the table's type, which changes nothing on the wire. A deepObject over a nested value
 // refuses the alternative unless the author config opts into brackets (PRM-27).
-const formRule = (
-  ctx: Context,
-  home: CanonicalKey,
-  input: RuleInput,
-): Effect.Effect<RuleResult, BodyNodeBudget> =>
+const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
     const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
@@ -1570,7 +1606,7 @@ const formRule = (
 
     const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);
     if (deepObject === "refuse") {
-      return { findings: [...typing.findings, compoundNested(home, input)], rule: undefined };
+      return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
     }
 
     const explicit = typing.serialization === undefined && node.contentType !== undefined;
@@ -1655,7 +1691,7 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
     for (const input of propertyInputs(media, members, true)) {
-      const result = yield* formRule(ctx, media.home, input);
+      const result = yield* formRule(ctx, input);
       findings.push(...result.findings);
       if (result.rule === undefined) {
         return refusedParts(findings);
@@ -1717,7 +1753,7 @@ const normalizeAlternative = (
     const { home, node } = media;
     const parts = yield* partsOf(ctx, media, base, codec);
     if (parts.refused) {
-      return stopAlternative(...parts.findings);
+      return stopAlternative(...anchorDrops(home, parts.findings));
     }
 
     // An XML body is opaque, so its schema is never consulted (design 6.3, D-SCH3).
