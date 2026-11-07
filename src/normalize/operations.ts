@@ -3,7 +3,11 @@ import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
 import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
-import { Operation } from "../model/entities.ts";
+import {
+  ContentSerialization,
+  Operation,
+  Parameter as ParameterEntity,
+} from "../model/entities.ts";
 import type {
   Body,
   Naming,
@@ -18,10 +22,10 @@ import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
 import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import { hintDiscriminators, normalizeBody } from "./bodies.ts";
+import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
 import { normalizeParameter } from "./parameters.ts";
-import type { ParameterNotReadable, ParameterOutcome } from "./parameters.ts";
+import type { ParameterNotReadable, ParameterOutcome, ParameterSite } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
 import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
@@ -384,35 +388,81 @@ const operationInfo = (raw: RawOperation): DiagnosticOperationValue =>
     ? { method: raw.method, path: raw.path }
     : { method: raw.method, operationId: raw.fields.operationId, path: raw.path };
 
+// A 3.2 `querystring` parameter's form content takes Encoding Objects as for bodies (design 6.1):
+// the body form rules decide them, and the parameter carries the rules, or is refused with their
+// diagnostics when they refuse the content, as a form body alternative would be dropped.
+const withFormRules = (
+  shared: Shared,
+  site: ParameterSite,
+  outcome: ParameterOutcome,
+): Effect.Effect<ParameterOutcome, BodyNodeBudget | BodyNotReadable> =>
+  Effect.gen(function* fill() {
+    if (outcome._tag !== "Implemented" || outcome.parameter.location !== "querystring") {
+      return outcome;
+    }
+
+    const { parameter } = outcome;
+    const { serialization } = parameter;
+    if (serialization.kind !== "content") {
+      return outcome;
+    }
+
+    const { nonStandard, ...placed } = site;
+    const bodySite: Plain<BodySite> = placed;
+    if (nonStandard !== undefined) {
+      bodySite.nonStandard = nonStandard;
+    }
+
+    const decided = yield* formContentRules(
+      shared.resolution,
+      bodySite,
+      serialization.mediaType,
+      shared.limits,
+    );
+    const diagnostics = [...outcome.diagnostics, ...decided.diagnostics];
+    if (decided._tag === "Refused") {
+      return { _tag: "Refused", diagnostics, required: parameter.required };
+    }
+
+    // Each spread feeds a class constructor, which checks the fields and gives back the class.
+    // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
+    const filled = new ContentSerialization({ ...serialization, encoding: decided.encoding });
+
+    return {
+      _tag: "Implemented",
+      diagnostics,
+      // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
+      parameter: new ParameterEntity({ ...parameter, serialization: filled }),
+    };
+  });
+
 const assembleParameters = (
   shared: Shared,
   raw: RawOperation,
   merged: Merged,
-): Effect.Effect<Assembled, ParameterNotReadable> =>
+): Effect.Effect<Assembled, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> =>
   Effect.gen(function* assemble() {
     const parameters: Parameter[] = [];
     const diagnostics: Diagnostic[] = [];
     const refusedRequired: string[] = [];
     for (const entry of merged.entries) {
       // A path item parameter is the item's element, not one operation's: it is read once.
-      const cached = shared.cache.get(entry.pointer);
+      const site: ParameterSite =
+        entry.level === "operation"
+          ? {
+              nonStandard: shared.context.config.nonStandard,
+              openapi: shared.context.openapi,
+              operation: operationInfo(raw),
+              pointer: entry.pointer,
+            }
+          : {
+              nonStandard: shared.context.config.nonStandard,
+              openapi: shared.context.openapi,
+              pointer: entry.pointer,
+            };
       const outcome =
-        cached ??
-        (yield* normalizeParameter(
-          shared.resolution,
-          entry.level === "operation"
-            ? {
-                nonStandard: shared.context.config.nonStandard,
-                openapi: shared.context.openapi,
-                operation: operationInfo(raw),
-                pointer: entry.pointer,
-              }
-            : {
-                nonStandard: shared.context.config.nonStandard,
-                openapi: shared.context.openapi,
-                pointer: entry.pointer,
-              },
-        ));
+        shared.cache.get(entry.pointer) ??
+        (yield* withFormRules(shared, site, yield* normalizeParameter(shared.resolution, site)));
       shared.cache.set(entry.pointer, outcome);
       diagnostics.push(...outcome.diagnostics);
       if (outcome._tag === "Implemented") {

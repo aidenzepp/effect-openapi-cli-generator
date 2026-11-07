@@ -154,7 +154,8 @@ const entryAt = (origin: { readonly document: string; readonly pointer: string }
 
 /**
  * The elements of the normalized model that carry the non-standard marker (design 6.1): query
- * parameters and form Encoding entries the author config sends in the bracket convention. The
+ * parameters, and form Encoding entries of bodies and of `querystring` form content, that the
+ * author config sends in the bracket convention. The
  * marker is read as the model holds it, never inferred; a model with none lists none. Entries are
  * in diagnostic order over `documents`.
  */
@@ -163,11 +164,15 @@ export const nonStandardEntries = (
   documents: readonly string[],
 ): GenerationReportValue["nonStandard"] => {
   const marked = api.operations.flatMap((operation) => [
-    ...operation.parameters.flatMap(({ serialization }) =>
-      serialization.kind === "style" && serialization.nonStandard !== undefined
-        ? [entryAt(serialization.origin)]
-        : [],
-    ),
+    ...operation.parameters.flatMap(({ serialization }) => {
+      if (serialization.kind === "content") {
+        return serialization.encoding.flatMap((rule) =>
+          rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
+        );
+      }
+
+      return serialization.nonStandard === undefined ? [] : [entryAt(serialization.origin)];
+    }),
     ...(operation.body?.alternatives ?? []).flatMap((alternative) =>
       alternative.encoding.flatMap((rule) =>
         rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],

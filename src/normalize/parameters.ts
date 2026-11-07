@@ -88,12 +88,7 @@ const ParameterObject = Schema.Struct({
 
 type ParameterNode = typeof ParameterObject.Type;
 
-const MediaTypeObject = Schema.Struct({
-  encoding: Schema.optionalKey(Schema.Unknown),
-  schema: Schema.optionalKey(Schema.Unknown),
-});
-
-const EncodingMap = Schema.Record(Schema.String, Schema.Unknown);
+const MediaTypeObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknown) });
 
 const rules: Record<Line, string> = { "3.0": "oas-3.0", "3.1": "oas-3.1", "3.2": "oas-3.2" };
 
@@ -407,22 +402,6 @@ const querystringSchemaFields = refusal(
   "Describe the query string with exactly one content entry",
 );
 
-// Design 6.1 sends querystring form content by Encoding Objects as for bodies, but a Parameter has
-// no model field to carry them, so content that declares any is refused rather than sent by the
-// default form rules (audit S1).
-const querystringEncoding = refusal(
-  "STY-43/querystring-encoding",
-  "encoding-object",
-  "Parameter in querystring, form-urlencoded content with encoding",
-  "The querystring parameter's form content declares Encoding Objects, which the generator cannot apply yet, so it is refused rather than sent with the default form rules.",
-  "Remove the encoding entries to send every property by the default form rules",
-);
-
-const formMedia = "application/x-www-form-urlencoded";
-
-const isFormMedia = (mediaType: string): boolean =>
-  (mediaType.split(";")[0] ?? "").trim().toLowerCase() === formMedia;
-
 // An RFC 6265 cookie-name is an RFC 9110 token.
 const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 
@@ -456,7 +435,7 @@ const explodeNotApplicableFinding = (row: string): Finding =>
   );
 
 const decideContent = (node: ParameterNode, content: Content): Decision => {
-  const { encoded, mediaType, schemaKey } = content;
+  const { mediaType, schemaKey } = content;
   if (Option.isNone(Schema.decodeUnknownOption(MediaType)(mediaType))) {
     return refuse(
       refusal(
@@ -466,10 +445,6 @@ const decideContent = (node: ParameterNode, content: Content): Decision => {
         "The content key is not a concrete media type.",
       ),
     );
-  }
-
-  if (node.in === "querystring" && encoded && isFormMedia(mediaType)) {
-    return refuse(querystringEncoding);
   }
 
   if (Option.isNone(schemaKey)) {
@@ -659,10 +634,10 @@ const decideName = (node: ParameterNode): Decision | undefined => {
   return node.in === "cookie" && !cookieNameToken.test(node.name) ? refuse(cookieName) : undefined;
 };
 
-// A parameter's one content entry: its media type, the schema key of its media type object, and
-// whether that object declares any Encoding Object.
+// A parameter's one content entry: its media type and the schema key of its media type object.
+// A `querystring` form entry's Encoding Objects are decided by the body form rules (design 6.1), in
+// the operation assembly.
 interface Content {
-  readonly encoded: boolean;
   readonly mediaType: string;
   readonly schemaKey: Option.Option<string>;
 }
@@ -717,8 +692,7 @@ const contractReason = (
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
 
-// A content entry's media type object, which 3.2 lets be a reference: its schema key, and whether
-// it declares at least one Encoding Object (an empty map changes no byte).
+// A content entry's media type object, which 3.2 lets be a reference: its schema key.
 const mediaContent = (
   resolution: Resolution,
   mediaType: string,
@@ -729,14 +703,13 @@ const mediaContent = (
   return nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(MediaTypeObject)),
     Effect.map((media): Content => ({
-      encoded: Schema.is(EncodingMap)(media.encoding) && Object.keys(media.encoding).length > 0,
       mediaType,
       schemaKey:
         media.schema === undefined
           ? Option.none()
           : Option.some(schemaKeyAt(resolution, childKey(home, "schema"))),
     })),
-    Effect.orElseSucceed((): Content => ({ encoded: false, mediaType, schemaKey: Option.none() })),
+    Effect.orElseSucceed((): Content => ({ mediaType, schemaKey: Option.none() })),
   );
 };
 
@@ -1096,7 +1069,9 @@ const serializationOf = (
   objectValue: boolean,
 ) => {
   if (plan.kind === "content") {
+    // The operation assembly fills a `querystring` form entry's rules (design 6.1).
     return {
+      encoding: [],
       kind: plan.kind,
       mediaType: plan.mediaType,
       origin,

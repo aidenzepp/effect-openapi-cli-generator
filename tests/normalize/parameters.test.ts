@@ -965,25 +965,22 @@ const formQuerystring = (encoding: Json): Json => ({
   required: true,
 });
 
-describe("STY-43 querystring form content with Encoding Objects is refused, never sent by the default rules", () => {
-  test("STY-43 an encoding entry on form querystring content refuses the parameter at element scope", () => {
-    const outcome = refused(
+// The body form rules decide the Encoding Objects in the operation assembly (design 6.1; witness
+// tests/emit/querystring-encoding.test.ts), so the parameter rules neither refuse nor ignore them.
+describe("STY-43 querystring form content with Encoding Objects reaches the body form rules", () => {
+  test("STY-43 an encoding entry no longer refuses the parameter, which starts with no rules", () => {
+    const outcome = implemented(
       "3.2",
       formQuerystring({ ids: { explode: false, style: "pipeDelimited" } }),
     );
-    const [diagnostic] = outcome.diagnostics;
 
-    expect(codes(outcome)).toEqual(["STY-43/querystring-encoding"]);
-    expect(diagnostic?.scope).toBe("element");
-    expect(diagnostic?.severity).toBe("refusal");
-    expect(String(diagnostic?.pointer)).toBe(site);
-    expect(plain(diagnostic?.specSection)).toBe(
-      "https://spec.openapis.org/oas/v3.2.1.html#encoding-object",
-    );
-    expect(outcome.required).toBe(true);
+    expect(codes(outcome)).toEqual([]);
+    expect(outcome.parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
   });
 
-  test("STY-43 an empty encoding map changes no byte and keeps the parameter", () => {
-    expect(codes(implemented("3.2", formQuerystring({})))).toEqual([]);
+  test("STY-43 every content serialization starts with an empty rule list", () => {
+    const { parameter } = implemented("3.2", formQuerystring({}));
+
+    expect(parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
   });
 });

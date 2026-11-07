@@ -2,7 +2,7 @@ import { Array as Arr, Data, Effect, Option, Order, Predicate, Schema } from "ef
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
-import { Body } from "../model/entities.ts";
+import { Body, EncodingRule } from "../model/entities.ts";
 import type { DiscriminatorHint } from "../model/entities.ts";
 import { nodeAt as jsonAt } from "../model/json-tree.ts";
 import { childPointer, formatPointer } from "../model/pointer.ts";
@@ -2354,4 +2354,59 @@ export const normalizeBody = (
     }).pipe(Effect.orDie);
 
     return { _tag: "Implemented", body, diagnostics };
+  });
+
+/**
+ * What the form rules decided for one form-urlencoded content entry outside a request body.
+ * `Implemented` holds one rule per declared property in document order; `Refused` means a rule
+ * refused the entry, as it would drop a form body alternative.
+ */
+export type FormContentOutcome =
+  | {
+      readonly _tag: "Implemented";
+      readonly diagnostics: readonly Diagnostic[];
+      readonly encoding: readonly EncodingRule[];
+    }
+  | { readonly _tag: "Refused"; readonly diagnostics: readonly Diagnostic[] };
+
+/**
+ * The form-urlencoded rules of the content entry `mediaType` of the element at `site`, decided
+ * exactly as a form body alternative's are (design 6.1, 6.3), for a 3.2 `querystring` parameter
+ * whose form content takes Encoding Objects "as for bodies". Content of any other media type has
+ * no rules. Diagnostics are placed as a body's are, at `site` when the element is a reference.
+ */
+export const formContentRules = (
+  resolution: Resolution,
+  site: BodySite,
+  mediaType: string,
+  limits: ResolveLimits = defaultLimits,
+): Effect.Effect<FormContentOutcome, BodyNodeBudget | BodyNotReadable> =>
+  Effect.gen(function* rules() {
+    if (codecOf(baseType(mediaType)) !== "form") {
+      return { _tag: "Implemented", diagnostics: [], encoding: [] };
+    }
+
+    const use = { document: resolution.document, pointer: site.pointer };
+    const reference = referenceIn(resolution, use);
+    const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
+    const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
+    const media = yield* readMedia(
+      resolution,
+      childKey(follow(resolution, use), "content", mediaType),
+    );
+    const parts = yield* formParts(ctx, media);
+    if (parts.refused) {
+      return {
+        _tag: "Refused",
+        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings)),
+      };
+    }
+
+    return {
+      _tag: "Implemented",
+      diagnostics: yield* toDiagnostics(ctx, parts.findings),
+      encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
+        Effect.orDie,
+      ),
+    };
   });
