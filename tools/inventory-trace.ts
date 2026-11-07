@@ -4,6 +4,8 @@ import type { PlatformError } from "effect/PlatformError";
 
 /**
  * Row trace: prove every implemented or refused inventory row has a test titled with its id.
+ * After the row lines it prints `total <status> <count>` for every status; a split row counts
+ * once, under its worst half.
  *
  * Bun tools/inventory-trace.ts [--check [--allow-todo]] [--only <regex>] [--root <dir>]
  */
@@ -356,6 +358,51 @@ const readJson = <S extends Schema.Top & { readonly DecodingServices: never }>(
     ),
   );
 
+/**
+ * The statuses, in the order the totals lines print them.
+ */
+const totalsOrder: readonly Status[] = [
+  "covered",
+  "partial",
+  "todo",
+  "missing",
+  "informational",
+  "deferred",
+  "delegated",
+];
+
+/**
+ * Worst first: a split row counts once, under the worst status among its halves.
+ */
+const severity: readonly Status[] = [
+  "missing",
+  "delegated",
+  "todo",
+  "partial",
+  "deferred",
+  "covered",
+  "informational",
+];
+
+/**
+ * Count each inventory row once, in `totalsOrder`, with zero for a status no row has.
+ */
+export const totalsOf = (reports: readonly Report[]): readonly (readonly [Status, number])[] => {
+  const worst = new Map<string, Status>();
+
+  for (const report of reports) {
+    const seen = worst.get(report.id);
+
+    if (seen === undefined || severity.indexOf(report.status) < severity.indexOf(seen)) {
+      worst.set(report.id, report.status);
+    }
+  }
+
+  const statuses = [...worst.values()];
+
+  return totalsOrder.map((status) => [status, statuses.filter((s) => s === status).length]);
+};
+
 const line = (report: Report): string =>
   `${report.id}${report.half === undefined ? "" : ` (${report.half})`} ${report.status}${
     report.status === "partial" ? ` (${report.passing} passing, ${report.todo} todo)` : ""
@@ -399,6 +446,10 @@ const trace = Effect.gen(function* run() {
 
   for (const report of reports) {
     console.log(line(report));
+  }
+
+  for (const [status, count] of totalsOf(reports)) {
+    console.log(`total ${status} ${count}`);
   }
 
   if (options.check && reports.some((report) => unresolved(report.status, options.allowTodo))) {
