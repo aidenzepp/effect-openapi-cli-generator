@@ -61,7 +61,14 @@ const SplitRows = Schema.Array(
   Schema.Struct({ halves: Schema.Array(Schema.String), row: Schema.String }),
 );
 
-export type Status = "covered" | "todo" | "missing" | "delegated" | "deferred" | "informational";
+export type Status =
+  | "covered"
+  | "partial"
+  | "todo"
+  | "missing"
+  | "delegated"
+  | "deferred"
+  | "informational";
 
 /**
  * One reported line: a row, or one half of a split row.
@@ -71,6 +78,14 @@ export interface Report {
   readonly half?: string;
   readonly status: Status;
   readonly via?: readonly string[];
+  /**
+   * Passing test count, set on `partial` rows.
+   */
+  readonly passing?: number;
+  /**
+   * `test.todo` count, set on `partial` rows.
+   */
+  readonly todo?: number;
 }
 
 /**
@@ -102,12 +117,25 @@ export const titlesOf = (source: string): readonly Title[] =>
       : [{ half: parsed.half, id: parsed.id, todo: match.groups?.todo !== undefined }];
   });
 
-const judge = (titles: readonly Title[]): "covered" | "todo" | "missing" => {
+type Judgement = Pick<Report, "status" | "passing" | "todo">;
+
+/**
+ * A remaining `test.todo` keeps a row from being covered, even when other tests for it pass.
+ */
+const judge = (titles: readonly Title[]): Judgement => {
   if (titles.length === 0) {
-    return "missing";
+    return { status: "missing" };
   }
 
-  return titles.every((title) => title.todo) ? "todo" : "covered";
+  const todo = titles.filter((title) => title.todo).length;
+
+  if (todo === 0) {
+    return { status: "covered" };
+  }
+
+  return todo === titles.length
+    ? { status: "todo" }
+    : { passing: titles.length - todo, status: "partial", todo };
 };
 
 interface TraceInput {
@@ -159,16 +187,18 @@ export const traceRows = (input: TraceInput): readonly Report[] => {
       return split.halves.map((half) =>
         half === entry?.deferred
           ? { half, id: row.id, status: "deferred" }
-          : { half, id: row.id, status: judge(own.filter((title) => title.half === half)) },
+          : { half, id: row.id, ...judge(own.filter((title) => title.half === half)) },
       );
     }
 
-    const status = judge(own.filter((title) => title.half === undefined));
+    const judged = judge(own.filter((title) => title.half === undefined));
 
     return [
       {
         id: row.id,
-        status: status === "missing" && row.coveredBy.length > 0 ? "delegated" : status,
+        ...judged,
+        status:
+          judged.status === "missing" && row.coveredBy.length > 0 ? "delegated" : judged.status,
       },
     ];
   };
@@ -259,7 +289,8 @@ export const traceRows = (input: TraceInput): readonly Report[] => {
 };
 
 const unresolved = (status: Status, allowTodo: boolean): boolean =>
-  status === "missing" || (!allowTodo && (status === "todo" || status === "delegated"));
+  status === "missing" ||
+  (!allowTodo && (status === "todo" || status === "partial" || status === "delegated"));
 
 interface Options {
   readonly check: boolean;
@@ -320,8 +351,8 @@ const readJson = <S extends Schema.Top & { readonly DecodingServices: never }>(
 
 const line = (report: Report): string =>
   `${report.id}${report.half === undefined ? "" : ` (${report.half})`} ${report.status}${
-    report.via === undefined ? "" : ` (deferred: ${report.via.join(", ")})`
-  }`;
+    report.status === "partial" ? ` (${report.passing} passing, ${report.todo} todo)` : ""
+  }${report.via === undefined ? "" : ` (deferred: ${report.via.join(", ")})`}`;
 
 const trace = Effect.gen(function* run() {
   const fs = yield* FileSystem.FileSystem;
