@@ -15,9 +15,12 @@ import { follow, nodeIn } from "./document-set.ts";
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
  * an alternative naming one is refused with it rather than treated as undeclared. `checkRefused`
- * holds the pointers of the requirement names check refused as unresolved.
+ * holds the pointers of the requirement names check refused as unresolved. `added` names the
+ * schemes `security.add` supplies that no declared scheme shares; only the author requirement
+ * reaches them, so a spec requirement naming one stays undeclared (AS-1).
  */
 export interface SchemeNormalization {
+  readonly added: ReadonlySet<string>;
   readonly checkRefused: ReadonlySet<string>;
   readonly diagnostics: readonly Diagnostic[];
   readonly schemes: readonly SecurityScheme[];
@@ -442,6 +445,7 @@ export const normalizeSecuritySchemes = (
         : { document: author.configDocument, requirement };
 
     return {
+      added: new Set(extra.names.filter((name) => !names.includes(name))),
       checkRefused: new Set(
         checkFindings
           .filter(
@@ -463,9 +467,15 @@ export const normalizeSecuritySchemes = (
     };
   });
 
-interface Lookup {
+interface Scope {
   readonly declared: ReadonlyMap<string, SecurityScheme>;
   readonly unusable: ReadonlySet<string>;
+}
+
+// The author requirement reaches every scheme; a spec requirement reaches only the spec's (AS-1).
+interface Lookup {
+  readonly author: Scope;
+  readonly spec: Scope;
 }
 
 // Built once per SchemeNormalization, so a requirement entry costs one map probe.
@@ -478,8 +488,18 @@ const lookupOf = (schemes: SchemeNormalization): Lookup => {
   }
 
   const built = {
-    declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
-    unusable: new Set(schemes.unusable),
+    author: {
+      declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
+      unusable: new Set(schemes.unusable),
+    },
+    spec: {
+      declared: new Map(
+        schemes.schemes
+          .filter((scheme) => scheme.source === "spec")
+          .map((scheme) => [scheme.name, scheme]),
+      ),
+      unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
+    },
   };
   lookups.set(schemes, built);
 
@@ -580,8 +600,8 @@ const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" 
   };
 };
 
-// `supplied`: the entries come from the author config, so normalize reports their undeclared
-// names itself.
+// `supplied`: the entries come from the author config, so they alone reach the added schemes and
+// normalize reports their undeclared names itself.
 const judge = (
   resolution: Resolution,
   schemes: SchemeNormalization,
@@ -592,7 +612,8 @@ const judge = (
   const findings: Finding[] = [];
   let refused = false;
   const staged = new Set<string>();
-  const { declared: byName, unusable } = lookupOf(schemes);
+  const lookup = lookupOf(schemes);
+  const { declared: byName, unusable } = supplied ? lookup.author : lookup.spec;
   const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
   for (const [name, scopes] of entries) {
     const exact = byName.has(name) || unusable.has(name);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Schema } from "effect";
+import { checkSpecText } from "../../src/check/index.ts";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { normalize } from "../../src/normalize/index.ts";
@@ -67,6 +68,42 @@ const run = (add: Json, rest: { readonly [key: string]: Json } = {}) =>
   );
 
 const own: Json = { securitySchemes: { own: { scheme: "bearer", type: "http" } } };
+
+// A spec whose operation names `token`, a scheme only `security.add` supplies (AS-1, m2.md 623).
+// Check runs on the spec, so its findings are the ones the report carries.
+const mixed = (add: Json) =>
+  Effect.runSync(
+    Effect.gen(function* normalizeMixed() {
+      const resolution = yield* resolve({
+        document: entry,
+        line: "3.1",
+        value: {
+          components: { securitySchemes: { key: apiKey } },
+          info: { title: "t", version: "1" },
+          openapi: "3.1.1",
+          paths: { "/mixed": { get: { ...ok, security: [{ token: [] }, { key: [] }] } } },
+        },
+      });
+      const checked = yield* checkSpecText(resolution);
+      const schemes = yield* normalizeSecuritySchemes(
+        resolution,
+        { config: configOf(add), configDocument: configUri },
+        checked,
+      );
+      const { diagnostics, policy } = yield* normalizeSecurityPolicy(
+        resolution,
+        schemes,
+        "/paths/~1mixed/get",
+      );
+
+      return { checked, diagnostics, policy };
+    }),
+  );
+
+const unresolvedAt = (diagnostics: readonly { code: string; pointer: string }[]) =>
+  diagnostics
+    .filter((diagnostic) => diagnostic.code.endsWith("unresolved-scheme"))
+    .map((diagnostic) => [diagnostic.code, diagnostic.pointer]);
 
 const added: Json = { requirement: [{ key: [] }], schemes: { key: apiKey } };
 
@@ -152,6 +189,33 @@ describe("author-supplied security", () => {
     ]);
     see(schemes.schemes).toEqual([]);
     see(schemes.unusable).toEqual(["key"]);
+  });
+
+  test("a spec requirement naming an added scheme never resolves to it (AS-1)", () => {
+    const { checked, diagnostics, policy } = mixed({
+      requirement: [{ token: [] }],
+      schemes: { token: { scheme: "bearer", type: "http" } },
+    });
+
+    see(policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
+    see(unresolvedAt(checked)).toEqual([
+      ["SEC-09/unresolved-scheme", "/paths/~1mixed/get/security/0/token"],
+    ]);
+    // Check's one diagnostic stands for the refused alternative; normalize adds none.
+    see(diagnostics).toEqual([]);
+  });
+
+  test("a spec requirement naming a refused added scheme is undeclared, not unusable", () => {
+    const { checked, diagnostics, policy } = mixed({
+      requirement: [{ token: [] }],
+      schemes: { token: { scheme: "digest", type: "http" } },
+    });
+
+    see(policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
+    see(unresolvedAt(checked)).toEqual([
+      ["SEC-09/unresolved-scheme", "/paths/~1mixed/get/security/0/token"],
+    ]);
+    see(diagnostics).toEqual([]);
   });
 
   test("normalize() applies security.add to a spec that declares no security", () => {
