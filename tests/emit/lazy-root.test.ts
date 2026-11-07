@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { Array as Arr, Effect, Order, Schema } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { emitCli } from "../../src/emit/cli.ts";
 import { emitEntryFiles } from "../../src/emit/entry.ts";
 import type { EmittedFile } from "../../src/emit/package.ts";
@@ -10,6 +11,7 @@ import { DocumentUri } from "../../src/model/brands.ts";
 import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
+import { generateFixture } from "../support/generated-cli.ts";
 
 // Design 4.1 Lazy root: `cli/root.ts` holds a header table of the top-level groups, each loaded by a
 // literal `import()`, and `main.ts` builds the root from the `Stdio` arguments. In process, on the
@@ -137,4 +139,91 @@ describe("lazy root: main.ts", () => {
     expect(main).toContain("CliOutput.layer(Output.formatter(command))");
     expect(main).not.toContain("Groups.root");
   });
+});
+
+// Tags whose Pascal fold is a `cli/root.ts` binding (`Groups`, `Arr`) or a namespace every cli
+// module imports (`Command`, `Effect`): the plan renames each api namespace, so generation never
+// stops on a name clash, and the emitted root type-checks.
+describe("lazy root: tags named like the root's bindings", () => {
+  const repoRoot = nodePath.resolve(import.meta.dir, "../..");
+  const scratch = nodePath.join(repoRoot, "work");
+  nodeFs.mkdirSync(scratch, { recursive: true });
+
+  const work = nodeFs.mkdtempSync(nodePath.join(scratch, "lazy-root-clash-"));
+  afterAll(() => {
+    nodeFs.rmSync(work, { force: true, recursive: true });
+  });
+
+  const tags = ["Groups", "Arr", "Command", "Effect"];
+  const spec = {
+    info: { title: "Clashing tags", version: "1.0.0" },
+    openapi: "3.1.0",
+    paths: Object.fromEntries(
+      tags.map((tag) => [
+        `/${tag.toLowerCase()}`,
+        {
+          get: {
+            operationId: `${tag.toLowerCase()}-list`,
+            responses: { "200": { description: "The list." } },
+            tags: [tag],
+          },
+        },
+      ]),
+    ),
+    servers: [{ url: "https://api.example.com" }],
+    tags: tags.map((name) => ({ name })),
+  };
+  const config = {
+    binName: "clash",
+    package: { name: "clash-cli", version: "0.1.0" },
+    servers: { accepted: ["https://api.example.com"] },
+  };
+
+  test("generates, renames each api namespace, and the root type-checks", async () => {
+    const specPath = nodePath.join(work, "openapi.json");
+    const configPath = nodePath.join(work, "author-config.json");
+    nodeFs.writeFileSync(specPath, JSON.stringify(spec));
+    nodeFs.writeFileSync(configPath, JSON.stringify(config));
+
+    // Generate under the work directory, then read and type-check the package inside its scope.
+    const priorTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = work;
+    const checked = Effect.gen(function* check() {
+      const { dir } = yield* generateFixture({ configPath, specPath });
+      const read = (path: string) => nodeFs.readFileSync(nodePath.join(dir, path), "utf-8");
+
+      nodeFs.symlinkSync(
+        nodePath.join(repoRoot, "node_modules"),
+        nodePath.join(dir, "node_modules"),
+      );
+
+      const tsc = Bun.spawnSync(
+        [nodePath.join(repoRoot, "node_modules/.bin/tsc"), "--noEmit", "-p", "tsconfig.json"],
+        { cwd: dir },
+      );
+
+      return {
+        groups: tags.map((tag) => read(`src/cli/${tag.toLowerCase()}.ts`)),
+        root: read("src/cli/root.ts"),
+        tsc: { exitCode: tsc.exitCode, stdout: new TextDecoder().decode(tsc.stdout) },
+      };
+    });
+    const { groups, root, tsc } = await Effect.runPromise(
+      Effect.scoped(checked).pipe(
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+      ),
+    ).finally(() => {
+      process.env.TMPDIR = priorTmpdir;
+    });
+
+    expect(root).toContain('import * as Groups from "../runtime/groups.ts";');
+    for (const [index, tag] of tags.entries()) {
+      const segment = tag.toLowerCase();
+      expect(root).toContain(`import("./${segment}.ts")`);
+      expect(groups[index]).toContain(`from "../api/${segment}.ts";`);
+      expect(groups[index]).not.toContain(`import * as ${tag} from "../api/${segment}.ts";`);
+    }
+    expect(tsc.stdout).toBe("");
+    expect(tsc.exitCode).toBe(0);
+  }, 300_000);
 });
