@@ -19,17 +19,11 @@ export const CommandNameSource = Schema.Literals([
   "x-forge",
 ]);
 
-// Where a command's group or command name came from (design 8.1, D-NAME4); `none` is a root
-// command's group.
-const NameSource = Schema.Literals([
-  "config",
-  "none",
-  "operationId",
-  "route",
-  "tag",
-  "x-fern",
-  "x-forge",
-]);
+/**
+ * Where a command's group name came from (design 8.1, D-NAME4): the first tag, or `none` for a root
+ * command. `operationId` and `route` name commands only, so a group never carries them.
+ */
+export const GroupNameSource = Schema.Literals(["config", "none", "tag", "x-fern", "x-forge"]);
 
 /**
  * One emitted command (design 8.1 `commandNames`): its visible path (group names, then the
@@ -40,7 +34,7 @@ export const CommandName = Schema.Struct({
   alias: Schema.optionalKey(Schema.Int),
   command: CommandNameSource,
   document: DocumentUri,
-  group: NameSource,
+  group: GroupNameSource,
   path: Schema.Array(Schema.String),
   pointer: JsonPointer,
 });
