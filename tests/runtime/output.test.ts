@@ -871,3 +871,19 @@ describe("credentials are scrubbed before the text is sanitized (audit S2, desig
     expect(stderr).not.toMatch(/CANARY|SECRET/u);
   });
 });
+
+// Audit S2 residual: an earlier echo of the credential turns into a shorter placeholder and pulls
+// the read's last bytes into the visible window; those bytes hold the credential, split by a
+// stripped character and cut at the read budget.
+describe("a credential split by a stripped character and cut at the budget (audit S2)", () => {
+  for (const split of ["\u00AD", "\u0085", "\u0001"]) {
+    test(`split by ${JSON.stringify(split)}`, async () => {
+      const cut = `${longSecret.slice(0, 6)}${split}${longSecret.slice(6)}`;
+      const excerpt = await excerptWith(`${longSecret}${cut}-tail`, longSecret.length, [
+        longBearer,
+      ]);
+
+      expect(excerpt).toBe("<redacted:bearer>");
+    });
+  }
+});

@@ -166,16 +166,47 @@ const trailingPrefixLength = (text: string, form: string): number => {
   return matched;
 };
 
+// The last code point one UTF-16 unit holds; a larger one is a surrogate pair of two.
+const lastSingleUnit = 0xff_ff;
+
+/**
+ * The length of the shortest tail of `text` that holds `kept` characters `strip` keeps. `strip`
+ * removes characters one at a time, so each code point is kept or removed on its own.
+ */
+const tailKeeping = (text: string, kept: number, strip: (text: string) => string): number => {
+  let end = text.length;
+
+  for (let remaining = kept; remaining > 0 && end > 0;) {
+    const start = end - ((text.codePointAt(end - 2) ?? 0) > lastSingleUnit ? 2 : 1);
+
+    remaining -= strip(text.slice(start, end)).length;
+    end = start;
+  }
+
+  return text.length - end;
+};
+
 /**
  * Drop the trailing partial match of any credential form (audit F1). A read cut at its budget can
  * end inside a credential; that fragment never matches, so scrubbing would leave it, and a shorter
- * placeholder earlier in the text would pull it into the visible window.
+ * placeholder earlier in the text would pull it into the visible window. The fragment is also
+ * matched as `strip` leaves the text, against each form both as sent and as `strip` leaves it
+ * (audit S2), so a credential that removed characters split is dropped too.
  */
-export const dropTrailingFragment = (text: string, credentials: readonly Credential[]): string => {
-  const cut = Math.max(
+export const dropTrailingFragment = (
+  text: string,
+  credentials: readonly Credential[],
+  strip: (text: string) => string,
+): string => {
+  const stripped = strip(text);
+  const sent = Math.max(
     0,
     ...credentials.flatMap(wireForms).map((form) => trailingPrefixLength(text, form)),
   );
+  const asStripped = Math.max(
+    0,
+    ...credentials.flatMap(formsAround(strip)).map((form) => trailingPrefixLength(stripped, form)),
+  );
 
-  return text.slice(0, text.length - cut);
+  return text.slice(0, text.length - Math.max(sent, tailKeeping(text, asStripped, strip)));
 };

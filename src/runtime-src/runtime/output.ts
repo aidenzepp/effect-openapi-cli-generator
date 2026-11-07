@@ -400,7 +400,11 @@ export const readExcerpt = <E, R>(
     const text =
       read.length < budget
         ? new TextDecoder().decode(read)
-        : dropTrailingFragment(new TextDecoder().decode(read, { stream: true }), credentials);
+        : dropTrailingFragment(
+            new TextDecoder().decode(read, { stream: true }),
+            credentials,
+            sanitize,
+          );
 
     return boundedExcerpt(text, maxBytes, credentials);
   });
