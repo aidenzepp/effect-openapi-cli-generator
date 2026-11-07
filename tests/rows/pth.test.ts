@@ -356,8 +356,13 @@ describe("PTH and OPR rows through the built CLI", () => {
       }, 60_000);
 
       // The help text and the use of a deprecated command carry no mark; the request is sent.
-      test.todo(`OPR-14: legacy-get help and stderr carry no deprecation mark vs a deprecated marker in help and a stderr notice on use (${line})`, () =>
-        Promise.resolve());
+      test(`OPR-14: legacy-get carries a deprecated marker in help and a stderr notice on use (${line})`, async () => {
+        const help = await run(line, ["legacy-get", "--help"]);
+        const used = await run(line, ["legacy-get"]);
+
+        expect(help.stdout.toLowerCase()).toContain("deprecated");
+        expect(used.stderr.toLowerCase()).toContain("deprecated");
+      }, 60_000);
     });
   }
 
@@ -697,11 +702,25 @@ describe("PTH and OPR rows through generate()", () => {
     ]);
   }, 60_000);
 
-  test.todo("PTH-24: a POST key beside a post operation fails the run with InvalidInstanceLocation vs a PTH-24 refusal (3.2.1)", () =>
-    Promise.resolve());
+  test("PTH-24: a POST key beside a post operation is a PTH-24 refusal (3.2.1)", async () => {
+    const found = await inProcess(
+      withPaths("3.2.1", {
+        "/a": { additionalOperations: { POST: operation() }, post: operation() },
+      }),
+    );
 
-  test.todo("PTH-24: a lowercase post key beside a post operation raises no diagnostic vs a PTH-24 refusal (3.2.1)", () =>
-    Promise.resolve());
+    expect(summary(found)).toEqual([["PTH-24/fixed-method-key", "refusal", "operation"]]);
+  }, 60_000);
+
+  test("PTH-24: a lowercase post key beside a post operation is a PTH-24 refusal (3.2.1)", async () => {
+    const found = await inProcess(
+      withPaths("3.2.1", {
+        "/a": { additionalOperations: { post: operation() }, post: operation() },
+      }),
+    );
+
+    expect(summary(found)).toEqual([["PTH-24/fixed-method-key", "refusal", "operation"]]);
+  }, 60_000);
 
   test("OPR-10: a described body on GET, HEAD, DELETE, OPTIONS and TRACE is a notice and generation continues (3.0.4)", async () => {
     const found = await inProcess(

@@ -605,8 +605,15 @@ describe("S30-02 to S30-36 through the built 3.0.4 CLI and generate()", () => {
     expect(rows.map((entry) => entry.endsWith("(body /size; default: 10)"))).toEqual([true]);
   }, 60_000);
 
-  test.todo('S30-27: a default "x" on an integer schema generates with no diagnostic vs refused at element scope (3.0.4)', () =>
-    Promise.resolve());
+  test('S30-27: a default "x" on an integer schema is refused at element scope (3.0.4)', async () => {
+    const found = await inProcess(
+      withBody(line, { properties: { n: { default: "x", type: "integer" } }, type: "object" }),
+    );
+
+    expect(rowDiagnostics(found, "S30-27")).toEqual([
+      ["S30-27/nonconforming-default", "refusal", "element", `${bodySchema}/properties/n`],
+    ]);
+  });
 
   test("S30-28: null for a nullable enum without null is rejected before send (3.0.4)", async () => {
     const nothing = await send(line, "nullable-enum", "null");
@@ -614,8 +621,12 @@ describe("S30-02 to S30-36 through the built 3.0.4 CLI and generate()", () => {
     expect(nothing).toEqual(rejectedBeforeSending);
   }, 60_000);
 
-  test.todo('S30-31: help offers "--id string (body /id; read-only)" and read-only --id 1 --name x sends {"id":"1","name":"x"} (exit 0) vs the read-only property not offered as a flag (3.0.4)', () =>
-    Promise.resolve());
+  test("S30-31: a read-only body property is not offered as a flag (3.0.4)", async () => {
+    const rows = await helpRows(line, "read-only", "--id");
+    const flagged = await run(line, ["read-only", "--id", "1", "--name", "x"]);
+
+    expect([rows, flagged]).toEqual([[], rejectedBeforeSending]);
+  }, 60_000);
 
   test("S30-36: help marks a deprecated body field (3.0.4)", async () => {
     const rows = await helpRows(line, "annotated", "--legacy");
