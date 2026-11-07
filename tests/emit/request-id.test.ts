@@ -65,7 +65,7 @@ const withHeaders = (headers: readonly (readonly string[])[]) =>
     ...encodedUpdate,
     responses: encodedUpdate.responses.map((response, index) => ({
       ...response,
-      headers: (headers[index] ?? []).map((name) => ({ name })),
+      headers: (headers[index] ?? []).map((name) => ({ deprecated: false, name, required: false })),
     })),
   });
 

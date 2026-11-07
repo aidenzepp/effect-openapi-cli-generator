@@ -9,6 +9,7 @@ import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { headerMarks } from "./header-object.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.
@@ -266,14 +267,14 @@ const headersOf = (
   response: CanonicalKey,
   findings: Finding[],
 ): Effect.Effect<PlainCase["headers"]> =>
-  Effect.gen(function* recordHeaders() {
-    const names: PlainCase["headers"][number][] = [];
+  Effect.gen(function* responseHeaders() {
+    const kept: PlainCase["headers"][number][] = [];
     for (const name of headers) {
       const at = childKey(response, "headers", name);
       if (name.toLowerCase() === "content-type") {
         findings.push({ at, code: "RSP-09/ignored-content-type" });
       } else if (isHeaderName(name)) {
-        names.push({ name });
+        kept.push({ name, ...(yield* headerMarks(resolution, at)) });
         if (resolution.line === "3.0" && (yield* serializedBySchema(resolution, at))) {
           findings.push({ at, code: "HDR-15/header-percent-encoding" });
         }
@@ -282,7 +283,7 @@ const headersOf = (
       }
     }
 
-    return names;
+    return kept;
   });
 
 const docsOf = (
@@ -391,11 +392,12 @@ const responseKeys = (
  * ascending). A key is an explicit code, a range `1XX` to `5XX` or `default`; a key outside that
  * grammar, a code outside 100 to 599, a content key that is no media type and a header name that is
  * no token are refused at element scope, and a `Content-Type` header is ignored with a notice
- * (`RSP-09`). Headers are recorded by name only: they never change output. A 3.0 schema-serialized
- * header gets a notice that its value is not percent-decoded (`HDR-15`). An absent Responses
- * Object has no cases, and `x-` keys are NZ-5's to account for. Schemas are referenced by `$defs`
- * key, an inline one by `defsKey` of its canonical pointer. A response or media type a reference
- * takes into another document of the set is read there, and its findings name that document.
+ * (`RSP-09`). Headers are recorded by name with their `required` and `deprecated` marks, read
+ * through a `$ref`; they never change stdout or the exit status. A 3.0 schema-serialized header
+ * gets a notice that its value is not percent-decoded (`HDR-15`). An absent Responses Object has no
+ * cases, and `x-` keys are NZ-5's to account for. Schemas are referenced by `$defs` key, an inline
+ * one by `defsKey` of its canonical pointer. A response or media type a reference takes into
+ * another document of the set is read there, and its findings name that document.
  */
 export const normalizeResponses = (
   resolution: Resolution,

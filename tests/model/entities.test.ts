@@ -71,7 +71,7 @@ const parameter = {
 const responseCase = {
   alternatives: [mediaAlternative],
   docs,
-  headers: [{ name: "Retry-After" }],
+  headers: [{ deprecated: false, name: "Retry-After", required: false }],
   key: { code: 200 },
   origin,
   rows,

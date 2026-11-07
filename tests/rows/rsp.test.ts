@@ -248,6 +248,14 @@ const summary = (found: Generated) =>
     String(diagnostic.pointer),
   ]);
 
+// The summary of one row's diagnostics only, so another row's finding on the same document (such
+// as a 3.0 header's HDR-15 notice) does not move the witness.
+const rowSummary = (found: Generated, row: string) =>
+  summary({
+    ...found,
+    diagnostics: found.diagnostics.filter((diagnostic) => diagnostic.row === row),
+  });
+
 // A refusal by the line's official schema, which runs before the generator's own rules: its code
 // is the schema row of the line (VAL-02, VAL-03 or VAL-04), so only severity, scope and pointer are
 // stable here.
@@ -495,6 +503,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-05: a simple-style array header a,b is accepted as sent and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "list", [
           ["x-list", "a,b"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -504,6 +513,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-06: an exploded object header R=100,G=200 is accepted as sent and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "color", [
           ["x-color", "R=100,G=200"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -513,6 +523,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-07: a header with an integer schema, even when its value is not an integer, does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "count", [
           ["x-count", "seven"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -522,19 +533,29 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-08: a header described by content is accepted and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "meta", [
           ["x-meta", '{"a":1}'],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
         expect([decided(observed), observed.stderr]).toEqual([succeeded("meta"), ""]);
       }, 60_000);
 
-      // A required response header the server omits passes silently: no stderr notice.
-      test.todo(`HDR-03: typed-get answered without its required X-Required header exits 0 with empty stderr vs a warning naming the missing header (${line})`, () =>
-        Promise.resolve());
+      test(`HDR-03: typed-get answered without its required X-Required header warns on stderr, output and exit unchanged (${line})`, async () => {
+        const observed = await respond(line, "typed-get", "/typed", 200, "typed", plainText);
 
-      // `typed-get --help` lists the request and response media, no response headers.
-      test.todo(`HDR-04: typed-get help names no response headers vs X-Deprecated marked deprecated (${line})`, () =>
-        Promise.resolve());
+        expect([decided(observed), stderrLines(observed)]).toEqual([
+          succeeded("typed"),
+          ["Warning: the response is missing the required header X-Required"],
+        ]);
+      }, 60_000);
+
+      test(`HDR-04: typed-get help lists its response headers with X-Required marked required and X-Deprecated marked deprecated (${line})`, async () => {
+        const help = await run(line, ["typed-get", "--help"]);
+
+        expect(text(help.stdout)).toContain(
+          "200: X-Color, X-Count, X-Deprecated (deprecated), X-List, X-Meta, X-Required (required)",
+        );
+      }, 60_000);
     });
   }
 
@@ -669,7 +690,7 @@ describe("RSS, RSP and HDR rows in generation", () => {
           }),
         );
 
-        expect(summary(found)).toEqual([
+        expect(rowSummary(found, "RSP-09")).toEqual([
           [
             "RSP-09/ignored-content-type",
             "notice",
@@ -734,7 +755,7 @@ describe("RSS, RSP and HDR rows in generation", () => {
         }),
       );
 
-      expect(summary(found)).toEqual([
+      expect(rowSummary(found, "RSP-09")).toEqual([
         [
           "RSP-09/invalid-header-name",
           "refusal",

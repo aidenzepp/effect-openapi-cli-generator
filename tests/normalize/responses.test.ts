@@ -162,6 +162,31 @@ describe("response headers", () => {
     expect(codes(result)).toEqual(["RSP-09/invalid-header-name"]);
     expect(result.diagnostics[0]?.severity).toBe("refusal");
   });
+
+  test("required and deprecated are read from each Header Object, through a $ref, absent as false", () => {
+    const [first] = normalize(
+      "3.1",
+      {
+        "200": {
+          description: "ok",
+          headers: {
+            "X-Both": { deprecated: true, required: true, schema: {} },
+            "X-Plain": { schema: {} },
+            "X-Shared": { $ref: "#/components/headers/Shared" },
+          },
+        },
+      },
+      { headers: { Shared: { deprecated: true, schema: {} } } },
+    ).responses;
+
+    expect(
+      first?.headers.map(({ deprecated, name, required }) => [text(name), required, deprecated]),
+    ).toEqual([
+      ["X-Both", true, true],
+      ["X-Plain", false, false],
+      ["X-Shared", false, true],
+    ]);
+  });
 });
 
 describe("HDR-15 response header percent-encoding in 3.0", () => {
