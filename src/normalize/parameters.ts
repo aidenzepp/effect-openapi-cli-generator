@@ -4,13 +4,13 @@ import { MediaType, WireName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
-import { defsKey } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { schemaKeyAt } from "./schemas.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -378,6 +378,18 @@ const contentRows = (location: Location): readonly string[] => {
   return location === "header" || location === "cookie" ? ["PRM-24"] : ["PRM-23"];
 };
 
+// The style table defines spaceDelimited and pipeDelimited for an array or object only.
+const delimitedStyles: ReadonlySet<StyleName> = new Set(["pipeDelimited", "spaceDelimited"]);
+
+const primitiveNotApplicableFinding = (row: string): Finding =>
+  refusal(
+    `${row}/primitive-not-applicable`,
+    "style-values",
+    "Parameter style spaceDelimited or pipeDelimited over a primitive",
+    "The style table defines this style only for an array or object; this schema is a primitive.",
+    "Use an array or object schema, or style: form",
+  );
+
 const explodeNotApplicableFinding = (row: string): Finding =>
   refusal(
     `${row}/explode-not-applicable`,
@@ -463,12 +475,14 @@ const styleNotices = (
 /**
  * What the schema shape and the author config add to a parameter's decision: `multiple` for a
  * cookie over an array or object (PRM-34), `nested` for a `deepObject` value beyond one level
- * (PRM-27) and `brackets` for the author config's bracket switch.
+ * (PRM-27), `primitive` for a schema that declares only primitive types (STY-17, STY-21) and
+ * `brackets` for the author config's bracket switch.
  */
 interface Traits {
   readonly brackets: boolean;
   readonly multiple: boolean;
   readonly nested: boolean;
+  readonly primitive: boolean;
 }
 
 const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision => {
@@ -496,6 +510,10 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
 
   if (explodeNotApplicable.has(row)) {
     return refuse(explodeNotApplicableFinding(row));
+  }
+
+  if (delimitedStyles.has(style) && traits.primitive) {
+    return refuse(primitiveNotApplicableFinding(row));
   }
 
   // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
@@ -613,9 +631,6 @@ const contractReason = (
 
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
-
-const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
-  referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
 
 // The schema key of a content entry's media type object, which 3.2 lets be a reference.
 const mediaSchemaKey = (
@@ -761,6 +776,18 @@ const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<
   return typesAt(resolution, childKey(source.target, "schema")).pipe(Effect.map(compound));
 };
 
+// Whether a parameter's schema, through `$ref`, declares types and none of them is an array or
+// object. An untyped schema is not primitive.
+const declaresPrimitive = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
+  if (source.node.schema === undefined) {
+    return Effect.succeed(false);
+  }
+
+  return typesAt(resolution, childKey(source.target, "schema")).pipe(
+    Effect.map((types) => types.length > 0 && !compound(types)),
+  );
+};
+
 // Whether a deepObject query parameter's schema, through `$ref`, is an array or declares a
 // property or `additionalProperties` schema of an object or array type (PRM-27). An untyped
 // member is not nested.
@@ -893,6 +920,7 @@ export const normalizeParameter = (
       brackets: site.nonStandard?.deepObjectBrackets === true,
       multiple: yield* carriesMultiple(resolution, source),
       nested: yield* nestsDeeply(resolution, source),
+      primitive: yield* declaresPrimitive(resolution, source),
     });
     const diagnostics = (findings: readonly Finding[]) =>
       toDiagnostics(resolution, site, source.related, source.node.name, findings);

@@ -22,7 +22,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { isObject, isArray, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
-import { nodeIn } from "./document-set.ts";
+import { nodeIn, referenceIn } from "./document-set.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -255,8 +255,9 @@ const forEachSchema = (
   node: Json,
   where: Positions,
   visit: (node: JsonObject, path: readonly string[]) => void,
+  start: readonly string[] = [],
 ): void => {
-  transformSchema(budget, node, [], where, (current, path) => {
+  transformSchema(budget, node, start, where, (current, path) => {
     visit(current, path);
 
     return current;
@@ -594,6 +595,47 @@ export const storeSchemas = (
   return storeFrom(budget, resolution, sitesOf(budget, resolution));
 };
 
+// Keywords beside a `$ref` that assert nothing: annotations, extensions and location keywords.
+const nonAsserting: ReadonlySet<string> = new Set([
+  "$anchor",
+  "$comment",
+  "$defs",
+  "$id",
+  "$schema",
+  "default",
+  "definitions",
+  "deprecated",
+  "description",
+  "example",
+  "examples",
+  "nullable",
+  "readOnly",
+  "title",
+  "writeOnly",
+]);
+
+const asserts = (keyword: string): boolean =>
+  keyword !== "$ref" && !nonAsserting.has(keyword) && !keyword.startsWith("x-");
+
+/**
+ * The store key of the schema at a use site (design 2.2 key rule, SCH-03). A `$ref` names its
+ * target's key, so the target's export is shared, unless a 3.1 or later `$ref` carries a keyword
+ * beside it that asserts, such as `maximum`: then the use site's own key, whose stored definition
+ * keeps both. A 3.0 `$ref` ignores its siblings. A site without a `$ref` is its own key.
+ */
+export const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string => {
+  const own = defsKey(resolution.document, site);
+  const target = referenceIn(resolution, site)?.defsKey;
+  if (target === undefined || resolution.line === "3.0") {
+    return target ?? own;
+  }
+
+  const value = resolution.documents.get(site.document);
+  const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+
+  return isObject(node) && Object.keys(node).some(asserts) ? own : target;
+};
+
 // ---------------------------------------------------------------------------------------------
 // The validation copy (design 3.5 "Import copies"; D-AD12 tiers and special cases).
 
@@ -613,6 +655,7 @@ const keywordRows = new Map<string, readonly [row30: string, row31: string]>([
   ["minContains", ["SCH-42", "SCH-42"]],
   ["not", ["S30-21", "SCH-24"]],
   ["pattern", ["S30-09", "SCH-37"]],
+  ["patternProperties", ["SCH-15", "SCH-15"]],
   ["then", ["SCH-19", "SCH-19"]],
   ["unevaluatedItems", ["SCH-25", "SCH-25"]],
   ["unevaluatedProperties", ["SCH-26", "SCH-26"]],
@@ -635,18 +678,127 @@ const serverValidated: ReadonlySet<string> = new Set([
   "maxContains",
   "minContains",
   "pattern",
+  "patternProperties",
   "then",
   "unevaluatedItems",
   "unevaluatedProperties",
 ]);
 
-// Refused keywords (D-AD12), removed from the copy with an element refusal.
-const refusedKeywords = new Map([
+// The dynamic and recursive keywords (D-AD12): refused wherever a schema holds them, and a body
+// schema that applies one is refused with it (SCH-05, 06, 65, 66).
+const dynamicKeywords = new Map([
   ["$dynamicAnchor", "SCH-06/dynamic-anchor"],
   ["$dynamicRef", "SCH-05/dynamic-ref"],
   ["$recursiveAnchor", "SCH-65/recursive-anchor"],
   ["$recursiveRef", "SCH-66/recursive-ref"],
 ]);
+
+// Keywords of other dialects that 3.1 and 3.2 refuse at element scope (SCH-07, SCH-64); a 3.0
+// schema does not read them.
+const otherDialect = new Map([
+  ["$vocabulary", "SCH-07/vocabulary"],
+  ["dependencies", "SCH-64/dependencies"],
+]);
+
+// The refusal code of a refused keyword (D-AD12), or `undefined`.
+const refusedCode = (line: Line, keyword: string): string | undefined =>
+  dynamicKeywords.get(keyword) ?? (line === "3.0" ? undefined : otherDialect.get(keyword));
+
+// Every refused keyword in a stored schema's source, nested `$defs` and `definitions` members
+// included, so whether a member is referenced does not change the refusal: one rule wherever the
+// keyword sits. The copy removes the ones it stores; these are reported at their schema.
+const refusedInSource = (
+  budget: Budget,
+  resolution: Resolution,
+  sites: ReadonlyMap<string, CanonicalKey>,
+): readonly (readonly [code: string, at: CanonicalKey])[] => {
+  const where = resolution.line === "3.0" ? positions30 : positions2020;
+  const found: [string, CanonicalKey][] = [];
+  for (const key of sortedKeys(sites)) {
+    const site = sites.get(key) ?? { document: resolution.document, pointer: "" };
+    const value = resolution.documents.get(site.document);
+    const tokens = tokensOf(site.pointer);
+    const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+    if (tokens !== undefined && node !== undefined) {
+      const visit = (current: JsonObject, path: readonly string[]): void => {
+        for (const keyword of Object.keys(current)) {
+          const code = refusedCode(resolution.line, keyword);
+          if (code !== undefined) {
+            found.push([code, { document: site.document, pointer: formatPointer(path) }]);
+          }
+        }
+      };
+      forEachSchema(budget, node, where, visit, tokens);
+    }
+  }
+
+  return found;
+};
+
+// Whether the schema at `at` holds a dynamic or recursive keyword in place (subschemas included,
+// nested `$defs` not); the targets of its `$ref`s join `pending`.
+const holdsDynamicKeyword = (
+  budget: Budget,
+  resolution: Resolution,
+  at: CanonicalKey,
+  pending: CanonicalKey[],
+): boolean => {
+  const value = resolution.documents.get(at.document);
+  const tokens = tokensOf(at.pointer);
+  const node = value === undefined ? undefined : nodeAt(value, at.pointer);
+  if (tokens === undefined || node === undefined) {
+    return false;
+  }
+
+  const where = resolution.line === "3.0" ? positions30 : copyPositions;
+  let found = false;
+  forEachSchema(
+    budget,
+    node,
+    where,
+    (current, path) => {
+      found ||= Object.keys(current).some((keyword) => dynamicKeywords.has(keyword));
+
+      const pointer = formatPointer(path);
+      const reference =
+        stringMember(current, "$ref") === undefined
+          ? undefined
+          : referenceIn(resolution, { document: at.document, pointer });
+      if (reference !== undefined) {
+        pending.push(reference.target);
+      }
+    },
+    tokens,
+  );
+
+  return found;
+};
+
+/**
+ * Whether the schema at `site` applies a dynamic or recursive keyword (SCH-05, 06, 65, 66):
+ * itself, through a subschema, or through a `$ref` chain, across the document set. A nested
+ * `$defs` member applies only through a reference. A body schema that does cannot be checked, so
+ * it is refused like any other refused body schema, and a required one raises to operation scope.
+ */
+export const appliesDynamicKeyword = (
+  resolution: Resolution,
+  site: CanonicalKey,
+  limits: SchemaLimits = {},
+): boolean => {
+  const budget = budgetOf(limits);
+  const seen = new Set<string>();
+  const pending = [site];
+  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+    if (!seen.has(keyOf(at))) {
+      seen.add(keyOf(at));
+      if (holdsDynamicKeyword(budget, resolution, at, pending)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
 
 const annotationKeys: ReadonlySet<string> = new Set([
   "$comment",
@@ -717,6 +869,7 @@ const isInt64 = (node: JsonObject): boolean =>
   (stringMember(node, "format") === "int64" || outsideSafeRange(node));
 
 interface Recorder {
+  readonly definitions: ReadonlyMap<string, Json>;
   readonly edits: SchemaEdit[];
   readonly key: string;
   readonly line: Line;
@@ -765,9 +918,54 @@ const filterEnum = (
   return kept.length > 0 ? kept : undefined;
 };
 
+// Whether a property schema is `readOnly: true`, itself or as the target of its `$ref`.
+const isReadOnly = (definitions: ReadonlyMap<string, Json>, schema: Json | undefined): boolean => {
+  if (!isObject(schema)) {
+    return false;
+  }
+
+  const ref = stringMember(schema, "$ref");
+  const key = ref === undefined ? undefined : referenceKey(ref);
+  const target = key === undefined ? undefined : definitions.get(key);
+
+  return (
+    member(schema, "readOnly") === true || (isObject(target) && member(target, "readOnly") === true)
+  );
+};
+
+// The names a node's `required` keeps on a request. A read-only property is not required there
+// (D-SCH2): 3.0.4 says `required` takes effect on the response only, so it is dropped under a code
+// no rule reports; in 3.1 and 3.2 the server decides (server-validated tier), so each drop is a
+// SCH-45 notice. `required` in one `allOf` branch naming a read-only property declared in another
+// is not seen here and stays asserted.
+const filterRequired = (
+  recorder: Recorder,
+  node: JsonObject,
+  path: readonly string[],
+): Json | undefined => {
+  const names = member(node, "required");
+  const properties = member(node, "properties");
+  if (!isArray(names) || !isObject(properties)) {
+    return names;
+  }
+
+  const code = recorder.line === "3.0" ? "S30-31/response-only" : "SCH-45/read-only-required";
+  const kept = names.filter((name, index) => {
+    const readOnly =
+      Predicate.isString(name) && isReadOnly(recorder.definitions, member(properties, name));
+    if (readOnly) {
+      record(recorder, "drop-member", code, [...path, "required", String(index)]);
+    }
+
+    return !readOnly;
+  });
+
+  return kept.length > 0 ? kept : undefined;
+};
+
 // The code of a keyword the validation copy removes, or `undefined` when the keyword stays.
 const removalCode = (line: Line, keyword: string, value: Json): string | undefined => {
-  const refused = refusedKeywords.get(keyword);
+  const refused = refusedCode(line, keyword);
   const notAsserted =
     serverValidated.has(keyword) ||
     (keyword === "format" && value !== "binary" && value !== "byte") ||
@@ -792,6 +990,12 @@ const retype = (value: Json): Json => {
   return [...new Set(strings(value).map((type) => (type === "integer" ? "number" : type)))];
 };
 
+// An `additionalProperties` that rejects or types some keys. Beside `patternProperties` it cannot
+// stay: which keys it governs depends on the patterns, which are not asserted (SCH-15), so the
+// object is left open, as Effect's importer leaves it when it ignores patterns.
+const constrainsKeys = (value: Json): boolean =>
+  value === false || (isObject(value) && !isEmptySchema(value));
+
 const filterNode =
   (recorder: Recorder): Visit =>
   (node, path) => {
@@ -811,13 +1015,24 @@ const filterNode =
       record(recorder, "retype", "FMT-02/int64-range", path);
     }
 
+    const patterned = member(node, "patternProperties") !== undefined;
     const kept: [string, Json][] = [];
     for (const [keyword, value] of Object.entries(node)) {
       const code = removalCode(recorder.line, keyword, value);
       if (code !== undefined) {
         record(recorder, "remove", code, [...path, keyword]);
+      } else if (keyword === "additionalProperties" && patterned && constrainsKeys(value)) {
+        record(recorder, "remove", `${rowOf(recorder.line, "patternProperties")}/not-asserted`, [
+          ...path,
+          keyword,
+        ]);
       } else if (keyword === "type" && int64) {
         kept.push([keyword, retype(value)]);
+      } else if (keyword === "required") {
+        const required = filterRequired(recorder, node, path);
+        if (required !== undefined) {
+          kept.push([keyword, required]);
+        }
       } else if (keyword !== "enum" && !rewritten.has(keyword)) {
         kept.push([keyword, value]);
       }
@@ -1022,8 +1237,6 @@ const importClasses: readonly (readonly [prefix: string, code: (line: Line) => s
     'Cannot combine typed "additionalProperties"',
     (line) => `${rowOf(line, "additionalProperties")}/not-asserted`,
   ],
-  ["Cannot import this closed patterned object", () => "SCH-15/not-asserted"],
-  ['Cannot import open "patternProperties"', () => "SCH-15/not-asserted"],
   ["Missing definition", (line) => `${line === "3.0" ? "REF-02" : "SCH-03"}/non-schema-target`],
   ['Cannot resolve $ref under a nested "$id"', () => "SCH-02/nested-resource"],
   ["Definition ", () => "DOC-23/alias-cycle"],
@@ -1104,6 +1317,17 @@ const multiDocument = (
   };
 };
 
+/**
+ * Effect's importer as both import copies run it: the validation copy here, and the
+ * code-generation copy in the domain emitter. Pattern constraints stay at the importer's default
+ * (rejected): the validation copy removes every `pattern` and `patternProperties` before import, so
+ * the two copies can never disagree on one.
+ */
+export const importSchemas = (
+  multi: JsonSchema.MultiDocument<"draft-2020-12">,
+): readonly [Schema.Top, ...Schema.Top[]] =>
+  SchemaRepresentation.fromJsonSchemaMultiDocument(multi);
+
 const importOnce = (
   definitions: ReadonlyMap<string, Json>,
 ): Effect.Effect<Option.Option<string>> => {
@@ -1112,10 +1336,7 @@ const importOnce = (
     return Effect.succeed(Option.none());
   }
 
-  return Effect.try({
-    catch: messageOf,
-    try: () => SchemaRepresentation.fromJsonSchemaMultiDocument(multi, { patterns: "ignore" }),
-  }).pipe(
+  return Effect.try({ catch: messageOf, try: () => importSchemas(multi) }).pipe(
     Effect.match({ onFailure: (message) => Option.some(message), onSuccess: () => Option.none() }),
   );
 };
@@ -1146,7 +1367,7 @@ const importEdit = (
     : { action: "replace", code: found[1](line), key, path };
 };
 
-// Imports with `patterns: "ignore"`; each rejected node becomes `{}` under the code of its class,
+// Imports through `importSchemas`; each rejected node becomes `{}` under the code of its class,
 // at its deepest existing schema ancestor, until the import succeeds. The importer stops at its
 // first failure, so repairs cannot be batched: each pass is charged the number of definitions it
 // imports, and the budget caps the passes.
@@ -1183,9 +1404,11 @@ const importCopy = (
  * with a refusal; an all-constant `oneOf` or `anyOf` becomes one `enum` with no notice; `enum`
  * members outside the declared type are dropped with a notice (SM-R16); a 3.0 `nullable` in 3.1 or
  * 3.2 is removed with a notice and no effect; an out-of-safe-range integer is asserted as a number
- * (int64 notice); a pure alias cycle is refused; then Effect's importer runs with `patterns:
- * "ignore"`, and each node it still rejects becomes `{}` under the code of its D-AD12 class. The
- * copy is the stored document minus `edits` (X10); it is recomputed, never edited.
+ * (int64 notice); `patternProperties` is removed with a notice, with an `additionalProperties`
+ * beside it that rejects or types keys (SCH-15); a name in `required` whose property is read-only
+ * is dropped (SCH-45: a notice in 3.1 and 3.2, none in 3.0); a pure alias cycle is refused; then
+ * Effect's importer runs, and each node it still rejects becomes `{}` under the code of its D-AD12
+ * class. The copy is the stored document minus `edits` (X10); it is recomputed, never edited.
  */
 export const validationCopy = (
   line: Line,
@@ -1197,7 +1420,7 @@ export const validationCopy = (
     const edits: SchemaEdit[] = [];
     const filtered = new Map(
       sortedKeys(definitions).map((key): [string, Json] => {
-        const visit = filterNode({ edits, key, line });
+        const visit = filterNode({ definitions, edits, key, line });
 
         return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
       }),
@@ -1228,6 +1451,16 @@ const rules = new Map<string, Rule>([
       element: "Schema reference cycle",
       message:
         "A cycle of schema references returns to a schema without descending into the instance.",
+      severity: "refusal",
+    },
+  ],
+  [
+    "dependencies",
+    {
+      anchor: keywordsSection,
+      element: "Schema dependencies",
+      message:
+        "dependencies is not a keyword of the OpenAPI dialect; use dependentRequired or dependentSchemas.",
       severity: "refusal",
     },
   ],
@@ -1304,6 +1537,16 @@ const rules = new Map<string, Rule>([
     },
   ],
   [
+    "read-only-required",
+    {
+      anchor: "validating-readonly-and-writeonly",
+      element: "Schema required",
+      message:
+        "A required read-only property is not asserted client-side on a request; the server decides.",
+      severity: "notice",
+    },
+  ],
+  [
     "recursive-anchor",
     {
       anchor: keywordsSection,
@@ -1318,6 +1561,15 @@ const rules = new Map<string, Rule>([
       anchor: keywordsSection,
       element: "Schema $recursiveRef",
       message: "$recursiveRef is not supported.",
+      severity: "refusal",
+    },
+  ],
+  [
+    "vocabulary",
+    {
+      anchor: keywordsSection,
+      element: "Schema $vocabulary",
+      message: "$vocabulary is not supported; schemas must use the OpenAPI dialect.",
       severity: "refusal",
     },
   ],
@@ -1358,9 +1610,14 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
   return formatPointer([...tokens, ...path.slice(0, consumed)]);
 };
 
-// A refusal of a removed keyword is reported at its schema, as the resolver reports `$dynamicRef`.
-const reportedPath = (edit: SchemaEdit, rule: Rule): readonly string[] =>
-  rule.severity === "refusal" && edit.action === "remove" ? edit.path.slice(0, -1) : edit.path;
+// A refusal of a removed keyword is reported at its schema, as the resolver reports `$dynamicRef`;
+// a name dropped from `required` at the `required` keyword, once per schema.
+const reportedPath = (edit: SchemaEdit, rule: Rule): readonly string[] => {
+  const removedRefusal = rule.severity === "refusal" && edit.action === "remove";
+  const droppedRequired = edit.action === "drop-member" && edit.path.at(-2) === "required";
+
+  return removedRefusal || droppedRequired ? edit.path.slice(0, -1) : edit.path;
+};
 
 // A diagnostic's identity for deduplication: its code at its document and pointer.
 const identityOf = (code: string, at: { readonly document: string; readonly pointer: string }) =>
@@ -1370,6 +1627,7 @@ const diagnosticsOf = (
   resolution: Resolution,
   sites: ReadonlyMap<string, CanonicalKey>,
   edits: readonly SchemaEdit[],
+  refused: readonly (readonly [code: string, at: CanonicalKey])[],
 ): Effect.Effect<readonly Diagnostic[]> => {
   const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
     Option.map((declared) => declared.openapi),
@@ -1420,6 +1678,10 @@ const diagnosticsOf = (
     );
   }
 
+  for (const [code, at] of refused) {
+    report(code, at, rules.get(code.split("/")[1] ?? ""));
+  }
+
   for (const reference of resolution.references.values()) {
     if (reference.kind === "schema" && reference.defsKey === undefined) {
       const row = resolution.line === "3.0" ? "REF-02" : "SCH-03";
@@ -1434,7 +1696,8 @@ const diagnosticsOf = (
 
 /**
  * Normalizes the schemas of a resolved document set (design 3.5, unit NZ-4): the store, the facts,
- * the validation copy, and one diagnostic per distinct edit at its source use site. A refusal the
+ * the validation copy, one diagnostic per distinct edit at its source use site, and a refusal for
+ * each refused keyword in a stored schema's source, nested `$defs` members included. A refusal the
  * resolver already reported is not repeated.
  */
 export const normalizeSchemas = (
@@ -1445,10 +1708,11 @@ export const normalizeSchemas = (
     const budget = budgetOf(limits);
     const sites = yield* within(budget, sitesOf(budget, resolution));
     const stored = yield* storeFrom(budget, resolution, sites);
+    const refused = yield* within(budget, refusedInSource(budget, resolution, sites));
     const validation = yield* validationCopy(resolution.line, stored.definitions, {
       maxNodes: budget.limit - budget.spent,
     });
-    const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits);
+    const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits, refused);
 
     return { ...stored, diagnostics, line: resolution.line, validation };
   });

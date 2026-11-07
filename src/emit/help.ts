@@ -1,14 +1,26 @@
-import { Schema } from "effect";
+import { Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type { Json } from "../model/pointer.ts";
+
+/**
+ * The schema annotations of the body property a flag writes, read along its `$ref` chain: its
+ * `enum` values, its `default` (never sent), and whether it is read-only or deprecated.
+ */
+export interface HelpBodyField {
+  readonly default: Json | undefined;
+  readonly deprecated: boolean;
+  readonly enum: readonly Json[] | undefined;
+  readonly readOnly: boolean;
+}
 
 /**
  * Where a flag's value lands: a parameter (`negatable` for a three-state boolean) or a body
- * property at an RFC 6901 pointer inside the body.
+ * property at an RFC 6901 pointer inside the body, with that property's annotations.
  */
 export type HelpFlagSource =
-  | { readonly _tag: "Body"; readonly pointer: string }
+  | { readonly _tag: "Body"; readonly field?: HelpBodyField; readonly pointer: string }
   | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter };
 
 /**
@@ -256,16 +268,36 @@ const refusedLine = (input: HelpInput): string | undefined => {
 const isArgument = (flag: HelpFlag): boolean =>
   flag.source._tag === "Parameter" && flag.source.parameter.location === "path";
 
-const isDeprecated = (flag: HelpFlag): boolean =>
-  flag.source._tag === "Parameter" && flag.source.parameter.deprecated;
+const isDeprecated = ({ source }: HelpFlag): boolean =>
+  source._tag === "Parameter" ? source.parameter.deprecated : source.field?.deprecated === true;
 
-// A flag's annotation: its location, then the bracket note and `deprecated` when they apply.
+// A schema value as help shows it: a string as itself, anything else as JSON.
+const valueText = (value: Json): string =>
+  line(Predicate.isString(value) ? value : JSON.stringify(value));
+
+// A body field's schema notes: its allowed values, its default and its read-only mark.
+const fieldNotes = (source: HelpFlagSource): readonly string[] => {
+  const field = source._tag === "Body" ? source.field : undefined;
+  if (field === undefined) {
+    return [];
+  }
+
+  return [
+    ...(field.enum === undefined ? [] : [`choices: ${field.enum.map(valueText).join(", ")}`]),
+    ...(field.default === undefined ? [] : [`default: ${valueText(field.default)}`]),
+    ...(field.readOnly ? ["read-only"] : []),
+  ];
+};
+
+// A flag's annotation: its location, then the bracket note, the body field's schema notes and
+// `deprecated` when they apply.
 const noted =
   (operation: Operation) =>
   (flag: HelpFlag): readonly [string, string] => {
     const notes = [
       locationNote(flag.source, flag.name),
       ...(isMarked(operation, flag) ? [bracketNote] : []),
+      ...fieldNotes(flag.source),
       ...(isDeprecated(flag) ? ["deprecated"] : []),
     ];
 
@@ -283,7 +315,8 @@ const nonStandardLine = (input: HelpInput): string | undefined => {
 
 /**
  * The description and generated notes of one command, from the model alone: source prose first,
- * then the wire name and location of each argument and flag, and the REQUEST, AUTH, RESPONSES and
+ * then the wire name and location of each argument and flag (with a body field's allowed values,
+ * default and read-only and deprecated marks), and the REQUEST, AUTH, RESPONSES and
  * REFUSED lines. The REFUSED line lists the command's refused elements by wire name and reason.
  */
 export const operationHelp = (input: HelpInput): OperationHelp => {

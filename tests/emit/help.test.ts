@@ -8,7 +8,7 @@ import hostileSeeds from "../fixtures/seeds/hostile.json" with { type: "json" };
 import { DocumentUri, SafeText } from "../../src/model/brands.ts";
 import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { Operation, SecurityScheme } from "../../src/model/entities.ts";
-import type { HelpInput } from "../../src/emit/help.ts";
+import type { HelpBodyField, HelpInput } from "../../src/emit/help.ts";
 import { operationHelp, sanitizeProse } from "../../src/emit/help.ts";
 
 const root = nodePath.resolve(import.meta.dir, "../..");
@@ -261,6 +261,12 @@ const timeAlternative = (count: number) => {
   return elapsed;
 };
 
+// A body field flag at `/<name>` with the given annotations.
+const body = (name: string, field: HelpBodyField) => ({
+  name,
+  source: { _tag: "Body", field, pointer: `/${name}` } as const,
+});
+
 describe("operationHelp", () => {
   test("description is the source description, else the summary, an empty one staying empty", () => {
     expect<string>(withDocs({ description: "Update a user." })).toBe("Update a user.");
@@ -301,6 +307,30 @@ describe("operationHelp", () => {
       "if-match": goldenNote("--if-match"),
       name: goldenNote("--name"),
       notify: goldenNote("--notify"),
+    });
+  });
+
+  test("SCH-29 SCH-49 SCH-50 SCH-51 a body field's note lists its values, default and marks", () => {
+    const help = operationHelp({
+      ...input,
+      flags: [
+        body("kind", {
+          default: undefined,
+          deprecated: false,
+          enum: ["a", 1, null],
+          readOnly: false,
+        }),
+        body("meta", { default: { x: [1] }, deprecated: true, enum: undefined, readOnly: true }),
+        body("plain", { default: undefined, deprecated: false, enum: undefined, readOnly: false }),
+        { name: "bare", source: { _tag: "Body", pointer: "/bare" } },
+      ],
+    });
+
+    expect(help.flags).toEqual({
+      bare: "body /bare",
+      kind: "body /kind; choices: a, 1, null",
+      meta: 'body /meta; default: {"x":[1]}; read-only; deprecated',
+      plain: "body /plain",
     });
   });
 
