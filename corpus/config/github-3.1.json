@@ -1,6 +1,255 @@
 {
   "binName": "github",
   "envPrefix": "GITHUB",
+  "naming": {
+    "operations": {
+      "actions/update-environment-variable": {
+        "parameters": {
+          "path:name": {
+            "flag": "variable-name"
+          }
+        }
+      },
+      "actions/update-org-variable": {
+        "parameters": {
+          "path:name": {
+            "flag": "variable-name"
+          }
+        }
+      },
+      "actions/update-repo-variable": {
+        "parameters": {
+          "path:name": {
+            "flag": "variable-name"
+          }
+        }
+      },
+      "agents/update-org-variable": {
+        "parameters": {
+          "path:name": {
+            "flag": "variable-name"
+          }
+        }
+      },
+      "agents/update-repo-variable": {
+        "parameters": {
+          "path:name": {
+            "flag": "variable-name"
+          }
+        }
+      },
+      "apps/update-webhook-config-for-app": {
+        "fields": {
+          "/content_type": {
+            "flag": "payload-content-type"
+          }
+        }
+      },
+      "dependency-graph/create-repository-snapshot": {
+        "fields": {
+          "/version": {
+            "flag": "snapshot-version"
+          }
+        }
+      },
+      "gists/create-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "gists/update-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "git/update-ref": {
+        "fields": {
+          "/force": {
+            "flag": "force-update"
+          }
+        }
+      },
+      "issues/create": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "issues/create-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "issues/create-issue-artifact": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "issues/update": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "issues/update-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "orgs/create-artifact-deployment-record": {
+        "fields": {
+          "/version": {
+            "flag": "artifact-version"
+          }
+        }
+      },
+      "orgs/create-artifact-storage-record": {
+        "fields": {
+          "/version": {
+            "flag": "artifact-version"
+          }
+        }
+      },
+      "orgs/update-webhook-config-for-org": {
+        "fields": {
+          "/content_type": {
+            "flag": "payload-content-type"
+          }
+        }
+      },
+      "projects/create-draft-item-for-authenticated-user": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "projects/create-draft-item-for-org": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/create": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/create-reply-for-review-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/create-review": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/create-review-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/submit-review": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/update": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/update-review": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "pulls/update-review-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "repos/create-commit-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "repos/create-release": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "repos/update-commit-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "repos/update-release": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "repos/update-webhook-config-for-repo": {
+        "fields": {
+          "/content_type": {
+            "flag": "payload-content-type"
+          }
+        }
+      },
+      "security-advisories/create-repository-advisory-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "security-advisories/update-repository-advisory-comment": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      }
+    }
+  },
   "package": {
     "name": "github-cli",
     "version": "0.1.0"
