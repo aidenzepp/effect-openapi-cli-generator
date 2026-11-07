@@ -17,6 +17,8 @@ jobs:
           bun-version: "1.4.3"
       - run: bun install --frozen-lockfile
       - run: bun run check
+      # Row coverage (m2.md outcome 2) from the tracked tests/inventory export: no network, no secrets.
+      - run: bun tools/inventory-trace.ts --check
       - uses: actions/cache@v4
         with:
           path: ~/.cache/effect-openapi-cli-generator

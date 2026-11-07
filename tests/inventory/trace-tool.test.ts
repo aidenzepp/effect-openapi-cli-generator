@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -46,6 +46,8 @@ const run = (root: string, ...args: string[]) => {
   return {
     code: result.exitCode,
     lines: output.filter((line) => !line.startsWith("total ")),
+    // The runtime logs a failure to stdout or stderr; `log` is both.
+    log: result.stdout.toString() + result.stderr.toString(),
     totals: output.filter((line) => line.startsWith("total ")),
   };
 };
@@ -162,6 +164,80 @@ describe("inventory-trace statuses", () => {
     });
 
     expect(lines).toEqual(["ZZZ-01 delegated", "ZZZ-02 todo"]);
+  });
+});
+
+const counted = (source: string) =>
+  trace({ rows: [{ id: "ZZZ-01" }, { id: "ZZZ-02" }], tests: { "a.test.ts": source } });
+
+describe("inventory-trace counts only real test calls", () => {
+  test("a test call inside a string or a template literal is not a title", () => {
+    const quoted = counted(`const a = 'test("ZZZ-01: x", () => {});';\n${titled("ZZZ-02: y")}`);
+    const templated = counted(
+      `const a = \`test("ZZZ-01: x", () => {});\`;\n${titled("ZZZ-02: y")}`,
+    );
+
+    expect(quoted.lines).toEqual(["ZZZ-01 missing", "ZZZ-02 covered"]);
+    expect(templated.lines).toEqual(["ZZZ-01 missing", "ZZZ-02 covered"]);
+  });
+
+  test("a test call after a trailing // comment is not a title", () => {
+    const { lines } = counted(`go(); // test("ZZZ-01: x", () => {});\n${titled("ZZZ-02: y")}`);
+
+    expect(lines).toEqual(["ZZZ-01 missing", "ZZZ-02 covered"]);
+  });
+
+  test("tests under a skipped, todo or conditional describe do not count; the next one does", () => {
+    for (const opener of [
+      "describe.skip(",
+      "describe.todo(",
+      "describe.if(false)(",
+      "describe.skipIf(true)(",
+    ]) {
+      const { lines } = counted(
+        `${opener}"off", () => {\n  describe("inner", () => {\n    ${titled("ZZZ-01: x")}\n  });\n});\n${titled("ZZZ-02: y")}`,
+      );
+
+      expect({ lines, opener }).toEqual({ lines: ["ZZZ-01 missing", "ZZZ-02 covered"], opener });
+    }
+  });
+
+  test("a skipped or conditional test does not count; describe.each does not hide its tests", () => {
+    expect(counted(`test.skip("ZZZ-01: x", () => {});`).lines).toEqual([
+      "ZZZ-01 missing",
+      "ZZZ-02 missing",
+    ]);
+    expect(
+      counted(`describe.each([1])("set %s", () => {\n  ${titled("ZZZ-01: x")}\n});`).lines,
+    ).toEqual(["ZZZ-01 covered", "ZZZ-02 missing"]);
+  });
+
+  test("a regular expression holding a quote does not hide the test after it", () => {
+    const { lines } = counted(`const r = /"/u;\nconst s = a / b / c;\n${titled("ZZZ-01: x")}`);
+
+    expect(lines).toEqual(["ZZZ-01 covered", "ZZZ-02 missing"]);
+  });
+
+  test("a test file the trace cannot read exits 1 and names the file and the line", () => {
+    const result = counted(`${titled("ZZZ-01: x")}\nconst s = "open;\n`);
+
+    expect(result.code).toBe(1);
+    expect(result.log).toContain(
+      "tests/a.test.ts: unterminated string literal at line 2; the trace cannot read its test titles",
+    );
+  });
+
+  test("the strings in tests/tools/inventory-trace.test.ts cover no real row (audit S8 repro)", () => {
+    const source = readFileSync(
+      path.join(import.meta.dir, "..", "tools", "inventory-trace.test.ts"),
+      "utf-8",
+    );
+    const { lines } = trace({
+      rows: [{ id: "S30-12" }, { id: "SCO-03" }],
+      tests: { "tools/inventory-trace.test.ts": source },
+    });
+
+    expect(lines).toEqual(["S30-12 missing", "SCO-03 missing"]);
   });
 });
 

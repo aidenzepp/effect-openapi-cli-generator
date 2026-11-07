@@ -455,14 +455,20 @@ const refusedFinding = (id: string, refused: GenerateRefused): Findings => ({
 });
 
 // Runs one `ci` entry and writes its verdict, or with `check` compares it with the committed file.
-// An entry without an author config is listed as skipped. Returns the run's findings.
+// An entry without an author config is listed as skipped, and is a finding under `check`: every
+// `ci` entry has a config and a verdict (design 8.2). Returns the run's findings.
 const verdictFor = (entry: Entry, corpusVersion: number, context: Context, check: boolean) =>
   Effect.gen(function* verdictOne() {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const { root } = context;
-    if (!(yield* fs.exists(path.join(root, "corpus/config", `${entry.id}.json`)))) {
-      yield* Effect.log(`${entry.id}: skipped, no corpus/config/${entry.id}.json`);
+    const configName = `corpus/config/${entry.id}.json`;
+    if (!(yield* fs.exists(path.join(root, ...configName.split("/"))))) {
+      if (check) {
+        return { coverage: [], other: [`${entry.id}: no author config at ${configName}`] };
+      }
+
+      yield* Effect.log(`${entry.id}: skipped, no ${configName}`);
 
       return noFindings;
     }
