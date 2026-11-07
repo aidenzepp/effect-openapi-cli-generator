@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { JsonLiteral } from "../model/brands.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
+import type { CommandNameSource as CommandNameSourceSchema } from "./index.ts";
 import { Verdict } from "../model/verdict.ts";
 
 export type VerdictValue = typeof Verdict.Type;
@@ -29,10 +30,9 @@ export interface VerdictInput {
 }
 
 /**
- * The sources a command name can come from (design 8.1, D-NAME4). `tag` and `none` name groups
- * only, so a command never carries them.
+ * The sources a command name can come from: the report's `CommandNameSource`.
  */
-export type CommandNameSource = "config" | "operationId" | "route" | "x-fern" | "x-forge";
+export type CommandNameSource = typeof CommandNameSourceSchema.Type;
 
 type CommandSources = VerdictValue["commandSources"];
 

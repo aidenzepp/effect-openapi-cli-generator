@@ -62,17 +62,22 @@ export interface PlannedFlag {
 }
 
 /**
- * Where a command's group or command name came from (design 8.1 `commandNames`): `none` is a root
- * command's group.
+ * Where a command name came from (design 8.1 `commandNames`, D-NAME4).
  */
-export type NameSource = "config" | "none" | "operationId" | "route" | "tag" | "x-fern" | "x-forge";
+export type CommandNameSource = "config" | "operationId" | "route" | "x-fern" | "x-forge";
+
+/**
+ * Where a command's group name came from (design 8.1 `commandNames`): the first tag, or `none` for
+ * a root command.
+ */
+export type GroupNameSource = "config" | "none" | "tag" | "x-fern" | "x-forge";
 
 /**
  * The sources of one command's group and command name.
  */
 export interface NameSources {
-  readonly command: NameSource;
-  readonly group: NameSource;
+  readonly command: CommandNameSource;
+  readonly group: GroupNameSource;
 }
 
 /**
@@ -172,12 +177,12 @@ export type Namer =
 
 export interface SourcedName {
   readonly folded: Folded<string>;
-  readonly source: NameSource;
+  readonly source: CommandNameSource;
 }
 
 const sourced = (
   folded: Result.Result<Folded<string>, EmptyFold>,
-  source: NameSource,
+  source: CommandNameSource,
 ): Result.Result<SourcedName, EmptyFold> =>
   Result.isFailure(folded)
     ? Result.fail(folded.failure)

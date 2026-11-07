@@ -21,11 +21,12 @@ import {
 } from "./plan.ts";
 import type {
   Collector,
+  CommandNameSource,
   Draft,
   DraftContext,
   DraftFlag,
   Finding,
-  NameSource,
+  GroupNameSource,
   Namer,
   OverrideSite,
   PlannedCommand,
@@ -40,8 +41,9 @@ import { escapeToken } from "../model/pointer.ts";
 export { domainIdentifiers } from "./domain.ts";
 
 export type {
+  CommandNameSource,
   FlagSource,
-  NameSource,
+  GroupNameSource,
   NameSources,
   PlannedCommand,
   PlannedCredential,
@@ -100,7 +102,7 @@ interface Candidate {
   readonly commandHint: string | undefined;
   readonly container: string;
   readonly groupHint: string | undefined;
-  readonly groupSource: NameSource;
+  readonly groupSource: GroupNameSource;
   readonly namePointer: string;
   readonly namer: Namer;
   readonly operation: Operation;
@@ -109,7 +111,7 @@ interface Candidate {
 }
 
 interface Named extends Candidate {
-  readonly commandSource: NameSource;
+  readonly commandSource: CommandNameSource;
   readonly name: string;
   readonly notes: readonly FoldNote[];
 }
@@ -437,7 +439,7 @@ type Chain = Result.Result<readonly GroupNode[], ChainError>;
 interface GroupChoice {
   readonly chain: Chain;
   readonly pointer: string;
-  readonly source: NameSource;
+  readonly source: GroupNameSource;
 }
 
 interface Chains {

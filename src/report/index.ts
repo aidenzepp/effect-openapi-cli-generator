@@ -7,6 +7,18 @@ import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
+/**
+ * Where a command name came from (design 8.1, D-NAME4). `tag` and `none` name groups only, so a
+ * command never carries them.
+ */
+export const CommandNameSource = Schema.Literals([
+  "config",
+  "operationId",
+  "route",
+  "x-fern",
+  "x-forge",
+]);
+
 // Where a command's group or command name came from (design 8.1, D-NAME4); `none` is a root
 // command's group.
 const NameSource = Schema.Literals([
@@ -26,7 +38,7 @@ const NameSource = Schema.Literals([
  */
 export const CommandName = Schema.Struct({
   alias: Schema.optionalKey(Schema.Int),
-  command: NameSource,
+  command: CommandNameSource,
   document: DocumentUri,
   group: NameSource,
   path: Schema.Array(Schema.String),

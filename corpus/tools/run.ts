@@ -10,9 +10,8 @@ import { loadBytes } from "../../src/load/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { collectInformational } from "../../src/normalize/informational.ts";
 import { VerdictCoverage } from "../../src/model/verdict.ts";
-import type { GenerationReportValue } from "../../src/report/index.ts";
 import { makeVerdict, printVerdict } from "../../src/report/verdict.ts";
-import type { CommandNameSource, VerdictValue } from "../../src/report/verdict.ts";
+import type { VerdictValue } from "../../src/report/verdict.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import { Description } from "../../src/runtime-src/runtime/describe.ts";
 import { lineOf } from "../../src/validate/dispatch.ts";
@@ -239,14 +238,6 @@ const coverageEntries = (coverage: Coverage) =>
     missing: coverage.missing.map(elementEntry),
   });
 
-type CommandNameValue = GenerationReportValue["commandNames"][number];
-
-// `tag` and `none` name groups only; a command carrying one is a generator bug the run reports.
-const commandSourced = (
-  name: CommandNameValue,
-): name is CommandNameValue & { readonly command: CommandNameSource } =>
-  name.command !== "tag" && name.command !== "none";
-
 /**
  * The causes a coverage join reports, one line each naming the spec id and the element: what
  * nothing accounts for, and what nothing in the spec stands behind. Elements accounted only by a
@@ -402,7 +393,7 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
 
     const { commandNames, nonStandard } = generated.report;
     const verdict = makeVerdict({
-      commandNames: commandNames.filter(commandSourced),
+      commandNames,
       corpusVersion,
       coverage: yield* coverageEntries(coverage),
       diagnostics: generated.diagnostics,
@@ -419,9 +410,6 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
       other: [
         ...(verdict.verdict === "refused" ? [`${entry.id}: verdict is refused`] : []),
         ...twin.differing.map((file) => `${entry.id}: YAML twin differs at ${file}`),
-        ...commandNames
-          .filter((name) => !commandSourced(name))
-          .map((name) => `${entry.id}: command ${name.path.join(" ")} has a group name source`),
       ],
     };
     const summary = [
