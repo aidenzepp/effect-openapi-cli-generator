@@ -1,0 +1,11 @@
+{
+  "binName": "github",
+  "envPrefix": "GITHUB",
+  "package": {
+    "name": "github-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": ["https://api.github.com"]
+  }
+}
