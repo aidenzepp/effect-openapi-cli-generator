@@ -3,9 +3,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun";
 import { Array as Arr, Data, Effect, FileSystem, Path, Runtime, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 import generatorPackage from "../../package.json" with { type: "json" };
-import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
-import { generate } from "../../src/generate.ts";
-import type { GenerateRefused } from "../../src/generate.ts";
+import { GenerateRefused } from "../../src/generate.ts";
 import { loadBytes } from "../../src/load/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { collectInformational } from "../../src/normalize/informational.ts";
@@ -20,21 +18,17 @@ import { coverageOf } from "./coverage.ts";
 import type { Coverage, Invented } from "./coverage.ts";
 import { Corpus, fetchPinned, githubSource } from "./fetch.ts";
 import type { CorpusEntry, Pin } from "./fetch.ts";
+import { Generation, GenerationRequest, reportFile } from "./generate.ts";
 import { walk } from "./walk.ts";
 import type { WalkElement } from "./walk.ts";
 
 // The corpus run (design 8.2, CP-2): for each `ci` spec with an author config, generate from the
 // pinned bytes, compare the YAML twin, build, run `--describe`, join coverage and print the
 // verdict. `--check` compares the printed verdict with the committed one byte for byte.
+// Generation runs in its own process (`generate.ts`) that exits before the build, so the build
+// never shares the memory ceiling with what generation held.
 
 type Entry = typeof CorpusEntry.Type;
-
-const reportFile = "generation-report.json";
-
-const generator = {
-  packageJson: Schema.decodeUnknownSync(Schema.Json)(generatorPackage),
-  tsconfig: Schema.decodeUnknownSync(Schema.Json)(generatorTsconfig),
-};
 
 const { version } = Schema.decodeUnknownSync(Schema.Struct({ version: Schema.String }))(
   generatorPackage,
@@ -45,6 +39,12 @@ const decodeDocument = Schema.decodeUnknownEffect(DocumentUri);
 const decodeCorpus = Schema.decodeUnknownEffect(Schema.fromJsonString(Corpus));
 
 const decodeDescription = Schema.decodeUnknownEffect(Schema.fromJsonString(Description));
+
+const decodeGeneration = Schema.decodeUnknownEffect(Schema.fromJsonString(Generation));
+
+const encodeRequest = Schema.encodeEffect(Schema.fromJsonString(GenerationRequest));
+
+const generateEntry = new URL("generate.ts", import.meta.url).pathname;
 
 const decoder = new TextDecoder();
 
@@ -57,6 +57,20 @@ export class CorpusRunFailed extends Data.TaggedError("CorpusRunFailed")<{
   readonly output: string;
   readonly step: string;
 }> {}
+
+/**
+ * The generation process for one spec ended without writing its result: a defect of the generator
+ * or of its input that the process has already logged. The run stops, as it does for any failure
+ * of generation other than a refusal.
+ */
+export class CorpusGenerateFailed extends Data.TaggedError("CorpusGenerateFailed")<{
+  readonly exitCode: number | null;
+  readonly id: string;
+}> {
+  override get message(): string {
+    return `${this.id}: generation exited ${String(this.exitCode)} without a result`;
+  }
+}
 
 /**
  * What the run found that a verdict records but the gate does not accept, other than a coverage
@@ -248,22 +262,6 @@ export const coverageFindings = (id: string, coverage: Coverage): readonly strin
   ...coverage.invented.map((invented) => `${id}: ${describeInvented(invented)}`),
 ];
 
-// Every emitted file but the report (which records each input's digest), compared by bytes.
-const twinDifferences = (json: string, yaml: string, files: readonly string[]) =>
-  Effect.gen(function* compare() {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const differing = yield* Effect.forEach(
-      files.filter((file) => file !== reportFile),
-      (file) =>
-        Effect.all([fs.readFile(path.join(json, file)), fs.readFile(path.join(yaml, file))]).pipe(
-          Effect.map(([a, b]) => (sha256Hex(a) === sha256Hex(b) ? [] : [file])),
-        ),
-    );
-
-    return differing.flat();
-  });
-
 interface Twin {
   readonly checked: boolean;
   readonly differing: readonly string[];
@@ -277,7 +275,31 @@ const twinState = (twin: Twin): string => {
   return twin.differing.length === 0 ? "equal" : "unequal";
 };
 
-// One spec through generation, twin, build, `--describe` and the coverage join.
+// Generates the package (and the twin) in a child process and reads back what the verdict needs.
+// The child's output and logs are the run's own; a refusal fails here as `generate` would.
+const generateApart = (id: string, request: typeof GenerationRequest.Type) =>
+  Effect.gen(function* generateRun() {
+    const fs = yield* FileSystem.FileSystem;
+    const result = Bun.spawnSync(
+      [process.execPath, ...process.execArgv, generateEntry, yield* encodeRequest(request)],
+      { env: { ...process.env }, stderr: "inherit", stdout: "inherit" },
+    );
+    if (result.exitCode !== 0 || !(yield* fs.exists(request.result))) {
+      return yield* new CorpusGenerateFailed({ exitCode: result.exitCode, id });
+    }
+
+    const generation = yield* decodeGeneration(yield* fs.readFileString(request.result));
+
+    return generation._tag === "Refused"
+      ? yield* new GenerateRefused({
+          diagnostics: generation.diagnostics,
+          reason: generation.reason,
+        })
+      : generation;
+  });
+
+// One spec through generation, twin, build, `--describe` and the coverage join. The spec is read
+// in this process only after the build, so the build runs beside nothing generation held.
 const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
   Effect.gen(function* runOne() {
     const fs = yield* FileSystem.FileSystem;
@@ -290,24 +312,7 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
     // The spec is named by its pinned source URL and the config by its repository path, never by
     // a host path (C8); the twin is named as the JSON is, so only the format differs.
     const document = yield* decodeDocument(entry.sourceUrl);
-    const config = {
-      document: yield* decodeDocument(`file:///${configName}`),
-      path: configPath,
-    };
-    const configBytes = yield* fs.readFile(configPath);
-    const specBytes = yield* fs.readFile(specPath);
-    const loaded = yield* loadBytes(specBytes, { document });
-    const resolution = yield* resolve({
-      document,
-      line: yield* lineOf(loaded.value),
-      value: loaded.value,
-    });
-    const openapi = yield* Schema.decodeUnknownEffect(Schema.Struct({ openapi: Schema.String }))(
-      loaded.value,
-    );
-    const informational = (yield* collectInformational(resolution)).length;
-    const elements = yield* walk(resolution);
-    const total = elements.filter((element) => element.kind === "operation").length;
+    const configDocument = yield* decodeDocument(`file:///${configName}`);
 
     yield* fs.makeDirectory(context.work, { recursive: true });
 
@@ -316,37 +321,23 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
       prefix: `corpus-${entry.id}-`,
     });
     const jsonDir = path.join(scratch, "json");
-    const generated = yield* generate(
-      {
-        document,
-        generator,
-        outDir: jsonDir,
-        source: { _tag: "File", path: specPath },
-        strict: false,
-      },
-      config,
-    );
-
+    const request = {
+      config: { document: configDocument, path: configPath },
+      document,
+      json: { outDir: jsonDir, specPath },
+      result: path.join(scratch, "generation.json"),
+    };
     const twinPin = entry.twin;
-    const twin: Twin =
+    const generated = yield* generateApart(
+      entry.id,
       twinPin === undefined
-        ? { checked: false, differing: [] }
-        : yield* Effect.gen(function* twinRun() {
-            const yamlDir = path.join(scratch, "yaml");
-            const yaml = yield* generate(
-              {
-                document,
-                generator,
-                outDir: yamlDir,
-                source: { _tag: "File", path: yield* fetch(twinPin) },
-                strict: false,
-              },
-              config,
-            );
-            const files = Arr.union(generated.files, yaml.files);
-
-            return { checked: true, differing: yield* twinDifferences(jsonDir, yamlDir, files) };
-          });
+        ? request
+        : {
+            ...request,
+            twin: { outDir: path.join(scratch, "yaml"), specPath: yield* fetch(twinPin) },
+          },
+    );
+    const { twin } = generated;
 
     const bun = process.execPath;
     yield* spawn(
@@ -368,6 +359,20 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
     if (binPath === undefined || binPaths.length !== 1) {
       return yield* new CorpusRunFailed({ id: entry.id, output: manifest, step: "bin" });
     }
+
+    const configBytes = yield* fs.readFile(configPath);
+    const loaded = yield* loadBytes(yield* fs.readFile(specPath), { document });
+    const resolution = yield* resolve({
+      document,
+      line: yield* lineOf(loaded.value),
+      value: loaded.value,
+    });
+    const openapi = yield* Schema.decodeUnknownEffect(Schema.Struct({ openapi: Schema.String }))(
+      loaded.value,
+    );
+    const informational = (yield* collectInformational(resolution)).length;
+    const elements = yield* walk(resolution);
+    const total = elements.filter((element) => element.kind === "operation").length;
 
     const describe = yield* spawn(
       entry.id,
@@ -391,7 +396,7 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
       total,
     };
 
-    const { commandNames, nonStandard } = generated.report;
+    const { commandNames, nonStandard } = generated;
     const verdict = makeVerdict({
       commandNames,
       corpusVersion,
