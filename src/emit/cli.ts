@@ -2,6 +2,8 @@ import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } 
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
+import { validationCopy } from "../normalize/schemas.ts";
+import type { Line } from "../validate/index.ts";
 import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
@@ -227,8 +229,12 @@ interface FieldNode {
   readonly ref: string | undefined;
 }
 
-// `None` for a node the walk cannot read: not an object, or a `$ref` that is not a string.
-const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
+// `None` for a node the walk cannot read: not an object, or a `$ref` that is not a string. A
+// `default` normalize refused reads as absent.
+const fieldNode = (
+  json: Schema.Json,
+  refusedDefaults: ReadonlySet<Schema.Json>,
+): Option.Option<FieldNode> => {
   if (!isJsonObject(json)) {
     return Option.none();
   }
@@ -259,7 +265,7 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
     allOf: Array.isArray(allOf) ? allOf : [],
     contentEncoding: text("contentEncoding"),
     contentMediaType: text("contentMediaType"),
-    default: own(json, "default"),
+    default: refusedDefaults.has(json) ? undefined : own(json, "default"),
     deprecated: own(json, "deprecated") === true,
     enum: Array.isArray(values) ? values : undefined,
     format: text("format"),
@@ -323,8 +329,14 @@ const encodingOf = (node: FieldNode): FieldEncoding | undefined => {
   return node.contentEncoding === undefined && node.format === "byte" ? "base64" : undefined;
 };
 
+// The stored `$defs` and the nodes among them whose `default` normalize refused (S30-27).
+interface FieldStore {
+  readonly defs: Defs;
+  readonly refusedDefaults: ReadonlySet<Schema.Json>;
+}
+
 const fieldSchema = (
-  defs: Defs,
+  { defs, refusedDefaults }: FieldStore,
   rootKey: string,
   pointer: string,
   repeated: boolean,
@@ -338,7 +350,7 @@ const fieldSchema = (
       seen.add(current);
       visits += 1;
 
-      const node = fieldNode(current);
+      const node = fieldNode(current, refusedDefaults);
       if (Option.isNone(node)) {
         break;
       }
@@ -440,14 +452,14 @@ const unknownField: FieldSchema = {
 type BodyFlagSource = Extract<PlannedFlag["source"], { readonly _tag: "Body" }>;
 
 // The body alternative a field flag writes into, and that field's schema.
-const bodyField = (operation: Operation, source: BodyFlagSource, defs: Defs) => {
+const bodyField = (operation: Operation, source: BodyFlagSource, store: FieldStore) => {
   const alternative = operation.body?.alternatives.find((candidate) =>
     source.media.includes(candidate.mediaType),
   );
   const schema =
     alternative?.schema === undefined
       ? unknownField
-      : fieldSchema(defs, alternative.schema.key, source.wireName, source.repeated);
+      : fieldSchema(store, alternative.schema.key, source.wireName, source.repeated);
 
   return { alternative, schema };
 };
@@ -462,10 +474,9 @@ interface Target {
   readonly namespace: string;
 }
 
-interface CommandContext {
+interface CommandContext extends FieldStore {
   readonly api: Api;
   readonly booleans: Map<string, boolean>;
-  readonly defs: Defs;
   readonly domain: NamePlan["domain"];
   readonly plan: NamePlan;
   readonly targets: ReadonlyMap<Operation, Target>;
@@ -739,7 +750,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return [flag.identifier, pipe(head, steps)] as const;
     }
 
-    const { alternative, schema } = bodyField(operation, source, context.defs);
+    const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
@@ -808,7 +819,7 @@ const alternativeBody = (
       // MED-21: a binary body's `maxLength` counts its octets, so it bounds the upload.
       const limit =
         alternative.codec === "binary" && alternative.schema !== undefined
-          ? fieldSchema(context.defs, alternative.schema.key, "", false).maxLength
+          ? fieldSchema(context, alternative.schema.key, "", false).maxLength
           : undefined;
       const bound: Entry[] = limit === undefined ? [] : [["maxBytes", num(limit)]];
 
@@ -850,7 +861,7 @@ const alternativeBody = (
         continue;
       }
 
-      const { encoding } = fieldSchema(context.defs, schemaKey, source.wireName, false);
+      const { encoding } = fieldSchema(context, schemaKey, source.wireName, false);
       if (encoding === undefined) {
         return yield* refuse("unsupported-flag", flag.name);
       }
@@ -1121,7 +1132,7 @@ const bindingOf = (location: string, pointer: string, wireName: string): Expr =>
     ["wireName", str(wireName)],
   ]);
 
-const helpFlags = (command: PlannedCommand, defs: Defs): readonly HelpFlag[] => {
+const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFlag[] => {
   const { operation } = command;
   const positionals = command.positionals.flatMap((positional) => {
     const parameter = parameterOf(operation, "path", positional.wireName);
@@ -1140,7 +1151,7 @@ const helpFlags = (command: PlannedCommand, defs: Defs): readonly HelpFlag[] => 
     .flatMap((flag): readonly HelpFlag[] => {
       const { source } = flag;
       if (source._tag === "Body") {
-        const field = bodyField(operation, source, defs).schema.notes;
+        const field = bodyField(operation, source, store).schema.notes;
 
         return [{ name: flag.name, source: { _tag: "Body", field, pointer: source.wireName } }];
       }
@@ -1251,7 +1262,7 @@ const annotationsOf = (command: PlannedCommand, meta: Expr, context: CommandCont
   const help = operationHelp({
     credentials: context.plan.credentials,
     diagnostics: context.plan.diagnostics,
-    flags: helpFlags(command, context.defs),
+    flags: helpFlags(command, context),
     operation: command.operation,
     schemes: context.api.securitySchemes,
   });
@@ -1761,6 +1772,54 @@ const decodeDefs = Schema.decodeUnknownOption(
 
 const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
 
+// The code normalize's validation copy records when it removes a 3.0 `default` (S30-27).
+const refusedDefaultCode = "S30-27/nonconforming-default";
+
+const isJsonArray = (json: Schema.Json | undefined): json is readonly Schema.Json[] =>
+  Arr.isArray(json);
+
+// The member of an object, or the element of an array, that one path token names.
+const childAt = (json: Schema.Json | undefined, token: string): Schema.Json | undefined => {
+  if (isJsonObject(json)) {
+    return own(json, token);
+  }
+
+  return isJsonArray(json) ? json[Number(token)] : undefined;
+};
+
+/**
+ * The stored nodes whose `default` normalize refused (S30-27, D-OC3: a refused default is not
+ * shown): the validation copy's edits under that code, located in `defs`, so help reads the one
+ * fact normalize records rather than re-checking conformance. Only the 3.0 line refuses a default,
+ * so other lines skip deriving the copy. Normalize derived the same copy from the same definitions
+ * and budget, so a failure here is a defect.
+ */
+const refusedDefaultsOf = (line: Line, defs: Defs): Effect.Effect<ReadonlySet<Schema.Json>> =>
+  Effect.gen(function* refusedDefaults() {
+    if (line !== "3.0") {
+      return new Set();
+    }
+
+    const copy = yield* Effect.orDie(validationCopy(line, new Map(Object.entries(defs))));
+    const nodes = new Set<Schema.Json>();
+    for (const edit of copy.edits) {
+      if (edit.code !== refusedDefaultCode) {
+        continue;
+      }
+
+      let node: Schema.Json | undefined = own(defs, edit.key);
+      for (const token of edit.path.slice(0, -1)) {
+        node = childAt(node, token);
+      }
+
+      if (node !== undefined) {
+        nodes.add(node);
+      }
+    }
+
+    return nodes;
+  });
+
 /**
  * Emits the V1 `cli/` layer (design 4.1, 4.4, 4.6, 4.8, 5, 6.6, 8.3; §14 D4, D5): `cli/<group>.ts`
  * per planned group with one `Command.make` per planned command (inline `Flag` and `Argument`
@@ -1793,15 +1852,17 @@ export const emitCli = (
     }
 
     const targets = targetsOf(plan);
+    const defs = Option.match(decodeDefs(api.schemas.document), {
+      onNone: (): Defs => ({}),
+      onSome: (store) => store.$defs,
+    });
     const context: CommandContext = {
       api,
       booleans: new Map(),
-      defs: Option.match(decodeDefs(api.schemas.document), {
-        onNone: () => ({}),
-        onSome: (store) => store.$defs,
-      }),
+      defs,
       domain: plan.domain,
       plan,
+      refusedDefaults: yield* refusedDefaultsOf(api.line, defs),
       targets,
     };
     const built = new Map<string, Commands>();

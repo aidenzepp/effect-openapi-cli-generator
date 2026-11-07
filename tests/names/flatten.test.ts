@@ -477,3 +477,44 @@ describe("flattenBody: multipart and xml", () => {
     ]);
   });
 });
+
+describe("flattenBody: 3.0 readOnly (S30-31, D-SCH2)", () => {
+  const defs = {
+    Id: { readOnly: true, type: "string" },
+    Root: object({
+      id: { readOnly: true, type: "string" },
+      meta: object({ stamp: { readOnly: true, type: "string" }, tag: { type: "string" } }),
+      name: { type: "string" },
+      ref: { $ref: "#/$defs/Id" },
+    }),
+  } satisfies Defs;
+
+  const names = (line: "3.0" | "3.1" | "3.2", codec: Alternative["codec"] = "json") => {
+    const result = flattenBody(defs, alternative(codec, "Root"), line);
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return {
+      flags: result.success.flags.map((flag) => flag.name),
+      skipped: result.success.skipped,
+    };
+  };
+
+  test("a 3.0 read-only property, directly or through one $ref, gets no flag and no skip notice", () => {
+    expect(names("3.0")).toEqual({
+      flags: ["body", "body-file", "meta.tag", "name"],
+      skipped: [],
+    });
+  });
+
+  test("a 3.0 read-only multipart part gets no flag and no skip notice", () => {
+    expect(names("3.0", "multipart")).toEqual({ flags: ["meta", "name"], skipped: [] });
+  });
+
+  test("3.1 and 3.2 keep the flag of a read-only property (SCH-51)", () => {
+    const kept = ["body", "body-file", "id", "meta.stamp", "meta.tag", "name", "ref"];
+    expect(names("3.1").flags).toEqual(kept);
+    expect(names("3.2").flags).toEqual(kept);
+  });
+});

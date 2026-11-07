@@ -1239,6 +1239,7 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
         onNone: () => ({}),
         onSome: (store) => store.$defs,
       }),
+      line: api.line,
     };
     const drafts = new Map<Operation, Draft>();
     for (const entry of named) {

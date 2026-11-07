@@ -15,6 +15,7 @@ import type {
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { escapeToken } from "../model/pointer.ts";
+import type { Line } from "../validate/index.ts";
 
 /**
  * A path parameter as a positional argument; `name` is its metavar.
@@ -622,14 +623,16 @@ export interface Draft {
 }
 
 /**
- * What flag drafting reads: the store's `$defs`, the boolean memo shared across the plan, and the
- * credential flags every command must avoid.
+ * What flag drafting reads: the store's `$defs`, the boolean memo shared across the plan, the
+ * credential flags every command must avoid, and the OpenAPI line, which decides whether a
+ * read-only body property is offered (S30-31).
  */
 export interface DraftContext {
   readonly booleans: Map<string, boolean>;
   readonly collector: Collector;
   readonly credentialFlags: ReadonlySet<string>;
   readonly defs: Readonly<Record<string, Schema.Json>>;
+  readonly line: Line;
 }
 
 export interface Subject {
@@ -822,7 +825,7 @@ const draftBody = (
     let flattenedAll = true;
     for (const alternative of operation.body?.alternatives ?? []) {
       const { pointer } = alternative.origin;
-      const flattened = flattenBody(context.defs, alternative);
+      const flattened = flattenBody(context.defs, alternative, context.line);
       if (Result.isFailure(flattened)) {
         if (flattened.failure._tag === "UnresolvedBodyRef") {
           return yield* Effect.die(flattened.failure);

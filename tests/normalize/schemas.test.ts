@@ -905,3 +905,51 @@ describe("m2-schfx", () => {
     });
   });
 });
+
+describe("S30-27 a 3.0 default that does not conform to its type", () => {
+  const nonconforming = {
+    properties: {
+      count: { default: "x", type: "integer" },
+      flags: { default: { on: true }, items: { type: "string" }, type: "array" },
+      half: { default: 1.5, type: "integer" },
+      name: { default: null, type: "string" },
+    },
+    type: "object",
+  };
+  const conforming = {
+    properties: {
+      count: { default: 3, type: "integer" },
+      flags: { default: ["a"], items: { type: "string" }, type: "array" },
+      maybe: { default: null, nullable: true, type: "string" },
+      ratio: { default: 2, type: "number" },
+      untyped: { default: "x" },
+    },
+    type: "object",
+  };
+
+  test("is refused at element scope, at its schema, and left out of the validation copy", () => {
+    const result = one(nonconforming, "3.0");
+    const codes = ["count", "flags", "half", "name"].map(
+      (name) => `S30-27/nonconforming-default /components/schemas/S/properties/${name}`,
+    );
+
+    expect(found(result)).toEqual(codes);
+    expect(scopes(result)).toEqual(codes.map(() => "refusal:element"));
+    expect(copied(result, "S")).toMatchObject({
+      properties: { count: { type: "integer" }, name: { type: "string" } },
+    });
+    expect(copied(result, "S")).not.toMatchObject({ properties: { count: { default: "x" } } });
+  });
+
+  test("a conforming default, a nullable null and an untyped default are kept unreported", () => {
+    const result = one(conforming, "3.0");
+
+    expect(found(result)).toEqual([]);
+    expect(result.validation.edits).toEqual([]);
+  });
+
+  test("3.1 and 3.2 do not refuse it (SCH-49: the default is an annotation)", () => {
+    expect(found(one(nonconforming, "3.1"))).toEqual([]);
+    expect(found(one(nonconforming, "3.2"))).toEqual([]);
+  });
+});
