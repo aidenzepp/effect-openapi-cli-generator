@@ -3,7 +3,7 @@ import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body } from "../model/entities.ts";
-import { defsKey, keyOf } from "../resolve/canonical.ts";
+import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { defaultLimits } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
@@ -11,6 +11,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -1167,9 +1168,6 @@ const stopAlternative = (...findings: readonly Finding[]): AlternativeResult => 
   findings,
 });
 
-const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
-  referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
-
 // The slice names `S30-24/multipart-extra-fields` for 3.0, but the Diagnostic codec's row pattern
 // (`^[A-Z]+-[0-9]+$`, src/model/diagnostic.ts) rejects the digits in `S30`, so 3.0 reports SCH-13
 // too until that pattern admits them; then restore the 3.0 code here and in the test.
@@ -1799,6 +1797,19 @@ const normalizeAlternative = (
 
     // An XML body is opaque, so its schema is never consulted (design 6.3, D-SCH3).
     const opaque = codec === "xml";
+    const schemaSites = opaque
+      ? []
+      : (["schema", "itemSchema"] as const).flatMap((field) =>
+          node[field] === undefined ? [] : [childKey(home, field)],
+        );
+    const limits = { maxNodes: ctx.walk.maxNodes };
+    if (schemaSites.some((site) => appliesDynamicKeyword(resolution, site, limits))) {
+      // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
+      // the body cannot be checked without it, so the alternative is refused with no second
+      // diagnostic, and a required body left without one raises to operation scope.
+      return stopAlternative();
+    }
+
     const result: PlainAlternative = {
       codec,
       encoding: parts.encoding,

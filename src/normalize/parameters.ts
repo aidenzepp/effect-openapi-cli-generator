@@ -4,13 +4,13 @@ import { MediaType, WireName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
-import { defsKey } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { schemaKeyAt } from "./schemas.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -613,9 +613,6 @@ const contractReason = (
 
   return node.in === "path" && node.required !== true ? "path-not-required" : undefined;
 };
-
-const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string =>
-  referenceIn(resolution, site)?.defsKey ?? defsKey(resolution.document, site);
 
 // The schema key of a content entry's media type object, which 3.2 lets be a reference.
 const mediaSchemaKey = (

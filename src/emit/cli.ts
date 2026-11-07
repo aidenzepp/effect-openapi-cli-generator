@@ -24,7 +24,7 @@ import {
 } from "./api.ts";
 import type { FormPart } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
-import type { HelpFlag } from "./help.ts";
+import type { HelpBodyField, HelpFlag } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
 import {
   Identifier,
@@ -213,12 +213,16 @@ interface FieldNode {
   readonly allOf: readonly Schema.Json[];
   readonly contentEncoding: string | undefined;
   readonly contentMediaType: string | undefined;
+  readonly default: Schema.Json | undefined;
+  readonly deprecated: boolean;
+  readonly enum: readonly Schema.Json[] | undefined;
   readonly format: string | undefined;
   readonly int64: boolean;
   readonly items: Schema.Json | undefined;
   readonly maxLength: number | undefined;
   readonly prose: string | undefined;
   readonly properties: JsonObject | undefined;
+  readonly readOnly: boolean;
   readonly ref: string | undefined;
 }
 
@@ -234,6 +238,7 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
   }
 
   const allOf = own(json, "allOf");
+  const values = own(json, "enum");
   const properties = own(json, "properties");
   const prose = [own(json, "description"), own(json, "title")].find(Predicate.isString);
   const maxLength = own(json, "maxLength");
@@ -253,6 +258,9 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
     allOf: Array.isArray(allOf) ? allOf : [],
     contentEncoding: text("contentEncoding"),
     contentMediaType: text("contentMediaType"),
+    default: own(json, "default"),
+    deprecated: own(json, "deprecated") === true,
+    enum: Array.isArray(values) ? values : undefined,
     format: text("format"),
     int64: own(json, "format") === "int64" || unsafe,
     items: own(json, "items"),
@@ -262,6 +270,7 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
         : undefined,
     properties: isJsonObject(properties) ? properties : undefined,
     prose,
+    readOnly: own(json, "readOnly") === true,
     ref,
   });
 };
@@ -286,6 +295,11 @@ interface FieldSchema {
    */
   readonly maxLength: number | undefined;
   readonly mediaType: string | undefined;
+  /**
+   * The annotations help notes (SCH-29, 49, 50, 51): the first `enum` and `default` on the `$ref`
+   * chain (an array's `items` too, for `enum`), and whether any node is read-only or deprecated.
+   */
+  readonly notes: HelpBodyField;
 }
 
 // The node chain a schema reaches through `$ref`, starting at the schema itself; `settled` when
@@ -396,13 +410,45 @@ const fieldSchema = (
     node.maxLength === undefined ? [] : [node.maxLength],
   );
 
+  const notes: HelpBodyField = {
+    default: field.nodes.find((node) => node.default !== undefined)?.default,
+    deprecated: field.nodes.some((node) => node.deprecated),
+    enum: [...field.nodes, ...items.nodes].find((node) => node.enum !== undefined)?.enum,
+    readOnly: field.nodes.some((node) => node.readOnly),
+  };
+
   return {
     description: described?.prose ?? "",
     encoding,
     integer: width(),
     maxLength: bounds.length === 0 ? undefined : Math.min(...bounds),
     mediaType: last?.contentMediaType,
+    notes,
   };
+};
+
+const unknownField: FieldSchema = {
+  description: "",
+  encoding: undefined,
+  integer: "unsettled",
+  maxLength: undefined,
+  mediaType: undefined,
+  notes: { default: undefined, deprecated: false, enum: undefined, readOnly: false },
+};
+
+type BodyFlagSource = Extract<PlannedFlag["source"], { readonly _tag: "Body" }>;
+
+// The body alternative a field flag writes into, and that field's schema.
+const bodyField = (operation: Operation, source: BodyFlagSource, defs: Defs) => {
+  const alternative = operation.body?.alternatives.find((candidate) =>
+    source.media.includes(candidate.mediaType),
+  );
+  const schema =
+    alternative?.schema === undefined
+      ? unknownField
+      : fieldSchema(defs, alternative.schema.key, source.wireName, source.repeated);
+
+  return { alternative, schema };
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -659,19 +705,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return [flag.identifier, pipe(head, steps)] as const;
     }
 
-    const alternative = operation.body?.alternatives.find((candidate) =>
-      source.media.includes(candidate.mediaType),
-    );
-    const schema: FieldSchema =
-      alternative?.schema === undefined
-        ? {
-            description: "",
-            encoding: undefined,
-            integer: "unsettled",
-            maxLength: undefined,
-            mediaType: undefined,
-          }
-        : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
+    const { alternative, schema } = bodyField(operation, source, context.defs);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
@@ -1053,7 +1087,7 @@ const bindingOf = (location: string, pointer: string, wireName: string): Expr =>
     ["wireName", str(wireName)],
   ]);
 
-const helpFlags = (command: PlannedCommand): readonly HelpFlag[] => {
+const helpFlags = (command: PlannedCommand, defs: Defs): readonly HelpFlag[] => {
   const { operation } = command;
   const positionals = command.positionals.flatMap((positional) => {
     const parameter = parameterOf(operation, "path", positional.wireName);
@@ -1072,7 +1106,9 @@ const helpFlags = (command: PlannedCommand): readonly HelpFlag[] => {
     .flatMap((flag): readonly HelpFlag[] => {
       const { source } = flag;
       if (source._tag === "Body") {
-        return [{ name: flag.name, source: { _tag: "Body", pointer: source.wireName } }];
+        const field = bodyField(operation, source, defs).schema.notes;
+
+        return [{ name: flag.name, source: { _tag: "Body", field, pointer: source.wireName } }];
       }
 
       const parameter = parameterOf(operation, source.location, source.wireName);
@@ -1181,7 +1217,7 @@ const annotationsOf = (command: PlannedCommand, meta: Expr, context: CommandCont
   const help = operationHelp({
     credentials: context.plan.credentials,
     diagnostics: context.plan.diagnostics,
-    flags: helpFlags(command),
+    flags: helpFlags(command, context.defs),
     operation: command.operation,
     schemes: context.api.securitySchemes,
   });
