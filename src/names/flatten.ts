@@ -5,6 +5,7 @@ import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
+import { sendsFormPairs } from "../normalize/bodies.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
@@ -51,8 +52,8 @@ export interface ReservedClash {
 
 /**
  * A property that has no field flag: its name folds to nothing (`EmptyFold`), or it is a multipart
- * part whose shape no part flag carries (`UnsupportedPart`: an object, an array of objects, a map
- * or a `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
+ * part whose shape no part flag carries (`UnsupportedPart`: an array of objects, a map or a
+ * `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
  */
 export interface SkippedProperty {
   readonly pointer: string;
@@ -169,7 +170,7 @@ const inProgress = Symbol("inProgress");
 interface Ctx {
   readonly defs: Defs;
   /**
-   * JSON bodies only: a base64 string property is a `file` flag, not a `string`.
+   * JSON and form bodies: a base64 string property is a `file` flag, not a `string`.
    */
   readonly base64Fields: boolean;
   /**
@@ -177,6 +178,11 @@ interface Ctx {
    * part: the runtime encodes the file's bytes, so typed text is never encoded in their place.
    */
   readonly base64Parts: ReadonlySet<string>;
+  /**
+   * Multipart only: the parts whose Encoding style joins values into one part (ENC-40). Normalize
+   * refuses each at element scope, so it gets no flag and no notice here.
+   */
+  readonly styleRefused: ReadonlySet<string>;
   /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
@@ -195,16 +201,29 @@ const base64PartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<stri
     ),
   );
 
+// The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
+const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.serialization !== undefined &&
+      !sendsFormPairs(rule.serialization) &&
+      rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
 const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
 ): Ctx => ({
-  base64Fields: codec === "json",
+  base64Fields: codec === "json" || codec === "form",
   base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
+  styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
 
@@ -307,13 +326,23 @@ const isScalar = (value: string): value is Scalar => scalarKinds.has(value);
 
 const isBareSchema = (schema: SchemaNode): boolean => Object.keys(schema).length === 0;
 
+const identityEncodings: ReadonlySet<string> = new Set(["7bit", "8bit", "binary"]);
+
+// A `contentEncoding` that sends the bytes as they are: `binary`, `7bit` or `8bit`, any case.
+const isIdentityEncoding = (value: Schema.Json | undefined): boolean =>
+  Predicate.isString(value) && identityEncodings.has(value.toLowerCase());
+
 /**
- * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, or 3.1+ `contentMediaType`
- * without a `contentEncoding`, or a schema with no keyword at all. `format: byte`, any
- * `contentEncoding` and any other type are text.
+ * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, a string whose
+ * `contentEncoding` is an identity encoding (`binary`, `7bit`, `8bit`, any case), or 3.1+
+ * `contentMediaType` without a `contentEncoding`, or a schema with no keyword at all.
+ * `format: byte`, any other `contentEncoding` and any other type are text.
  */
 const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
-  if (type === "string" && schema.format === "binary") {
+  if (
+    type === "string" &&
+    (schema.format === "binary" || isIdentityEncoding(schema.contentEncoding))
+  ) {
     return true;
   }
 
@@ -561,8 +590,9 @@ const walkProperties = (
 
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
- * (repeated parts), or a `file` part when it is binary or its rule sends it base64 encoded; any
- * other shape is skipped with a reason.
+ * (repeated parts), a `file` part when it is binary or its rule sends it base64 encoded, or a
+ * `json` flag for an object part, sent as one JSON part (ENC-22); any other shape is skipped with
+ * a reason. A part whose style normalize refused (ENC-40) gets nothing.
  */
 const walkParts = (
   ctx: Ctx,
@@ -574,6 +604,10 @@ const walkParts = (
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (ctx.styleRefused.has(key)) {
+      continue;
     }
 
     const pointer = formatPointer([key]);
@@ -588,18 +622,24 @@ const walkParts = (
       return Result.fail(classified.failure);
     }
 
-    if (classified.success._tag !== "Scalar") {
+    const part = classified.success;
+    if (part._tag === "Opaque") {
       skipped.push({ pointer, reason: "UnsupportedPart" });
       continue;
     }
 
+    const base = { name: folded.success.name, notes: folded.success.notes, pointer };
+    const schemaPointer = sourcePointer(site);
+    if (part._tag === "Object") {
+      flags.push({ ...base, kind: "json", repeated: false, schemaPointer });
+      continue;
+    }
+
     flags.push({
-      kind: ctx.base64Parts.has(key) ? "file" : classified.success.kind,
-      name: folded.success.name,
-      notes: folded.success.notes,
-      pointer,
-      repeated: classified.success.repeated,
-      schemaPointer: sourcePointer(site),
+      ...base,
+      kind: ctx.base64Parts.has(key) ? "file" : part.kind,
+      repeated: part.repeated,
+      schemaPointer,
     });
   }
 

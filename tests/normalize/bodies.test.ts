@@ -287,8 +287,8 @@ describe("ENC-17 to ENC-26 the default contentType table", () => {
     });
   });
 
-  test("3.2 types every array as application/json", () => {
-    expect(typesFor("3.2").list).toEqual(["application/json"]);
+  test("3.2 types a top-level array property by its items, encoded per item (ENC-24)", () => {
+    expect(typesFor("3.2").list).toEqual(["text/plain"]);
   });
 
   test("an array of binary items is octet-stream in 3.0 by format and in 3.1 by type absent", () => {
@@ -376,11 +376,18 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
 
     expect(rule.serialization).toEqual({ explode: false, style: "form" });
     expect(rule.contentType).toEqual([]);
-    expect(codes(outcome)).toEqual(["ENC-13/content-type-ignored"]);
-    expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13"]);
+    expect(codes(outcome)).toEqual([
+      "ENC-13/content-type-ignored",
+      "ENC-40/unsupported-part-style",
+    ]);
+    expect(outcome.diagnostics.map(({ scope, severity }) => [scope, severity])).toEqual([
+      ["element", "notice"],
+      ["element", "refusal"],
+    ]);
+    expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13", "ENC-40"]);
   });
 
-  test("allowReserved alone is explicit and keeps only the fields given", () => {
+  test("allowReserved alone is explicit, keeps only the fields given, and is sent as text/plain", () => {
     const outcome = implemented(
       "3.2",
       multipart(object({ q: string }), {
@@ -390,7 +397,7 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     const rule = only(only(outcome.body.alternatives).encoding);
 
     expect(rule.serialization).toEqual({ allowReserved: true });
-    expect(rule.contentType).toEqual([]);
+    expect(rule.contentType.map(String)).toEqual(["text/plain"]);
     expect(codes(outcome)).toEqual([]);
   });
 

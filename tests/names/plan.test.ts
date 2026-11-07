@@ -542,6 +542,7 @@ describe("planNames: multipart parts", () => {
     const result = plan({
       defs: {
         Body: object({
+          choice: { oneOf: [{ type: "string" }, { type: "integer" }] },
           file: { format: "binary", type: "string" },
           meta: object({ a: { type: "string" } }),
           name: { type: "string" },
@@ -557,7 +558,7 @@ describe("planNames: multipart parts", () => {
       ],
     });
 
-    expect(flagNames(commandOf(result, "upload"))).toEqual(["file", "name"]);
+    expect(flagNames(commandOf(result, "upload"))).toEqual(["file", "meta", "name"]);
     expect(codes(result)).toEqual([
       { code: "RQB-03/unnamed-property", scope: "element", severity: "notice" },
     ]);

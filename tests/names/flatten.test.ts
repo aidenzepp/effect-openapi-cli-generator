@@ -351,18 +351,38 @@ describe("flattenBody: multipart and xml", () => {
     }),
   } satisfies Defs;
 
-  test("a multipart body gets one flag per part and no whole-body flag", () => {
+  test("a multipart body gets one flag per part, an object part a JSON flag, and no whole-body flag", () => {
     const flattened = run(parts, "multipart");
     expect(
       flattened.flags.map(({ kind, name, pointer, repeated }) => [name, kind, pointer, repeated]),
     ).toEqual([
       ["avatar", "file", "/avatar", false],
       ["count", "integer", "/count", false],
+      ["meta", "json", "/meta", false],
       ["name", "string", "/name", false],
       ["photos", "file", "/photos", true],
       ["tags", "string", "/tags", true],
     ]);
-    expect(flattened.skipped).toEqual([{ pointer: "/meta", reason: "UnsupportedPart" }]);
+    expect(flattened.skipped).toEqual([]);
+  });
+
+  test("a oneOf, map or array-of-objects part has no flag and is skipped as UnsupportedPart", () => {
+    const flattened = run(
+      {
+        Root: object({
+          choice: { oneOf: [{ type: "string" }, { type: "integer" }] },
+          map: { additionalProperties: { type: "string" }, type: "object" },
+          rows: { items: object({ a: { type: "string" } }), type: "array" },
+        }),
+      },
+      "multipart",
+    );
+    expect(flattened.flags).toEqual([]);
+    expect(flattened.skipped).toEqual([
+      { pointer: "/choice", reason: "UnsupportedPart" },
+      { pointer: "/map", reason: "UnsupportedPart" },
+      { pointer: "/rows", reason: "UnsupportedPart" },
+    ]);
   });
 
   test("3.1 binary: contentMediaType and a schemaless part are files", () => {
@@ -379,6 +399,25 @@ describe("flattenBody: multipart and xml", () => {
       ["any", "file"],
       ["png", "file"],
     ]);
+  });
+
+  test.each(["binary", "7bit", "8bit", "BINARY", "7Bit", "8BIT"])(
+    "a string part with identity contentEncoding %s is a file part sent as raw bytes",
+    (contentEncoding) => {
+      const flattened = run(
+        { Root: object({ doc: { contentEncoding, type: "string" } }) },
+        "multipart",
+      );
+      expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "file"]]);
+    },
+  );
+
+  test("a part with any other contentEncoding stays text", () => {
+    const flattened = run(
+      { Root: object({ doc: { contentEncoding: "quoted-printable", type: "string" } }) },
+      "multipart",
+    );
+    expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "string"]]);
   });
 
   test("a part whose Encoding rule is base64 is a file part; the rule decides, not the schema", () => {

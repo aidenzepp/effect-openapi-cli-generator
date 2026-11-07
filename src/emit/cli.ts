@@ -216,6 +216,7 @@ interface FieldNode {
   readonly format: string | undefined;
   readonly int64: boolean;
   readonly items: Schema.Json | undefined;
+  readonly maxLength: number | undefined;
   readonly prose: string | undefined;
   readonly properties: JsonObject | undefined;
   readonly ref: string | undefined;
@@ -235,6 +236,7 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
   const allOf = own(json, "allOf");
   const properties = own(json, "properties");
   const prose = [own(json, "description"), own(json, "title")].find(Predicate.isString);
+  const maxLength = own(json, "maxLength");
   const unsafe = boundKeywords.some((keyword) => {
     const bound = own(json, keyword);
 
@@ -254,6 +256,10 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
     format: text("format"),
     int64: own(json, "format") === "int64" || unsafe,
     items: own(json, "items"),
+    maxLength:
+      Predicate.isNumber(maxLength) && Number.isSafeInteger(maxLength) && maxLength >= 0
+        ? maxLength
+        : undefined,
     properties: isJsonObject(properties) ? properties : undefined,
     prose,
     ref,
@@ -275,6 +281,10 @@ interface FieldSchema {
    */
   readonly encoding: FieldEncoding | undefined;
   readonly integer: IntegerWidth;
+  /**
+   * The tightest `maxLength` on the `$ref` chain: for a binary body, its byte limit (MED-21).
+   */
+  readonly maxLength: number | undefined;
   readonly mediaType: string | undefined;
 }
 
@@ -382,10 +392,15 @@ const fieldSchema = (
   const last = field.nodes.at(-1);
   const encoding = last === undefined ? undefined : encodingOf(last);
 
+  const bounds = field.nodes.flatMap((node) =>
+    node.maxLength === undefined ? [] : [node.maxLength],
+  );
+
   return {
     description: described?.prose ?? "",
     encoding,
     integer: width(),
+    maxLength: bounds.length === 0 ? undefined : Math.min(...bounds),
     mediaType: last?.contentMediaType,
   };
 };
@@ -448,6 +463,10 @@ const numericKindOf = (parameter: Parameter, context: CommandContext) =>
 const parameterDescription = (parameter: Parameter): string =>
   parameter.docs.description ?? parameter.docs.summary ?? "";
 
+// The notice step of a deprecated parameter's flag or argument (PRM-07); none for any other.
+const deprecation = (parameter: Parameter, combinator: string, name: string): readonly Expr[] =>
+  parameter.deprecated ? [fn(combinator, str(name))] : [];
+
 const positionalEntry = (
   operation: Operation,
   positional: PlannedPositional,
@@ -483,6 +502,7 @@ const positionalEntry = (
     const described = describedBy(parameterDescription(parameter));
     const value = pipe(head, [
       ...(array ? [fn("Argument.atLeast", num(1))] : []),
+      ...deprecation(parameter, "Input.deprecatedArgument", positional.name),
       ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
     ]);
 
@@ -516,10 +536,11 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): E
     : flagConstructor(flag, kind);
 };
 
-// A JSON body property the runtime reads from a file and encodes (design 6.3 Binary): its flag is
-// a `file` flag inside a JSON alternative, where a multipart part flag of the same kind is a part.
+// A JSON or form body property the runtime reads from a file and encodes (design 6.3 Binary): its
+// flag is a `file` flag inside a JSON or form alternative, where a multipart part flag of the same
+// kind is a part.
 const isEncodedField = (flag: PlannedFlag, alternative: MediaAlternative | undefined): boolean =>
-  alternative?.codec === "json" &&
+  (alternative?.codec === "json" || alternative?.codec === "form") &&
   flag.source._tag === "Body" &&
   flag.source.kind === "file" &&
   !flag.source.repeated;
@@ -625,8 +646,11 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       const array = styled && (yield* isArrayParameter(parameter, context));
       const head = parameterFlagHead(flag, parameter, yield* numericKindOf(parameter, context));
       const presence = parameter.required ? [] : [path("Flag.optional")];
+      // A deprecated parameter's notice goes outside the presence wrapper, which settles whether
+      // the operator gave the flag (PRM-07).
       const steps = [
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
+        ...deprecation(parameter, "Input.deprecated", flag.name),
         ...describedBy(parameterDescription(parameter)).map((text) =>
           fn("Flag.withDescription", text),
         ),
@@ -640,7 +664,13 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     );
     const schema: FieldSchema =
       alternative?.schema === undefined
-        ? { description: "", encoding: undefined, integer: "unsettled", mediaType: undefined }
+        ? {
+            description: "",
+            encoding: undefined,
+            integer: "unsettled",
+            maxLength: undefined,
+            mediaType: undefined,
+          }
         : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
@@ -707,9 +737,16 @@ const alternativeBody = (
       ["bodyFile", yield* wholeBody(command, "body-file")],
     ];
     if (isOpaque(alternative)) {
+      // MED-21: a binary body's `maxLength` counts its octets, so it bounds the upload.
+      const limit =
+        alternative.codec === "binary" && alternative.schema !== undefined
+          ? fieldSchema(context.defs, alternative.schema.key, "", false).maxLength
+          : undefined;
+      const bound: Entry[] = limit === undefined ? [] : [["maxBytes", num(limit)]];
+
       return {
         domain: [],
-        value: fn("Input.binaryBody", obj([...sources, ["required", bool(required)]])),
+        value: fn("Input.binaryBody", obj([...sources, ...bound, ["required", bool(required)]])),
       };
     }
 
@@ -785,12 +822,20 @@ const alternativeBody = (
   });
 
 // A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
-// file part opens each path, or stdin for `-` under the invocation's one stdin claim.
+// JSON part's value is `Serialize.jsonPart`'s (ENC-22). A file part opens each path, or stdin for
+// `-` under the invocation's one stdin claim.
 const partValues = (part: FormPart) =>
   Effect.gen(function* values() {
     const { flag } = part;
     const repeated = flag.source._tag === "Body" && flag.source.repeated;
     const value = yield* flagValue(flag.identifier);
+    if (flag.source._tag === "Body" && flag.source.kind === "json" && !repeated) {
+      return fn(
+        "Effect.succeed",
+        fn("Option.toArray", fn("Option.map", value, path("Serialize.jsonPart"))),
+      );
+    }
+
     const list = repeated ? value : fn("Option.toArray", value);
     if (flag.source._tag !== "Body" || flag.source.kind !== "file") {
       return fn("Effect.succeed", list);
