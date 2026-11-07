@@ -479,7 +479,9 @@ describe("emitCli: operation-scope refusals", () => {
         },
       });
       expect(output.refusals).toEqual([]);
-      expect(contentOf(output, "src/cli/counters.ts")).toContain(expected);
+      expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
+        expected,
+      );
       expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
     });
   }

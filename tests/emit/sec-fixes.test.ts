@@ -115,10 +115,11 @@ describe("one diagnostic per undeclared requirement name", () => {
             paths: { "/a": { get: ok } },
           },
         });
-        const schemes = yield* normalizeSecuritySchemes(resolution, {
-          config,
-          configDocument: configUri,
-        });
+        const schemes = yield* normalizeSecuritySchemes(
+          resolution,
+          { config, configDocument: configUri },
+          [],
+        );
 
         return yield* normalizeSecurityPolicy(resolution, schemes, "/paths/~1a/get");
       }),

@@ -409,8 +409,8 @@ const unresolvedCodes: ReadonlySet<string> = new Set([
  */
 export const normalizeSecuritySchemes = (
   resolution: Resolution,
-  author?: AuthorSecurity,
-  checkFindings: readonly Diagnostic[] = [],
+  author: AuthorSecurity | undefined,
+  checkFindings: readonly Diagnostic[],
 ): Effect.Effect<SchemeNormalization> =>
   Effect.gen(function* normalize() {
     const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };

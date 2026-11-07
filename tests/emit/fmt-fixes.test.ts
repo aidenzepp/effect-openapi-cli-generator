@@ -113,6 +113,7 @@ const numberFlags = {
     Flag.map((text) => new Input.JsonNumber(text)),
     Flag.optional,
   ),
+  total: Input.int64Flag("total").pipe(Flag.optional),
 };
 
 const decoder = new TextDecoder();
@@ -132,6 +133,13 @@ const sent = (args: readonly string[]) =>
   Effect.runPromise(
     Effect.suspend(() => {
       const seen: string[] = [];
+      const printed: string[] = [];
+      // oxlint-disable-next-line prefer-object-spread
+      const recording: Console.Console = Object.assign({}, silent, {
+        log: (...parts: readonly unknown[]) => {
+          printed.push(parts.join(" "));
+        },
+      });
       const command = Command.make("create", numberFlags, (flags) =>
         Input.mergeBody({
           body: Option.none(),
@@ -164,10 +172,11 @@ const sent = (args: readonly string[]) =>
         Effect.provide(CliOutput.layer(Output.valueFreeFormatter)),
         Effect.provide(CliOutput.layerPresenter(Output.presenter)),
         Effect.provide(BunServices.layer),
-        Effect.provideService(Console.Console, silent),
+        Effect.provideService(Console.Console, recording),
         Effect.exit,
         Effect.map((exit) => ({
           code: Exit.isSuccess(exit) ? 0 : Runtime.getErrorExitCode(Cause.squash(exit.cause)),
+          printed: printed.join("\n"),
           seen,
         })),
       );
@@ -209,19 +218,31 @@ describe("FMT-04 number and integer JSON body fields", () => {
       `count: Input.numericFlag("count", "integer").pipe( ${asJsonNumber}, Flag.optional, )`,
     );
     expect(content).toContain('total: Input.int64Flag("total").pipe(Flag.optional)');
+    expect(content).not.toContain("Flag.withMetavar(");
     expect(content).not.toContain("Flag.Int(");
     expect(content).not.toContain("Flag.Finite(");
+  });
+
+  test("help labels an integer, a number and an int64 field by its numeric kind, never string", async () => {
+    const { code, printed } = await sent(["--help"]);
+    const labels = squeezed(printed);
+
+    expect(code).toBe(0);
+    expect(labels).toContain("--count integer");
+    expect(labels).toContain("--ratio number");
+    expect(labels).toContain("--total integer");
+    expect(labels).not.toMatch(/--(?:count|ratio|total) string/u);
   });
 
   test("--ratio 0.10000000000000000001 is sent with every digit", async () => {
     const run = await sent(["--ratio", "0.10000000000000000001", "--count", "-7"]);
 
-    expect(run).toEqual({ code: 0, seen: ['{"count":-7,"ratio":0.10000000000000000001}'] });
+    expect(run).toMatchObject({ code: 0, seen: ['{"count":-7,"ratio":0.10000000000000000001}'] });
   });
 
   test("a safe integer takes the integer grammar: --count 1e2 exits 2 and sends nothing", async () => {
-    expect(await sent(["--count", "1e2"])).toEqual({ code: 2, seen: [] });
-    expect(await sent(["--count", "1.0"])).toEqual({ code: 2, seen: [] });
+    expect(await sent(["--count", "1e2"])).toMatchObject({ code: 2, seen: [] });
+    expect(await sent(["--count", "1.0"])).toMatchObject({ code: 2, seen: [] });
   });
 
   test("a multipart number part sends its text unchanged", async () => {

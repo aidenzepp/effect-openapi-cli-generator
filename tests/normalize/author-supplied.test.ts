@@ -49,10 +49,11 @@ const run = (add: Json, rest: { readonly [key: string]: Json } = {}) =>
           ...rest,
         },
       });
-      const schemes = yield* normalizeSecuritySchemes(resolution, {
-        config: configOf(add),
-        configDocument: configUri,
-      });
+      const schemes = yield* normalizeSecuritySchemes(
+        resolution,
+        { config: configOf(add), configDocument: configUri },
+        [],
+      );
       const policy = (path: string) =>
         normalizeSecurityPolicy(resolution, schemes, `/paths/~1${path}/get`);
 

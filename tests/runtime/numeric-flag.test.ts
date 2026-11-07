@@ -173,3 +173,44 @@ describe("Input.numericArgument", () => {
     expect(stderr).not.toContain("x-secret");
   });
 });
+
+// The help text of a command whose values only `--help` reaches: the label each numeric input
+// shows in the ARGUMENTS and FLAGS sections.
+const help = (): Promise<string> =>
+  Effect.runPromise(
+    Effect.suspend(() => {
+      const out: string[] = [];
+      // oxlint-disable-next-line prefer-object-spread
+      const console: Console.Console = Object.assign({}, globalThis.console, {
+        log: (...parts: readonly unknown[]) => {
+          out.push(`${parts.join(" ")}\n`);
+        },
+      });
+      const command = Command.make(
+        "get",
+        {
+          id: Input.numericArgument("id", "number"),
+          limit: Input.numericFlag("limit", "integer").pipe(Flag.optional),
+          total: Input.int64Flag("total").pipe(Flag.optional),
+        },
+        () => Effect.void,
+      );
+
+      return Command.runWith(command, { version: "0" })(["--help"]).pipe(
+        Effect.provide(BunServices.layer),
+        Effect.provideService(Console.Console, console),
+        Effect.map(() => out.join("")),
+      );
+    }),
+  );
+
+describe("numeric help labels", () => {
+  test("a number argument, an integer flag and an int64 flag show their kind, never string", async () => {
+    const text = await help();
+
+    expect(text).toMatch(/\bid number\b/u);
+    expect(text).toMatch(/--limit integer\b/u);
+    expect(text).toMatch(/--total integer\b/u);
+    expect(text).not.toMatch(/\bstring\b/u);
+  });
+});
