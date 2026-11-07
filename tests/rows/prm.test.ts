@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, Exit, Layer, Order, Runtime, Scope, Schema } from "effect";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { generate, GenerateRefused } from "../../src/generate.ts";
@@ -12,7 +13,7 @@ import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
-import type { HeaderList } from "../fixtures/capture-server.ts";
+import type { HeaderList, RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
 
@@ -164,6 +165,27 @@ const invoke = async (line: Line, args: readonly string[]): Promise<Invocation> 
     stdout: latin1(result.stdout),
   };
 };
+
+// The requests one successful invocation sent, as the capture server recorded them: raw header
+// names and the request target, before any normalization.
+const sentRaw = async (
+  line: Line,
+  args: readonly string[],
+): Promise<readonly RecordedRequest[]> => {
+  const before = capture.requests().length;
+  const { exchange } = await invoke(line, args);
+  expect(exchange.exitCode).toBe(0);
+
+  return capture.requests().slice(before);
+};
+
+// The fields named `name`, compared case-insensitively (RFC 9110 5.1), with the name as sent.
+const fieldsNamed = (request: RecordedRequest | undefined, name: string): HeaderList =>
+  (request?.headers ?? []).filter(([field]) => field.toLowerCase() === name.toLowerCase());
+
+// The Cookie field's values: the cookie names are inside them; the field name is the runtime's own.
+const cookiesOf = (request: RecordedRequest | undefined): readonly string[] =>
+  fieldsNamed(request, "Cookie").map(([, value]) => value);
 
 const run = async (line: Line, args: readonly string[]): Promise<Exchange> => {
   const { exchange } = await invoke(line, args);
@@ -321,6 +343,38 @@ describe("PRM rows through the built CLI", () => {
             ["x-trace", "h1"],
           ]),
         );
+      }, 60_000);
+
+      // PRM-02 (audit 15dfff22 S6): the name as sent, read from the raw capture. Query and cookie
+      // names are case-sensitive and sent as written, a name outside the unreserved set
+      // percent-encoded (PRM-26); a header name is a case-insensitive field name (RFC 9110 5.1) that
+      // the HTTP client sends lowercased, so the header bytes are the lowercase name; a path
+      // parameter's name is never sent in a simple expansion; one name in two locations is sent once
+      // in each.
+      test(`PRM-02: each parameter name reaches the wire exactly as the document spells it (${line})`, async () => {
+        const [located] = await sentRaw(line, [
+          "locations-get",
+          "p1",
+          "--tags",
+          "q1",
+          "--x-trace",
+          "h1",
+          "--session",
+          "c1",
+        ]);
+        const [spaced] = await sentRaw(line, ["delimited-get", "--a-b", "v"]);
+        const [identity] = await sentRaw(line, ["identity-get", "--id", "q", "--header-id", "h"]);
+
+        expect([located?.target, spaced?.target, identity?.target]).toEqual([
+          "/locations/p1?tags=q1",
+          "/delimited?a%20b=v",
+          "/identity?id=q",
+        ]);
+        expect([fieldsNamed(located, "X-Trace"), fieldsNamed(identity, "id")]).toEqual([
+          [["x-trace", "h1"]],
+          [["id", "h"]],
+        ]);
+        expect(cookiesOf(located)).toEqual(["session=c1"]);
       }, 60_000);
 
       test(`PRM-03: in path, query, header and cookie each serialize to their own place (${line})`, async () => {
@@ -669,6 +723,54 @@ describe("PRM rows through the built CLI", () => {
 
     expect(observed).toEqual(sentOnce("/querystring-text?a%20b%26c%3Dd"));
   }, 60_000);
+
+  test("PRM-02: in querystring (3.2) the parameter name selector is not sent", async () => {
+    const [sent] = await sentRaw("3.2.1", ["querystring-get", "--selector", '"x"']);
+
+    expect(sent?.target).toBe("/querystring?%22x%22");
+    expect(sent?.target).not.toContain("selector");
+  }, 60_000);
+
+  // PRM-02 names the fixture cannot hold (a non-ASCII name; two names differing only in case, whose
+  // flags would collide): built by the runtime serializer the package embeds and sent by Bun's
+  // fetch to the capture server, so the bytes are the ones on the wire. A matrix path expansion,
+  // the query and the cookie keep the case and percent-encode the UTF-8 of a non-ASCII name; the
+  // header name goes out lowercased (RFC 9110 5.1).
+  test("PRM-02: a non-ASCII or case-distinct name is sent with its case kept and its UTF-8 percent-encoded", async () => {
+    const before = capture.requests().length;
+    const cookieOptions = {
+      allowReserved: false,
+      explode: true,
+      line: "3.1",
+      required: false,
+      style: "form",
+    } as const;
+    const sending = Serialize.request("GET", {
+      cookies: [
+        Serialize.cookie("SID", "1", cookieOptions),
+        Serialize.cookie("sid", "2", cookieOptions),
+      ],
+      headers: [Serialize.header("X-Mixed-Case", "h", { explode: false, required: false })],
+      path: Serialize.path("/names/{Naïve}", [
+        Serialize.matrix("Naïve", "v", { allowReserved: false, explode: false }),
+      ]),
+      query: [
+        Serialize.form("Naïve", "v", runtimeOptions),
+        Serialize.form("Q", "1", runtimeOptions),
+        Serialize.form("q", "2", runtimeOptions),
+      ],
+    }).pipe(
+      Effect.map(HttpClientRequest.prependUrl(origin)),
+      Effect.flatMap(HttpClient.execute),
+      Effect.provide(FetchHttpClient.layer),
+    );
+    await Effect.runPromise(sending);
+    const [sent] = capture.requests().slice(before);
+
+    expect(sent?.target).toBe("/names/;Na%C3%AFve=v?Na%C3%AFve=v&Q=1&q=2");
+    expect(fieldsNamed(sent, "X-Mixed-Case")).toEqual([["x-mixed-case", "h"]]);
+    expect(cookiesOf(sent)).toEqual(["SID=1; sid=2"]);
+  });
 
   // Two PRM-29 cases the built CLI cannot reach, checked on the runtime serializer the package
   // embeds: a deepObject parameter gets a string flag, so no object with a bracketed member key can
