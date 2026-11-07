@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "schb",
+  "envPrefix": "SCHB",
+  "package": {
+    "name": "sch-b-witness-cli",
+    "version": "0.1.0"
+  }
+}
