@@ -10,6 +10,7 @@ import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
+import { headerPercentEncoding } from "./parameters.ts";
 
 /**
  * The response cases of one Responses Object and the diagnostics found while building them.
@@ -50,13 +51,6 @@ interface Rule {
   readonly message: string;
   readonly severity: "notice" | "refusal";
 }
-
-/**
- * What a 3.0 header notice says: `PRM-32` for a header parameter, `HDR-15` for a schema-serialized
- * response header (design D-OC9).
- */
-export const headerPercentEncoding =
-  "The 3.0 text implies percent-encoding of header values; 3.1 calls that a mistake, so none is applied.";
 
 const rules = {
   "HDR-15/header-percent-encoding": {
