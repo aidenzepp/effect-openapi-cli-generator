@@ -8,9 +8,23 @@ import { generateFixture, preparePackage, runBin } from "../support/generated-cl
 import type { BinRun, GeneratedPackage } from "../support/generated-cli.ts";
 
 // Design 4.1 Lazy root, through the built CLI (M1 TS-2) and the capture server (M1 TS-1): the lazy
-// build reproduces the eager record in `tests/fixtures/lazy-root/expected/` byte for byte, `tsc`
-// rewrites each `import("./<segment>.ts")` to `.js`, and the inferred table keeps every group's
-// requirements checked at `Effect.provide` and `runMain`.
+// build prints what an eager build of the same package prints, `tsc` rewrites each
+// `import("./<segment>.ts")` to `.js`, and the inferred table keeps every group's requirements
+// checked at `Effect.provide` and `runMain`.
+//
+// The eager oracle is built live, inside the same package and by the same `tsc` build (m2.md 2
+// outcome 5, "as the eager root did"; audit 15dfff22 S5). The generator has no eager form (design
+// 4.1 One layout), so the test writes one beside the generated entry: `src/cli/eager-root.ts` is
+// `src/cli/root.ts` with its `Groups` import pointed at `src/runtime/eager-groups.ts`, which hands
+// the root header every top-level group's real module whatever argv selects, never a header-only
+// stub; `src/eager-main.ts` and `src/eager-bin.ts` are `main.ts` and `bin.ts` over it. That is the
+// pre-LZ-2 command tree (every group's own `Command.make`), so root help and the unknown-group
+// error compare real group headers against the lazy stubs.
+//
+// Every file in `tests/fixtures/lazy-root/expected/` is the eager oracle's output: each record test
+// below runs both builds and asserts lazy = eager = record, so a record that drifts from eager output
+// fails here. help.stdout and unknown-group.stderr were last written from the lazy build (379e2e4);
+// this test is what ties them to the eager oracle.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -45,7 +59,45 @@ const apiKey = "lazy-root-key";
 
 let generated: GeneratedPackage | undefined;
 
-// The eager record (slice step 1): the runs whose output must not change, by file stem.
+// The eager oracle's runtime half: every entry's module loaded, argv ignored (see the header).
+const eagerGroups = `import { Effect } from "effect";
+import type { Entry, Group } from "./groups.ts";
+
+export const root = <E, R, C>(
+  table: readonly Entry<E, R>[],
+  header: (groups: readonly Group<E, R>[]) => C,
+  _args: readonly string[],
+): Effect.Effect<C> =>
+  Effect.forEach(table, (entry) =>
+    Effect.promise(() => entry.load()).pipe(Effect.map((module) => module.group)),
+  ).pipe(Effect.map(header));
+`;
+
+// Copies a generated module to `to`, replacing exactly one occurrence of `from` with `into`.
+const derive = (dir: string, source: string, to: string, from: string, into: string) => {
+  const text = nodeFs.readFileSync(nodePath.join(dir, source), "utf-8");
+  if (text.split(from).length !== 2) {
+    throw new Error(`${source} must hold exactly one ${from}`);
+  }
+
+  nodeFs.writeFileSync(nodePath.join(dir, to), text.replace(from, into));
+};
+
+// Writes the eager entry beside the generated one, before the package's typecheck and build.
+const writeEagerOracle = ({ dir }: GeneratedPackage) => {
+  nodeFs.writeFileSync(nodePath.join(dir, "src/runtime/eager-groups.ts"), eagerGroups);
+  derive(
+    dir,
+    "src/cli/root.ts",
+    "src/cli/eager-root.ts",
+    'import * as Groups from "../runtime/groups.ts";',
+    'import * as Groups from "../runtime/eager-groups.ts";',
+  );
+  derive(dir, "src/main.ts", "src/eager-main.ts", '"./cli/root.ts"', '"./cli/eager-root.ts"');
+  derive(dir, "src/bin.ts", "src/eager-bin.ts", '"./main.ts"', '"./eager-main.ts"');
+};
+
+// The recorded runs, by file stem: each record is the eager oracle's output (see the header).
 const recorded: readonly (readonly [string, readonly string[]])[] = [
   ["help", ["--help"]],
   ["pets-help", ["pets", "--help"]],
@@ -66,7 +118,16 @@ beforeAll(async () => {
       ],
       configPath: nodePath.join(fixture, "author-config.json"),
       specPath: nodePath.join(fixture, "openapi.json"),
-    }).pipe(Effect.tap(preparePackage), Scope.provide(scope), Effect.provide(layer)),
+    }).pipe(
+      Effect.tap((fresh) =>
+        Effect.sync(() => {
+          writeEagerOracle(fresh);
+        }),
+      ),
+      Effect.tap(preparePackage),
+      Scope.provide(scope),
+      Effect.provide(layer),
+    ),
   );
 }, 900_000);
 
@@ -88,12 +149,41 @@ const built = (): GeneratedPackage => {
 const run = (args: readonly string[], env: Readonly<Record<string, string>> = {}) =>
   Effect.runPromise(runBin(built(), { args, env, timeoutMs: 30_000 }).pipe(Effect.provide(layer)));
 
+// The eager oracle's bin, spawned as `runBin` spawns the package's own bin: empty environment, no
+// stdin, the same timeout.
+const runEager = async (args: readonly string[]): Promise<BinRun> => {
+  const child = Bun.spawn(
+    [process.execPath, nodePath.join(built().dir, "dist/src/eager-bin.js"), ...args],
+    { cwd: built().dir, env: {}, stderr: "pipe", stdin: new Uint8Array(), stdout: "pipe" },
+  );
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGKILL");
+  }, 30_000);
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).bytes(),
+    new Response(child.stderr).bytes(),
+    child.exited,
+  ]).finally(() => {
+    clearTimeout(timer);
+  });
+
+  return { exitCode: child.signalCode === null ? exitCode : null, stderr, stdout, timedOut };
+};
+
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 const record = (stem: string, stream: "exit" | "stderr" | "stdout") =>
   nodeFs.readFileSync(nodePath.join(expected, `${stem}.${stream}`), "utf-8");
 
 const exitText = (result: BinRun) => `${result.exitCode}\n`;
+
+const streams = (result: BinRun) => ({
+  exit: exitText(result),
+  stderr: decode(result.stderr),
+  stdout: decode(result.stdout),
+});
 
 describe("lazy root: the built CLI", () => {
   test("dist/src/cli/root.js imports each top-level group by import() with a .js specifier", () => {
@@ -103,12 +193,32 @@ describe("lazy root: the built CLI", () => {
     expect(rootJs).not.toMatch(/\.ts["']/u);
   });
 
+  test("the eager oracle's built root imports every group module and never stubs one", () => {
+    const groupsJs = nodeFs.readFileSync(
+      nodePath.join(built().dir, "dist/src/runtime/eager-groups.js"),
+      "utf-8",
+    );
+    const eagerRootJs = nodeFs.readFileSync(
+      nodePath.join(built().dir, "dist/src/cli/eager-root.js"),
+      "utf-8",
+    );
+    expect(groupsJs).not.toMatch(/stub|selected/u);
+    expect(eagerRootJs).toContain('from "../runtime/eager-groups.js"');
+    expect(
+      [...eagerRootJs.matchAll(/import\("(?<from>[^"]+)"\)/gu)].map((match) => match.groups?.from),
+    ).toEqual(["./pets.js", "./stores.js"]);
+  });
+
   for (const [stem, args] of recorded) {
-    test(`reproduces the eager record byte for byte: ${stem}`, async () => {
-      const result = await run(args);
-      expect(decode(result.stdout)).toBe(record(stem, "stdout"));
-      expect(decode(result.stderr)).toBe(record(stem, "stderr"));
-      expect(exitText(result)).toBe(record(stem, "exit"));
+    test(`prints what the eager oracle prints, which is the record: ${stem}`, async () => {
+      const lazy = await run(args);
+      const eager = await runEager(args);
+      expect(streams(lazy)).toEqual(streams(eager));
+      expect(streams(eager)).toEqual({
+        exit: record(stem, "exit"),
+        stderr: record(stem, "stderr"),
+        stdout: record(stem, "stdout"),
+      });
     }, 60_000);
   }
 
