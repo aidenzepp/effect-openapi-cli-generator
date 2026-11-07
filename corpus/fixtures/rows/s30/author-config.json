@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "s30",
+  "envPrefix": "S30",
+  "package": {
+    "name": "s30-witness-cli",
+    "version": "0.1.0"
+  }
+}
