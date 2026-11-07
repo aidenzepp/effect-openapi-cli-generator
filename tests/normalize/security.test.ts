@@ -219,7 +219,8 @@ describe("policy shapes", () => {
 });
 
 describe("undeclared names", () => {
-  test("remove only their alternative with an element-scope refusal at the name", () => {
+  // Check raises SEC-09 or SEC-10 `unresolved-scheme` at the name; normalize adds no second one.
+  test("remove only their alternative, leaving the refusal to check", () => {
     const { policy } = run("3.1", {
       ...withSchemes({ key: keyed }),
       security: [{ missing: [] }, { key: [] }],
@@ -227,9 +228,7 @@ describe("undeclared names", () => {
 
     expect(policy.policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
     expect(policy.listed).toBe(2);
-    expect(policy.diagnostics.map((d) => [d.code, d.scope, d.severity, d.pointer])).toEqual([
-      ["SEC-09/undeclared-scheme", "element", "refusal", "/security/0/missing"],
-    ]);
+    expect(policy.diagnostics).toEqual([]);
   });
 
   test("the only alternative gone leaves none with listed 1", () => {
@@ -371,7 +370,8 @@ describe("3.2 scheme URIs (SEC-10)", () => {
     });
 
     expect(policy.policy.alternatives).toEqual([]);
-    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+    // Check refuses the name (SEC-09/unresolved-scheme); normalize adds nothing.
+    expect(codes(policy.diagnostics)).toEqual([]);
   });
 
   test("a scheme URI outside the component names stays undeclared", () => {
@@ -380,7 +380,9 @@ describe("3.2 scheme URIs (SEC-10)", () => {
       security: [{ "#/components/securitySchemes/missing": [] }],
     });
 
-    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+    expect(policy.policy.alternatives).toEqual([]);
+    // Check refuses the name (SEC-10/unresolved-scheme); normalize adds nothing.
+    expect(codes(policy.diagnostics)).toEqual([]);
   });
 });
 

@@ -522,13 +522,66 @@ interface Judged {
   readonly use?: readonly { readonly scheme: string; readonly scopes: readonly string[] }[];
 }
 
+// Whether check refused this spec requirement name (src/check/grammar.ts `requirementFindings`,
+// SEC-09 or SEC-10 `unresolved-scheme`): the same implicit connection reaches no object.
+const checkRefused = (resolution: Resolution, name: string): boolean =>
+  Option.match(implicitComponent(resolution, "securitySchemes", name), {
+    onNone: () => true,
+    onSome: (key) =>
+      nodeAt(resolution, follow(resolution, key)).pipe(
+        Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
+        Option.isNone,
+      ),
+  });
+
+interface Named {
+  readonly name: string;
+  readonly pointer: string;
+  readonly resolved: string;
+  // The entries come from the author config, which check never reads.
+  readonly supplied: boolean;
+  readonly unusable: ReadonlySet<string>;
+}
+
+// The refusal of a requirement name that names no usable scheme, or `checked` when check already
+// raised the one diagnostic for it; either way its alternative is dropped.
+const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
+  const { name, pointer, resolved } = named;
+  if (named.unusable.has(resolved)) {
+    return {
+      anchor: "security-requirements-name",
+      code: "SEC-02/unusable-scheme",
+      element: "Security Requirement Object",
+      message: "The requirement names a security scheme that is refused.",
+      pointer: `${pointer}/${escapeToken(name)}`,
+      related: formatPointer(["components", "securitySchemes", resolved]),
+    };
+  }
+
+  if (!named.supplied && checkRefused(resolution, name)) {
+    return "checked";
+  }
+
+  return {
+    anchor: "security-requirements-name",
+    code: `${resolution.line === "3.2" ? "SEC-10" : "SEC-09"}/undeclared-scheme`,
+    element: "Security Requirement Object",
+    message: "The requirement names a security scheme that is not declared.",
+    pointer: `${pointer}/${escapeToken(name)}`,
+  };
+};
+
+// `supplied`: the entries come from the author config, so normalize reports their undeclared
+// names itself.
 const judge = (
   resolution: Resolution,
   schemes: SchemeNormalization,
   entries: readonly (readonly [string, readonly string[]])[],
   pointer: string,
+  supplied: boolean,
 ): Judged => {
   const findings: Finding[] = [];
+  let refused = false;
   const staged = new Set<string>();
   const { declared: byName, unusable } = lookupOf(schemes);
   const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
@@ -543,24 +596,12 @@ const judge = (
     if (declared !== undefined && stagedRules.has(declared.kind.type)) {
       staged.add(declared.kind.type);
     } else if (declared === undefined) {
-      findings.push(
-        unusable.has(resolved)
-          ? {
-              anchor: "security-requirements-name",
-              code: "SEC-02/unusable-scheme",
-              element: "Security Requirement Object",
-              message: "The requirement names a security scheme that is refused.",
-              pointer: `${pointer}/${escapeToken(name)}`,
-              related: formatPointer(["components", "securitySchemes", resolved]),
-            }
-          : {
-              anchor: "security-requirements-name",
-              code: "SEC-09/undeclared-scheme",
-              element: "Security Requirement Object",
-              message: "The requirement names a security scheme that is not declared.",
-              pointer: `${pointer}/${escapeToken(name)}`,
-            },
-      );
+      const refusal = nameRefusal(resolution, { name, pointer, resolved, supplied, unusable });
+      if (refusal === "checked") {
+        refused = true;
+      } else {
+        findings.push(refusal);
+      }
     }
   }
 
@@ -576,7 +617,7 @@ const judge = (
     });
   }
 
-  return findings.length > 0 ? { findings } : { findings, use: used };
+  return findings.length > 0 || refused ? { findings } : { findings, use: used };
 };
 
 /**
@@ -584,7 +625,8 @@ const judge = (
  * omitted (design 6.5). `operation` is the pointer of the operation object. An alternative that
  * names an undeclared or refused scheme, or an `oauth2`, `openIdConnect` or `mutualTLS` scheme
  * (staged, SSC-18 to SSC-20), is removed whole with element-scope refusals and never dropped
- * silently. Raising an operation with no alternative left is the caller's job (`listed`).
+ * silently. A spec name check already refused as unresolved keeps that one diagnostic and gets no
+ * second here. Raising an operation with no alternative left is the caller's job (`listed`).
  */
 export const normalizeSecurityPolicy = (
   resolution: Resolution,
@@ -623,7 +665,7 @@ export const normalizeSecurityPolicy = (
               },
             ],
           }
-        : judge(resolution, schemes, entries.value, pointer);
+        : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
     });
     const diagnostics = yield* Effect.all(
       judged

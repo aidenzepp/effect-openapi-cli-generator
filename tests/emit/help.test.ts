@@ -456,7 +456,7 @@ describe("operationHelp", () => {
     expect(sectionText(help, "REFUSED")).toBeUndefined();
   });
 
-  test("an optional body, no body and an unauthenticated operation shorten the lines", () => {
+  test("an optional body, no body and an explicit `security: []` shorten the lines", () => {
     const { operationId: _operationId, ...unnamed } = operationPlain;
     const plain = {
       ...unnamed,
@@ -469,7 +469,7 @@ describe("operationHelp", () => {
     });
 
     expect(sectionText(optional, "REQUEST")).toBe("PATCH /users/{id}, body application/json");
-    expect(sectionText(optional, "AUTH")).toBeUndefined();
+    expect(sectionText(optional, "AUTH")).toBe("no authentication");
 
     const { body: _body, ...bodiless } = plain;
     const none = operationHelp({

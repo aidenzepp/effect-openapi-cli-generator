@@ -211,10 +211,14 @@ const useLine = (lookup: UseLookup, name: string): string => {
   return `${head}: --${line(credential.flag)} <path|->, env ${line(credential.env)}`;
 };
 
-const authLine = (input: HelpInput): string | undefined => {
-  const { alternatives } = input.operation.security;
+const anonymous = "no authentication";
+
+// The AUTH line: the alternatives in document order, `{}` as no authentication; an explicit
+// `security: []` is no authentication and absent security is undocumented (D-OQ10 (a), design 2.2).
+const authLine = (input: HelpInput): string => {
+  const { alternatives, declared } = input.operation.security;
   if (alternatives.length === 0) {
-    return undefined;
+    return declared ? anonymous : "no authentication documented";
   }
 
   const lookup: UseLookup = {
@@ -223,7 +227,11 @@ const authLine = (input: HelpInput): string | undefined => {
   };
 
   return alternatives
-    .map((alternative) => alternative.uses.map((use) => useLine(lookup, use.scheme)).join(" and "))
+    .map((alternative) =>
+      alternative.uses.length === 0
+        ? anonymous
+        : alternative.uses.map((use) => useLine(lookup, use.scheme)).join(" and "),
+    )
     .join(" or ");
 };
 
@@ -324,10 +332,10 @@ export const operationHelp = (input: HelpInput): OperationHelp => {
   const auth = authLine(input);
   const refused = refusedLine(input);
   const nonStandard = nonStandardLine(input);
-  const sections: (readonly [string, string])[] = [["REQUEST", requestLine(operation)]];
-  if (auth !== undefined) {
-    sections.push(["AUTH", auth]);
-  }
+  const sections: (readonly [string, string])[] = [
+    ["REQUEST", requestLine(operation)],
+    ["AUTH", auth],
+  ];
 
   if (operation.deprecated) {
     sections.push([
