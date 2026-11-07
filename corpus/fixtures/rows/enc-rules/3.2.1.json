@@ -134,9 +134,17 @@
             "multipart/form-data": {
               "schema": {
                 "properties": {
+                  "binary": {
+                    "contentEncoding": "binary",
+                    "type": "string"
+                  },
                   "blob": {},
                   "count": {
                     "type": "integer"
+                  },
+                  "eight": {
+                    "contentEncoding": "8BIT",
+                    "type": "string"
                   },
                   "encoded": {
                     "contentEncoding": "base64",
@@ -164,6 +172,10 @@
                   },
                   "ratio": {
                     "type": "number"
+                  },
+                  "seven": {
+                    "contentEncoding": "7bit",
+                    "type": "string"
                   },
                   "tags": {
                     "items": {
