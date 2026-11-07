@@ -557,6 +557,23 @@ interface Located extends Place {
   readonly node: Json;
 }
 
+const visitKey = (item: Visit): string =>
+  `${item.member.document}\u0000${item.kind}\u0000${item.pointer}`;
+
+// A Reference Object's siblings are fields only for a Path Item and a 3.1 or 3.2 schema.
+const siblingsAreFields = (line: Line, kind: ReferenceKind): boolean =>
+  kind === "pathItem" || (kind === "schema" && line !== "3.0");
+
+// Pushes `items` so that they pop in their given order.
+const pushInOrder = (stack: Visit[], items: readonly Visit[]): void => {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item !== undefined) {
+      stack.push(item);
+    }
+  }
+};
+
 const keyAt = (place: Place): CanonicalKey => ({
   document: place.member.document,
   pointer: place.pointer,
@@ -624,6 +641,37 @@ const enclosingBase = (found: Place): string => {
   return base;
 };
 
+// The structural children of a node, in document order.
+const childrenOf = (place: Place, kind: Kind, node: JsonObject, base: string): Visit[] => {
+  const { member, pointer } = place;
+  const members = memberKinds.get(kind);
+  const childBase = kind === "schema" ? base : member.base;
+  const queued: Visit[] = [];
+  const enqueue = (childKind: Kind, value: Json, at: string): void => {
+    queued.push({ base: childBase, kind: childKind, member, node: value, pointer: at });
+  };
+
+  for (const [name, value] of Object.entries(node)) {
+    const at = childPointer(pointer, name);
+    const field = fieldOf(member.line, kind, name);
+    if (members !== undefined && !name.startsWith("x-")) {
+      enqueue(members, value, at);
+    } else if (field?.[2] === "one") {
+      enqueue(field[1], value, at);
+    } else if (field?.[2] === "list" && isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        enqueue(field[1], item, childPointer(at, `${index}`));
+      }
+    } else if (field?.[2] === "map" && isObject(value)) {
+      for (const [entry, item] of Object.entries(value)) {
+        enqueue(field[1], item, childPointer(at, entry));
+      }
+    }
+  }
+
+  return queued;
+};
+
 /**
  * The resolver's working state for one run over the whole document set.
  */
@@ -633,6 +681,8 @@ class Resolver {
   readonly all: readonly Member[];
   readonly anchors = new Map<string, Place>();
   readonly byDocument: ReadonlyMap<Document, Member>;
+  // Nodes already charged to the node budget, so a node indexed and then walked costs once.
+  readonly charged = new Set<string>();
   readonly defs = new Map<string, string>();
   // Every resource URI a member is known by (its retrieval URI and its base) to that member.
   readonly documents = new Map<string, Member>();
@@ -660,7 +710,16 @@ class Resolver {
     this.limits = limits;
   }
 
-  spend(): Failure | undefined {
+  // Charges one node, or one retry when `seen` is absent, to the node budget.
+  spend(seen?: string): Failure | undefined {
+    if (seen !== undefined) {
+      if (this.charged.has(seen)) {
+        return undefined;
+      }
+
+      this.charged.add(seen);
+    }
+
     this.nodes += 1;
 
     return this.nodes > this.limits.maxNodes
@@ -685,14 +744,14 @@ class Resolver {
 
   visit(item: Visit, sites: Site[]): Failure | undefined {
     const { member, node, pointer } = item;
-    const seen = `${member.document}\u0000${item.kind}\u0000${pointer}`;
+    const seen = visitKey(item);
     if (this.visited.has(seen) || !isObject(node)) {
       return undefined;
     }
 
     this.visited.add(seen);
 
-    const spent = this.spend();
+    const spent = this.spend(seen);
     if (spent !== undefined) {
       return spent;
     }
@@ -708,9 +767,14 @@ class Resolver {
         );
       }
 
-      const indexed = this.index(place, node, own, base);
+      // A node reached only by a reference into a non-schema position is indexed here.
+      const indexed = this.declare(place, node, own, base);
       if (indexed !== undefined) {
         return indexed;
+      }
+
+      if (member.line !== "3.0" && stringMember(node, "$dynamicRef") !== undefined) {
+        this.findings.push({ code: "SCH-05/dynamic-ref", ...keyAt(place) });
       }
 
       base = own;
@@ -730,8 +794,8 @@ class Resolver {
     return undefined;
   }
 
-  // Indexes a schema's $id and $anchor, and refuses $dynamicRef at element scope.
-  index(place: Place, node: JsonObject, own: string, enclosing: string): Failure | undefined {
+  // Indexes a schema's $id and $anchor; indexing one place twice is a no-op.
+  declare(place: Place, node: JsonObject, own: string, enclosing: string): Failure | undefined {
     if (place.member.line === "3.0") {
       return undefined;
     }
@@ -758,9 +822,78 @@ class Resolver {
       this.added.add(own);
     }
 
-    if (stringMember(node, "$dynamicRef") !== undefined) {
-      this.findings.push({ code: "SCH-05/dynamic-ref", ...keyAt(place) });
+    return undefined;
+  }
+
+  // Indexes every $id and $anchor at a schema position of every member before any reference is
+  // judged (design 3.3: resolution happens only after every supplied document is parsed). Each
+  // node is charged to the node budget once, here or in the walk.
+  index(): Failure | undefined {
+    for (const member of this.all) {
+      const stack: Visit[] = [
+        {
+          base: member.base,
+          kind: member.openapi ? "root" : "schema",
+          member,
+          node: member.value,
+          pointer: "",
+        },
+      ];
+      let item = stack.pop();
+      while (item !== undefined) {
+        const failed = this.indexNode(item, stack);
+        if (failed !== undefined) {
+          return failed;
+        }
+
+        item = stack.pop();
+      }
     }
+
+    this.added.clear();
+
+    return undefined;
+  }
+
+  // Indexes one node and queues its structural children; Reference Object siblings that are not
+  // fields are skipped, as the walk skips them.
+  indexNode(item: Visit, stack: Visit[]): Failure | undefined {
+    const { kind, member, node } = item;
+    const seen = visitKey(item);
+    if (!isObject(node) || this.charged.has(seen)) {
+      return undefined;
+    }
+
+    const spent = this.spend(seen);
+    if (spent !== undefined) {
+      return spent;
+    }
+
+    const place: Place = { member, pointer: item.pointer };
+    let { base } = item;
+    if (kind === "schema") {
+      const own = schemaBase(member.line, base, node);
+      if (own === undefined) {
+        return failure(
+          member.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
+          keyAt(place),
+        );
+      }
+
+      const declared = this.declare(place, node, own, base);
+      if (declared !== undefined) {
+        return declared;
+      }
+
+      base = own;
+    }
+
+    const ref = stringMember(node, "$ref");
+    if (ref !== undefined && isReferenceKind(kind) && !siblingsAreFields(member.line, kind)) {
+      return undefined;
+    }
+
+    pushInOrder(stack, childrenOf(place, kind, node, base));
 
     return undefined;
   }
@@ -768,7 +901,7 @@ class Resolver {
   // Records the sibling notice; true when the siblings are fields to walk.
   walksSiblings(place: Place, kind: ReferenceKind, node: JsonObject): boolean {
     const { line } = place.member;
-    if (kind === "pathItem" || (kind === "schema" && line !== "3.0")) {
+    if (siblingsAreFields(line, kind)) {
       return true;
     }
 
@@ -814,38 +947,7 @@ class Resolver {
 
   // Queues the structural children so that they pop in document order.
   push(place: Place, kind: Kind, node: JsonObject, base: string): void {
-    const { member, pointer } = place;
-    const members = memberKinds.get(kind);
-    const childBase = kind === "schema" ? base : member.base;
-    const queued: Visit[] = [];
-    const enqueue = (childKind: Kind, value: Json, at: string): void => {
-      queued.push({ base: childBase, kind: childKind, member, node: value, pointer: at });
-    };
-
-    for (const [name, value] of Object.entries(node)) {
-      const at = childPointer(pointer, name);
-      const field = fieldOf(member.line, kind, name);
-      if (members !== undefined && !name.startsWith("x-")) {
-        enqueue(members, value, at);
-      } else if (field?.[2] === "one") {
-        enqueue(field[1], value, at);
-      } else if (field?.[2] === "list" && isArray(value)) {
-        for (const [index, item] of value.entries()) {
-          enqueue(field[1], item, childPointer(at, `${index}`));
-        }
-      } else if (field?.[2] === "map" && isObject(value)) {
-        for (const [entry, item] of Object.entries(value)) {
-          enqueue(field[1], item, childPointer(at, entry));
-        }
-      }
-    }
-
-    for (let index = queued.length - 1; index >= 0; index -= 1) {
-      const item = queued[index];
-      if (item !== undefined) {
-        this.stack.push(item);
-      }
-    }
+    pushInOrder(this.stack, childrenOf(place, kind, node, base));
   }
 
   // The node a resource URI names: a document of the set, or for a schema an $id.
@@ -1108,8 +1210,9 @@ class Resolver {
     return undefined;
   }
 
-  // Walks to a fixed point from the entry root: members are walked where references reach them. A
-  // schema reference may wait for an $id or $anchor found later; a waiting site is retried only
+  // Indexes every member, then walks to a fixed point from the entry root: members are walked
+  // where references reach them. A schema reference may still wait for an $id or $anchor that only
+  // a walked reference reveals (a schema under an extension, say); a waiting site is retried only
   // when its resource gains one, and only while the walk progresses.
   run(): Failure | undefined {
     for (const member of this.all) {
@@ -1117,6 +1220,11 @@ class Resolver {
       if (failed !== undefined) {
         return failed;
       }
+    }
+
+    const indexed = this.index();
+    if (indexed !== undefined) {
+      return indexed;
     }
 
     this.stack.push({

@@ -295,3 +295,76 @@ describe("budgets span the document set", () => {
     expect(refusal("3.1", value, members, { maxNodes: levels }).code).toBe("REF-18/node-budget");
   });
 });
+
+const usesSchema = (ref: string) => ({ components: { schemas: { Root: { $ref: ref } } } });
+
+describe("every member's $id and $anchor is indexed before a reference is judged (B10)", () => {
+  const unreached = uri("https://example.com/unreached.json");
+  const rootAt = { document: entry, pointer: "/components/schemas/Root" };
+
+  test("DOC-17 a $ref to a $id declared in a member no reference reaches resolves", () => {
+    const fragment = { $defs: { Pet: { $id: "https://example.com/schemas/pet", type: "object" } } };
+    const members = [{ document: unreached, value: fragment }];
+    const resolution = resolved(
+      "3.1",
+      spec("3.1", usesSchema("https://example.com/schemas/pet")),
+      members,
+    );
+
+    expect(at(resolution, rootAt)?.target).toEqual({ document: unreached, pointer: "/$defs/Pet" });
+  });
+
+  test("REF-14 a $ref to a $id in another supplied OpenAPI document's components resolves", () => {
+    const other = spec("3.2", {
+      components: { schemas: { Pet: { $id: "https://example.com/schemas/pet", type: "object" } } },
+    });
+    const members = [{ document: unreached, line: "3.2" as const, value: other }];
+    const resolution = resolved(
+      "3.2",
+      spec("3.2", usesSchema("https://example.com/schemas/pet")),
+      members,
+    );
+
+    expect(at(resolution, rootAt)?.target).toEqual({
+      document: unreached,
+      pointer: "/components/schemas/Pet",
+    });
+  });
+
+  test("a $ref to an $anchor under a member's root $id resolves", () => {
+    const fragment = { $defs: { Pet: { $anchor: "pet" } }, $id: "https://example.com/s.json" };
+    const members = [{ document: unreached, value: fragment }];
+    const resolution = resolved(
+      "3.1",
+      spec("3.1", usesSchema("https://example.com/s.json#pet")),
+      members,
+    );
+
+    expect(at(resolution, rootAt)?.target).toEqual({ document: unreached, pointer: "/$defs/Pet" });
+  });
+
+  test("REF-14 a $id declared in the entry and again in an unreached member is refused", () => {
+    const pet = { $id: "https://example.com/schemas/pet", type: "object" };
+    const members = [{ document: unreached, value: { $defs: { Pet: pet } } }];
+    const diagnostic = refusal(
+      "3.1",
+      spec("3.1", { components: { schemas: { Pet: pet } } }),
+      members,
+    );
+
+    expect(diagnostic.code).toBe("REF-14/duplicate-id");
+    expect<readonly string[]>([diagnostic.document, diagnostic.pointer]).toEqual([
+      unreached,
+      "/$defs/Pet",
+    ]);
+  });
+
+  test("REF-18 the node budget counts an unreached member's nodes", () => {
+    const wide = { $defs: Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`S${i}`, {}])) };
+    const members = [{ document: unreached, value: wide }];
+    const value = spec("3.1", {});
+
+    expect(resolved("3.1", value, members, { maxNodes: 60 }).diagnostics).toEqual([]);
+    expect(refusal("3.1", value, members, { maxNodes: 40 }).code).toBe("REF-18/node-budget");
+  });
+});
