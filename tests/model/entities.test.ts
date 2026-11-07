@@ -37,9 +37,17 @@ const serialization = {
   style: "form",
 };
 
+const partHeader = {
+  deprecated: false,
+  name: "X-Rate",
+  required: false,
+  schema: schemaRef,
+  serialization: { ...serialization, explode: false, style: "simple" },
+};
+
 const encodingRule = {
   contentType: ["application/json"],
-  headers: [{ name: "X-Rate", required: false }],
+  headers: [partHeader],
   origin,
   rows,
   target: { kind: "property", name: "file" },
@@ -232,7 +240,7 @@ describe("model entities", () => {
       decodes(Body, { ...body, alternatives: [{ ...mediaAlternative, mediaType: "json" }] }),
     ).toBe(false);
     expect(
-      decodes(EncodingRule, { ...encodingRule, headers: [{ name: "Bad Name", required: false }] }),
+      decodes(EncodingRule, { ...encodingRule, headers: [{ ...partHeader, name: "Bad Name" }] }),
     ).toBe(false);
   });
 

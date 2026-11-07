@@ -14,7 +14,7 @@ import type {
   PlannedPositional,
 } from "../names/index.ts";
 import type { FieldEncoding, NumericKind } from "../runtime-src/runtime/input.ts";
-import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
+import { envPrefixOf, isBooleanSchema, rootNamespace } from "../names/plan.ts";
 import {
   buildsParameter,
   encodesByKey,
@@ -1741,30 +1741,35 @@ const commandsOf = (
     };
   });
 
-const targetsOf = (plan: NamePlan): ReadonlyMap<Operation, Target> => {
-  const modules = [
-    ...plan.groups.map((group) => ({
-      commands: group.commands,
-      from: `../api/${group.segment}.ts`,
-      namespace: String(group.namespace),
-    })),
-    { commands: plan.root, from: "../api/root.ts", namespace: "Root" },
-  ];
+interface ApiModule {
+  readonly commands: readonly PlannedCommand[];
+  readonly from: string;
+  readonly namespace: string;
+}
 
-  return new Map(
-    modules.flatMap(({ commands, from, namespace }) =>
+// Every api module under the namespace the names plan gave it, unique across the modules.
+const apiModules = (plan: NamePlan): readonly ApiModule[] => [
+  ...plan.groups.map((group) => ({
+    commands: group.commands,
+    from: `../api/${group.segment}.ts`,
+    namespace: String(group.namespace),
+  })),
+  { commands: plan.root, from: "../api/root.ts", namespace: rootNamespace },
+];
+
+const targetsOf = (plan: NamePlan): ReadonlyMap<Operation, Target> =>
+  new Map(
+    apiModules(plan).flatMap(({ commands, from, namespace }) =>
       commands
         .filter((command) => command.alias === undefined)
         .map((command) => [command.operation, { from, identifier: command.identifier, namespace }]),
     ),
   );
-};
 
-// The api namespaces a cli module may read; only the ones its commands use are imported.
-const apiBindings = (targets: ReadonlyMap<Operation, Target>): readonly Binding[] =>
-  [...new Map([...targets.values()].map((target) => [target.from, target])).values()].map(
-    ({ from, namespace }) => ({ from, kind: "Namespace", name: namespace }),
-  );
+// The api namespaces a cli module may read, one per api module under its planned name; only the
+// ones its commands use are imported.
+const apiBindings = (plan: NamePlan): readonly Binding[] =>
+  apiModules(plan).map(({ from, namespace }) => ({ from, kind: "Namespace", name: namespace }));
 
 // The header fields a group module's `Command.make` sets, which its root table entry carries
 // (`runtime/groups.ts` `Header`): today the name only.
@@ -2092,7 +2097,7 @@ export const emitCli = (
     const files: EmittedFile[] = [
       ...(yield* Effect.all(
         groups.map((group) =>
-          groupFile(group, commandsFor(group), childrenOf(group), apiBindings(targets)),
+          groupFile(group, commandsFor(group), childrenOf(group), apiBindings(plan)),
         ),
       )),
     ];
@@ -2102,7 +2107,7 @@ export const emitCli = (
         rootCommands,
         plan,
         config,
-        apiBindings(targets),
+        apiBindings(plan),
       ),
     );
 
