@@ -1090,13 +1090,26 @@ export type FormValue = string | number | boolean | { readonly text: string } | 
 export type FormFields = Readonly<Record<string, readonly FormValue[]>>;
 
 /**
- * One declared part: its name, its Encoding `contentType` and, when the part is sent base64
- * encoded, its transfer encoding (design 6.3 Multipart transfer encoding). The writer then encodes
- * the part's bytes and writes the one `Content-Transfer-Encoding` header.
+ * A part whose `Content-Type` the caller chooses among the types its Encoding `contentType` lists
+ * (design 6.3, ENC-10): the chosen type and the part's values, sent together or not at all. It is
+ * the part's whole value, so per-part header values join it as one more member beside `values`.
+ */
+export interface ChosenPart<T extends string = string> {
+  readonly contentType: T;
+  readonly values: readonly FormValue[];
+}
+
+/**
+ * One declared part: its name, its `Content-Type` and, when the part is sent base64 encoded, its
+ * transfer encoding (design 6.3 Multipart transfer encoding). The writer then encodes the part's
+ * bytes and writes the one `Content-Transfer-Encoding` header. A string is the one type the
+ * Encoding `contentType` lists, and the part's values are the fields under its name. A `ChosenPart`
+ * brings its own type and values, and `undefined` is a chosen part not sent; the fields hold
+ * neither name.
  */
 export type FormPartEntry = readonly [
   name: string,
-  contentType: string,
+  contentType: string | ChosenPart | undefined,
   contentEncoding?: "base64",
 ];
 
@@ -1136,8 +1149,19 @@ const formText = (value: Exclude<FormValue, FormFile>) => {
 
 const utf8 = new TextEncoder();
 
+// What one part entry sends: a declared type with the fields' values under the part's name, a
+// chosen part as given, or nothing for a chosen part not sent.
+const sentPart = (fields: FormFields, [name, sent]: FormPartEntry): ChosenPart | undefined =>
+  Predicate.isString(sent)
+    ? { contentType: sent, values: Object.hasOwn(fields, name) ? (fields[name] ?? []) : [] }
+    : sent;
+
 // One value's part. A part entry's `contentEncoding` reaches the writer, which encodes the bytes.
-const formPart = ([name, contentType, contentEncoding]: FormPartEntry, value: FormValue) => {
+const formPart = (
+  [name, , contentEncoding]: FormPartEntry,
+  contentType: string,
+  value: FormValue,
+) => {
   const encoded = (part: Multipart.LeafPart): Multipart.LeafPart =>
     contentEncoding === undefined ? part : { ...part, contentEncoding };
 
@@ -1157,9 +1181,18 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
 
     const leaves: Multipart.LeafPart[] = [];
     for (const entry of options.parts) {
-      const [name] = entry;
-      for (const value of Object.hasOwn(fields, name) ? (fields[name] ?? []) : []) {
-        leaves.push(yield* formPart(entry, value));
+      const [name, sent] = entry;
+      if (!Predicate.isString(sent) && Object.hasOwn(fields, name)) {
+        return yield* Effect.die(new Error("formData: a chosen part is also a field"));
+      }
+
+      const part = sentPart(fields, entry);
+      if (part === undefined) {
+        continue;
+      }
+
+      for (const value of part.values) {
+        leaves.push(yield* formPart(entry, part.contentType, value));
       }
     }
 
@@ -1294,11 +1327,62 @@ export const assertFormData =
     });
 
 /**
+ * The chosen parts of a form, by their key in the `api/` builder's form (ENC-10): each part's name
+ * and the `Content-Type` the operator chose, if any.
+ */
+export type PartChoices = Readonly<
+  Record<string, readonly [part: string, contentType: Option.Option<string>]>
+>;
+
+/**
+ * A form as the `api/` builder takes it: the declared parts' values under `fields`, and each
+ * chosen part under its key, absent when it is not sent.
+ */
+export type ChosenForm<C extends PartChoices> = { readonly fields: FormFields } & {
+  readonly [K in keyof C]?: ChosenPart<Extract<Option.Option.Value<C[K][1]>, string>> | undefined;
+};
+
+/**
+ * Splits asserted part values for the `api/` builder (ENC-10): each chosen part's values leave the
+ * fields and travel with the chosen type, and a part with no value is left out. `Input.partOptions`
+ * has already refused a sent part with no type, so meeting one here is a defect.
+ */
+export const chooseParts =
+  <const C extends PartChoices>(choices: C) =>
+  (fields: FormFields): Effect.Effect<ChosenForm<C>> =>
+    Effect.gen(function* choose() {
+      const named = new Set(Object.values(choices).map(([part]) => part));
+      const chosen: (readonly [string, ChosenPart])[] = [];
+      for (const [key, [part, contentType]] of Object.entries(choices)) {
+        const values = Object.hasOwn(fields, part) ? (fields[part] ?? []) : [];
+        if (values.length === 0) {
+          continue;
+        }
+
+        if (Option.isNone(contentType)) {
+          return yield* Effect.die(new Error("chooseParts: a sent part has no content type"));
+        }
+
+        chosen.push([key, { contentType: contentType.value, values }]);
+      }
+
+      const split = {
+        ...Object.fromEntries(chosen),
+        fields: Object.fromEntries(Object.entries(fields).filter(([name]) => !named.has(name))),
+      };
+
+      // SAFETY: each chosen key is a key of `choices` whose type is the `Some` it chose, and the
+      // generated keys are never `fields`, so `split` holds `fields` and optional chosen parts only.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `fields` and one optional chosen part per key of `choices`, as `ChosenForm` reads them
+      return split as ChosenForm<C>;
+    });
+
+/**
  * A `multipart/form-data` body streamed through the multipart writer (design 6.3): one part per
- * value, in the declared part order, each with its declared `Content-Type`, and a part entry's
- * `contentEncoding` base64-encodes each of its values. With no value a
- * required body is the close delimiter alone and an optional one is empty. `request` sends the
- * writer's `Content-Type`, which carries its boundary.
+ * value, in the declared part order, each with its declared or chosen `Content-Type`, and a part
+ * entry's `contentEncoding` base64-encodes each of its values. With no value a required body is the
+ * close delimiter alone and an optional one is empty. `request` sends the writer's `Content-Type`,
+ * which carries its boundary.
  */
 export const formData = (fields: FormFields, options: FormDataOptions): RequestBody => ({
   expand: formDataOf(fields, options),

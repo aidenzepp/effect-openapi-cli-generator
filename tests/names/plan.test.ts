@@ -25,6 +25,7 @@ interface ParameterInput {
 interface OperationInput {
   readonly body?: readonly {
     readonly codec?: string;
+    readonly encoding?: readonly Json[];
     readonly media: string;
     readonly schema?: string;
   }[];
@@ -102,7 +103,7 @@ const operationJson = (input: OperationInput): Json => {
           alternatives: input.body.map((alternative) => {
             const media = {
               codec: alternative.codec ?? "json",
-              encoding: [],
+              encoding: alternative.encoding ?? [],
               mediaType: alternative.media,
               origin: origin(`${home}/requestBody/content/${escape(alternative.media)}`),
               prefixEncoding: [],
@@ -581,6 +582,59 @@ describe("planNames: multipart parts", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
       "The multipart part at /!!! has no flag and is not reachable; a multipart body has no --body or --body-file.",
     ]);
+  });
+});
+
+describe("planNames: a multipart part with several content types (ENC-10)", () => {
+  const media = "multipart/form-data";
+  const home = `/paths/~1u/post/requestBody/content/${escape(media)}`;
+  const fileRule: Json = {
+    contentType: ["image/png", "image/jpeg"],
+    headers: [],
+    origin: origin(`${home}/encoding/file`),
+    rows: [],
+    target: { kind: "property", name: "file" },
+  };
+  const upload = (properties: Readonly<Record<string, Json>>): ApiInput => ({
+    defs: { Body: object(properties) },
+    operations: [
+      {
+        body: [{ codec: "multipart", encoding: [fileRule], media, schema: "Body" }],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  });
+
+  test("the part gets a --<part>-content-type choice over the listed types", () => {
+    const result = plan(upload({ file: { format: "binary", type: "string" } }));
+    const command = commandOf(result, "upload");
+
+    expect(flagNames(command)).toEqual(["file", "file-content-type"]);
+    expect(command?.flags.find((flag) => flag.name === "file-content-type")?.source).toEqual({
+      _tag: "PartOption",
+      media: [media],
+      option: { choices: ["image/png", "image/jpeg"], kind: "content-type" },
+      part: "/file",
+      pointer: `${home}/encoding/file`,
+    });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("a flag of the same name is the flag collision, renamed through the part flag", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "file-content-type": { type: "string" },
+      }),
+    );
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("/file");
   });
 });
 

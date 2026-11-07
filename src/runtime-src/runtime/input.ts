@@ -1044,3 +1044,33 @@ export const selectBody = <A extends BodyAlternatives>(options: {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the picked key, its content type and its entry's value form one member of `Chosen`
     return chosen as Chosen<{ readonly [P in keyof A]: Effect.Success<A[P]> }>;
   });
+
+/**
+ * One option flag of a multipart part (design 6.3): its name, whether the operator gave it, and
+ * whether a sent part needs it. `--<part>-content-type` is required when its part lists several
+ * types (ENC-10).
+ */
+export type PartOption = readonly [flag: string, given: boolean, required: boolean];
+
+/**
+ * Checks a multipart part's option flags against whether the part is sent, before any request: an
+ * option given without its part, and a required one missing while the part is sent, are each a
+ * `UsageError` naming the option. A given option is never dropped silently.
+ */
+export const partOptions = (
+  part: string,
+  sent: boolean,
+  options: readonly PartOption[],
+): Effect.Effect<void, UsageError> => {
+  for (const [flag, given, required] of options) {
+    if (given && !sent) {
+      return Effect.fail(usage(flag, `applies only with --${part}`));
+    }
+
+    if (required && sent && !given) {
+      return Effect.fail(usage(flag, `this request needs it when --${part} is given`));
+    }
+  }
+
+  return Effect.void;
+};

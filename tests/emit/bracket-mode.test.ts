@@ -5,6 +5,7 @@ import { Array as Arr, Effect, Order, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { emitApi } from "../../src/emit/api.ts";
+import { emitCli } from "../../src/emit/cli.ts";
 import { emitDomainSchemas } from "../../src/emit/domain.ts";
 import { emitPackageFiles } from "../../src/emit/package.ts";
 import type { EmittedFile } from "../../src/emit/package.ts";
@@ -63,12 +64,18 @@ const filter = {
   type: "object",
 };
 
-const formSchema = { properties: { filter, title: { type: "string" } }, type: "object" };
+// A deepObject array of scalars, Stripe's `expand` shape (watch item N2).
+const expand = { items: { maxLength: 5000, type: "string" }, type: "array" };
 
-const formEncoding = { filter: { explode: true, style: "deepObject" } };
+const formSchema = { properties: { expand, filter, title: { type: "string" } }, type: "object" };
 
-// `GET /items` with a deepObject query parameter and a plain one; `POST /forms` with a lone
-// form body; `POST /choices` with form and JSON alternatives (the alternatives table).
+const formEncoding = {
+  expand: { explode: true, style: "deepObject" },
+  filter: { explode: true, style: "deepObject" },
+};
+
+// `GET /items` with nested and array deepObject query parameters and a plain one; `POST /forms`
+// with a lone form body; `POST /choices` with form and JSON alternatives (the alternatives table).
 const spec: Schema.Json = {
   ...golden,
   paths: {
@@ -104,6 +111,7 @@ const spec: Schema.Json = {
         operationId: "items-list",
         parameters: [
           { explode: true, in: "query", name: "filter", schema: filter, style: "deepObject" },
+          { explode: true, in: "query", name: "expand", schema: expand, style: "deepObject" },
           { in: "query", name: "page", schema: { type: "string" } },
         ],
         responses: { "200": { description: "ok" } },
@@ -158,7 +166,15 @@ const generated = await Effect.runPromise(
       });
     const plainApi = unmark(markedApi);
 
+    const cli = yield* emitCli({
+      api: markedApi,
+      config,
+      plan: yield* planOf(markedApi),
+      validationEdits: [],
+    });
+
     return {
+      cli: cli.files,
       domain,
       marked: yield* emitOf(markedApi),
       off: { diagnostics: off.diagnostics, files: yield* emitOf(off.api) },
@@ -193,6 +209,7 @@ describe("emitApi: the non-standard bracket marker", () => {
     const text = items(generated.marked);
 
     expect(callOf(text, 'Serialize.deepObject("filter"')).toContain("brackets: true");
+    expect(callOf(text, 'Serialize.deepObject("expand"')).toContain("brackets: true");
     expect(callOf(text, 'Serialize.form("page"')).toContain("explode: true");
     expect(callOf(text, 'Serialize.form("page"')).not.toContain("brackets");
   });
@@ -201,15 +218,30 @@ describe("emitApi: the non-standard bracket marker", () => {
     const entries = lines(items(generated.marked), '["filter", {');
 
     expect(entries.length).toBe(2);
-    for (const entry of entries) {
+    expect(lines(items(generated.marked), '["expand", {').length).toBe(2);
+    for (const entry of [...entries, ...lines(items(generated.marked), '["expand", {')]) {
       expect(entry).toContain("brackets: true");
       expect(entry).toContain('style: "deepObject"');
     }
   });
 
   test("the marker adds brackets: true and nothing else", () => {
-    expect(items(generated.marked).match(/brackets: true/gu)?.length).toBe(3);
+    expect(items(generated.marked).match(/brackets: true/gu)?.length).toBe(6);
     expect(withoutBrackets(items(generated.marked))).toBe(withoutBrackets(items(generated.plain)));
+  });
+
+  // Watch item N2 (memo 8573fad5): a marked array of scalars repeats, like any scalar-array flag,
+  // and the runtime sends its items as `expand[0]=a&expand[1]=b`; a marked nested object is the
+  // JSON flag object parameters use. Effect's help prints a repeatable flag as `--expand string`.
+  test("a marked scalar array is a repeatable flag and a nested object a JSON flag", () => {
+    const cli = generated.cli.find((file) => file.path === "src/cli/items.ts")?.content ?? "";
+
+    expect(
+      cli.match(/expand: Flag\.String\("expand"\)\.pipe\(Flag\.atLeast\(0\)\)/gu)?.length,
+    ).toBe(3);
+    expect(cli).toContain('filter: Input.jsonFlag("filter").pipe(Flag.withMetavar("json")');
+    expect(cli).toContain('"query expand; non-standard: sent as name[a][b]=v');
+    expect(cli).toContain('"body /expand; non-standard: sent as name[a][b]=v');
   });
 
   test("unmarked entries emit no brackets", () => {

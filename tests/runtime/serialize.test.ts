@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   ByteSize,
+  Cause,
   Effect,
+  Exit,
   FileSystem,
   Layer,
   Option,
@@ -651,6 +653,20 @@ describe("deepObject", () => {
     await expectUsage(Serialize.deepObject("c", "a", formOptions()).expand);
   });
 
+  // Watch item N2: a marked array of scalars (Stripe's `expand`) sends each value indexed.
+  test("with brackets, two values of a scalar array are sent as a[0] and a[1]", async () => {
+    const brackets = formOptions({ brackets: true });
+    const body = Serialize.urlEncode(
+      { expand: ["data.a", "data.b"] },
+      { properties: [["expand", { brackets: true, explode: true, style: "deepObject" }]] },
+    );
+
+    expect(await query(Serialize.deepObject("expand", ["data.a", "data.b"], brackets))).toBe(
+      "expand%5B0%5D=data.a&expand%5B1%5D=data.b",
+    );
+    expect(await Effect.runPromise(body)).toBe("expand%5B0%5D=data.a&expand%5B1%5D=data.b");
+  });
+
   test("an empty object sends nothing or is refused when required", async () => {
     expect(await query(Serialize.deepObject("c", {}, formOptions()))).toBeUndefined();
     await expectUsage(Serialize.deepObject("c", {}, formOptions({ required: true })).expand);
@@ -1107,7 +1123,7 @@ const boundaryOf = (built: HttpClientRequest.HttpClientRequest): string => {
 
 const formRequest = (
   fields: Serialize.FormFields,
-  parts: readonly (readonly [string, string])[],
+  parts: readonly Serialize.FormPartEntry[],
   required = true,
 ) =>
   Serialize.request("POST", {
@@ -1228,6 +1244,82 @@ describe("formData", () => {
 
   test("a lone surrogate in a text part is refused", async () => {
     await expectUsage(formRequest({ title: ["\uD800"] }, [["title", "text/plain"]]));
+  });
+
+  test("a chosen part is sent under its chosen type, in entry order", async () => {
+    const built = await run(
+      formRequest({ title: ["cat"] }, [
+        ["photo", { contentType: "image/jpeg", values: ["x", "y"] }],
+        ["title", "text/plain"],
+      ]),
+    );
+    const boundary = boundaryOf(built);
+    const part = (name: string, type: string, body: string) =>
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: ${type}\r\n\r\n${body}\r\n`;
+
+    expect(await streamed(built)).toBe(
+      [
+        part("photo", "image/jpeg", "x"),
+        part("photo", "image/jpeg", "y"),
+        part("title", "text/plain", "cat"),
+        `--${boundary}--\r\n`,
+      ].join(""),
+    );
+  });
+
+  test("a chosen part not sent writes nothing", async () => {
+    const built = await run(formRequest({}, [["photo", undefined]], false));
+
+    expect(built.body._tag).toBe("Empty");
+  });
+
+  test("a chosen part's name among the fields is a defect", async () => {
+    const chosen = { contentType: "image/png", values: ["x"] };
+    const exits = await Promise.all(
+      [chosen, undefined].map((entry) =>
+        Effect.runPromiseExit(formRequest({ photo: ["y"] }, [["photo", entry]])),
+      ),
+    );
+
+    expect(exits.map((exit) => Exit.isFailure(exit) && Cause.hasDies(exit.cause))).toEqual([
+      true,
+      true,
+    ]);
+  });
+});
+
+const split = (fields: Serialize.FormFields, contentType: Option.Option<"image/png">) =>
+  Effect.runPromiseExit(Serialize.chooseParts({ photo: ["photo-part", contentType] })(fields));
+
+describe("chooseParts", () => {
+  test("a sent part leaves the fields and carries the chosen type", async () => {
+    const exit = await split({ "photo-part": ["x"], title: ["cat"] }, Option.some("image/png"));
+
+    expect(exit).toEqual(
+      Exit.succeed({
+        fields: { title: ["cat"] },
+        photo: { contentType: "image/png", values: ["x"] },
+      }),
+    );
+  });
+
+  test("a part with no value is absent", async () => {
+    const exits = await Promise.all(
+      [{ title: ["cat"] }, { "photo-part": [], title: ["cat"] }].map((fields) =>
+        split(fields, Option.none()),
+      ),
+    );
+
+    expect(exits).toEqual([
+      Exit.succeed({ fields: { title: ["cat"] } }),
+      Exit.succeed({ fields: { title: ["cat"] } }),
+    ]);
+  });
+
+  test("a sent part with no type is a defect", async () => {
+    const exit = await split({ "photo-part": ["x"] }, Option.none());
+
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
   });
 });
 

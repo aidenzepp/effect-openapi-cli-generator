@@ -14,7 +14,7 @@ import type {
 } from "./fold.ts";
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { escapeToken, formatPointer } from "../model/pointer.ts";
 import type { SpecLine } from "../model/spec-section.ts";
 
 /**
@@ -28,11 +28,21 @@ export interface PlannedPositional {
 }
 
 /**
- * Where a flag's value goes: a parameter by location and wire name, or a body field by its RFC 6901
- * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media.
- * `pointer` is what `--describe` reports: the parameter's source pointer, a body field's declaring
- * property schema (`BodyFlag.schemaPointer`, from the first media alternative that has the flag),
- * or the request body for `--body` and `--body-file`.
+ * What a multipart part option flag sets on its part: the part's `Content-Type`, one of `choices`,
+ * the media types its Encoding `contentType` lists (design 6.3, ENC-10).
+ */
+export interface PartOptionKind {
+  readonly choices: readonly string[];
+  readonly kind: "content-type";
+}
+
+/**
+ * Where a flag's value goes: a parameter by location and wire name, a body field by its RFC 6901
+ * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media, or
+ * an option of the multipart part at `part` (the part flag's body pointer). `pointer` is what
+ * `--describe` reports: the parameter's source pointer, a body field's declaring property schema
+ * (`BodyFlag.schemaPointer`, from the first media alternative that has the flag), the request body
+ * for `--body` and `--body-file`, or a part option's Encoding Object.
  */
 export type FlagSource =
   | {
@@ -48,6 +58,13 @@ export type FlagSource =
       readonly pointer: string;
       readonly repeated: boolean;
       readonly wireName: string;
+    }
+  | {
+      readonly _tag: "PartOption";
+      readonly media: readonly string[];
+      readonly option: PartOptionKind;
+      readonly part: string;
+      readonly pointer: string;
     };
 
 /**
@@ -817,6 +834,86 @@ const renamed = (site: OverrideSite, flag: BodyFlag): BodyFlag => {
   return configured === undefined ? flag : { ...flag, name: configured.flag, notes: [] };
 };
 
+interface DraftedOption {
+  readonly choices: readonly string[];
+  readonly media: string[];
+  readonly part: string;
+  readonly pointer: string;
+  readonly rule: string;
+}
+
+const sameChoices = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((choice, index) => choice === right[index]);
+
+// The `--<part>-content-type` choice flag of each multipart part whose Encoding `contentType`
+// lists several concrete media types (design 6.3, ENC-10): named after the part flag, so renaming
+// the part flag renames it, and offered over the listed types with no default. Alternatives that
+// list the same types share it; a part listing other types elsewhere collides on the name.
+const draftContentTypes = (
+  subject: Subject,
+  parts: readonly Merged[],
+  owners: Owners,
+): readonly DraftFlag[] => {
+  const { operation, site } = subject;
+  const drafted = new Map<string, DraftedOption>();
+  for (const { flag, media } of parts) {
+    for (const alternative of operation.body?.alternatives ?? []) {
+      if (alternative.codec !== "multipart" || !media.includes(alternative.mediaType)) {
+        continue;
+      }
+
+      const rule = alternative.encoding.find(
+        (candidate) =>
+          candidate.target.kind === "property" &&
+          formatPointer([candidate.target.name]) === flag.pointer,
+      );
+      const choices = rule?.contentType ?? [];
+      if (
+        rule === undefined ||
+        rule.nested !== undefined ||
+        choices.length < 2 ||
+        choices.some((choice) => choice.includes("*"))
+      ) {
+        continue;
+      }
+
+      const name = `${flag.name}-content-type`;
+      const { pointer } = alternative.origin;
+      const known = drafted.get(name);
+      if (known === undefined) {
+        const hint = fieldHint(site, flag.pointer);
+        addOwner(owners, name, { field: flag.pointer, hint, kind: "body", pointer });
+        drafted.set(name, {
+          choices,
+          media: [alternative.mediaType],
+          part: flag.pointer,
+          pointer,
+          rule: rule.origin.pointer,
+        });
+      } else if (known.part === flag.pointer && sameChoices(known.choices, choices)) {
+        known.media.push(alternative.mediaType);
+      } else {
+        const hint = fieldHint(site, flag.pointer);
+        addOwner(owners, name, { field: flag.pointer, hint, kind: "body", pointer });
+      }
+    }
+  }
+
+  return [...drafted].map(([name, option]): DraftFlag => ({
+    boolean: false,
+    name,
+    notes: [],
+    pointer: option.pointer,
+    source: {
+      _tag: "PartOption",
+      media: option.media,
+      option: { choices: option.choices, kind: "content-type" },
+      part: option.part,
+      pointer: option.rule,
+    },
+  }));
+};
+
 const draftBody = (
   subject: Subject,
   context: DraftContext,
@@ -882,7 +979,8 @@ const draftBody = (
       }
     }
 
-    return [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
+    const options = draftContentTypes(subject, [...merged.values()], owners);
+    const fieldFlags = [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
       if (!isWholeBody(flag.kind)) {
         const owner: Owner = {
@@ -910,6 +1008,8 @@ const draftBody = (
 
       return { boolean, name: flag.name, notes: flag.notes, pointer, source };
     });
+
+    return [...fieldFlags, ...options];
   });
 
 const ownerRank: Record<Owner["kind"], number> = { body: 2, parameter: 1, positional: 0 };

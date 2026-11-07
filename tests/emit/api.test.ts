@@ -454,4 +454,52 @@ describe("emitApi: multipart request bodies", () => {
     expect(content("src/api/imports.ts")).not.toContain("formData");
     expect(content("src/api/imports.ts")).not.toContain("input.contentType");
   });
+
+  test("a part listing several types travels with its chosen type in the alternative's form", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "application/json": { schema: { type: "object" } },
+              "multipart/form-data": {
+                encoding: { file: { contentType: "text/csv, application/json" } },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain(
+      [
+        "export interface CreateForm {",
+        "  readonly fields: Serialize.FormFields;",
+        '  readonly file?: Serialize.ChosenPart<"text/csv" | "application/json"> | undefined;',
+        "}",
+      ].join("\n"),
+    );
+    expect(api).toContain('  readonly "multipart/form-data": CreateForm;');
+    expect(api).toContain(
+      [
+        "export interface CreateInput {",
+        "  readonly body: Serialize.Chosen<CreateBodies>;",
+        "}",
+      ].join("\n"),
+    );
+    expect(api).toContain(
+      [
+        '      "multipart/form-data": (body: CreateForm) =>',
+        "        Serialize.formData(body.fields, {",
+        "          parts: [",
+        '            ["title", "text/plain"],',
+        '            ["file", body.file],',
+        '            ["tags", "text/plain"],',
+        "          ],",
+      ].join("\n"),
+    );
+  });
 });
