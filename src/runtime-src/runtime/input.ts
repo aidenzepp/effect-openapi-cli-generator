@@ -474,11 +474,12 @@ const asCliError = (error: UsageError): CliError.CliError =>
 
 /**
  * The flag for an `int64` field: its digit string parsed to a `JsonNumber`, so a later merge writes
- * the digits unchanged. A non-digit value fails the flag with an error that names `--name` and
- * never the value.
+ * the digits unchanged. Help labels it `integer`. A non-digit value fails the flag with an error
+ * that names `--name` and never the value.
  */
 export const int64Flag = (name: string) =>
   Flag.String(name).pipe(
+    Flag.withMetavar("integer"),
     Flag.mapEffect((raw) => jsonNumber(raw, name).pipe(Effect.mapError(asCliError))),
   );
 
@@ -507,19 +508,25 @@ const numericText =
       : Effect.fail(asCliError(refuse(numericCause[kind])));
 
 /**
- * The flag for an `integer` or `number` parameter: its text checked against the JSON integer or
- * number grammar and returned unchanged, so `9007199254740993` and `1.50` reach the wire as given.
- * A text outside the grammar fails the flag with an error that names `--name` and never the text.
+ * The flag for an `integer` or `number` parameter or field: its text checked against the JSON
+ * integer or number grammar and returned unchanged, so `9007199254740993` and `1.50` reach the wire
+ * as given. Help labels it with its `kind`. A text outside the grammar fails the flag with an error
+ * that names `--name` and never the text.
  */
 export const numericFlag = (name: string, kind: NumericKind) =>
-  Flag.String(name).pipe(Flag.mapEffect(numericText(kind, (cause) => usage(name, cause))));
+  Flag.String(name).pipe(
+    Flag.withMetavar(kind),
+    Flag.mapEffect(numericText(kind, (cause) => usage(name, cause))),
+  );
 
 /**
- * The positional argument for an `integer` or `number` path parameter, checked as `numericFlag`
- * is. A text outside the grammar fails with an error that names `<name>` and never the text.
+ * The positional argument for an `integer` or `number` path parameter, checked and labelled as
+ * `numericFlag` is. A text outside the grammar fails with an error that names `<name>` and never
+ * the text.
  */
 export const numericArgument = (name: string, kind: NumericKind) =>
   Argument.String(name).pipe(
+    Argument.withMetavar(kind),
     Argument.mapEffect(
       numericText(kind, (cause) => new UsageError({ message: `<${name}>: ${cause}` })),
     ),

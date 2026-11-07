@@ -107,15 +107,13 @@ const kinds = (line: Line, properties: Properties) => {
 const numberFlags = {
   count: Input.numericFlag("count", "integer").pipe(
     Flag.map((text) => new Input.JsonNumber(text)),
-    Flag.withMetavar("integer"),
     Flag.optional,
   ),
   ratio: Input.numericFlag("ratio", "number").pipe(
     Flag.map((text) => new Input.JsonNumber(text)),
-    Flag.withMetavar("number"),
     Flag.optional,
   ),
-  total: Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.optional),
+  total: Input.int64Flag("total").pipe(Flag.optional),
 };
 
 const decoder = new TextDecoder();
@@ -214,14 +212,13 @@ describe("FMT-04 number and integer JSON body fields", () => {
 
     expect(refusals).toEqual([]);
     expect(content).toContain(
-      `ratio: Input.numericFlag("ratio", "number").pipe( ${asJsonNumber}, Flag.withMetavar("number"), Flag.optional, )`,
+      `ratio: Input.numericFlag("ratio", "number").pipe( ${asJsonNumber}, Flag.optional, )`,
     );
     expect(content).toContain(
-      `count: Input.numericFlag("count", "integer").pipe( ${asJsonNumber}, Flag.withMetavar("integer"), Flag.optional, )`,
+      `count: Input.numericFlag("count", "integer").pipe( ${asJsonNumber}, Flag.optional, )`,
     );
-    expect(content).toContain(
-      'total: Input.int64Flag("total").pipe(Flag.withMetavar("integer"), Flag.optional)',
-    );
+    expect(content).toContain('total: Input.int64Flag("total").pipe(Flag.optional)');
+    expect(content).not.toContain("Flag.withMetavar(");
     expect(content).not.toContain("Flag.Int(");
     expect(content).not.toContain("Flag.Finite(");
   });
