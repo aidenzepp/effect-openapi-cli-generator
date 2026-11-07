@@ -315,8 +315,12 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         ]);
       }, 60_000);
 
-      test.todo(`SCH-03: a sibling maximum 5 beside $ref is not asserted and 7 is sent vs rejected before send (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-03: a sibling maximum 5 beside $ref applies beside the target (${line})`, async () => {
+        const bound = await send(line, "ref-siblings", "5");
+        const above = await send(line, "ref-siblings", "7");
+
+        expect([bound, above]).toEqual([sentAsGiven("ref-siblings", "5"), rejectedBeforeSending]);
+      }, 60_000);
 
       test(`SCH-04: a plain-name fragment targets the schema whose $anchor it names (${line})`, async () => {
         const target = targetOf(line, "anchor");
@@ -335,8 +339,22 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         ).toEqual([["SCH-05/dynamic-ref", "refusal", "element", bodySchema]]);
       });
 
-      test.todo(`SCH-05: a $dynamicRef that a required body depends on is refused at element scope only vs raised to operation scope (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-05: a $dynamicRef that a required body depends on is raised to operation scope (${line})`, async () => {
+        const found = await inProcess(withBody(line, true, { $dynamicRef: "#node" }, dynamicNode));
+
+        expect(summary(found.diagnostics)).toContainEqual([
+          "SCH-05/dynamic-ref",
+          "refusal",
+          "element",
+          bodySchema,
+        ]);
+        expect(summary(found.diagnostics)).toContainEqual([
+          "OPR-09/required-body-refused",
+          "refusal",
+          "operation",
+          "/paths/~1a/post",
+        ]);
+      });
 
       test(`SCH-06: a $dynamicAnchor a $dynamicRef targets is refused at element scope (${line})`, async () => {
         const found = await inProcess(withBody(line, false, { $dynamicRef: "#node" }, dynamicNode));
@@ -346,11 +364,33 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         ).toEqual([["SCH-06/dynamic-anchor", "refusal", "element", "/components/schemas/Node"]]);
       });
 
-      test.todo(`SCH-06: a $dynamicAnchor that a required body depends on is refused at element scope only vs raised to operation scope (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-06: a $dynamicAnchor that a required body depends on is raised to operation scope (${line})`, async () => {
+        const found = await inProcess(withBody(line, true, { $dynamicRef: "#node" }, dynamicNode));
 
-      test.todo(`SCH-07: a request schema declaring $vocabulary generates with no diagnostic vs refused (${line})`, () =>
-        Promise.resolve());
+        expect(summary(found.diagnostics)).toContainEqual([
+          "SCH-06/dynamic-anchor",
+          "refusal",
+          "element",
+          "/components/schemas/Node",
+        ]);
+        expect(summary(found.diagnostics)).toContainEqual([
+          "OPR-09/required-body-refused",
+          "refusal",
+          "operation",
+          "/paths/~1a/post",
+        ]);
+      });
+
+      test(`SCH-07: a request schema declaring $vocabulary is refused (${line})`, async () => {
+        const vocabulary = { "https://json-schema.org/draft/2020-12/vocab/core": true };
+        const found = await inProcess(
+          withBody(line, false, { $vocabulary: vocabulary, type: "object" }),
+        );
+
+        expect(
+          summary(found.diagnostics.filter((diagnostic) => diagnostic.row === "SCH-07")),
+        ).toEqual([["SCH-07/vocabulary", "refusal", "element", bodySchema]]);
+      });
 
       test(`SCH-09: a $ref into $defs targets that definition, which then applies (${line})`, async () => {
         const target = targetOf(line, "defs");
@@ -410,8 +450,11 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         );
       }, 60_000);
 
-      test.todo(`SCH-13: an undeclared key under additionalProperties false is sent vs rejected before send (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-13: an undeclared key under additionalProperties false is rejected before send (${line})`, async () => {
+        const undeclared = await send(line, "additional-properties", '{"a":"x","z":1}');
+
+        expect(undeclared).toEqual(rejectedBeforeSending);
+      }, 60_000);
 
       test(`SCH-14: input violating properties is rejected before send (${line})`, async () => {
         const valid = await send(line, "properties", '{"n":1}');
@@ -423,7 +466,7 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         ]);
       }, 60_000);
 
-      test.todo(`SCH-15: any patternProperties in a request schema fails generation with DomainEmitError import-failed vs input violating it rejected before send (${line})`, () =>
+      test.todo(`SCH-15: patternProperties generates with a SCH-15/not-asserted notice and a violating value is sent vs input violating it rejected before send (${line})`, () =>
         Promise.resolve());
 
       test(`SCH-16: dependentSchemas is not asserted; a violating value is sent exactly as given (${line})`, async () => {
@@ -589,8 +632,25 @@ describe("SCH-02 to SCH-33 through the built CLI, the resolver and generate()", 
         );
       }, 60_000);
 
-      test.todo(`SCH-29: help for an enum body field shows "--color string (body /color)" with no values vs listing red and blue (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-29: help for an enum body field lists red and blue (${line})`, async () => {
+        const generated = packages.get(line);
+        if (generated === undefined) {
+          throw new Error(`no package built for ${line}`);
+        }
+
+        const result = await Effect.runPromise(
+          runBin(generated, { args: ["enum-flag", "--help"], timeoutMs: 30_000 }).pipe(
+            Effect.provide(layer),
+          ),
+        );
+        const color = text(result.stdout)
+          .split("\n")
+          .find((entry) => entry.includes("--color "));
+
+        expect(result.exitCode).toBe(0);
+        expect(color).toContain("red");
+        expect(color).toContain("blue");
+      }, 60_000);
 
       test(`SCH-30: input violating multipleOf is rejected before send (${line})`, async () => {
         const multiple = await send(line, "multiple-of", "6");

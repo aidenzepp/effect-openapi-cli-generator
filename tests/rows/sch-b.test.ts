@@ -334,6 +334,24 @@ const bodySchema = "/paths/~1a/post/requestBody/content/application~1json/schema
 const rowDiagnostics = (found: Generated, row: string) =>
   summary(found.diagnostics.filter((diagnostic) => diagnostic.row === row));
 
+// A command's `--help`, without the base URL.
+const helpOf = async (line: Line, command: string): Promise<Invoked> => {
+  const generated = packages.get(line);
+  if (generated === undefined) {
+    throw new Error(`no package built for ${line}`);
+  }
+
+  const result = await Effect.runPromise(
+    runBin(generated, { args: [command, "--help"], timeoutMs: 30_000 }).pipe(Effect.provide(layer)),
+  );
+
+  return { exitCode: result.exitCode, requests: [], stdout: text(result.stdout) };
+};
+
+// The help line that names a flag.
+const flagHelp = (help: string, flag: string): string =>
+  help.split("\n").find((entry) => entry.includes(`${flag} `)) ?? "";
+
 describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", () => {
   for (const line of lines) {
     describe(line, () => {
@@ -461,8 +479,11 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         ]);
       }, 60_000);
 
-      test.todo(`SCH-45: a request omitting a required read-only property is rejected before send (exit 2, nothing sent) vs sent as given (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-45: a request omitting a required read-only property is sent as given (${line})`, async () => {
+        const readOnlyOmitted = await send(line, "read-only", '{"name":"x"}');
+
+        expect(readOnlyOmitted).toEqual(sentAsGiven("read-only", '{"name":"x"}'));
+      }, 60_000);
 
       test(`SCH-46: dependentRequired is not asserted; a violating value is sent exactly as given (${line})`, async () => {
         const violating = await send(line, "dependent-required", '{"a": 1}');
@@ -479,11 +500,19 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         expect(omitted).toEqual(sentAsGiven("annotated", '{"name":"x"}'));
       }, 60_000);
 
-      test.todo(`SCH-49: help for a body field with default 10 shows "--size integer (body /size)" with no default vs showing 10 (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-49: help for a body field with default 10 shows 10 (${line})`, async () => {
+        const help = await helpOf(line, "annotated");
 
-      test.todo(`SCH-50: help for a deprecated body field shows "--legacy string (body /legacy)" vs marking it deprecated (${line})`, () =>
-        Promise.resolve());
+        expect(help.exitCode).toBe(0);
+        expect(flagHelp(help.stdout, "--size")).toContain("default: 10");
+      }, 60_000);
+
+      test(`SCH-50: help for a deprecated body field marks it deprecated (${line})`, async () => {
+        const help = await helpOf(line, "annotated");
+
+        expect(help.exitCode).toBe(0);
+        expect(flagHelp(help.stdout, "--legacy")).toContain("deprecated");
+      }, 60_000);
 
       test(`SCH-51: an operator-supplied read-only property is sent (${line})`, async () => {
         const supplied = await send(line, "read-only", '{"id":"1","name":"x"}');
@@ -491,8 +520,12 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         expect(supplied).toEqual(sentAsGiven("read-only", '{"id":"1","name":"x"}'));
       }, 60_000);
 
-      test.todo(`SCH-51: help for a read-only body field shows "--id string (body /id)" vs noting it is read-only (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-51: help for a read-only body field notes it is read-only (${line})`, async () => {
+        const help = await helpOf(line, "read-only");
+
+        expect(help.exitCode).toBe(0);
+        expect(flagHelp(help.stdout, "--id")).toContain("read-only");
+      }, 60_000);
 
       test(`SCH-52: a required writeOnly property absent from a response is not an error (${line})`, async () => {
         const fetched = await invoke(line, ["write-only"]);
@@ -565,8 +598,15 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         expect([inside, above]).toEqual([sentAsGiven("definitions", "5"), rejectedBeforeSending]);
       }, 60_000);
 
-      test.todo(`SCH-64: a request schema declaring dependencies generates with no diagnostic vs refused at element scope (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-64: a request schema declaring dependencies is refused at element scope (${line})`, async () => {
+        const found = await inProcess(
+          withBody(line, false, { dependencies: { a: ["b"] }, type: "object" }),
+        );
+
+        expect(rowDiagnostics(found, "SCH-64")).toEqual([
+          ["SCH-64/dependencies", "refusal", "element", bodySchema],
+        ]);
+      });
 
       test(`SCH-65: $recursiveAnchor is refused at element scope at the schema (${line})`, async () => {
         const found = await inProcess(
@@ -578,8 +618,24 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         ]);
       });
 
-      test.todo(`SCH-65: a $recursiveAnchor that a required body depends on is refused at element scope only vs raised to operation scope (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-65: a $recursiveAnchor that a required body depends on is raised to operation scope (${line})`, async () => {
+        const found = await inProcess(
+          withBody(line, true, { $recursiveAnchor: true, type: "object" }),
+        );
+
+        expect(summary(found.diagnostics)).toContainEqual([
+          "SCH-65/recursive-anchor",
+          "refusal",
+          "element",
+          bodySchema,
+        ]);
+        expect(summary(found.diagnostics)).toContainEqual([
+          "OPR-09/required-body-refused",
+          "refusal",
+          "operation",
+          "/paths/~1a/post",
+        ]);
+      });
 
       test(`SCH-66: $recursiveRef is refused at element scope at the schema (${line})`, async () => {
         const found = await inProcess(withBody(line, false, { $recursiveRef: "#" }));
@@ -589,8 +645,22 @@ describe("SCH-34 to SCH-66 through the built CLI, the resolver and generate()", 
         ]);
       });
 
-      test.todo(`SCH-66: a $recursiveRef that a required body depends on is refused at element scope only vs raised to operation scope (${line})`, () =>
-        Promise.resolve());
+      test(`SCH-66: a $recursiveRef that a required body depends on is raised to operation scope (${line})`, async () => {
+        const found = await inProcess(withBody(line, true, { $recursiveRef: "#" }));
+
+        expect(summary(found.diagnostics)).toContainEqual([
+          "SCH-66/recursive-ref",
+          "refusal",
+          "element",
+          bodySchema,
+        ]);
+        expect(summary(found.diagnostics)).toContainEqual([
+          "OPR-09/required-body-refused",
+          "refusal",
+          "operation",
+          "/paths/~1a/post",
+        ]);
+      });
     });
   }
 });
