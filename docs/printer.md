@@ -106,15 +106,22 @@ A long identifier is an unbreakable token: a name, key or type name whose line i
 stays on its line, because `vp fmt` leaves it there. Two moves apply, both the ones `vp fmt` makes.
 A `const` whose head (`export const <name>: <Type> =`) is past column 100 puts its value on the next
 line, indented 2, except a non-negative number or boolean, which stays on the head line. A type
-alias whose line is past column 100 puts its type on the next line. A type with several union
-members or type arguments is one `vp fmt` breaks across lines, and the printer does not: a line
-past column 100 holding one is refused with `unbreakable-line`.
+alias whose line is past column 100 puts its type on the next line, unless the type is a union,
+which breaks by the union rule below. Any other type with several union members or type arguments
+is one `vp fmt` breaks across lines, and the printer does not: a line past column 100 holding one
+is refused with `unbreakable-line`.
 
 - **Object literal.** `{}` when empty. Flat: `{ a: 1, b: 2 }`. Broken: `{`, one property per line,
   `}`. The formatter keeps an object broken whenever its first key starts a new line, so a broken
   object never returns to flat.
 - **Interface body.** Always broken, one `readonly key: Type;` per line. Types inside it are printed
-  flat.
+  flat, except a long union.
+- **Long union.** A field's or type alias's whole type that is a union of two or more members
+  (nested unions flattened) breaks when its line ends past column 100: the line ends at the `:` or
+  `=`, then each member starts a line one level deeper than the field or alias with `| `, and the
+  last member ends with `;` (measured). This holds however long the key or name is. A member line
+  past column 100 is refused by the rule above when the member itself has several union members or
+  type arguments.
 - **Array literal.** `[]` when empty. Flat when it fits, otherwise broken. One case is always
   broken: two or more elements that are all object literals, or all array literals, with more than
   one entry each, such as `[["a", "b"], ["c", "d"]]`. An array of number literals, possibly signed,
@@ -167,10 +174,11 @@ past column 100 holding one is refused with `unbreakable-line`.
   laid out by the call rule from column 0. No other expression is a statement.
 
 The subset is exactly the forms above plus: `export const`, unexported `const`, `export interface`,
-`export type` with a flat type, `as const`, property access, and string, number, boolean and
-`undefined` literals. Not in the subset: template literals, comments other than generator JSDoc,
-block bodies, `if` and statements other than the ones above, nested conditionals, classes, member
-chains longer than the rule above, and type annotations that need breaking.
+`export type` with a flat type or a long union, `as const`, property access, and string, number,
+boolean and `undefined` literals. Not in the subset: template literals, comments other than
+generator JSDoc, block bodies, `if` and statements other than the ones above, nested conditionals,
+classes, member chains longer than the rule above, and type annotations that need breaking other
+than a long union.
 
 ## Domain module
 
