@@ -1259,10 +1259,12 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
         ...domainNames(byContainer.get(container) ?? [], domain),
         ...(container === root ? rootModuleNames : []),
       ]);
-    // A group's namespace is also imported by every cli module holding one of its aliases.
+    // A group's namespace is also imported by every cli module holding one of its aliases, and
+    // `cli/root.ts` is offered every api namespace beside its own bindings, so no namespace may
+    // take one of the root module's names.
     const links = aliasLinks(finals);
     const used = [...firstUses(finals)].map(([node, first]) => {
-      const importers = [node.tag, ...(links.hosts.get(node.tag) ?? [])].map(imports);
+      const importers = [node.tag, root, ...(links.hosts.get(node.tag) ?? [])].map(imports);
       const blocked = (candidate: string): boolean =>
         fixedNamespaces.has(candidate) || importers.some((names) => names.has(candidate));
 
