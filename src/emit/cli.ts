@@ -3,7 +3,7 @@ import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { SchemaEdit } from "../normalize/schemas.ts";
-import type { Line } from "../validate/index.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 import { runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
@@ -326,7 +326,7 @@ type Work =
 
 // The text encoding of a base64 string node: `contentEncoding` on every line, or `format: byte`
 // without one on 3.0 only (FMT-10), as `flattenBody` reads it.
-const encodingOf = (node: FieldNode, line: Line): FieldEncoding | undefined => {
+const encodingOf = (node: FieldNode, line: SpecLine): FieldEncoding | undefined => {
   if (node.contentEncoding === "base64" || node.contentEncoding === "base64url") {
     return node.contentEncoding;
   }
@@ -340,7 +340,7 @@ const encodingOf = (node: FieldNode, line: Line): FieldEncoding | undefined => {
 // OpenAPI line, which decides whether `format: byte` is a base64 encoding.
 interface FieldStore {
   readonly defs: Defs;
-  readonly line: Line;
+  readonly line: SpecLine;
   readonly refusedDefaults: ReadonlySet<Schema.Json>;
 }
 

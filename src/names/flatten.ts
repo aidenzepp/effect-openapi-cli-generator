@@ -6,7 +6,7 @@ import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
-import type { Line } from "../validate/index.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
@@ -228,7 +228,7 @@ const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
-  line: Line,
+  line: SpecLine,
 ): Ctx => ({
   base64Fields: codec === "json" || codec === "form",
   base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
@@ -738,7 +738,7 @@ export const flattenBody = (
   defs: Defs,
   alternative: Pick<MediaAlternative, "codec" | "schema"> &
     Partial<Pick<MediaAlternative, "encoding">>,
-  line: Line,
+  line: SpecLine,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
   if (codec === "binary") {
