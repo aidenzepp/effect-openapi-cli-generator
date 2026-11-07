@@ -103,8 +103,49 @@ const subtreeNotices: ReadonlySet<string> = new Set(["OPR-10/body-ignored"]);
 
 const key = (document: string, pointer: string): string => `${document}\u0000${pointer}`;
 
-const within = (pointer: string, owner: string): boolean =>
-  pointer === owner || pointer.startsWith(`${owner}/`);
+// The pointers an element at `pointer` lies within, outermost first and itself last: the root and
+// each prefix ending before a `/`. `within(pointer, owner)` holds exactly for these owners.
+const ancestors = (pointer: string): readonly string[] => {
+  const found = [""];
+  for (let at = pointer.indexOf("/", 1); at !== -1; at = pointer.indexOf("/", at + 1)) {
+    found.push(pointer.slice(0, at));
+  }
+  if (pointer !== "") {
+    found.push(pointer);
+  }
+
+  return found;
+};
+
+// Appends `value` to the list at `at`, creating it on first use.
+const append = <K, V>(map: Map<K, V[]>, at: K, value: V): void => {
+  const list = map.get(at);
+  if (list === undefined) {
+    map.set(at, [value]);
+  } else {
+    list.push(value);
+  }
+};
+
+// Computes `make(at)` once per `at`; an undefined result is computed again.
+const memo = <K, V>(make: (at: K) => V): ((at: K) => V) => {
+  const cache = new Map<K, V>();
+
+  return (at) => {
+    const cached = cache.get(at);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const made = make(at);
+    cache.set(at, made);
+
+    return made;
+  };
+};
+
+// An operation-scope refusal's name, as the report spells it: the request method token and path.
+const operationName = (method: string, path: string): string => `${method}\u0000${path}`;
 
 type Command = (typeof Description.Type)["commands"][number];
 
@@ -114,25 +155,69 @@ type Operation = Extract<WalkElement, { readonly kind: "operation" }>;
 const schemeSet = (schemes: readonly string[]): string =>
   JSON.stringify(Arr.sort(schemes, Order.String));
 
+// What a command, or the elements an operation declares or inherits, offer by kind, keyed as the
+// join matches them: parameters by pointer, media and response keys by value, security alternatives
+// by scheme set, servers by URL.
+interface Offer {
+  readonly media: ReadonlySet<string>;
+  readonly parameters: ReadonlySet<string>;
+  readonly responses: ReadonlySet<string>;
+  readonly security: ReadonlySet<string>;
+  readonly servers: ReadonlySet<string>;
+}
+
+const commandOffer = (command: Command): Offer => ({
+  media: new Set(command.requestMedia),
+  parameters: new Set(command.flags.map((flag) => flag.pointer)),
+  responses: new Set(command.responses),
+  security: new Set(command.security.map(schemeSet)),
+  servers: new Set(command.servers),
+});
+
+const elementOffer = (elements: readonly WalkElement[]): Offer => {
+  const offer = {
+    media: new Set<string>(),
+    parameters: new Set<string>(),
+    responses: new Set<string>(),
+    security: new Set<string>(),
+    servers: new Set<string>(),
+  };
+  for (const element of elements) {
+    if (element.kind === "parameter") {
+      offer.parameters.add(element.pointer);
+    } else if (element.kind === "requestMedia") {
+      offer.media.add(element.mediaType);
+    } else if (element.kind === "response") {
+      offer.responses.add(element.key);
+    } else if (element.kind === "securityAlternative") {
+      offer.security.add(schemeSet(element.schemes));
+    } else if (element.kind === "server") {
+      offer.servers.add(element.url);
+    }
+  }
+
+  return offer;
+};
+
 // Whether a command for the operation carries the element, matched on that command's own fields.
-const carries = (command: Command, element: WalkElement): boolean => {
+const carries = (offer: Offer, element: WalkElement): boolean => {
   if (element.kind === "parameter") {
-    return command.flags.some((flag) => flag.pointer === element.pointer);
+    return offer.parameters.has(element.pointer);
   }
 
   if (element.kind === "requestMedia") {
-    return command.requestMedia.includes(element.mediaType);
+    return offer.media.has(element.mediaType);
   }
 
   if (element.kind === "response") {
-    return command.responses.includes(element.key);
+    return offer.responses.has(element.key);
   }
 
   if (element.kind === "securityAlternative") {
-    return command.security.some((schemes) => schemeSet(schemes) === schemeSet(element.schemes));
+    return offer.security.has(schemeSet(element.schemes));
   }
 
-  return element.kind === "operation" || command.servers.includes(element.url);
+  return element.kind === "operation" || offer.servers.has(element.url);
 };
 
 /**
@@ -160,77 +245,149 @@ const carries = (command: Command, element: WalkElement): boolean => {
  * A command whose pointer is no walked operation is invented, as is a command's request media,
  * response key, security alternative or server that its operation neither declares nor inherits,
  * except the default `/` server when no level declares servers.
+ *
+ * The report and `--describe` are indexed once, so the join's cost grows with the elements and
+ * claims, not their product. `count`, when given, receives the number of index lookups and
+ * candidates each step examines, which lets a test bound that cost without timing it.
  */
-export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, CoverageError> =>
-  Effect.gen(function* coverage() {
+export const coverageOf = (
+  input: CoverageInput,
+  count?: (examined: number) => void,
+): Effect.Effect<Coverage, CoverageError> => {
+  // One index lookup each, as `count` sees it.
+  const has = <K>(index: ReadonlySet<K> | ReadonlyMap<K, unknown>, at: K): boolean => {
+    count?.(1);
+
+    return index.has(at);
+  };
+  const lookup = <K, V>(index: ReadonlyMap<K, V>, at: K): V | undefined => {
+    count?.(1);
+
+    return index.get(at);
+  };
+  // Whether `index` holds any of the given sites.
+  const holds = (index: ReadonlySet<string>, sites: readonly string[]): boolean =>
+    sites.some((site) => has(index, site));
+
+  return Effect.gen(function* coverage() {
     const entry = input.resolution.document;
-    const label = (document: string) => labelOf(entry, document);
+    const label = memo((document: string) => labelOf(entry, document));
     const elements = yield* walk(input.resolution);
     const description = yield* decodeDescription(input.describe);
     const report = yield* decodeReport(input.report);
 
     const labelled = <R extends { readonly document: string }>(records: readonly R[]) =>
       records.map((record) => ({ ...record, document: label(record.document) }));
+    const siteOf = (element: WalkElement) => key(label(element.document), element.pointer);
+    // The sites an element lies within, from the one at pointer `from` (the root by default).
+    const sitesAbove = (element: WalkElement, from = ""): readonly string[] =>
+      ancestors(element.pointer)
+        .filter((pointer) => pointer.length >= from.length)
+        .map((pointer) => key(label(element.document), pointer));
+
+    // Refusals: documents refused whole, every refusal's site (each covers its subtree), operation
+    // refusals by site and by every site at or above one, and operation refusals by name.
     const refusals = labelled(report.refusals);
+    const refusedDocuments = new Set(
+      refusals.filter((record) => record.scope === "document").map((record) => record.document),
+    );
+    const refusedSites = new Set(refusals.map((record) => key(record.document, record.pointer)));
+    const operationRefusals = refusals.filter((record) => record.scope === "operation");
+    const operationRefusalSites = new Set(
+      operationRefusals.map((record) => key(record.document, record.pointer)),
+    );
+    const aboveOperationRefusals = new Set(
+      operationRefusals.flatMap((record) =>
+        ancestors(record.pointer).map((pointer) => key(record.document, pointer)),
+      ),
+    );
+    const refusedNames = new Set(
+      operationRefusals.flatMap((record) =>
+        record.operation === undefined
+          ? []
+          : [operationName(record.operation.method, record.operation.path)],
+      ),
+    );
+
+    // Notices by exact site, and the sites of notices that cover their subtree.
     const notices = new Set(
       labelled(report.notices).map((record) => key(record.document, record.pointer)),
     );
-    const subtrees = labelled(report.notices).filter((record) => subtreeNotices.has(record.code));
+    const subtrees = new Set(
+      labelled(report.notices)
+        .filter((record) => subtreeNotices.has(record.code))
+        .map((record) => key(record.document, record.pointer)),
+    );
     const skipped = new Set(
       labelled(report.skipped ?? []).map((record) => key(record.document, record.pointer)),
     );
-    const siteOf = (element: WalkElement) => key(label(element.document), element.pointer);
 
     const operations = new Map(
       elements.flatMap((element): readonly (readonly [string, Operation])[] =>
         element.kind === "operation" ? [[siteOf(element), element]] : [],
       ),
     );
-    const commandsOf = (operation: Operation): readonly Command[] =>
-      description.commands.filter(
-        (command) => key(command.document, command.pointer) === siteOf(operation),
-      );
-    const ownerOf = (element: WalkElement): Operation | undefined =>
-      [...operations.values()].find(
-        (operation) =>
-          operation.document === element.document && within(element.pointer, operation.pointer),
-      );
+    const commandsBySite = new Map<string, Command[]>();
+    for (const command of description.commands) {
+      append(commandsBySite, key(command.document, command.pointer), command);
+    }
 
-    // An operation-scope refusal names the operation it refuses. Its pointer may sit outside that
+    const offerOf = memo(commandOffer);
+    const commandsOf = (operation: Operation): readonly Command[] =>
+      lookup(commandsBySite, siteOf(operation)) ?? [];
+
+    // Each element's owner, the walked operation at one of its sites; operations by the pointers
+    // they inherit; and elements by owner and by pointer, as `inherits` names them.
+    const owners = new Map<WalkElement, Operation>();
+    const owned = new Map<Operation, WalkElement[]>();
+    const atPointer = new Map<string, WalkElement[]>();
+    for (const element of elements) {
+      const owner = sitesAbove(element)
+        .map((site) => lookup(operations, site))
+        .find((operation) => operation !== undefined);
+      if (owner !== undefined) {
+        owners.set(element, owner);
+        append(owned, owner, element);
+      }
+
+      append(atPointer, element.pointer, element);
+    }
+
+    const ownerOf = (element: WalkElement): Operation | undefined => lookup(owners, element);
+    const inheritors = new Map<string, Operation[]>();
+    for (const operation of operations.values()) {
+      for (const pointer of operation.inherits) {
+        append(inheritors, pointer, operation);
+      }
+    }
+
+    // A refusal or an author-config skip: either way the operation has no command by decision. An
+    // operation-scope refusal names the operation it refuses. Its pointer may sit outside that
     // operation, at a path-item parameter the operation inherits, so the name decides; method and
     // path identify one operation of the entry's `paths`, whichever document the refusal names.
     // The report spells the method as the request token, the walk as the path-item key.
-    const names = (record: (typeof refusals)[number], operation: Operation): boolean =>
-      record.operation?.method === operation.method.toUpperCase() &&
-      record.operation.path === operation.path;
-    // A refusal or an author-config skip: either way the operation has no command by decision.
-    const refused = (operation: Operation): boolean =>
-      skipped.has(siteOf(operation)) ||
-      refusals.some(
-        (record) =>
-          (record.scope === "operation" && names(record, operation)) ||
-          (record.document === label(operation.document) &&
-            (record.scope === "document" ||
-              (record.scope === "operation" &&
-                (within(operation.pointer, record.pointer) ||
-                  within(record.pointer, operation.pointer))))),
-      );
+    const refused = memo(
+      (operation: Operation): boolean =>
+        has(skipped, siteOf(operation)) ||
+        has(refusedNames, operationName(operation.method.toUpperCase(), operation.path)) ||
+        has(refusedDocuments, label(operation.document)) ||
+        holds(operationRefusalSites, sitesAbove(operation)) ||
+        has(aboveOperationRefusals, siteOf(operation)),
+    );
     // An element- or operation-scope refusal covers its subtree; never used for an operation.
     const refusedElement = (element: WalkElement): boolean =>
-      refusals.some(
-        (record) =>
-          record.document === label(element.document) &&
-          (record.scope === "document" || within(element.pointer, record.pointer)),
-      );
+      has(refusedDocuments, label(element.document)) || holds(refusedSites, sitesAbove(element));
     // Every command of the operation (its primary name and each alias) must carry the element; an
     // operation with no command carries nothing.
     const carried = (operation: Operation, element: WalkElement): boolean => {
-      const commands = commandsOf(operation);
+      if (refused(operation)) {
+        return true;
+      }
 
-      return (
-        refused(operation) ||
-        (commands.length > 0 && commands.every((command) => carries(command, element)))
-      );
+      const commands = commandsOf(operation);
+      count?.(commands.length);
+
+      return commands.length > 0 && commands.every((command) => carries(offerOf(command), element));
     };
 
     // Accounted for by a command or a refusal, without notices.
@@ -248,9 +405,10 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
         return carried(owner, element);
       }
 
-      return [...operations.values()]
-        .filter((operation) => operation.inherits.includes(element.pointer))
-        .every((operation) => carried(operation, element));
+      const inheriting = lookup(inheritors, element.pointer) ?? [];
+      count?.(inheriting.length);
+
+      return inheriting.every((operation) => carried(operation, element));
     };
 
     const noticed = (element: WalkElement): boolean => {
@@ -261,60 +419,44 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
       const owner = ownerOf(element);
 
       return (
-        notices.has(siteOf(element)) ||
-        (owner !== undefined &&
-          subtrees.some(
-            (record) =>
-              record.document === label(element.document) &&
-              within(record.pointer, owner.pointer) &&
-              within(element.pointer, record.pointer),
-          ))
+        has(notices, siteOf(element)) ||
+        (owner !== undefined && holds(subtrees, sitesAbove(element, owner.pointer)))
       );
     };
 
+    // What an operation declares or inherits: the elements within it and those at its inherited
+    // pointers.
+    const declared = memo((operation: Operation): Offer => {
+      const effective = [
+        ...(owned.get(operation) ?? []),
+        ...operation.inherits.flatMap((pointer) => lookup(atPointer, pointer) ?? []),
+      ];
+      count?.(effective.length);
+
+      return elementOffer(effective);
+    });
+
     const invented = description.commands.flatMap((command): readonly Invented[] => {
       const site = { document: command.document, path: command.path, pointer: command.pointer };
-      const operation = operations.get(key(command.document, command.pointer));
+      const operation = lookup(operations, key(command.document, command.pointer));
       if (operation === undefined) {
         return [{ ...site, kind: "command" }];
       }
 
-      const effective = elements.filter(
-        (element) => ownerOf(element) === operation || operation.inherits.includes(element.pointer),
-      );
-      const declares = (matches: (element: WalkElement) => boolean) => effective.some(matches);
+      const offer = declared(operation);
 
       return [
         ...command.requestMedia
-          .filter(
-            (mediaType) =>
-              !declares(
-                (element) => element.kind === "requestMedia" && element.mediaType === mediaType,
-              ),
-          )
+          .filter((mediaType) => !has(offer.media, mediaType))
           .map((mediaType): Invented => ({ ...site, kind: "requestMedia", mediaType })),
         ...command.responses
-          .filter(
-            (responseKey) =>
-              !declares((element) => element.kind === "response" && element.key === responseKey),
-          )
+          .filter((responseKey) => !has(offer.responses, responseKey))
           .map((responseKey): Invented => ({ ...site, key: responseKey, kind: "response" })),
         ...command.security
-          .filter(
-            (schemes) =>
-              !declares(
-                (element) =>
-                  element.kind === "securityAlternative" &&
-                  schemeSet(element.schemes) === schemeSet(schemes),
-              ),
-          )
+          .filter((schemes) => !has(offer.security, schemeSet(schemes)))
           .map((schemes): Invented => ({ ...site, kind: "securityAlternative", schemes })),
         ...command.servers
-          .filter(
-            (url) =>
-              !(operation.defaultServer && url === "/") &&
-              !declares((element) => element.kind === "server" && element.url === url),
-          )
+          .filter((url) => !(operation.defaultServer && url === "/") && !has(offer.servers, url))
           .map((url): Invented => ({ ...site, kind: "server", url })),
       ];
     });
@@ -325,6 +467,7 @@ export const coverageOf = (input: CoverageInput): Effect.Effect<Coverage, Covera
       missing: elements.filter((element) => !generated(element) && !noticed(element)),
     };
   });
+};
 
 /**
  * Runs the join and fails with the mismatch when an element is missing or a command is invented.
