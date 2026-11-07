@@ -103,7 +103,7 @@ describe("inventory-trace statuses", () => {
     expect(lines).toEqual(["OAF-01 deferred"]);
   });
 
-  test("a test.todo title is todo, and a plain test beside it makes the row covered", () => {
+  test("a test.todo title is todo, and a plain test beside it makes the row partial", () => {
     const only = trace({ rows: [{ id: "ZZZ-01" }], tests: { "a.test.ts": todo("ZZZ-01: x") } });
     const both = trace({
       rows: [{ id: "ZZZ-01" }],
@@ -111,7 +111,7 @@ describe("inventory-trace statuses", () => {
     });
 
     expect(only.lines).toEqual(["ZZZ-01 todo"]);
-    expect(both.lines).toEqual(["ZZZ-01 covered"]);
+    expect(both.lines).toEqual(["ZZZ-01 partial (1 passing, 1 todo)"]);
   });
 
   test("a row id inside a comment is not a title", () => {
