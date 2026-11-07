@@ -1,0 +1,29 @@
+{
+  "binName": "stripe",
+  "envPrefix": "STRIPE",
+  "naming": {
+    "operations": {
+      "GetInvoiceRenderingTemplatesTemplate": {
+        "parameters": {
+          "query:version": {
+            "flag": "template-version"
+          }
+        }
+      }
+    }
+  },
+  "nonStandard": {
+    "deepObjectBrackets": true
+  },
+  "package": {
+    "name": "stripe-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": [
+      "https://api.stripe.com/",
+      "https://files.stripe.com/",
+      "https://meter-events.stripe.com/"
+    ]
+  }
+}
