@@ -304,6 +304,10 @@ const urlEncoded = "application/x-www-form-urlencoded";
 
 interface Generated {
   readonly diagnostics: readonly Diagnostic[];
+  /**
+   * The generated package directory of a run that was not refused.
+   */
+  readonly out?: string;
 }
 
 let counter = 0;
@@ -338,7 +342,7 @@ const inProcess = async (document: Members): Promise<Generated> => {
     ).pipe(Effect.provide(layer)),
   );
   if (Exit.isSuccess(exit)) {
-    return { diagnostics: exit.value.diagnostics };
+    return { diagnostics: exit.value.diagnostics, out: nodePath.join(dir, "out") };
   }
 
   const [failure] = exit.cause.reasons.flatMap((reason) =>
@@ -412,8 +416,36 @@ describe("ENC field rows through generate()", () => {
       ]);
     });
 
-    test.todo(`ENC-03: declared multipart part headers refuse the operation with EMT-1/unsupported-body vs the declared part headers sent (${line})`, () =>
-      Promise.resolve());
+    // The built CLI sending the header values in the part's head is tests/emit/phdr.test.ts.
+    test(`ENC-03: each declared part header is a --<part>-<header> flag serialized as a header parameter, and the writer's own headers get a notice (${line})`, async () => {
+      const found = await inProcess(
+        withBody(line, multipart, {
+          encoding: {
+            a: {
+              headers: {
+                "Content-Transfer-Encoding": { schema: string },
+                "X-Trace": { required: true, schema: string },
+              },
+            },
+          },
+          schema: objectOf({ a: string }),
+        }),
+      );
+      const cli = nodeFs.readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8");
+
+      expect(summary(found)).toEqual([
+        [
+          "ENC-03/writer-owned-header",
+          "notice",
+          "element",
+          `${multipartAt}/encoding/a/headers/Content-Transfer-Encoding`,
+          "undefined",
+        ],
+      ]);
+      expect(cli).toContain('["a-x-trace", Option.isSome(flags.aXTrace), true]');
+      expect(cli).toContain('Serialize.header("X-Trace", Option.getOrUndefined(flags.aXTrace), {');
+      expect(cli).not.toContain("Content-Transfer-Encoding");
+    });
 
     test.todo(`ENC-10: a part contentType of two media types refuses the operation with EMT-1/unsupported-body vs a --<part>-content-type choice with no sniffing default (${line})`, () =>
       Promise.resolve());

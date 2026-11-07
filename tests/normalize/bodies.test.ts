@@ -471,6 +471,93 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     expect(codes(outcome)).toEqual(["ENC-03/invalid-header-name"]);
   });
 
+  test("HDR-01: a part header is typed and serialized as a header parameter, with its marks", () => {
+    const outcome = implemented(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: {
+          file: {
+            headers: {
+              "X-Meta": { content: { "application/json": { schema: object({ a: string }) } } },
+              "X-Tags": {
+                deprecated: true,
+                explode: true,
+                schema: { items: string, type: "array" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const [meta, tags] = only(only(outcome.body.alternatives).encoding).headers;
+    const at = `${site}/content/multipart~1form-data/encoding/file/headers`;
+
+    expect(meta?.serialization).toMatchObject({ kind: "content", mediaType: "application/json" });
+    expect(String(meta?.serialization.origin.pointer)).toBe(`${at}/X-Meta`);
+    expect(tags?.schema.key).toContain("X-Tags");
+    expect(tags).toMatchObject({ deprecated: true, required: false });
+    expect(tags?.serialization).toMatchObject({
+      explode: true,
+      kind: "style",
+      objectValued: false,
+      style: "simple",
+    });
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-03: headers the multipart writer owns get a notice and leave the rule", () => {
+    const outcome = implemented(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: {
+          file: {
+            headers: {
+              "Content-Disposition": { schema: string },
+              "Content-Transfer-Encoding": { schema: string },
+              "X-Rate": { schema: string },
+            },
+          },
+        },
+      }),
+    );
+    const rule = only(only(outcome.body.alternatives).encoding);
+
+    expect(rule.headers.map((header) => String(header.name))).toEqual(["X-Rate"]);
+    expect(rule.rows.map(String)).toContain("ENC-03");
+    expect(codes(outcome)).toEqual(["ENC-03/writer-owned-header", "ENC-03/writer-owned-header"]);
+    expect(outcome.diagnostics.map(({ pointer }) => String(pointer))).toEqual([
+      `${site}/content/multipart~1form-data/encoding/file/headers/Content-Disposition`,
+      `${site}/content/multipart~1form-data/encoding/file/headers/Content-Transfer-Encoding`,
+    ]);
+  });
+
+  test("ENC-03: Content-Disposition is the writer's only under multipart/form-data", () => {
+    const alternative = alternativeOf("3.2", "multipart/mixed", {
+      prefixEncoding: [{ headers: { "Content-Disposition": { schema: string } } }],
+      schema: { prefixItems: [string], type: "array" },
+    });
+
+    expect(
+      alternative.prefixEncoding.flatMap((rule) => rule.headers.map(({ name }) => String(name))),
+    ).toEqual(["Content-Disposition"]);
+  });
+
+  test("ENC-03: a part header the header parameter path cannot carry refuses the alternative", () => {
+    const outcome = refused(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: { file: { headers: { "X-Pos": { schema: string, style: "matrix" } } } },
+      }),
+    );
+    const [diagnostic] = outcome.diagnostics;
+
+    expect(codes(outcome)).toEqual(["ENC-03/unsupported-part-header"]);
+    expect(String(diagnostic?.pointer)).toBe(`${site}/content/multipart~1form-data`);
+    expect(diagnostic?.related?.map(({ pointer }) => String(pointer))).toEqual([
+      `${site}/content/multipart~1form-data/encoding/file/headers/X-Pos`,
+    ]);
+  });
+
   test("MED-11 3.0 and 3.1 refuse an encoding key with no schema property", () => {
     for (const line of ["3.0", "3.1"] as const) {
       const outcome = refused(

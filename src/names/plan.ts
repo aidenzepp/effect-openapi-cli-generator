@@ -29,12 +29,12 @@ export interface PlannedPositional {
 
 /**
  * What a multipart part option flag sets on its part: the part's `Content-Type`, one of `choices`,
- * the media types its Encoding `contentType` lists (design 6.3, ENC-10).
+ * the media types its Encoding `contentType` lists (design 6.3, ENC-10), or the value of its
+ * Encoding header `name` (ENC-03).
  */
-export interface PartOptionKind {
-  readonly choices: readonly string[];
-  readonly kind: "content-type";
-}
+export type PartOptionKind =
+  | { readonly choices: readonly string[]; readonly kind: "content-type" }
+  | { readonly kind: "header"; readonly name: string };
 
 /**
  * Where a flag's value goes: a parameter by location and wire name, a body field by its RFC 6901
@@ -42,7 +42,8 @@ export interface PartOptionKind {
  * an option of the multipart part at `part` (the part flag's body pointer). `pointer` is what
  * `--describe` reports: the parameter's source pointer, a body field's declaring property schema
  * (`BodyFlag.schemaPointer`, from the first media alternative that has the flag), the request body
- * for `--body` and `--body-file`, or a part option's Encoding Object.
+ * for `--body` and `--body-file`, or a part option's Encoding Object (a header option's Encoding
+ * header).
  */
 export type FlagSource =
   | {
@@ -914,6 +915,107 @@ const draftContentTypes = (
   }));
 };
 
+interface DraftedHeader {
+  readonly boolean: boolean;
+  readonly header: string;
+  readonly media: string[];
+  readonly part: string;
+  readonly pointer: string;
+  readonly rule: string;
+}
+
+// A part header flag collision: the part flag's rename renames it. The config key for the Encoding
+// header itself is not settled yet, so the hint names the header's pointer.
+const headerHint = (site: OverrideSite, part: string, header: string): string =>
+  `Rename the part flag with ${site.configKey}.fields[${JSON.stringify(part)}].flag (no config key renames the Encoding header at ${header} yet), or skip the operation with ${site.configKey}.skip.`;
+
+// One `--<part>-<header>` flag per declared header of each multipart part's Encoding rule (design
+// 6.3, ENC-03): named after the part flag and the header name folded, typed as a header parameter
+// is, so a boolean header is negatable. Alternatives that declare the same header on the same part
+// share it; any other owner of the name collides.
+const draftPartHeaders = (
+  subject: Subject,
+  context: DraftContext,
+  parts: readonly Merged[],
+  owners: Owners,
+): Effect.Effect<readonly DraftFlag[]> =>
+  Effect.gen(function* draft() {
+    const { operation, site } = subject;
+    const drafted = new Map<string, DraftedHeader>();
+    for (const { flag, media } of parts) {
+      for (const alternative of operation.body?.alternatives ?? []) {
+        if (alternative.codec !== "multipart" || !media.includes(alternative.mediaType)) {
+          continue;
+        }
+
+        const rule = alternative.encoding.find(
+          (candidate) =>
+            candidate.target.kind === "property" &&
+            formatPointer([candidate.target.name]) === flag.pointer,
+        );
+        for (const header of rule === undefined || rule.nested !== undefined ? [] : rule.headers) {
+          const folded = foldKebab(header.name);
+          if (Result.isFailure(folded)) {
+            continue;
+          }
+
+          const name = `${flag.name}-${folded.success.name}`;
+          const at = `${rule?.origin.pointer ?? ""}/headers/${escapeToken(header.name)}`;
+          const { pointer } = alternative.origin;
+          const owner: Owner = {
+            field: flag.pointer,
+            hint: headerHint(site, flag.pointer, at),
+            kind: "body",
+            pointer,
+          };
+          const known = drafted.get(name);
+          if (known !== undefined && known.part === flag.pointer && known.header === header.name) {
+            known.media.push(alternative.mediaType);
+            continue;
+          }
+
+          addOwner(owners, name, owner);
+          if (known !== undefined) {
+            continue;
+          }
+
+          const boolean =
+            header.serialization.kind === "style" &&
+            !header.serialization.objectValued &&
+            (yield* Effect.fromResult(
+              isBooleanSchema(context.defs, context.booleans, header.schema.key),
+            ).pipe(Effect.orDie));
+          if (boolean) {
+            addOwner(owners, `no-${name}`, owner);
+          }
+
+          drafted.set(name, {
+            boolean,
+            header: header.name,
+            media: [alternative.mediaType],
+            part: flag.pointer,
+            pointer,
+            rule: at,
+          });
+        }
+      }
+    }
+
+    return [...drafted].map(([name, option]): DraftFlag => ({
+      boolean: option.boolean,
+      name,
+      notes: [],
+      pointer: option.pointer,
+      source: {
+        _tag: "PartOption",
+        media: option.media,
+        option: { kind: "header", name: option.header },
+        part: option.part,
+        pointer: option.rule,
+      },
+    }));
+  });
+
 const draftBody = (
   subject: Subject,
   context: DraftContext,
@@ -980,6 +1082,7 @@ const draftBody = (
     }
 
     const options = draftContentTypes(subject, [...merged.values()], owners);
+    const headers = yield* draftPartHeaders(subject, context, [...merged.values()], owners);
     const fieldFlags = [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
       if (!isWholeBody(flag.kind)) {
@@ -1009,7 +1112,7 @@ const draftBody = (
       return { boolean, name: flag.name, notes: flag.notes, pointer, source };
     });
 
-    return [...fieldFlags, ...options];
+    return [...fieldFlags, ...options, ...headers];
   });
 
 const ownerRank: Record<Owner["kind"], number> = { body: 2, parameter: 1, positional: 0 };

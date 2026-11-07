@@ -57,12 +57,64 @@ const styleName = Schema.Literals([
   "spaceDelimited",
 ]);
 
-const requestHeaders = Schema.Array(Schema.Struct({ name: HeaderName, required: Schema.Boolean }));
-
 // A response Header Object by name, with its `required` and `deprecated` marks (HDR-03, HDR-04);
 // absent in the document, each is false.
 const responseHeaders = Schema.Array(
   Schema.Struct({ deprecated: Schema.Boolean, name: HeaderName, required: Schema.Boolean }),
+);
+
+// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
+// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
+// convention. Set only from the author config, never defaulted or inferred; absent is strict.
+const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
+
+/**
+ * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
+ * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
+ * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
+ * by its style.
+ */
+export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
+  allowReserved: Schema.Boolean,
+  explode: Schema.Boolean,
+  kind: Schema.Literal("style"),
+  nonStandard,
+  objectValued: Schema.Boolean,
+  origin: Origin,
+  rows,
+  rules,
+  style: styleName,
+}) {}
+
+/**
+ * A parameter written in `content` form.
+ */
+export class ContentSerialization extends Schema.Class<ContentSerialization>(
+  "ContentSerialization",
+)({
+  kind: Schema.Literal("content"),
+  mediaType: MediaType,
+  origin: Origin,
+  rows,
+  rules,
+  schema: SchemaRef,
+}) {}
+
+/**
+ * How a parameter value reaches the wire: by style or by content.
+ */
+export const Serialization = Schema.Union([StyleSerialization, ContentSerialization]);
+
+// A part header of an Encoding Object: a Header Object by name, typed and serialized as a header
+// parameter is (HDR-01, ENC-03), with its `required` and `deprecated` marks.
+const partHeaders = Schema.Array(
+  Schema.Struct({
+    deprecated: Schema.Boolean,
+    name: HeaderName,
+    required: Schema.Boolean,
+    schema: SchemaRef,
+    serialization: Serialization,
+  }),
 );
 
 const encodingTarget = Schema.Union([
@@ -78,15 +130,10 @@ const explicitStyle = Schema.Struct({
 
 const nestedEncodingRule = Schema.Struct({
   contentType: Schema.Array(MediaRange),
-  headers: requestHeaders,
+  headers: partHeaders,
   serialization: Schema.optionalKey(explicitStyle),
   target: encodingTarget,
 });
-
-// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
-// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
-// convention. Set only from the author config, never defaulted or inferred; absent is strict.
-const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
 
 /**
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
@@ -97,7 +144,7 @@ const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
   contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
-  headers: requestHeaders,
+  headers: partHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
   nonStandard,
   origin: Origin,
@@ -164,43 +211,6 @@ export class Body extends Schema.Class<Body>("Body")({
   required: Schema.Boolean,
   rows,
 }) {}
-
-/**
- * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
- * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
- * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
- * by its style.
- */
-export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
-  allowReserved: Schema.Boolean,
-  explode: Schema.Boolean,
-  kind: Schema.Literal("style"),
-  nonStandard,
-  objectValued: Schema.Boolean,
-  origin: Origin,
-  rows,
-  rules,
-  style: styleName,
-}) {}
-
-/**
- * A parameter written in `content` form.
- */
-export class ContentSerialization extends Schema.Class<ContentSerialization>(
-  "ContentSerialization",
-)({
-  kind: Schema.Literal("content"),
-  mediaType: MediaType,
-  origin: Origin,
-  rows,
-  rules,
-  schema: SchemaRef,
-}) {}
-
-/**
- * How a parameter value reaches the wire: by style or by content.
- */
-export const Serialization = Schema.Union([StyleSerialization, ContentSerialization]);
 
 /**
  * An operation parameter after path-item merge.

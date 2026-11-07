@@ -639,6 +639,98 @@ describe("planNames: a multipart part with several content types (ENC-10)", () =
   });
 });
 
+describe("planNames: multipart part headers (ENC-03)", () => {
+  const media = "multipart/form-data";
+  const home = `/paths/~1u/post/requestBody/content/${escape(media)}`;
+  const header = (name: string, schema: string, required: boolean): Json => ({
+    deprecated: false,
+    name,
+    required,
+    schema: { key: schema },
+    serialization: {
+      allowReserved: false,
+      explode: false,
+      kind: "style",
+      objectValued: false,
+      origin: origin(`${home}/encoding/file/headers/${name}`),
+      rows: [],
+      rules: "3.1",
+      style: "simple",
+    },
+  });
+  const upload = (properties: Readonly<Record<string, Json>>): ApiInput => ({
+    defs: { Body: object(properties), Flag: { type: "boolean" }, Text: { type: "string" } },
+    operations: [
+      {
+        body: [
+          {
+            codec: "multipart",
+            encoding: [
+              {
+                contentType: ["image/png"],
+                headers: [header("X-Checksum", "Text", true), header("X-Signed", "Flag", false)],
+                origin: origin(`${home}/encoding/file`),
+                rows: [],
+                target: { kind: "property", name: "file" },
+              },
+            ],
+            media,
+            schema: "Body",
+          },
+        ],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  });
+
+  test("each header is a --<part>-<header> option; a boolean header is negatable", () => {
+    const result = plan(upload({ file: { format: "binary", type: "string" } }));
+    const command = commandOf(result, "upload");
+    const checksum = command?.flags.find((flag) => flag.name === "file-x-checksum");
+
+    expect(flagNames(command)).toEqual(["file", "file-x-checksum", "file-x-signed"]);
+    expect(checksum?.source).toEqual({
+      _tag: "PartOption",
+      media: [media],
+      option: { kind: "header", name: "X-Checksum" },
+      part: "/file",
+      pointer: `${home}/encoding/file/headers/X-Checksum`,
+    });
+    expect(checksum?.boolean).toBe(false);
+    expect(command?.flags.find((flag) => flag.name === "file-x-signed")?.boolean).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("a flag of the same name is the flag collision, hinted through the part flag", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "file-x-checksum": { type: "string" },
+      }),
+    );
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+  });
+
+  test("a boolean header's negation collides too", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "no-file-x-signed": { type: "string" },
+      }),
+    );
+
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+  });
+});
+
 describe("planNames: overrides", () => {
   const input: ApiInput = {
     operations: [{ method: "GET", operationId: "list", path: "/l" }],

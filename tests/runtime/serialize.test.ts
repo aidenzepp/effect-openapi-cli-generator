@@ -1267,6 +1267,30 @@ describe("formData", () => {
     );
   });
 
+  test("a keyed part's header lines precede its type on every value; an absent header is not written", async () => {
+    const headers = [
+      Serialize.header("X-Checksum", "9f86d0", { explode: false, required: false }),
+      Serialize.header("X-Trace", undefined, { explode: false, required: false }),
+      Serialize.header("X-Tags", ["a", "b"], { explode: false, required: false }),
+    ];
+    const built = await run(
+      formRequest({}, [["photo", { contentType: "image/png", headers, values: ["x", "y"] }]]),
+    );
+    const boundary = boundaryOf(built);
+    const part = (body: string) =>
+      `--${boundary}\r\nContent-Disposition: form-data; name="photo"\r\nX-Checksum: 9f86d0\r\nX-Tags: a,b\r\nContent-Type: image/png\r\n\r\n${body}\r\n`;
+
+    expect(await streamed(built)).toBe([part("x"), part("y"), `--${boundary}--\r\n`].join(""));
+  });
+
+  test("a part header value no header line can carry is a usage error", async () => {
+    const headers = [Serialize.header("X-Trace", "a\r\nb", { explode: false, required: false })];
+
+    await expectUsage(
+      formRequest({}, [["photo", { contentType: "image/png", headers, values: ["x"] }]]),
+    );
+  });
+
   test("a chosen part not sent writes nothing", async () => {
     const built = await run(formRequest({}, [["photo", undefined]], false));
 
@@ -1320,6 +1344,19 @@ describe("chooseParts", () => {
     const exit = await split({ "photo-part": ["x"] }, Option.none());
 
     expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+  });
+
+  test("a part with one listed type and headers carries both; not sent, it carries neither", async () => {
+    const header = Serialize.header("X-Checksum", "9f86d0", { explode: false, required: false });
+    const choose = Serialize.chooseParts({ file: ["file", "image/png", [header]] });
+    const sent = await Effect.runPromise(choose({ file: ["x"], title: ["cat"] }));
+    const absent = await Effect.runPromise(choose({ title: ["cat"] }));
+
+    expect(sent).toEqual({
+      fields: { title: ["cat"] },
+      file: { contentType: "image/png", headers: [header], values: ["x"] },
+    });
+    expect(absent).toEqual({ fields: { title: ["cat"] } });
   });
 });
 

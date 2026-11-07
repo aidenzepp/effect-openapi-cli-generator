@@ -1123,3 +1123,95 @@ export const normalizeParameter = (
       parameter: yield* build(resolution, site, source, decision.plan, limits),
     };
   });
+
+const { in: _in, name: _name, ...headerFields } = ParameterObject.fields;
+
+// A Header Object is a Parameter Object without `name` and `in` (HDR-01).
+const HeaderObject = Schema.Struct(headerFields);
+
+/**
+ * How one encoding part header is typed and sent: as a header parameter of its name would be, or
+ * `Unsupported` with the reason the header parameter path cannot carry it.
+ */
+export type PartHeaderOutcome =
+  | {
+      readonly _tag: "Typed";
+      readonly schema: { readonly key: string };
+      readonly serialization: ReturnType<typeof serializationOf>;
+    }
+  | { readonly _tag: "Unsupported"; readonly reason: string };
+
+const unsupported = (reason: string): PartHeaderOutcome => ({ _tag: "Unsupported", reason });
+
+/**
+ * Decides an encoding part header (ENC-03, HDR-01) by the header parameter rules: the Header
+ * Object at use site `site`, read where its `$ref` leads, as `in: header` under `name`. The name
+ * rules of header parameters (PRM-19, PRM-21) govern the operation's own headers and do not apply
+ * to a part's. A style or content the header parameter path refuses, a dynamic keyword in its
+ * schema, or a Header Object with neither or both of `schema` and `content` is `Unsupported`. The
+ * notices a header parameter would carry are not repeated here. `origin` is the header's pointer.
+ */
+export const partHeader = (
+  resolution: Resolution,
+  site: CanonicalKey,
+  name: string,
+  origin: Related,
+  limits: SchemaLimits = {},
+): Effect.Effect<PartHeaderOutcome> =>
+  Effect.gen(function* decidePartHeader() {
+    const target = follow(resolution, site);
+    const decoded = yield* nodeIn(resolution, target).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
+      Effect.option,
+    );
+    if (Option.isNone(decoded)) {
+      return unsupported("The header is not a Header Object.");
+    }
+
+    const node: ParameterNode = { ...decoded.value, in: "header", name };
+    if ((node.schema === undefined) === (node.content === undefined)) {
+      return unsupported("The header needs exactly one of schema and content.");
+    }
+
+    if (node.content !== undefined && Object.keys(node.content).length !== 1) {
+      return unsupported("The header's content needs exactly one media type.");
+    }
+
+    const source: Source = { node, reference: referenceIn(resolution, site), related: [], target };
+    const traits: Traits = {
+      brackets: false,
+      multiple: false,
+      nested: yield* nestsDeeply(resolution, source),
+      nonObject: false,
+      primitive: yield* declaresPrimitive(resolution, source),
+    };
+    const decision = Option.match(yield* mediaOf(resolution, source), {
+      onNone: () => decideStyle(node, resolution.line, traits),
+      onSome: ([mediaType, schemaKey]) => decideContent(node, mediaType, schemaKey),
+    });
+    if (decision._tag === "Refuse") {
+      return unsupported(decision.finding.message);
+    }
+
+    if (decision._tag === "Ignore") {
+      return unsupported("The header parameter rules ignore this header.");
+    }
+
+    if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
+      return unsupported("The header's schema applies a dynamic keyword.");
+    }
+
+    const { plan } = decision;
+    const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
+
+    return {
+      _tag: "Typed",
+      schema: {
+        key:
+          plan.kind === "content"
+            ? plan.schemaKey
+            : schemaKeyAt(resolution, childKey(target, "schema")),
+      },
+      serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
+    };
+  });
