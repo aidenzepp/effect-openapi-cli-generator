@@ -464,8 +464,37 @@ describe("SEC rows through generate()", () => {
     }, 60_000);
   }
 
-  test.todo('SEC-08: help for an operation with absent security shows no AUTH entry (the emitted help sections hold only REQUEST and RESPONSES) vs help says "no authentication documented" (design D-OQ10 (a))', () =>
-    Promise.resolve());
+  test('SEC-08: help for an operation with absent security says "no authentication documented" (design D-OQ10 (a))', async () => {
+    // A document with no root list, so the operation's security is absent everywhere; the fixture
+    // declares a root list, so this one package is built here.
+    const dir = nodePath.join(work, "absent");
+    nodeFs.mkdirSync(dir, { recursive: true });
+    const specPath = nodePath.join(dir, "openapi.json");
+    const configPath = nodePath.join(dir, "author-config.json");
+    nodeFs.writeFileSync(
+      specPath,
+      JSON.stringify(members("3.1.2", { "/absent": unsecured("absent-get") })),
+    );
+    nodeFs.writeFileSync(configPath, JSON.stringify(authorConfig));
+    const help = await Effect.runPromise(
+      generateFixture({ configPath, specPath }).pipe(
+        Effect.tap(preparePackage),
+        Effect.flatMap((generated) =>
+          runBin(generated, { args: ["absent-get", "--help"], timeoutMs: 30_000 }),
+        ),
+        Scope.provide(scope),
+        Effect.provide(layer),
+      ),
+    );
+    const auth = latin1(help.stdout)
+      .split("\n")
+      .filter((entry) => entry.startsWith("AUTH"));
+
+    expect([help.exitCode, auth.map((entry) => entry.replace(/^AUTH\s+/, ""))]).toEqual([
+      0,
+      ["no authentication documented"],
+    ]);
+  }, 600_000);
 
   for (const line of ["3.0.4", "3.1.2"] as const) {
     test(`SEC-09: an undeclared name is an element refusal at the name while another alternative remains (${line})`, async () => {
@@ -523,8 +552,13 @@ describe("SEC rows through generate()", () => {
     expect(found.commands).toContain("/paths/~1by-relative/get");
   }, 60_000);
 
-  test.todo("SEC-10: a 3.2 undeclared requirement name also raises SEC-09/undeclared-scheme (row SEC-09, a 3.0.4 and 3.1.2 row) at the same pointer, from normalize, beside SEC-10/unresolved-scheme vs only SEC-10-rowed refusals on a 3.2 document", () =>
-    Promise.resolve());
+  test("SEC-10: a 3.2 undeclared requirement name raises only SEC-10-rowed refusals", async () => {
+    const found = await fixture("3.2.1");
+    const refusals = at(found, "/paths/~1undeclared/get/security");
+
+    expect(refusals.length).toBeGreaterThan(0);
+    expect(refusals.map((entry) => entry[0])).toEqual(refusals.map(() => "SEC-10"));
+  }, 60_000);
 
   test("SEC-10: names resolve from the entry document, so a URI into another document of the set is refused", async () => {
     const otherSchemes = {
