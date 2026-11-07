@@ -31,6 +31,16 @@ const wireForms = (credential: Credential): readonly string[] => {
   return forms.filter((form) => form !== "");
 };
 
+/**
+ * Every wire form, and each one as `strip` leaves it. Empty forms are dropped.
+ */
+const formsAround =
+  (strip: (text: string) => string) =>
+  (credential: Credential): readonly string[] =>
+    wireForms(credential)
+      .flatMap((form) => [form, strip(form)])
+      .filter((form) => form !== "");
+
 interface Covered {
   readonly start: number;
   readonly end: number;
@@ -46,9 +56,13 @@ const byStartThenLongest = Order.combine(
  * Every occurrence of every wire form of every credential as a character range, overlapping
  * occurrences included.
  */
-const occurrences = (text: string, credentials: readonly Credential[]): readonly Covered[] =>
+const occurrences = (
+  text: string,
+  credentials: readonly Credential[],
+  formsOf: (credential: Credential) => readonly string[],
+): readonly Covered[] =>
   credentials.flatMap((credential) =>
-    wireForms(credential).flatMap((form) => {
+    formsOf(credential).flatMap((form) => {
       const placeholder = `<redacted:${credential.scheme}>`;
       const found: Covered[] = [];
 
@@ -80,13 +94,12 @@ const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
   return runs;
 };
 
-/**
- * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
- * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
- * character of any form survives (recheck N1), and placeholders are never rescanned.
- */
-export const scrub = (text: string, credentials: readonly Credential[]): string => {
-  const runs = mergeRuns(occurrences(text, credentials));
+const scrubForms = (
+  text: string,
+  credentials: readonly Credential[],
+  formsOf: (credential: Credential) => readonly string[],
+): string => {
+  const runs = mergeRuns(occurrences(text, credentials, formsOf));
   let scrubbed = "";
   let at = 0;
 
@@ -97,6 +110,26 @@ export const scrub = (text: string, credentials: readonly Credential[]): string 
 
   return scrubbed + text.slice(at);
 };
+
+/**
+ * Replace every wire form of every configured credential with `<redacted:<scheme>>` (design 7.5,
+ * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
+ * character of any form survives (recheck N1), and placeholders are never rescanned.
+ */
+export const scrub = (text: string, credentials: readonly Credential[]): string =>
+  scrubForms(text, credentials, wireForms);
+
+/**
+ * Scrub, apply `strip`, then scrub again (design 7.4, audit S2). The first pass runs before
+ * anything is removed, so a credential holding a character `strip` removes is found as sent. The
+ * second pass finds a credential that removed characters had split, matching each form both as
+ * sent and as `strip` leaves it.
+ */
+export const scrubAround = (
+  text: string,
+  credentials: readonly Credential[],
+  strip: (text: string) => string,
+): string => scrubForms(strip(scrub(text, credentials)), credentials, formsAround(strip));
 
 const encoder = new TextEncoder();
 

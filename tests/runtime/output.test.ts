@@ -825,3 +825,49 @@ describe("a credential split by invisible characters is scrubbed (security revie
     },
   );
 });
+
+// Audit S2: a credential holding characters `sanitize` removes (U+00AD, the C1 NEL and the C0 SOH),
+// which `auth.ts` accepts. The echo carries it as sent, then split by a bidi control.
+const strippable = "CANARY\u00AD\u0085\u0001SECRET";
+
+const strippableBearer: Credential = { ...bearer, value: Redacted.make(strippable) };
+
+const strippableEcho = `x ${strippable} y CANARY\u202E\u00AD\u0085\u0001SECRET z`;
+
+describe("credentials are scrubbed before the text is sanitized (audit S2, design 7.4)", () => {
+  test("the body excerpt", async () => {
+    const excerpt = await excerptWith(strippableEcho, defaultMaxErrorBytes, [strippableBearer]);
+
+    expect(excerpt).toBe("x <redacted:bearer> y <redacted:bearer> z");
+  });
+
+  test("the request id line and the excerpt of a rendered error", () => {
+    const rendered = renderError(
+      responseError({ bodyExcerpt: strippableEcho, requestId: strippableEcho }),
+      [strippableBearer],
+    );
+
+    expect(rendered.split("\n").slice(1)).toEqual([
+      "Request ID: x <redacted:bearer> y <redacted:bearer> z",
+      "x <redacted:bearer> y <redacted:bearer> z",
+    ]);
+  });
+
+  test("a single line: the defect report", async () => {
+    const { stderr } = await runCatch(Effect.die(strippableEcho), [strippableBearer]);
+
+    expect(stderr).toContain("Error: x <redacted:bearer> y <redacted:bearer> z\n");
+    expect(stderr).not.toMatch(/CANARY|SECRET/u);
+  });
+
+  test("the final report of a parse error", async () => {
+    const unknown = new CliError.UnrecognizedOption({
+      option: `--${strippableEcho}`,
+      suggestions: [],
+    });
+    const { stderr } = await runCatch(Effect.fail(unknown), [strippableBearer]);
+
+    expect(stderr).toContain("--x <redacted:bearer> y <redacted:bearer> z");
+    expect(stderr).not.toMatch(/CANARY|SECRET/u);
+  });
+});

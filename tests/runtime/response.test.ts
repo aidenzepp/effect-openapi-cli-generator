@@ -160,6 +160,22 @@ describe("classify", () => {
     expect(rendered).not.toContain("SECRETTOKEN");
   });
 
+  test("a credential holding characters sanitize removes is scrubbed from the request id (audit S2)", () => {
+    // U+00AD, the C1 NEL and the C0 SOH: `auth.ts` accepts them, `sanitize` removes them.
+    const secret = "CANARY\u00AD\u0085\u0001SECRET";
+    const credential: Credential = {
+      definition: { kind: "http", scheme: "bearer" },
+      scheme: "bearer",
+      value: Redacted.make(secret),
+    };
+    const header = `req-${secret}-CANARY\u009B\u00AD\u0085\u0001SECRET`;
+    const error = toApiResponseError(table, respond(404, { "x-request-id": header }), "", [
+      credential,
+    ]);
+
+    expect(error.requestId).toBe("req-<redacted:bearer>-<redacted:bearer>");
+  });
+
   test("an unfollowed 3xx carries the Location with query credentials redacted, exit 1", async () => {
     const error = await apiError(
       respond(302, { location: "https://login.example.com/next?access_token=SECRET&state=ok" }),

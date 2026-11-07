@@ -3,7 +3,7 @@ import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
 import type { Credential } from "./auth.ts";
-import { scrub } from "./redact.ts";
+import { scrubAround } from "./redact.ts";
 
 /**
  * What the matcher needs of one operation: its display name, its declared response keys (an
@@ -80,8 +80,9 @@ const boundRequestId = (text: string): string => {
 };
 
 /**
- * The declared request-id header, credentials scrubbed, then sanitized, then bounded (audit F6):
- * bounding first could cut a credential so that the remaining prefix no longer matches.
+ * The declared request-id header, credentials scrubbed, sanitized and scrubbed again (design 7.1,
+ * audit S2), then bounded (audit F6): bounding first could cut a credential so that the remaining
+ * prefix no longer matches.
  */
 const requestIdOf = (
   table: ResponseTable,
@@ -96,7 +97,7 @@ const requestIdOf = (
 
   return header === undefined
     ? undefined
-    : boundRequestId(scrub(header.replaceAll(unsafeText, ""), credentials));
+    : boundRequestId(scrubAround(header, credentials, (text) => text.replaceAll(unsafeText, "")));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
