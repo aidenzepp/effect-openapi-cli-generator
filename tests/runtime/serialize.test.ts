@@ -653,6 +653,20 @@ describe("deepObject", () => {
     await expectUsage(Serialize.deepObject("c", "a", formOptions()).expand);
   });
 
+  // Watch item N2: a marked array of scalars (Stripe's `expand`) sends each value indexed.
+  test("with brackets, two values of a scalar array are sent as a[0] and a[1]", async () => {
+    const brackets = formOptions({ brackets: true });
+    const body = Serialize.urlEncode(
+      { expand: ["data.a", "data.b"] },
+      { properties: [["expand", { brackets: true, explode: true, style: "deepObject" }]] },
+    );
+
+    expect(await query(Serialize.deepObject("expand", ["data.a", "data.b"], brackets))).toBe(
+      "expand%5B0%5D=data.a&expand%5B1%5D=data.b",
+    );
+    expect(await Effect.runPromise(body)).toBe("expand%5B0%5D=data.a&expand%5B1%5D=data.b");
+  });
+
   test("an empty object sends nothing or is refused when required", async () => {
     expect(await query(Serialize.deepObject("c", {}, formOptions()))).toBeUndefined();
     await expectUsage(Serialize.deepObject("c", {}, formOptions({ required: true })).expand);
