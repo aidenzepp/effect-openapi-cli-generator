@@ -17,7 +17,7 @@ import { resolve } from "../../src/resolve/index.ts";
 // a file (ENC-31, BIN-02, BIN-04), a 3.2 top-level array part takes its item's default type
 // (ENC-24), a style-based multipart part is sent as name and raw value or refused alone (ENC-40),
 // and a binary body's maxLength bounds the upload (MED-21). An object multipart part is one JSON
-// part (ENC-22, m2-jpart).
+// part (ENC-22, m2-jpart). An object body on multipart/mixed is refused alone (MED-25).
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -46,21 +46,25 @@ type Line = "3.0" | "3.1" | "3.2";
 
 const versions: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.0", "3.2": "3.2.0" };
 
-// One `POST /uploads` operation whose required body is `media` under `mediaType`.
-const specOf = (line: Line, mediaType: string, media: Schema.Json): Schema.Json => ({
+// One `POST /uploads` operation whose required body has the alternatives in `content`.
+const specWith = (line: Line, content: Record<string, Schema.Json>): Schema.Json => ({
   ...golden,
   openapi: versions[line],
   paths: {
     "/uploads": {
       post: {
         operationId: "uploads-create",
-        requestBody: { content: { [mediaType]: media }, required: true },
+        requestBody: { content, required: true },
         responses: { "200": { description: "ok" } },
         tags: ["uploads"],
       },
     },
   },
 });
+
+// One `POST /uploads` operation whose required body is `media` under `mediaType`.
+const specOf = (line: Line, mediaType: string, media: Schema.Json): Schema.Json =>
+  specWith(line, { [mediaType]: media });
 
 const contentOf = (files: readonly EmittedFile[], path: string): string =>
   files.find((file) => file.path === path)?.content ?? "";
@@ -234,4 +238,22 @@ describe("MED-21: a binary body's maxLength bounds the upload", () => {
     expect(emitted.cli).toContain("Input.binaryBody");
     expect(emitted.cli).not.toContain("maxBytes");
   });
+});
+
+describe("MED-25: an object body on multipart/mixed is refused alone", () => {
+  for (const line of ["3.0", "3.1", "3.2"] as const) {
+    test(`a ${line} operation keeps its JSON alternative and has no operation refusal`, async () => {
+      const schema = object({ name: { type: "string" } });
+      const emitted = await uploads(
+        line,
+        specWith(line, { "application/json": { schema }, "multipart/mixed": { schema } }),
+      );
+
+      expect(emitted.refusals).toEqual([]);
+      expect(emitted.cli).toContain("uploads-create");
+      expect(emitted.diagnostics).toEqual([
+        { code: "MED-25/unnamed-parts", scope: "element", severity: "refusal" },
+      ]);
+    });
+  }
 });

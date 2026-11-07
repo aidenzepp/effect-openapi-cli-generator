@@ -1282,6 +1282,20 @@ const arrayFormData = (at: CanonicalKey): Finding =>
     "Describe the body as an object whose properties are the parts",
   );
 
+// MED-25: a multipart type other than form-data sends unnamed ordered parts, and correlating them
+// with an object's properties by a Content-Disposition name is a MAY this generator does not offer.
+const unnamedParts = (line: Line, at: CanonicalKey): Finding =>
+  refusal(
+    "MED-25/unnamed-parts",
+    line === "3.2" ? "additional-encoding-approaches" : "encoding-multipart-media-types",
+    "Multipart object body other than form-data",
+    "This multipart type sends unnamed parts in order, which the object schema's named properties do not map to, so the media type is refused.",
+    at,
+    line === "3.2"
+      ? "Use multipart/form-data, or describe the parts in order with an array schema"
+      : "Use multipart/form-data",
+  );
+
 interface Media {
   readonly home: CanonicalKey;
   readonly node: MediaNode;
@@ -1512,6 +1526,22 @@ const isArrayBody = (
     return typesOf(yield* flatten(walk, schema)).includes("array");
   });
 
+// An object root: not an array body, and typed object or with declared properties.
+const isObjectBody = (
+  walk: Walk,
+  schema: CanonicalKey,
+  members: Members,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* objectBody() {
+    if (yield* isArrayBody(walk, schema, members)) {
+      return false;
+    }
+
+    return (
+      members.properties.length > 0 || typesOf(yield* flatten(walk, schema)).includes("object")
+    );
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1532,6 +1562,16 @@ const multipartParts = (
       (yield* isArrayBody(ctx.walk, schema, members))
     ) {
       return refusedParts([arrayFormData(media.home)]);
+    }
+
+    // A range such as `multipart/*` is not a concrete type, so it is left to the emitter.
+    if (
+      schema !== undefined &&
+      base !== "multipart/form-data" &&
+      !base.endsWith("/*") &&
+      (yield* isObjectBody(ctx.walk, schema, members))
+    ) {
+      return refusedParts([dropping(unnamedParts(line, schema))]);
     }
 
     const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
