@@ -482,12 +482,27 @@ const encodedDelimiters: Partial<Record<QueryStyle, string>> = {
   spaceDelimited: "%20",
 };
 
+const bracketInKey = /[[\]]/u;
+
+/**
+ * A deepObject member key holding `[` or `]` writes a name whose encoded bracket equals the
+ * encoded delimiter, so a single decoding pass cannot tell the key from the path.
+ */
+const refuseBracketKey = (name: string) =>
+  refuse(`parameter ${name} has a member name with [ or ], which deepObject would leave ambiguous`);
+
 const checkQueryDelimiter = (
   name: string,
   style: QueryStyle,
   text: Text,
   options: QueryOptions,
 ) => {
+  if (style === "deepObject" && text.kind === "object") {
+    return text.members.some(([member]) => bracketInKey.test(member))
+      ? refuseBracketKey(name)
+      : Effect.void;
+  }
+
   const banned = queryDelimiter(style, text, options);
   const encoded = options.allowReserved ? encodedDelimiters[style] : undefined;
   const clash =
@@ -582,6 +597,10 @@ const bracketLeaves = (
     const leaves: Leaf[] = [];
 
     for (const [key, child] of children) {
+      if (bracketInKey.test(key) && !isNestedList(value)) {
+        return yield* refuseBracketKey(name);
+      }
+
       leaves.push(...(yield* bracketLeaves(name, child, [...keys, yield* itemText(name, key)])));
     }
 
