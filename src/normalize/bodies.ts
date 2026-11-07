@@ -660,6 +660,41 @@ const invalidContentType = (input: RuleInput): Finding =>
     ),
   );
 
+// D-SCH3: an object part typed as XML would need serialization from its schema and XML Object,
+// which is refused. A scalar part typed as XML is the operator's own text, sent as given.
+const schemaDrivenXml = (input: RuleInput): Finding =>
+  dropping(
+    refusal(
+      "XML-01/schema-driven",
+      "xml-object",
+      "Multipart part contentType",
+      `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
+      childKey(input.actual, "contentType"),
+      "Type the part application/json, or make the whole body an XML media type sent from --body-file",
+    ),
+  );
+
+const isXmlType = (range: string): boolean => codecOf(baseType(range)) === "xml";
+
+// Whether the part's schema is an object: typed `object`, or untyped with declared properties,
+// found through `$ref` and `allOf`.
+const isObjectPart = (
+  walk: Walk,
+  schema: CanonicalKey | undefined,
+  facts: Facts,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* objectPart() {
+    if (schema === undefined) {
+      return false;
+    }
+
+    if (facts.type.includes("object")) {
+      return true;
+    }
+
+    return facts.type.length === 0 && (yield* membersOf(walk, schema)).properties.length > 0;
+  });
+
 interface Typing {
   readonly contentType: readonly string[];
   readonly findings: readonly Finding[];
@@ -726,6 +761,29 @@ const typingOf = (
       refused: false,
       rows: ["ENC-01", "ENC-02"],
       serialization: undefined,
+    };
+  });
+
+// A multipart part's typing: as `typingOf`, and an object part typed as XML is refused (XML-01).
+const partTypingOf = (
+  ctx: Context,
+  input: RuleInput,
+  node: EncodingNode,
+  facts: Facts,
+): Effect.Effect<Typing, BodyNodeBudget> =>
+  Effect.gen(function* partTyping() {
+    const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
+    const xml = typing.contentType.some(isXmlType);
+    if (typing.refused || !xml || !(yield* isObjectPart(ctx.walk, input.schema, facts))) {
+      return typing;
+    }
+
+    return {
+      ...typing,
+      contentType: [],
+      findings: [...typing.findings, schemaDrivenXml(input)],
+      refused: true,
+      rows: [],
     };
   });
 
@@ -1061,7 +1119,7 @@ const buildRule = (
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
     const facts = yield* factsOf(ctx.walk, input.schema);
-    const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
+    const typing = yield* partTypingOf(ctx, input, node, facts);
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
     }

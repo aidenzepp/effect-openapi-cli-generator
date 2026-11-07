@@ -655,6 +655,96 @@ describe("SCO-10 XML bodies are opaque", () => {
   });
 });
 
+// A multipart body whose `doc` part is an object typed by `contentType`, beside other media types.
+const xmlPart = (contentType: string, siblings: Members = {}): Members => ({
+  content: {
+    "multipart/form-data": {
+      encoding: { doc: { contentType } },
+      schema: object({
+        doc: object({ id: { type: "integer", xml: { attribute: true } } }),
+        name: string,
+      }),
+    },
+    ...siblings,
+  },
+});
+
+describe("XML-01 a multipart part typed as XML over an object schema is schema-driven XML, refused (D-SCH3)", () => {
+  const media = "/paths/~1a/post/requestBody/content/multipart~1form-data";
+
+  test("the part drops its alternative at element scope, naming the part and the XML Object section", () => {
+    for (const line of lines) {
+      for (const contentType of ["application/xml", "text/xml", "application/atom+xml"]) {
+        const outcome = refused(line, xmlPart(contentType));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(outcome).toMatchObject({ _tag: "Refused", required: false });
+        expect(diagnostic.code).toBe("XML-01/schema-driven");
+        expect(diagnostic.scope).toBe("element");
+        expect(diagnostic.severity).toBe("refusal");
+        expect(String(diagnostic.pointer)).toBe(media);
+        expect(diagnostic.related?.map((key) => String(key.pointer))).toEqual([
+          `${media}/encoding/doc/contentType`,
+        ]);
+        expect(plain(diagnostic.specSection)).toBe(
+          `https://spec.openapis.org/oas/v${specVersion[line]}.html#xml-object`,
+        );
+      }
+    }
+  });
+
+  test("a required body keeps required, so the operation assembly raises it", () => {
+    const outcome = refused("3.1", { ...xmlPart("application/xml"), required: true });
+
+    expect(outcome).toMatchObject({ _tag: "Refused", required: true });
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("a sibling alternative stays and the XML part's alternative is gone", () => {
+    const outcome = implemented(
+      "3.1",
+      xmlPart("application/xml", { "application/json": { schema: string } }),
+    );
+
+    expect(outcome.body.alternatives.map((alternative) => String(alternative.mediaType))).toEqual([
+      "application/json",
+    ]);
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("an object found through a reference or allOf is still an object", () => {
+    const outcome = normalize(
+      "3.1",
+      {
+        content: {
+          "multipart/form-data": {
+            encoding: { doc: { contentType: "application/xml" } },
+            schema: object({ doc: { allOf: [{ $ref: "#/components/schemas/Doc" }] } }),
+          },
+        },
+      },
+      { schemas: { Doc: { properties: { id: { type: "integer" } } } } },
+    );
+
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("a string part typed as XML is the operator's text, and a JSON object part is unchanged", () => {
+    const alternative = alternativeOf("3.1", "multipart/form-data", {
+      encoding: {
+        doc: { contentType: "application/json" },
+        raw: { contentType: "application/xml" },
+      },
+      schema: object({ doc: object({ id: { type: "integer" } }), raw: string }),
+    });
+
+    expect(typesOf(alternative.encoding)).toEqual({
+      doc: ["application/json"],
+      raw: ["application/xml"],
+    });
+  });
+});
+
 describe("ENC-27 ENC-28 form-urlencoded request bodies are form alternatives with a rule per property", () => {
   const form: Json = {
     content: { "application/x-www-form-urlencoded": { schema: object({ a: string }) } },
