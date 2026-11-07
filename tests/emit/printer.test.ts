@@ -1479,19 +1479,70 @@ describe("over-width identifiers", () => {
     expectVpFmt(print(aliasOf(wide, typeLiteral("lit"))), `export type ${wide} = "lit";\n`);
   }, 30_000);
 
-  test("a type vp fmt breaks across lines is still refused", () => {
-    const failure = failureOf({
-      imports: [],
-      statements: [
-        {
-          _tag: "TypeAlias",
-          name: I("A"),
-          type: typeUnion([ref(wideType), typeKeyword("string")]),
-        },
-      ],
-    });
+  test("a union member vp fmt breaks across lines is still refused", () => {
+    const failure = failureOf(
+      aliasOf("A", typeUnion([ref("Foo", [ref(wideType), ref("Bar")]), typeKeyword("string")])),
+    );
     expect(failure).toMatchObject({ _tag: "PrinterError", reason: "unbreakable-line" });
   });
+});
+
+const literals = (...values: readonly string[]) => typeUnion(values.map(typeLiteral));
+
+const field = (key: string, type: TypeExpr, optional = false) => ({ key, optional, type });
+
+const interfaceOf = (name: string, fields: readonly ReturnType<typeof field>[]): Module => ({
+  imports: [],
+  statements: [{ _tag: "Interface", fields, name: I(name) }],
+});
+
+// A union that does not fit puts each member on its own line after a leading `| `, one level
+// deeper than its key or alias. Captured from `vp fmt` as above.
+describe("long unions", () => {
+  const wideType = "B".repeat(95);
+  const mediaTypes = [
+    "application/apply-patch+cbor",
+    "application/apply-patch+yaml",
+    "application/json-patch+json",
+    "application/merge-patch+json",
+    "application/strategic-merge-patch+json",
+  ];
+  const quoted = mediaTypes.map((value) => JSON.stringify(value)).join(" | ");
+
+  test("an interface field breaks a union that does not fit", () => {
+    const printed = print(
+      interfaceOf("PatchCoreV1namespacedConfigMapInput", [
+        field("contentType", literals(...mediaTypes)),
+        field("short", typeUnion([typeKeyword("string"), typeKeyword("number")])),
+        field(
+          "nested",
+          typeUnion([literals("a".repeat(40), "b".repeat(40)), typeKeyword("undefined")]),
+          true,
+        ),
+      ]),
+    );
+    expectVpFmt(
+      printed,
+      `export interface PatchCoreV1namespacedConfigMapInput { readonly contentType: ${quoted}; readonly nested?: "${"a".repeat(40)}" | "${"b".repeat(40)}" | undefined; readonly short: string | number }\n`,
+    );
+  }, 30_000);
+
+  test("a type alias breaks a union that does not fit", () => {
+    expectVpFmt(print(aliasOf("A", literals(...mediaTypes))), `export type A = ${quoted};\n`);
+  }, 30_000);
+
+  test("a long name or member still breaks the union", () => {
+    const longName = "a".repeat(100);
+    const pair = typeUnion([ref(wideType), typeKeyword("string")]);
+    expectVpFmt(
+      print(interfaceOf("Wide", [field(longName, pair)])),
+      `export interface Wide { readonly ${longName}: ${wideType} | string }\n`,
+    );
+    expectVpFmt(
+      print(aliasOf(longName, pair)),
+      `export type ${longName} = ${wideType} | string;\n`,
+    );
+  }, 30_000);
 });
 
 describe("unsupported constructs", () => {
