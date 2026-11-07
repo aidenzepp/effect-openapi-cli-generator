@@ -6,6 +6,7 @@ import type { Json } from "../../src/model/pointer.ts";
 import { emitCli } from "../../src/emit/cli.ts";
 import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
+import { normalizeSchemas } from "../../src/normalize/schemas.ts";
 import { resolve } from "../../src/resolve/index.ts";
 
 // The 3.0 schema fixes of m2-s30fx and m2-s30ro, in process: a `default` that does not conform to
@@ -123,11 +124,16 @@ describe("S30-31 a 3.0 read-only body property", () => {
   });
 });
 
-// The emitted CLI module text of the one operation.
+// The emitted CLI module text of the one operation, given the validation copy's edits as
+// generation passes them.
 const emitted = (line: Line, properties: Json): string => {
-  const { api } = normalizedApi(line, properties).result;
+  const { resolution, result } = normalizedApi(line, properties);
+  const { api } = result;
   const plan = Effect.runSync(planNames(api, { ...config, strict: false }));
-  const output = Effect.runSync(emitCli({ api, config: config.config, plan }));
+  const { validation } = Effect.runSync(normalizeSchemas(resolution));
+  const output = Effect.runSync(
+    emitCli({ api, config: config.config, plan, validationEdits: validation.edits }),
+  );
 
   return output.files.map((file) => file.content).join("\n");
 };

@@ -20,23 +20,36 @@ const config: Schema.Json = {
   servers: { accepted: ["https://api.example.com"] },
 };
 
+type Line = "3.0" | "3.1" | "3.2";
+
+const versions: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.1", "3.2": "3.2.0" };
+
 interface Case {
   readonly encoding: FieldEncoding;
+  readonly line: Line;
   readonly name: string;
   readonly schema: Schema.Json;
 }
 
-// One base64 property per spec line: 3.0 `format: byte`, 3.1 `contentEncoding: base64`, and 3.2
-// `contentEncoding: base64url` with a `contentMediaType` kept as help text.
+// One base64 property per spec line, each flattened and emitted on its own line: 3.0
+// `format: byte`, 3.1 `contentEncoding: base64`, and 3.2 `contentEncoding: base64url` with a
+// `contentMediaType` kept as help text.
 const cases: readonly Case[] = [
-  { encoding: "base64", name: "3.0 format byte", schema: { format: "byte", type: "string" } },
   {
     encoding: "base64",
+    line: "3.0",
+    name: "3.0 format byte",
+    schema: { format: "byte", type: "string" },
+  },
+  {
+    encoding: "base64",
+    line: "3.1",
     name: "3.1 contentEncoding base64",
     schema: { contentEncoding: "base64", type: "string" },
   },
   {
     encoding: "base64url",
+    line: "3.2",
     name: "3.2 contentEncoding base64url",
     schema: { contentEncoding: "base64url", contentMediaType: "image/png", type: "string" },
   },
@@ -45,10 +58,11 @@ const cases: readonly Case[] = [
 // The formatter may break lines; the structure is what the test pins.
 const squeezed = (text: string | undefined): string => (text ?? "").replaceAll(/\s+/gu, " ");
 
-const flatten = (properties: Readonly<Record<string, Schema.Json>>) => {
+const flatten = (properties: Readonly<Record<string, Schema.Json>>, line: Line = "3.1") => {
   const result = flattenBody(
     { Root: { properties, type: "object" } },
     { codec: "json", schema: { key: "Root" } },
+    line,
   );
   if (Result.isFailure(result)) {
     throw new Error(`flattenBody failed with ${result.failure._tag}`);
@@ -57,9 +71,9 @@ const flatten = (properties: Readonly<Record<string, Schema.Json>>) => {
   return new Map(result.success.flags.map((flag) => [flag.name, flag] as const));
 };
 
-const spec = (properties: Readonly<Record<string, Schema.Json>>): Schema.Json => ({
+const spec = (line: Line, properties: Readonly<Record<string, Schema.Json>>): Schema.Json => ({
   info: { title: "B64", version: "1.0.0" },
-  openapi: "3.1.1",
+  openapi: versions[line],
   paths: {
     "/avatars": {
       post: {
@@ -75,11 +89,11 @@ const spec = (properties: Readonly<Record<string, Schema.Json>>): Schema.Json =>
   },
 });
 
-const emitted = (properties: Readonly<Record<string, Schema.Json>>) =>
+const emitted = (properties: Readonly<Record<string, Schema.Json>>, line: Line = "3.1") =>
   Effect.runPromise(
     Effect.gen(function* generate() {
       const author = yield* decodeAuthorConfig(config, { document: configDocument });
-      const resolution = yield* resolve({ document, line: "3.1", value: spec(properties) });
+      const resolution = yield* resolve({ document, line, value: spec(line, properties) });
       const { api } = yield* normalize(resolution, { config: author, configDocument });
       const plan = yield* planNames(api, { config: author, configDocument, strict: false });
       const output = yield* emitCli({ api, config: author, plan });
@@ -96,9 +110,9 @@ const emitted = (properties: Readonly<Record<string, Schema.Json>>) =>
   );
 
 describe("a base64 body property is a file field flag", () => {
-  for (const { encoding, name, schema } of cases) {
+  for (const { encoding, line, name, schema } of cases) {
     test(`${name} plans a file flag`, () => {
-      const flags = flatten({ photo: schema, title: { type: "string" } });
+      const flags = flatten({ photo: schema, title: { type: "string" } }, line);
       expect(flags.get("photo")?.kind).toBe("file");
       expect(flags.get("photo")?.repeated).toBe(false);
       expect(flags.get("title")?.kind).toBe("string");
@@ -106,10 +120,10 @@ describe("a base64 body property is a file field flag", () => {
     });
 
     test(`${name} emits a FileField with encoding ${encoding}`, async () => {
-      const { content, flags, refusals } = await emitted({
-        photo: schema,
-        title: { type: "string" },
-      });
+      const { content, flags, refusals } = await emitted(
+        { photo: schema, title: { type: "string" } },
+        line,
+      );
       expect(refusals).toEqual([]);
       expect(flags.find((flag) => flag.name === "photo")?.source).toMatchObject({ kind: "file" });
       expect(squeezed(content)).toContain(
@@ -122,7 +136,7 @@ describe("a base64 body property is a file field flag", () => {
   }
 
   test("the content type is kept as help text", async () => {
-    const { content } = await emitted({ photo: cases[2]?.schema ?? {} });
+    const { content } = await emitted({ photo: cases[2]?.schema ?? {} }, "3.2");
     expect(content).toContain("Content type: image/png.");
   });
 
