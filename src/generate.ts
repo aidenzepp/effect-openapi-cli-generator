@@ -39,6 +39,7 @@ import {
   skippedEntries,
 } from "./report/index.ts";
 import type { GenerationReportValue } from "./report/index.ts";
+import { retrievalBase } from "./resolve/base-uri.ts";
 import { resolve } from "./resolve/index.ts";
 import type { Resolution, ResolveMember } from "./resolve/index.ts";
 import { diagnoseDocument } from "./validate/index.ts";
@@ -211,9 +212,10 @@ const realPathOf = (path: string) =>
 
 /**
  * The set's documents other than the entry, in set order, each with the line it declares (the
- * entry's when it declares none the generator reads). A member under the entry's own retrieval URI
- * is the entry when it is the same file, as when `--ref-root` holds the entry; under that URI any
- * other file is refused as `REF-16/duplicate-uri`, never chosen between.
+ * entry's when it declares none the generator reads). Retrieval URIs compare in the resolver's
+ * normal form. A member under the entry's exact retrieval URI is the entry when it is the same
+ * file, as when `--ref-root` holds the entry; any other file under that URI, or any member spelling
+ * it differently, is refused as `REF-16/duplicate-uri`, never chosen between.
  */
 export const setMembers = (
   entry: { readonly document: Document; readonly source: SpecSource },
@@ -223,10 +225,14 @@ export const setMembers = (
     const found: ResolveMember[] = [];
 
     for (const [document, member] of documents?.documents ?? []) {
-      if (document === entry.document) {
+      if (retrievalBase(document) === retrievalBase(entry.document)) {
         const entryPath =
           entry.source._tag === "File" ? yield* realPathOf(entry.source.path) : undefined;
-        if (entryPath === undefined || entryPath !== (yield* realPathOf(member.path))) {
+        if (
+          document !== entry.document ||
+          entryPath === undefined ||
+          entryPath !== (yield* realPathOf(member.path))
+        ) {
           return yield* duplicateUri({ path: member.path, uri: document });
         }
       } else {

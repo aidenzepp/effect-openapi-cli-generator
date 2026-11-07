@@ -22,6 +22,7 @@ import {
   maxWalkEntries,
   resolveUnderRoot,
 } from "../../src/load/document-set.ts";
+import { setMembers } from "../../src/generate.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { DocumentPair, DocumentSetOptions } from "../../src/load/document-set.ts";
 
@@ -256,6 +257,41 @@ describe("document set: --ref-root", () => {
 
     expect(error.diagnostic.code).toBe("REF-16/duplicate-uri");
     expect(error.diagnostic.hint).toBe(realpathSync(path.join(root, "a.json")));
+  });
+
+  test("setMembers refuses a member spelling the entry's URI differently, same file or not", async () => {
+    const { root } = workspace();
+    const entryPath = path.join(root, "a.json");
+    const entryUri = pathToFileURL(entryPath).href;
+    const entry = {
+      document: Schema.decodeUnknownSync(DocumentUri)(entryUri),
+      source: { _tag: "File", path: entryPath } as const,
+    };
+    const spellings = [
+      { path: entryPath, uri: entryUri.replace(/a\.json$/u, "./a.json") },
+      { path: path.join(fixtures, "outside.json"), uri: entryUri.replace(/^file:/u, "FILE:") },
+    ];
+
+    const errors = await Promise.all(
+      spellings.map((pair) =>
+        Effect.runPromise(
+          Effect.flip(
+            makeDocumentSet([pair]).pipe(
+              Effect.flatMap((set) => setMembers(entry, set)),
+              Effect.provide(BunFileSystem.layer),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(errors.map((error) => error.diagnostic.code)).toEqual([
+      "REF-16/duplicate-uri",
+      "REF-16/duplicate-uri",
+    ]);
+    expect(errors.map((error) => error.diagnostic.hint)).toEqual(
+      spellings.map((pair) => pair.path),
+    );
   });
 
   test("a --document URI equal to a preloaded file's URI is refused", async () => {
