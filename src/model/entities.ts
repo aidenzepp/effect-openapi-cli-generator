@@ -57,9 +57,13 @@ const styleName = Schema.Literals([
   "spaceDelimited",
 ]);
 
-const nameList = Schema.Array(Schema.Struct({ name: HeaderName }));
-
 const requestHeaders = Schema.Array(Schema.Struct({ name: HeaderName, required: Schema.Boolean }));
+
+// A response Header Object by name, with its `required` and `deprecated` marks (HDR-03, HDR-04);
+// absent in the document, each is false.
+const responseHeaders = Schema.Array(
+  Schema.Struct({ deprecated: Schema.Boolean, name: HeaderName, required: Schema.Boolean }),
+);
 
 const encodingTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("property"), name: WireName }),
@@ -216,7 +220,7 @@ export class Parameter extends Schema.Class<Parameter>("Parameter")({
 export class ResponseCase extends Schema.Class<ResponseCase>("ResponseCase")({
   alternatives: Schema.Array(MediaAlternative),
   docs: Docs,
-  headers: nameList,
+  headers: responseHeaders,
   key: Schema.Union([
     Schema.Struct({ code: Schema.Int.check(Schema.isBetween({ maximum: 599, minimum: 100 })) }),
     Schema.Struct({ range: Schema.Int.check(Schema.isBetween({ maximum: 5, minimum: 1 })) }),

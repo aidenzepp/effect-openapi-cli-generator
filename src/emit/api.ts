@@ -991,6 +991,17 @@ const requestIdHeaderOf = (responses: Operation["responses"]): string | undefine
     .flatMap((response) => response.headers)
     .find((header) => requestIdNames.has(header.name.toLowerCase()))?.name;
 
+/**
+ * The required response headers of each case that declares any, keyed as the media table keys the
+ * case, each list in document order (design 7.3; HDR-03).
+ */
+const requiredHeadersOf = (responses: Operation["responses"]): (readonly [string, Expr])[] =>
+  responses.flatMap((response) => {
+    const names = response.headers.filter((header) => header.required).map((header) => header.name);
+
+    return names.length === 0 ? [] : [[responseKey(response.key), strings(names)] as const];
+  });
+
 const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
   Effect.gen(function* requirement() {
     const alternatives = operation.security.alternatives.map((alternative) =>
@@ -1092,6 +1103,12 @@ const commandStatements = (
     const requestId = requestIdHeaderOf(operation.responses);
     if (requestId !== undefined) {
       meta.push(["requestIdHeader", str(requestId)]);
+    }
+
+    // Only an operation that declares a required response header names the table (HDR-03).
+    const requiredHeaders = requiredHeadersOf(operation.responses);
+    if (requiredHeaders.length > 0) {
+      meta.push(["requiredHeaders", obj(requiredHeaders)]);
     }
 
     if (operation.servers.some((server) => server.level !== "root")) {

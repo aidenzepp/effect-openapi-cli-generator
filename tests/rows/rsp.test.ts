@@ -495,6 +495,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-05: a simple-style array header a,b is accepted as sent and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "list", [
           ["x-list", "a,b"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -504,6 +505,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-06: an exploded object header R=100,G=200 is accepted as sent and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "color", [
           ["x-color", "R=100,G=200"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -513,6 +515,7 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-07: a header with an integer schema, even when its value is not an integer, does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "count", [
           ["x-count", "seven"],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
@@ -522,19 +525,29 @@ describe("RSS, RSP and HDR rows through the built CLI", () => {
       test(`HDR-08: a header described by content is accepted and does not change output (${line})`, async () => {
         const observed = await respond(line, "typed-get", "/typed", 200, "meta", [
           ["x-meta", '{"a":1}'],
+          ["x-required", "r"],
           ["content-type", "text/plain"],
         ]);
 
         expect([decided(observed), observed.stderr]).toEqual([succeeded("meta"), ""]);
       }, 60_000);
 
-      // A required response header the server omits passes silently: no stderr notice.
-      test.todo(`HDR-03: typed-get answered without its required X-Required header exits 0 with empty stderr vs a warning naming the missing header (${line})`, () =>
-        Promise.resolve());
+      test(`HDR-03: typed-get answered without its required X-Required header warns on stderr, output and exit unchanged (${line})`, async () => {
+        const observed = await respond(line, "typed-get", "/typed", 200, "typed", plainText);
 
-      // `typed-get --help` lists the request and response media, no response headers.
-      test.todo(`HDR-04: typed-get help names no response headers vs X-Deprecated marked deprecated (${line})`, () =>
-        Promise.resolve());
+        expect([decided(observed), stderrLines(observed)]).toEqual([
+          succeeded("typed"),
+          ["Warning: the response is missing the required header X-Required"],
+        ]);
+      }, 60_000);
+
+      test(`HDR-04: typed-get help lists its response headers with X-Required marked required and X-Deprecated marked deprecated (${line})`, async () => {
+        const help = await run(line, ["typed-get", "--help"]);
+
+        expect(text(help.stdout)).toContain(
+          "200: X-Color, X-Count, X-Deprecated (deprecated), X-List, X-Meta, X-Required (required)",
+        );
+      }, 60_000);
     });
   }
 

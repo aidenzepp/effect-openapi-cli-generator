@@ -283,6 +283,29 @@ const responsesLine = (operation: Operation): string => {
   return `${cases.join("; ")}. Non-2xx exits 1 (401/403 exit 3)`;
 };
 
+type ResponseHeader = Operation["responses"][number]["headers"][number];
+
+const headerMarks = (header: ResponseHeader): string => {
+  const marks = [
+    ...(header.required ? ["required"] : []),
+    ...(header.deprecated ? ["deprecated"] : []),
+  ];
+
+  return marks.length === 0 ? header.name : `${header.name} (${marks.join(", ")})`;
+};
+
+// The RESPONSE HEADERS line: each case that declares headers, its names in document order with
+// their required and deprecated marks (HDR-04); absent when no case declares one.
+const responseHeadersLine = (operation: Operation): string | undefined => {
+  const cases = operation.responses
+    .filter((response) => response.headers.length > 0)
+    .map(
+      (response) => `${responseKey(response.key)}: ${response.headers.map(headerMarks).join(", ")}`,
+    );
+
+  return cases.length === 0 ? undefined : cases.join("; ");
+};
+
 const refusedLine = (input: HelpInput): string | undefined => {
   const { key } = input.operation;
   const refused = input.diagnostics.filter(
@@ -354,15 +377,17 @@ const nonStandardLine = (input: HelpInput): string | undefined => {
 /**
  * The description and generated notes of one command, from the model alone: source prose first,
  * then the wire name and location of each argument and flag (with a body field's allowed values,
- * default and read-only and deprecated marks), and the REQUEST, VARIANTS, AUTH, RESPONSES and
- * REFUSED lines. VARIANTS lists a discriminated body's branches and is absent without a hint; the
- * REFUSED line lists the command's refused elements by wire name and reason.
+ * default and read-only and deprecated marks), and the REQUEST, VARIANTS, AUTH, RESPONSES,
+ * RESPONSE HEADERS and REFUSED lines. VARIANTS lists a discriminated body's branches and is absent
+ * without a hint; RESPONSE HEADERS is absent when no case declares a header; the REFUSED line lists
+ * the command's refused elements by wire name and reason.
  */
 export const operationHelp = (input: HelpInput): OperationHelp => {
   const { operation } = input;
   const auth = authLine(input);
   const refused = refusedLine(input);
   const nonStandard = nonStandardLine(input);
+  const responseHeaders = responseHeadersLine(operation);
   const variants = variantsLine(operation);
   const sections: (readonly [string, string])[] = [
     ["REQUEST", requestLine(operation)],
@@ -378,6 +403,10 @@ export const operationHelp = (input: HelpInput): OperationHelp => {
   }
 
   sections.push(["RESPONSES", responsesLine(operation)]);
+  if (responseHeaders !== undefined) {
+    sections.push(["RESPONSE HEADERS", responseHeaders]);
+  }
+
   if (nonStandard !== undefined) {
     sections.push(["NON-STANDARD", nonStandard]);
   }

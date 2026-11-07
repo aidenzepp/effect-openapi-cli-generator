@@ -804,6 +804,8 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
  * when the operation or its path item overrides the root servers, its effective servers table.
  * `deprecated` is printed only for an operation the document marks deprecated; the meta object is
  * not `as const`, so it arrives widened to `boolean`, and only `true` writes the notice.
+ * `requiredHeaders` lists, by response key, the required headers a case declares; it is present
+ * only when some case declares one.
  */
 export interface OperationMeta {
   readonly deprecated?: boolean | undefined;
@@ -812,6 +814,7 @@ export interface OperationMeta {
   readonly operationId?: string | undefined;
   readonly pathTemplate: string;
   readonly requestIdHeader?: string | undefined;
+  readonly requiredHeaders?: Readonly<Record<string, readonly string[]>> | undefined;
   readonly security: SecurityRequirement;
   readonly servers?: ServersTable | undefined;
 }
@@ -886,6 +889,28 @@ const declaredMedia = (meta: OperationMeta, status: number): readonly string[] =
 };
 
 /**
+ * One stderr warning per required header the matched case declares and the response lacks, in
+ * document order (HDR-03). Names are matched case-insensitively and only the name is printed,
+ * never a value; an undeclared status matches no case and checks nothing.
+ */
+const warnMissingHeaders = (
+  meta: OperationMeta,
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<void, never, Stdio.Stdio> => {
+  const key = matchResponse(meta.media.responses, response.status);
+  const required =
+    meta.requiredHeaders !== undefined && Object.hasOwn(meta.requiredHeaders, key)
+      ? (meta.requiredHeaders[key] ?? [])
+      : [];
+
+  return Effect.forEach(
+    required.filter((name) => Option.isNone(Headers.get(response.headers, name))),
+    (name) => printStderr(`Warning: the response is missing the required header ${name}`),
+    { discard: true },
+  );
+};
+
+/**
  * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
  * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
  * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
@@ -894,7 +919,8 @@ const declaredMedia = (meta: OperationMeta, status: number): readonly string[] =
  * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
  * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
  * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink (a
+ * loopback hops, `User-Agent`); then response matching, after a stderr warning for each required
+ * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
  * bodiless one, `isBodiless`, writes nothing and reads nothing); any
  * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
  * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
@@ -955,6 +981,7 @@ export const send =
 
       yield* client.execute(built).pipe(
         Effect.catchTag("HttpClientError", mapClientError),
+        Effect.tap((response) => warnMissingHeaders(meta, response)),
         Effect.flatMap((response) =>
           classify(table, response, credentials).pipe(
             Effect.matchEffect({

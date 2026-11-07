@@ -514,6 +514,55 @@ describe("several media types", () => {
   });
 });
 
+// The golden operation with these response headers on its first two cases.
+const withResponseHeaders = (headers: readonly (readonly Schema.Json[])[]) =>
+  operationHelp({
+    ...input,
+    operation: Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      responses: operationPlain.responses.map((plain, index) => ({
+        ...plain,
+        headers: headers[index] ?? [],
+      })),
+    }),
+  });
+
+const header = (name: string, required = false, deprecated = false) => ({
+  deprecated,
+  name,
+  required,
+});
+
+describe("HDR-04 RESPONSE HEADERS", () => {
+  test("each case lists its headers in document order with required and deprecated marks", () => {
+    const help = withResponseHeaders([
+      [
+        header("X-Color"),
+        header("X-Required", true),
+        header("X-Deprecated", false, true),
+        header("X-Both", true, true),
+      ],
+      [header("X-Request-Id")],
+    ]);
+
+    expect(help.sections.map(([title]) => title)).toEqual([
+      "REQUEST",
+      "AUTH",
+      "RESPONSES",
+      "RESPONSE HEADERS",
+    ]);
+    expect(sectionText(help, "RESPONSE HEADERS")).toBe(
+      "200: X-Color, X-Required (required), X-Deprecated (deprecated), X-Both (required, deprecated); 404: X-Request-Id",
+    );
+  });
+
+  test("an operation whose cases declare no headers has no section", () => {
+    const help = withResponseHeaders([]);
+
+    expect(help.sections.map(([title]) => title)).toEqual(["REQUEST", "AUTH", "RESPONSES"]);
+  });
+});
+
 const hint = (keyword: string, branches: readonly Schema.Json[]) => ({
   branches,
   keyword,
