@@ -126,9 +126,10 @@ describe("emitEntryFiles", () => {
       expect(bin).toContain(provided);
     }
 
-    expect(callText(bin, "CliConfig.layer(")).toContain(
-      "builtIns: [GlobalFlag.Help, GlobalFlag.Version, GlobalFlag.Completions, GlobalFlag.LogLevel]",
+    expect(callText(bin, "CliConfig.layer(")).toBe(
+      "CliConfig.layer({ builtIns: Output.builtIns })",
     );
+    expect(bin).not.toContain("GlobalFlag");
     expect(bin).not.toContain("stdinClaimLayer");
     expect(bin).not.toContain("Wizard");
     expect(bin).not.toContain("CliOutput.layer(");

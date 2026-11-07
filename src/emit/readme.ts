@@ -66,6 +66,7 @@ const usage = (bin: string): string =>
     "## Usage",
     `\`\`\`sh\n${bin} --help\n${bin} <command> --help\n\`\`\``,
     "Every command's `--help` shows its flags, request body fields, credentials and responses.",
+    "Write a flag value that starts with `-` as `--flag=-value`: `--flag -value` is a usage error (exit 2), and help and version have no `-h` or `-v` short form.",
     `These names belong to the CLI, so no command or flag of the description may claim them: ${reserved}. Each credential's \`<scheme>-file\` flag is reserved as well.`,
   ].join("\n\n");
 
@@ -158,11 +159,11 @@ const webhooks = (api: Api): string | undefined => {
 };
 
 /**
- * Emits the generated package's `README.md` (design 4.1, 4.2): usage with the reserved CLI names
- * (design 4.4), the credential environment variables and file flags from the name plan, the exit
- * codes (design 4.6), a refusal summary of every stage's refusals,
- * and the webhooks, listed as informational. The bin name and credential names are ASCII by
- * their grammars; every spec string is an escaped literal in a `text` fence.
+ * Emits the generated package's `README.md` (design 4.1, 4.2): usage with the `--flag=-value`
+ * escape and the reserved CLI names (design 4.4), the credential environment variables and file
+ * flags from the name plan, the exit codes (design 4.6), a refusal summary of every stage's
+ * refusals, and the webhooks, listed as informational. The bin name and credential names are ASCII
+ * by their grammars; every spec string is an escaped literal in a `text` fence.
  */
 export const emitReadme = (input: ReadmeInput): EmittedFile => {
   const bin = input.config.binName;

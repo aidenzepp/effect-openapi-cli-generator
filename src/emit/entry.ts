@@ -116,18 +116,14 @@ const mainModule = (config: AuthorConfig): Module => {
 };
 
 /**
- * Built-in global flags the generated CLI keeps (design 4.3): every default but `--wizard`.
- */
-const builtIns = ["Help", "Version", "Completions", "LogLevel"];
-
-/**
  * `bin.ts` (design 4.1, 4.3): the only emitted module that names Bun. It composes the platform:
  * Bun services, the Bun HTTP client with manual redirects and no client timeout or `proxy` key,
  * the `FileBody` layer over `Bun.file` (spike S3), the client policy (the method allowlist of
  * design 6.7, the runtime's `Client.directRoute` for loopback hops of design 6.5, the
  * `User-Agent` name and version), `RunCredentials` outside the final catch, the
- * runtime presenter with no second formatter, the built-in flags, logs to stderr and no trace
- * propagation. `runMain` reports no error: the final catch already rendered it.
+ * runtime presenter with no second formatter, the runtime's built-in flags (`Output.builtIns`:
+ * every effect default but `--wizard`, help and version without `-h`/`-v`), logs to stderr and
+ * no trace propagation. `runMain` reports no error: the final catch already rendered it.
  */
 const binModule = (config: AuthorConfig): Module => {
   const fileBody = fn(
@@ -168,10 +164,7 @@ const binModule = (config: AuthorConfig): Module => {
     path("fileBody"),
     path("Output.runCredentialsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
-    fn(
-      "CliConfig.layer",
-      obj([["builtIns", arr(builtIns.map((name) => path(`GlobalFlag.${name}`)))]]),
-    ),
+    fn("CliConfig.layer", obj([["builtIns", path("Output.builtIns")]])),
     fn("Layer.succeed", path("References.LogToStderr"), bool(true)),
     fn("Layer.succeed", path("HttpClient.TracerPropagationEnabled"), bool(false)),
   );
@@ -180,7 +173,7 @@ const binModule = (config: AuthorConfig): Module => {
     imports: [
       named("@effect/platform-bun", ["BunHttpClient", "BunRuntime", "BunServices"]),
       named("effect", ["Effect", "Layer", "References"]),
-      named("effect/cli", ["CliConfig", "CliOutput", "GlobalFlag"]),
+      named("effect/cli", ["CliConfig", "CliOutput"]),
       named("effect/http", ["HttpBody", "HttpClient"]),
       named("./main.ts", ["run"]),
       namespace("./runtime/client.ts", "Client"),

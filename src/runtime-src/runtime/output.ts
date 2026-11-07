@@ -109,6 +109,47 @@ export const MaxErrorBytes = GlobalFlag.Setting("max-error-bytes")({
 });
 
 /**
+ * `--help` without effect's `-h` alias. A flag value that starts with "-" lexes as short options,
+ * so with `-h` registered, `--hostname -bad_.host-` would run help and exit 0 with no request
+ * sent; without it the value is a usage error (exit 2). It runs effect's built-in help.
+ */
+export const HelpFlag: GlobalFlag.Action<boolean> = GlobalFlag.Action({
+  flag: Flag.Boolean("help").pipe(
+    Flag.withDescription("Show help information"),
+    Flag.withDefault(false),
+  ),
+  run: GlobalFlag.Help.run,
+});
+
+/**
+ * `--version` without effect's `-v` alias, for the reason `HelpFlag` drops `-h`.
+ */
+export const VersionFlag: GlobalFlag.Action<boolean> = GlobalFlag.Action({
+  flag: Flag.Boolean("version").pipe(
+    Flag.withDescription("Show version information"),
+    Flag.withDefault(false),
+  ),
+  run: GlobalFlag.Version.run,
+});
+
+/**
+ * The generated CLI's built-in global flags (design 4.3), in precedence order: every effect
+ * default but `--wizard`, with help and version carrying no short alias. `bin.ts` provides them
+ * through `CliConfig.layer`.
+ */
+export const builtIns = [
+  HelpFlag,
+  VersionFlag,
+  GlobalFlag.Completions,
+  GlobalFlag.LogLevel,
+] as const;
+
+/**
+ * The root help's last line: how to pass a flag value that starts with "-".
+ */
+export const dashValueEscape = 'Write a flag value that starts with "-" as --flag=-value';
+
+/**
  * A response body: its media type (absent when the response declared none) and its bytes, not
  * yet read.
  */
@@ -777,23 +818,28 @@ const helpNotesOf = (
     ),
   );
 
+const isRootHelp = (doc: HelpDoc.HelpDoc): boolean => (doc.commandPath ?? []).length <= 1;
+
 /**
  * The help formatter for a command tree (design 4.6). A command that carries `Output.Help` prints
  * its DESCRIPTION, USAGE, ARGUMENTS and FLAGS with a third column of notes, then its sections,
  * then the pointer to the global flags. Any other command prints as effect's default formatter
- * prints it, without colors and with global flags as a pointer. Errors render through
- * `valueFreeFormatter`.
+ * prints it, without colors and with global flags as a pointer. Root help ends with
+ * `dashValueEscape`. Errors render through `valueFreeFormatter`.
  */
 export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
   formatCliError: valueFreeFormatter.formatCliError,
   formatError: valueFreeFormatter.formatError,
   formatErrors: valueFreeFormatter.formatErrors,
-  formatHelpDoc: (doc) =>
-    Option.match(helpNotesOf(root, doc.commandPath), {
+  formatHelpDoc: (doc) => {
+    const text = Option.match(helpNotesOf(root, doc.commandPath), {
       onNone: () => helpBase.formatHelpDoc(doc),
       onSome: (notes) =>
         isNotesLayout(doc) ? renderNotedHelp(doc, notes) : helpBase.formatHelpDoc(doc),
-    }),
+    });
+
+    return isRootHelp(doc) ? `${text.trimEnd()}\n\n${dashValueEscape}` : text;
+  },
   formatVersion: valueFreeFormatter.formatVersion,
 });
 
