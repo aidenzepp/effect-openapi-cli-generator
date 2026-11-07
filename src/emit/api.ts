@@ -1,4 +1,5 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
+import type { Types } from "effect";
 import type {
   Api,
   EncodingRule,
@@ -13,7 +14,7 @@ import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
-import type { FlagSource } from "../names/plan.ts";
+import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
 import { JsDocText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
@@ -184,19 +185,6 @@ const scalarValueOf = (defs: Defs, key: string): Result.Result<ScalarValue, stri
  */
 export const isScalarArraySchema = (defs: Defs, key: string): Result.Result<boolean, string> =>
   Result.map(scalarValueOf(defs, key), ({ array, type }) => array && type !== undefined);
-
-/**
- * Whether a stored parameter schema is an object through its `$ref` chain (design 6.1): `type:
- * "object"`, or no `type` and `properties`. Its styled value is JSON data the operator gives as an
- * object, which the runtime expands by its style. A type list is not one. The failure is the store
- * key that does not resolve.
- */
-export const isObjectSchema = (defs: Defs, key: string): Result.Result<boolean, string> =>
-  Result.map(settle(defs, own(defs, key), key), (node) => {
-    const type = own(node, "type");
-
-    return type === undefined ? own(node, "properties") !== undefined : type === "object";
-  });
 
 /**
  * The scalar `type` of a stored parameter schema through its `$ref` chain, or of its `items` for an
@@ -522,15 +510,10 @@ const parameterParts = (
       return yield* refuse("unresolved-schema", array.failure);
     }
 
-    const object = isObjectSchema(defs, parameter.schema.key);
-    if (Result.isFailure(object)) {
-      return yield* refuse("unresolved-schema", object.failure);
-    }
-
     // An object's value is JSON data, as a `content` parameter's is; the runtime refuses a member
     // that is itself an object or array.
     let valueType = typeKeyword(boolean.success ? "boolean" : "string");
-    if (object.success) {
+    if (serialization.objectValued) {
       valueType = typeRef(I("Serialize"), [M("Json")]);
     } else if (array.success) {
       valueType = typeReadonlyArray(typeKeyword("string"));
@@ -587,8 +570,8 @@ const parameterParts = (
 
 /**
  * A part's `Content-Type`: the one media type its Encoding `contentType` lists, or the operator's
- * choice among several (design 6.3, ENC-10), with the part's key in the builder's form, the listed
- * types, and the `--<part>-content-type` flag.
+ * choice among several (design 6.3, ENC-10), with the listed types and the `--<part>-content-type`
+ * flag.
  */
 export type PartType =
   | { readonly _tag: "Declared"; readonly mediaType: string }
@@ -596,36 +579,46 @@ export type PartType =
       readonly _tag: "Chosen";
       readonly choices: readonly string[];
       readonly flag: PlannedFlag;
-      readonly key: string;
     };
 
-type ChosenType = Extract<PartType, { readonly _tag: "Chosen" }>;
+/**
+ * One declared header of a part (ENC-03, HDR-01) and its `--<part>-<header>` flag.
+ */
+export interface PartHeader {
+  readonly flag: PlannedFlag;
+  readonly header: EncodingRule["headers"][number];
+}
 
 /**
- * One `multipart/form-data` part a command sends: its part flag, its part name, its `Content-Type`
- * and, from its Encoding rule, its transfer encoding.
+ * One `multipart/form-data` part a command sends: its part flag, its part name, its `Content-Type`,
+ * its declared headers and, from its Encoding rule, its transfer encoding. `key` is the part's key
+ * in the builder's form when the part travels as a `Serialize.ChosenPart` beside `fields`: it
+ * lists several types or declares a header.
  */
 export interface FormPart {
   readonly contentEncoding?: "base64";
   readonly contentType: PartType;
   readonly flag: PlannedFlag;
+  readonly headers: readonly PartHeader[];
+  readonly key?: string;
   readonly name: string;
 }
 
 /**
- * The keys in the builder's form of the parts whose content type an operation's operator chooses
- * (ENC-10), by part name: the part name folded to camel case, renamed by numeric suffix past
- * `fields` and each other. Keys never depend on flag spelling.
+ * The keys in the builder's form of the parts that travel as a `Serialize.ChosenPart` (ENC-10,
+ * ENC-03), by part name: each multipart part whose Encoding `contentType` lists several types or
+ * whose rule declares a header, folded to camel case and renamed by numeric suffix past `fields`
+ * and each other. Keys never depend on flag spelling.
  */
-export const chosenPartKeys = (operation: Operation): ReadonlyMap<string, string> => {
+export const keyedPartKeys = (operation: Operation): ReadonlyMap<string, string> => {
   const taken = new Set(["fields"]);
   const keys = new Map<string, string>();
   for (const alternative of operation.body?.alternatives ?? []) {
-    for (const { contentType, target } of alternative.encoding) {
+    for (const { contentType, headers, target } of alternative.encoding) {
       if (
         alternative.codec !== "multipart" ||
         target.kind !== "property" ||
-        contentType.length < 2 ||
+        (contentType.length < 2 && headers.length === 0) ||
         keys.has(target.name)
       ) {
         continue;
@@ -641,13 +634,6 @@ export const chosenPartKeys = (operation: Operation): ReadonlyMap<string, string
 
   return keys;
 };
-
-// The runtime writes `Content-Transfer-Encoding` for a part with a transfer encoding, so a declared
-// header of that name is not sent beside it (design 6.3 Multipart transfer encoding).
-const sentHeaders = (rule: EncodingRule): EncodingRule["headers"] =>
-  rule.contentEncoding === undefined
-    ? rule.headers
-    : rule.headers.filter((header) => header.name.toLowerCase() !== "content-transfer-encoding");
 
 type PartFlag = PlannedFlag & { readonly source: Extract<FlagSource, { readonly _tag: "Body" }> };
 
@@ -668,24 +654,53 @@ interface PartContext {
   readonly schemas: ObjectSchemas;
 }
 
-// The flag that chooses a part's `Content-Type` among `choices` under the context's alternative.
-const choiceOf = (
+// The part option flag of kind `kind` (and header `header`) of the part at `pointer` under the
+// context's alternative.
+const optionFlag = (
   context: PartContext,
-  name: string,
   pointer: string,
-  choices: readonly string[],
-): ChosenType | undefined => {
-  const flag = context.flags.find(
+  matches: (option: PartOptionKind) => boolean,
+): PlannedFlag | undefined =>
+  context.flags.find(
     ({ source }) =>
       source._tag === "PartOption" &&
       source.part === pointer &&
+      matches(source.option) &&
       source.media.includes(context.alternative.mediaType),
   );
-  const key = context.keys.get(name);
 
-  return flag === undefined || key === undefined
-    ? undefined
-    : { _tag: "Chosen", choices, flag, key };
+// The flag that chooses a part's `Content-Type` among `choices` under the context's alternative.
+const choiceOf = (
+  context: PartContext,
+  pointer: string,
+  choices: readonly string[],
+): PartType | undefined => {
+  const flag = optionFlag(context, pointer, (option) => option.kind === "content-type");
+
+  return flag === undefined ? undefined : { _tag: "Chosen", choices, flag };
+};
+
+// Each declared header of a part with its `--<part>-<header>` flag, or the first header with none.
+const headersOf = (
+  context: PartContext,
+  pointer: string,
+  rule: EncodingRule,
+): Result.Result<readonly PartHeader[], string> => {
+  const headers: PartHeader[] = [];
+  for (const header of rule.headers) {
+    const flag = optionFlag(
+      context,
+      pointer,
+      (option) => option.kind === "header" && option.name === header.name,
+    );
+    if (flag === undefined) {
+      return Result.fail(`a flag for header ${header.name} of multipart part ${pointer}`);
+    }
+
+    headers.push({ flag, header });
+  }
+
+  return Result.succeed(headers);
 };
 
 // The reason a body's multipart alternative is not one the writer sends, or `undefined`.
@@ -725,10 +740,6 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
     return Result.fail(`nested parts in multipart part ${pointer}`);
   }
 
-  if (sentHeaders(rule).length > 0) {
-    return Result.fail(`part headers for multipart part ${pointer}`);
-  }
-
   // A style the writer sends (ENC-40) arrives typed `text/plain`; normalize refuses any other, and
   // the names plan gives that part no flag.
   if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
@@ -743,16 +754,38 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
   const contentType: PartType | undefined =
     rule.contentType.length === 1
       ? { _tag: "Declared", mediaType: first }
-      : choiceOf(context, name, pointer, rule.contentType);
+      : choiceOf(context, pointer, rule.contentType);
   if (contentType === undefined) {
     return Result.fail(`a content type flag for multipart part ${pointer}`);
   }
 
-  const part = { contentType, flag, name, order };
+  const headers = headersOf(context, pointer, rule);
+  if (Result.isFailure(headers)) {
+    return Result.fail(headers.failure);
+  }
 
-  return Result.succeed(
-    rule.contentEncoding === undefined ? part : { ...part, contentEncoding: rule.contentEncoding },
-  );
+  const key = context.keys.get(name);
+  const keyed = contentType._tag === "Chosen" || headers.success.length > 0;
+  if (keyed && key === undefined) {
+    return Result.fail(`a form key for multipart part ${pointer}`);
+  }
+
+  const part: Types.Mutable<OrderedPart> = {
+    contentType,
+    flag,
+    headers: headers.success,
+    name,
+    order,
+  };
+  if (keyed && key !== undefined) {
+    part.key = key;
+  }
+
+  if (rule.contentEncoding !== undefined) {
+    part.contentEncoding = rule.contentEncoding;
+  }
+
+  return Result.succeed(part);
 };
 
 const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
@@ -762,10 +795,10 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
  * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
  * command's request media alternatives; the part flags are those whose media lists it. Refused,
  * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
- * positional parts, a nested part, part headers (a declared `Content-Transfer-Encoding` beside
- * the rule's transfer encoding aside), a part style other than exploded `form`, a part whose
+ * positional parts, a nested part, a part style other than exploded `form`, a part whose
  * `contentType` lists a range, a part listing several types with no `--<part>-content-type` flag,
- * and a required part the names plan gave no flag.
+ * a part header the names plan gave no `--<part>-<header>` flag, and a required part the names plan
+ * gave no flag. Normalize keeps the headers the writer owns out of the rule (ENC-03).
  */
 export const formParts = (
   command: PlannedCommand,
@@ -781,7 +814,7 @@ export const formParts = (
   const context: PartContext = {
     alternative,
     flags: command.flags,
-    keys: chosenPartKeys(command.operation),
+    keys: keyedPartKeys(command.operation),
     schemas: objectSchemas(defs, key),
   };
   const parts: OrderedPart[] = [];
@@ -916,25 +949,44 @@ const encoderOf = (
       return Option.none();
     }
 
-    // A chosen part type travels with its part's values in the form, so a part not sent has no
-    // type to give (ENC-10).
-    const chosen: Field[] = [];
+    // A keyed part travels with its type and header values in the form, so a part not sent has no
+    // type or header to give (ENC-10, ENC-03). A chosen type's union is its own alias, named after
+    // the form and the part's key, so the field line stays short however many types it lists.
+    const aliases: Statement[] = [];
+    const keyed: Field[] = [];
     const sends: ((form: Expr) => Expr)[] = [];
-    for (const { contentEncoding, contentType, name } of parts.success) {
+    for (const { contentEncoding, contentType, key, name } of parts.success) {
       const encoding = contentEncoding === undefined ? [] : [str(contentEncoding)];
-      if (contentType._tag === "Declared") {
+      if (key === undefined && contentType._tag === "Declared") {
         sends.push(() => arr([str(name), str(contentType.mediaType), ...encoding]));
         continue;
       }
 
-      const key = yield* memberName(contentType.key);
-      const choices = typeUnion(contentType.choices.map((choice) => typeLiteral(choice)));
-      chosen.push({
-        key: contentType.key,
+      const formKey = key ?? name;
+      let typeArgument: TypeExpr;
+      if (contentType._tag === "Declared") {
+        typeArgument = typeLiteral(contentType.mediaType);
+      } else {
+        const alias = yield* identifier(
+          `${formName}${formKey.slice(0, 1).toUpperCase()}${formKey.slice(1)}ContentType`,
+        );
+        aliases.push({
+          _tag: "TypeAlias",
+          doc: yield* docText("The content types the operator may choose for one multipart part."),
+          name: alias,
+          type: typeUnion(contentType.choices.map((choice) => typeLiteral(choice))),
+        });
+        typeArgument = typeRef(alias);
+      }
+
+      keyed.push({
+        key: formKey,
         optional: true,
-        type: optionalOf(typeRef(I("Serialize"), [M("ChosenPart")], [choices])),
+        type: optionalOf(typeRef(I("Serialize"), [M("ChosenPart")], [typeArgument])),
       });
-      sends.push((form) => arr([str(name), member(form, key), ...encoding]));
+
+      const slot = yield* memberName(formKey);
+      sends.push((form) => arr([str(name), member(form, slot), ...encoding]));
     }
 
     const options = (form: Expr) =>
@@ -943,7 +995,7 @@ const encoderOf = (
         ["required", required],
       ]);
     const fields = typeRef(I("Serialize"), [M("FormFields")]);
-    if (chosen.length === 0) {
+    if (keyed.length === 0) {
       return Option.some<Encoder>({
         encode: (value) => fn("formData", [value, options(value)]),
         type: fields,
@@ -953,15 +1005,16 @@ const encoderOf = (
 
     const name = yield* identifier(formName);
     const doc = yield* docText(
-      "The multipart parts: fields holds each part with one listed content type, and each part listing several carries the type chosen for it, or is absent when not sent.",
+      "The multipart parts: fields holds each part with one listed content type and no declared header; each other part carries its content type and header values, or is absent when not sent.",
     );
 
     return Option.some<Encoder>({
       declarations: [
+        ...aliases,
         {
           _tag: "Interface",
           doc,
-          fields: [{ key: "fields", optional: false, type: fields }, ...chosen],
+          fields: [{ key: "fields", optional: false, type: fields }, ...keyed],
           name,
         },
       ],
@@ -1303,6 +1356,19 @@ const moduleFile = (
     const statements = yield* Effect.all(
       commands.map((command) => commandStatements(command, `${prefix}${command.name}`, context)),
     );
+    // Declaration names are composed from command identifiers and form keys; two compositions that
+    // spell the same name are refused rather than printed twice.
+    const declared = new Set<string>();
+    for (const statement of statements.flat()) {
+      if (statement._tag !== "Expression") {
+        if (declared.has(statement.name)) {
+          return yield* refuse("unprintable-name", statement.name);
+        }
+
+        declared.add(statement.name);
+      }
+    }
+
     const content = yield* printModule({ imports: groupImports, statements: statements.flat() });
 
     return { content, path: `src/api/${segment}.ts` };

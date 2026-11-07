@@ -110,6 +110,7 @@ const cookie = (required: boolean) => ({
     allowReserved: false,
     explode: true,
     kind: "style",
+    objectValued: false,
     origin: read0.origin,
     rows: [],
     rules: "fixture",

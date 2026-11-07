@@ -23,7 +23,21 @@ export interface HelpBodyField {
 export type HelpFlagSource =
   | { readonly _tag: "Body"; readonly field?: HelpBodyField; readonly pointer: string }
   | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter }
-  | { readonly _tag: "PartOption"; readonly choices: readonly string[]; readonly part: string };
+  | { readonly _tag: "PartOption"; readonly option: HelpPartOption; readonly part: string };
+
+/**
+ * What a multipart part option sets: the part's content type, one of `choices`, or the value of
+ * its Encoding header `name`, needed when `required` and the part flag `partFlag` is given.
+ */
+export type HelpPartOption =
+  | { readonly choices: readonly string[]; readonly kind: "content-type" }
+  | {
+      readonly deprecated: boolean;
+      readonly kind: "header";
+      readonly name: string;
+      readonly partFlag: string;
+      readonly required: boolean;
+    };
 
 /**
  * A flag or argument by its visible name, without `--`.
@@ -135,7 +149,11 @@ const locationNote = (source: HelpFlagSource, name: string): string => {
   }
 
   if (source._tag === "PartOption") {
-    return `content type of multipart part ${line(propertyOf(source.part))}`;
+    const part = `multipart part ${line(propertyOf(source.part))}`;
+
+    return source.option.kind === "header"
+      ? `header ${line(source.option.name)} of ${part}`
+      : `content type of ${part}`;
   }
 
   const { location, wireName } = source.parameter;
@@ -341,7 +359,7 @@ const isArgument = (flag: HelpFlag): boolean =>
 
 const isDeprecated = ({ source }: HelpFlag): boolean => {
   if (source._tag === "PartOption") {
-    return false;
+    return source.option.kind === "header" && source.option.deprecated;
   }
 
   return source._tag === "Parameter"
@@ -353,11 +371,16 @@ const isDeprecated = ({ source }: HelpFlag): boolean => {
 const valueText = (value: Json): string =>
   line(Predicate.isString(value) ? value : JSON.stringify(value));
 
-// A body field's schema notes: its allowed values, its default and its read-only mark. A part
-// option lists its choices.
+// A body field's schema notes: its allowed values, its default and its read-only mark. A content
+// type option lists its choices, and a required part header names the part flag it goes with.
 const fieldNotes = (source: HelpFlagSource): readonly string[] => {
   if (source._tag === "PartOption") {
-    return [`choices: ${source.choices.map(line).join(", ")}`];
+    const { option } = source;
+    if (option.kind === "content-type") {
+      return [`choices: ${option.choices.map(line).join(", ")}`];
+    }
+
+    return option.required ? [`required when --${line(option.partFlag)} is given`] : [];
   }
 
   const field = source._tag === "Body" ? source.field : undefined;

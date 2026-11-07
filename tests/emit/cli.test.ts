@@ -856,14 +856,28 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/imports.ts")).not.toContain("meta");
   });
 
-  test("part headers are refused, not guessed", async () => {
+  test("a part header is a --<part>-<header> flag typed as a header parameter (ENC-03)", async () => {
     const headers = {
       file: { headers: { "X-Rate": { schema: { type: "integer" } } } },
     };
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(importSchema, headers)) }),
+    );
+    const text = contentOf(output, "src/cli/imports.ts") ?? "";
 
-    expect(await multipartRefusals(multipart(importSchema, headers))).toEqual([
-      { reason: "unsupported-body", subject: "part headers for multipart part /file" },
-    ]);
+    expect(output.refusals).toEqual([]);
+    expect(text).toContain(
+      'fileXRate: Input.numericFlag("file-x-rate", "integer").pipe(Flag.optional),',
+    );
+    expect(text).toContain(
+      [
+        '    Input.partOptions("file", Option.isSome(flags.file), [',
+        '      ["file-x-rate", Option.isSome(flags.fileXRate), false],',
+        "    ]).pipe(",
+      ].join("\n"),
+    );
+    expect(text).toContain('Serialize.header("X-Rate", Option.getOrUndefined(flags.fileXRate), {');
+    expect(text).toContain('"file-x-rate": "header X-Rate of multipart part file",');
   });
 
   test("several part content types are the operator's --<part>-content-type choice", async () => {

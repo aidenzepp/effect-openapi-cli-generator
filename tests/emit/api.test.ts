@@ -475,10 +475,15 @@ describe("emitApi: multipart request bodies", () => {
     const api = content("src/api/imports.ts") ?? "";
 
     expect(api).toContain(
+      ['export type CreateFormFileContentType = "text/csv" | "application/json";', "", "/**"].join(
+        "\n",
+      ),
+    );
+    expect(api).toContain(
       [
         "export interface CreateForm {",
         "  readonly fields: Serialize.FormFields;",
-        '  readonly file?: Serialize.ChosenPart<"text/csv" | "application/json"> | undefined;',
+        "  readonly file?: Serialize.ChosenPart<CreateFormFileContentType> | undefined;",
         "}",
       ].join("\n"),
     );
@@ -501,5 +506,74 @@ describe("emitApi: multipart request bodies", () => {
         "          ],",
       ].join("\n"),
     );
+  });
+
+  test("a part listing ten types prints its union as a broken alias, not one long field", async () => {
+    const types = [
+      "application/json",
+      "application/pdf",
+      "application/zip",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "text/csv",
+      "text/html",
+      "text/plain",
+    ];
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "multipart/form-data": {
+                encoding: { file: { contentType: types.join(", ") } },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain(
+      ["export type CreateFormFileContentType =", ...types.map((type) => `  | "${type}"`)].join(
+        "\n",
+      ),
+    );
+    expect(api).toContain(
+      "  readonly file?: Serialize.ChosenPart<CreateFormFileContentType> | undefined;",
+    );
+    expect(api.split("\n").every((line) => line.length <= 100)).toBe(true);
+  });
+
+  test("a part with a declared header travels keyed, typed by its one content type", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "multipart/form-data": {
+                encoding: {
+                  file: {
+                    contentType: "text/csv",
+                    headers: { "X-Checksum": { required: true, schema: { type: "string" } } },
+                  },
+                },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain('  readonly file?: Serialize.ChosenPart<"text/csv"> | undefined;');
+    expect(api).toContain('["file", input.body.file],');
+    expect(api).not.toContain("ContentType =");
   });
 });

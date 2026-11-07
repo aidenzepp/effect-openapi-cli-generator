@@ -1,12 +1,16 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunFileSystem, BunPath, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
+import { Command } from "effect/cli";
+import type { Flag } from "effect/cli";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { generate } from "../../src/generate.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import * as Input from "../../src/runtime-src/runtime/input.ts";
+import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // m2-dpany: Stripe's `created` query parameter is deepObject over `anyOf [object, integer]`. It
 // generated a string flag that the runtime refused for every value, `--created 5` and
@@ -14,6 +18,9 @@ import { DocumentUri } from "../../src/model/brands.ts";
 // deepObject whose schema admits a value that is not an object is refused at generation
 // (PRM-27/non-object-schema), with the bracket switch on or off; one whose anyOf members are all
 // objects is still generated. Runs `generate` in process; nothing is installed or built.
+//
+// m2-objfact: that all-object anyOf, or oneOf, is object-valued, so it takes JSON like a `type:
+// object` schema does; it was emitted as a string flag the runtime refused for every value.
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -62,6 +69,7 @@ const spec = {
         parameters: [
           deep("created", { anyOf: [range, { type: "integer" }] }),
           deep("window", { anyOf: [range, { properties: { at: { type: "string" } } }] }),
+          deep("span", { oneOf: [range, { properties: { at: { type: "string" } } }] }),
         ],
         responses: ok,
       },
@@ -147,4 +155,43 @@ describe("PRM-27: a deepObject over a schema that admits non-objects", () => {
       expect(run.cli).toContain('"window"');
     });
   }
+});
+
+type Parsed = ReturnType<typeof Input.jsonFlag> extends Flag.Flag<infer A> ? A : never;
+
+// The operator's `--window` text through the flag the CLI emits, then through the runtime's
+// deepObject serializer, as the generated command hands it on.
+const sent = (text: string) =>
+  Effect.runPromise(
+    Effect.gen(function* send() {
+      let seen: Parsed | undefined;
+      const command = Command.make("x", { window: Input.jsonFlag("window") }, ({ window }) =>
+        Effect.sync(() => {
+          seen = window;
+        }),
+      );
+      yield* Command.runWith(command, { version: "0" })(["--window", text]);
+      if (seen === undefined) {
+        return yield* Effect.die(new Error("expected a parsed --window"));
+      }
+
+      const options = { allowReserved: false, explode: true, required: false };
+
+      return yield* Serialize.deepObject("window", seen, options).expand;
+    }).pipe(Effect.provide(BunServices.layer)),
+  );
+
+describe("m2-objfact: a deepObject over all-object anyOf or oneOf takes JSON", () => {
+  for (const [label, run] of Object.entries(runs)) {
+    test(`bracket switch ${label}: the anyOf and oneOf flags are JSON flags`, () => {
+      expect(run.cli).toContain('window: Input.jsonFlag("window")');
+      expect(run.cli).toContain('span: Input.jsonFlag("span")');
+      expect(run.cli).not.toContain('Flag.String("window")');
+      expect(run.cli).not.toContain('Flag.String("span")');
+    });
+  }
+
+  test("the JSON flag's object is sent as window[at]=v", async () => {
+    expect(await sent('{"at":"v"}')).toBe("window%5Bat%5D=v");
+  });
 });

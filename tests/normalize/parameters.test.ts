@@ -909,3 +909,46 @@ describe("PRM-27 the object test's schema walk is bounded", () => {
     expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
   });
 });
+
+const objectValued = (parameter: Json, components: Members = {}) => {
+  const { serialization } = implemented("3.1", parameter, components).parameter;
+  if (serialization.kind !== "style") {
+    throw new Error("expected a style serialization");
+  }
+
+  return serialization.objectValued;
+};
+
+describe("objectValued: a styled parameter whose schema admits only objects takes JSON", () => {
+  const other: Json = { properties: { b: string }, type: "object" };
+
+  const cases: readonly (readonly [string, Json, boolean])[] = [
+    ["a form query over type object", query({ schema: flat }), true],
+    [
+      "a form query over properties with no type",
+      query({ schema: { properties: { a: string } } }),
+      true,
+    ],
+    ["a deepObject over anyOf of objects", deep({ schema: { anyOf: [flat, other] } }), true],
+    ["a deepObject over oneOf of objects", deep({ schema: { oneOf: [flat, other] } }), true],
+    ["a simple path over type object", path({ schema: flat }), true],
+    ["a form query over a string", query({}), false],
+    ["a form query over an array", query({ schema: list }), false],
+    ["a form query over anyOf with a string", query({ schema: { anyOf: [flat, string] } }), false],
+    [
+      "a form query over a type list with null",
+      query({ schema: { type: ["object", "null"] } }),
+      false,
+    ],
+  ];
+
+  for (const [label, parameter, expected] of cases) {
+    test(`${label} is ${expected ? "" : "not "}object-valued`, () => {
+      expect(objectValued(parameter)).toBe(expected);
+    });
+  }
+
+  test("a $ref to an object component is object-valued", () => {
+    expect(objectValued(query({ schema: ref("O") }), { schemas: { O: flat } })).toBe(true);
+  });
+});

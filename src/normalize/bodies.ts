@@ -16,7 +16,8 @@ import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
-import { deepObjectExplodeText } from "./parameters.ts";
+import { deepObjectExplodeText, partHeader } from "./parameters.ts";
+import type { PartHeaderOutcome } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
@@ -536,8 +537,11 @@ interface PlainSerialization {
 }
 
 interface PlainHeader {
+  readonly deprecated: boolean;
   readonly name: string;
   readonly required: boolean;
+  readonly schema: { readonly key: string };
+  readonly serialization: Extract<PartHeaderOutcome, { readonly _tag: "Typed" }>["serialization"];
 }
 
 interface PlainNested {
@@ -563,6 +567,11 @@ interface RuleResult {
 interface RuleInput {
   readonly actual: CanonicalKey;
   readonly depth: 0 | 1;
+  /**
+   * The part is a top-level part of a `multipart/form-data` body, whose `Content-Disposition` the
+   * writer writes.
+   */
+  readonly formData: boolean;
   readonly honorsStyle: boolean;
   readonly node: EncodingNode | undefined;
   readonly schema: CanonicalKey | undefined;
@@ -793,31 +802,36 @@ const partTypingOf = (
     };
   });
 
-const headerRequired = (
-  resolution: Resolution,
-  actual: CanonicalKey,
-  name: string,
-): Effect.Effect<boolean> =>
-  headerMarks(resolution, childKey(actual, "headers", name)).pipe(
-    Effect.map((marks) => marks.required),
-  );
-
 interface Headers {
   readonly findings: readonly Finding[];
   readonly headers: readonly PlainHeader[] | undefined;
+  /**
+   * Whether the rule declares a header besides an ignored `Content-Type` (row ENC-03).
+   */
+  readonly declares: boolean;
 }
 
-// ENC-03, ENC-11: part headers; a `Content-Type` entry is ignored, a bad name refuses the part.
-const headersOf = (
-  resolution: Resolution,
-  actual: CanonicalKey,
-  node: EncodingNode,
-): Effect.Effect<Headers> =>
+const writerOwnedCode = "ENC-03/writer-owned-header";
+
+// Headers the multipart writer writes itself (design 6.3): `Content-Transfer-Encoding` always, and
+// `Content-Disposition`, with the part name RFC 7578 requires, under `multipart/form-data`.
+const writerOwned = (name: string, formData: boolean): boolean => {
+  const folded = name.toLowerCase();
+
+  return folded === "content-transfer-encoding" || (formData && folded === "content-disposition");
+};
+
+// ENC-03, ENC-11: part headers, each typed and serialized as a header parameter (HDR-01). A
+// `Content-Type` entry is ignored, a header the writer owns gets no flag, and a bad name or a header
+// the header parameter path cannot carry refuses the part.
+const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.Effect<Headers> =>
   Effect.gen(function* headers() {
+    const { resolution } = ctx;
     const findings: Finding[] = [];
     const kept: PlainHeader[] = [];
+    let declares = false;
     for (const name of Object.keys(node.headers ?? {})) {
-      const at = childKey(actual, "headers", name);
+      const at = childKey(input.actual, "headers", name);
       if (name.toLowerCase() === "content-type") {
         findings.push(
           notice(
@@ -828,7 +842,11 @@ const headersOf = (
             at,
           ),
         );
-      } else if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
+        continue;
+      }
+
+      declares = true;
+      if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
         findings.push(
           dropping(
             refusal(
@@ -841,13 +859,51 @@ const headersOf = (
           ),
         );
 
-        return { findings, headers: undefined };
-      } else {
-        kept.push({ name, required: yield* headerRequired(resolution, actual, name) });
+        return { declares, findings, headers: undefined };
       }
+
+      if (writerOwned(name, input.formData)) {
+        findings.push(
+          notice(
+            writerOwnedCode,
+            "encoding-headers",
+            `Encoding header ${name}`,
+            `The multipart writer writes ${name} itself, so the declared header gets no flag and is not sent as declared.`,
+            at,
+          ),
+        );
+        continue;
+      }
+
+      const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.maxNodes });
+      if (typed._tag === "Unsupported") {
+        findings.push(
+          dropping(
+            refusal(
+              "ENC-03/unsupported-part-header",
+              "encoding-headers",
+              `Encoding header ${name}`,
+              `The part header ${name} cannot be sent as a header parameter: ${typed.reason}`,
+              at,
+              "Describe the header with a schema the header parameter rules accept, or remove it",
+            ),
+          ),
+        );
+
+        return { declares, findings, headers: undefined };
+      }
+
+      const marks = yield* headerMarks(resolution, at);
+      kept.push({
+        deprecated: marks.deprecated,
+        name,
+        required: marks.required,
+        schema: typed.schema,
+        serialization: typed.serialization,
+      });
     }
 
-    return { findings, headers: kept };
+    return { declares, findings, headers: kept };
   });
 
 interface NestedEntry {
@@ -960,6 +1016,7 @@ const nestingOf = (
       entries.map((entry): RuleInput => ({
         actual: entry.actual,
         depth: 1,
+        formData: false,
         honorsStyle: false,
         node: entry.node,
         schema: memberSchema(children, entry.target),
@@ -1133,7 +1190,7 @@ const buildRule = (
       return { findings: [...typing.findings, transfer.finding], rule: undefined };
     }
 
-    const headers = yield* headersOf(ctx.resolution, input.actual, node);
+    const headers = yield* headersOf(ctx, input, node);
     const transferHeader = transferHeaderOf(node);
     const conflict =
       transfer.encoding === undefined ||
@@ -1141,8 +1198,11 @@ const buildRule = (
       transferHeader === undefined
         ? undefined
         : yield* transferConflict(ctx, input, transferHeader);
+    // A conflict refuses the part, so it sends no header and the writer-owned notices are moot.
     if (conflict !== undefined) {
-      return { findings: [...typing.findings, ...headers.findings, conflict], rule: undefined };
+      const kept = headers.findings.filter(({ code }) => code !== writerOwnedCode);
+
+      return { findings: [...typing.findings, ...kept, conflict], rule: undefined };
     }
 
     const nesting = yield* nestingOf(ctx, input, node, buildAll);
@@ -1167,7 +1227,7 @@ const buildRule = (
       rows: sorted([
         ...typing.rows,
         ...nesting.rows,
-        ...(headers.headers.length === 0 ? [] : ["ENC-03"]),
+        ...(headers.declares ? ["ENC-03"] : []),
         ...(transfer.row === undefined ? [] : [transfer.row]),
         ...(styled === undefined ? [] : ["ENC-40"]),
       ]),
@@ -1449,6 +1509,7 @@ const propertyInputs = (
   media: Media,
   members: Members,
   honorsStyle: boolean,
+  formData: boolean,
 ): readonly RuleInput[] => {
   const byName = media.node.encoding ?? {};
 
@@ -1458,6 +1519,7 @@ const propertyInputs = (
     return {
       actual: explicit === undefined ? schema : childKey(media.home, "encoding", name),
       depth: 0,
+      formData,
       honorsStyle,
       node: explicit,
       schema,
@@ -1472,14 +1534,16 @@ const partInputs = (
   media: Media,
   members: Members,
   honorsStyle: boolean,
+  formData: boolean,
 ): readonly RuleInput[] => {
   const { home, node } = media;
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
-  const properties = propertyInputs(media, members, honorsStyle);
+  const properties = propertyInputs(media, members, honorsStyle, formData);
   const positions = prefix.map((entry, index): RuleInput => ({
     actual: childKey(home, "prefixEncoding", String(index)),
     depth: 0,
+    formData,
     honorsStyle,
     node: entry,
     schema: members.prefixItems[index],
@@ -1492,6 +1556,7 @@ const partInputs = (
           {
             actual: childKey(home, "itemEncoding"),
             depth: 0,
+            formData,
             honorsStyle,
             node: item,
             schema: node.itemSchema === undefined ? members.items : childKey(home, "itemSchema"),
@@ -1581,7 +1646,7 @@ const multipartParts = (
     }
 
     const honorsStyle = base === "multipart/form-data" && line !== "3.0";
-    const inputs = partInputs(line, media, members, honorsStyle);
+    const inputs = partInputs(line, media, members, honorsStyle, base === "multipart/form-data");
     const built = yield* buildAll(ctx, inputs);
     const findings = [...extra, ...keys.findings, ...built.findings];
     if (built.refused) {
@@ -1858,7 +1923,7 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
 
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
-    for (const input of propertyInputs(media, members, true)) {
+    for (const input of propertyInputs(media, members, true, false)) {
       const result = yield* formRule(ctx, input);
       findings.push(...result.findings);
       if (result.rule === undefined) {

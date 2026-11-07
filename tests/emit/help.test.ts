@@ -34,6 +34,7 @@ const serialization = (style: string) => ({
   allowReserved: false,
   explode: false,
   kind: "style",
+  objectValued: false,
   origin,
   rows,
   rules: "rfc3986-3.1+",

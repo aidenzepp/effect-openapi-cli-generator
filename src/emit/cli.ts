@@ -20,14 +20,13 @@ import {
   encodesByKey,
   formParts,
   inputKeys,
-  isObjectSchema,
   isScalarArraySchema,
   scalarTypeOf,
   takesJsonContent,
 } from "./api.ts";
-import type { FormPart } from "./api.ts";
+import type { FormPart, PartHeader } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
-import type { HelpBodyField, HelpFlag } from "./help.ts";
+import type { HelpBodyField, HelpFlag, HelpPartOption } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
 import {
   Identifier,
@@ -496,8 +495,11 @@ const parameterOf = (operation: Operation, location: string, wireName: string) =
     (parameter) => parameter.location === location && parameter.wireName === wireName,
   );
 
+// What typing a header-shaped value reads: a parameter, or a part header typed as one (ENC-03).
+type Typed = Pick<Parameter, "location" | "schema" | "serialization">;
+
 // Whether a parameter is an array of scalar items, given once per item (design 6.1).
-const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
+const isArrayParameter = (parameter: Pick<Typed, "schema">, context: CommandContext) =>
   Effect.gen(function* scalarArray() {
     const array = isScalarArraySchema(context.defs, parameter.schema.key);
     if (Result.isFailure(array)) {
@@ -509,24 +511,13 @@ const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
 
 // Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
 // builder hands to the style serializer. A `content` parameter is one value whatever its schema.
-const isObjectParameter = (parameter: Parameter, context: CommandContext) =>
-  Effect.gen(function* object() {
-    if (parameter.serialization.kind !== "style") {
-      return false;
-    }
-
-    const found = isObjectSchema(context.defs, parameter.schema.key);
-    if (Result.isFailure(found)) {
-      return yield* refuse("unresolved-schema", found.failure);
-    }
-
-    return found.success;
-  });
+const isObjectParameter = ({ serialization }: Pick<Typed, "serialization">): boolean =>
+  serialization.kind === "style" && serialization.objectValued;
 
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
 // `content` parameter is one value whatever its schema, so it has none.
-const numericKindOf = (parameter: Parameter, context: CommandContext) =>
+const numericKindOf = (parameter: Typed, context: CommandContext) =>
   Effect.gen(function* numeric() {
     let kind: NumericKind | undefined;
     if (parameter.serialization.kind === "style") {
@@ -577,7 +568,7 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
-    const object = yield* isObjectParameter(parameter, context);
+    const object = isObjectParameter(parameter);
     const numeric = yield* numericKindOf(parameter, context);
     let head = fn("Argument.String", str(positional.name));
     if (object) {
@@ -701,7 +692,7 @@ const fieldDescription = (
 // for an array) is checked against its grammar.
 const parameterFlagHead = (
   flag: PlannedFlag,
-  parameter: Parameter,
+  parameter: Typed,
   object: boolean,
   numeric: NumericKind | undefined,
 ): Expr => {
@@ -724,6 +715,59 @@ const parameterFlagHead = (
     ? fn("Flag.String", str(flag.name))
     : fn("Input.numericFlag", str(flag.name), str(numeric));
 };
+
+type PartOptionSource = Extract<PlannedFlag["source"], { readonly _tag: "PartOption" }>;
+
+// The Encoding header a part header option sets, from the first multipart alternative it applies to.
+const partHeaderOf = (operation: Operation, source: PartOptionSource) => {
+  const { option } = source;
+
+  return (operation.body?.alternatives ?? [])
+    .filter((alternative) => source.media.includes(alternative.mediaType))
+    .flatMap((alternative) => alternative.encoding)
+    .find(
+      ({ target }) => target.kind === "property" && formatPointer([target.name]) === source.part,
+    )
+    ?.headers.find((header) => option.kind === "header" && header.name === option.name);
+};
+
+// A content type option takes one of the listed values, with no default (ENC-10). A part header
+// option is typed as a header parameter of its schema or content is, and is optional at parse:
+// `Input.partOptions` requires it only when its part is sent (ENC-03).
+const partOptionEntry = (
+  flag: PlannedFlag,
+  source: PartOptionSource,
+  operation: Operation,
+  context: CommandContext,
+) =>
+  Effect.gen(function* entry() {
+    if (source.option.kind === "content-type") {
+      const choices = arr(source.option.choices.map((choice) => str(choice)));
+
+      return [
+        flag.identifier,
+        pipe(fn("Flag.Literals", str(flag.name), choices), [path("Flag.optional")]),
+      ] as const;
+    }
+
+    const header = partHeaderOf(operation, source);
+    if (header === undefined) {
+      return yield* refuse("unsupported-flag", flag.name);
+    }
+
+    const typed: Typed = { ...header, location: "header" };
+    const array =
+      header.serialization.kind === "style" && (yield* isArrayParameter(typed, context));
+    const object = isObjectParameter(typed);
+    const head = parameterFlagHead(flag, typed, object, yield* numericKindOf(typed, context));
+    const steps = [
+      ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
+      array ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
+      ...(header.deprecated ? [fn("Input.deprecated", str(flag.name))] : []),
+    ];
+
+    return [flag.identifier, pipe(head, steps)] as const;
+  });
 
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
@@ -749,7 +793,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       }
 
       const array = styled && (yield* isArrayParameter(parameter, context));
-      const object = yield* isObjectParameter(parameter, context);
+      const object = isObjectParameter(parameter);
       const head = parameterFlagHead(
         flag,
         parameter,
@@ -771,14 +815,8 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return [flag.identifier, pipe(head, steps)] as const;
     }
 
-    // A part option takes one of the listed values, with no default (ENC-10).
     if (source._tag === "PartOption") {
-      const choices = arr(source.option.choices.map((choice) => str(choice)));
-
-      return [
-        flag.identifier,
-        pipe(fn("Flag.Literals", str(flag.name), choices), [path("Flag.optional")]),
-      ] as const;
+      return yield* partOptionEntry(flag, source, operation, context);
     }
 
     const { alternative, schema } = bodyField(operation, source, context);
@@ -1008,30 +1046,87 @@ const formAssertion = (
     };
   });
 
-// Whether the operator gave a part's flag at least once.
-const partSent = (part: FormPart) =>
-  Effect.map(flagValue(part.flag.identifier), (value) =>
-    part.flag.source._tag === "Body" && part.flag.source.repeated
-      ? fn("Option.isSome", fn("Option.fromIterable", value))
-      : fn("Option.isSome", value),
+// Whether the operator gave a flag at least once; a repeated flag's value is a list.
+const gaveFlag = (flag: PlannedFlag, repeated: boolean) =>
+  Effect.map(flagValue(flag.identifier), (value) =>
+    repeated ? fn("Option.isSome", fn("Option.fromIterable", value)) : fn("Option.isSome", value),
   );
 
-// A part type the operator chooses (ENC-10): `Input.partOptions` refuses its flag without the part
-// and a sent part without its flag, before any request, and `Serialize.chooseParts` moves the
-// sent part's values beside the chosen type under its key in the builder's form.
-const chosenType = (part: FormPart) =>
-  Effect.gen(function* chosen() {
-    const { contentType } = part;
-    if (contentType._tag === "Declared") {
-      return Option.none();
+const isRepeatedPart = (flag: PlannedFlag): boolean =>
+  flag.source._tag === "Body" && flag.source.repeated;
+
+// One part header's value as a header parameter (ENC-03, HDR-01), serialized by its style or
+// content as a header parameter is, and never required on its own: `Input.partOptions` settles
+// whether the sent part needs it. An array header's flag repeats, and its list is the value.
+const headerValue = (entry: PartHeader, array: boolean) =>
+  Effect.gen(function* value() {
+    const { flag, header } = entry;
+    const raw = yield* flagValue(flag.identifier);
+    const { serialization } = header;
+    if (serialization.kind === "content") {
+      return fn(
+        "Serialize.headerContent",
+        str(header.name),
+        str(serialization.mediaType),
+        fn("Option.getOrUndefined", raw),
+        obj([["required", bool(false)]]),
+      );
     }
 
-    const value = yield* flagValue(contentType.flag.identifier);
-    const option = arr([str(contentType.flag.name), fn("Option.isSome", value), bool(true)]);
+    const options = obj([
+      ["explode", bool(serialization.explode)],
+      ["required", bool(false)],
+    ]);
 
-    return Option.some({
-      check: fn("Input.partOptions", str(part.flag.name), yield* partSent(part), arr([option])),
-      choice: [contentType.key, arr([str(part.name), value])] as const,
+    return fn(
+      "Serialize.header",
+      str(header.name),
+      array ? raw : fn("Option.getOrUndefined", raw),
+      options,
+    );
+  });
+
+interface KeyedPart {
+  readonly check: Expr;
+  readonly choice: readonly [string, Expr];
+}
+
+// A keyed part (ENC-10, ENC-03): `Input.partOptions` refuses an option flag without the part and a
+// sent part without a required option, before any request, and `Serialize.chooseParts` moves the
+// sent part's values beside its type and header parameters under its key in the builder's form.
+const keyedPart = (part: FormPart, context: CommandContext) =>
+  Effect.gen(function* keyed() {
+    const { contentType, key } = part;
+    if (key === undefined) {
+      return Option.none<KeyedPart>();
+    }
+
+    const options: Expr[] = [];
+    let type: Expr;
+    if (contentType._tag === "Declared") {
+      type = str(contentType.mediaType);
+    } else {
+      type = yield* flagValue(contentType.flag.identifier);
+      options.push(arr([str(contentType.flag.name), fn("Option.isSome", type), bool(true)]));
+    }
+
+    const headers: Expr[] = [];
+    for (const entry of part.headers) {
+      const { header } = entry;
+      const array =
+        header.serialization.kind === "style" && (yield* isArrayParameter(header, context));
+      options.push(
+        arr([str(entry.flag.name), yield* gaveFlag(entry.flag, array), bool(header.required)]),
+      );
+      headers.push(yield* headerValue(entry, array));
+    }
+
+    const sent = yield* gaveFlag(part.flag, isRepeatedPart(part.flag));
+    const choice = arr([str(part.name), type, ...(headers.length === 0 ? [] : [arr(headers)])]);
+
+    return Option.some<KeyedPart>({
+      check: fn("Input.partOptions", str(part.flag.name), sent, arr(options)),
+      choice: [key, choice],
     });
   });
 
@@ -1055,10 +1150,10 @@ const formBody = (
     for (const part of parts.success) {
       entries.push([part.name, yield* partValues(part)]);
 
-      const chosen = yield* chosenType(part);
-      if (Option.isSome(chosen)) {
-        checks.push(chosen.value.check);
-        choices.push(chosen.value.choice);
+      const keyed = yield* keyedPart(part, context);
+      if (Option.isSome(keyed)) {
+        checks.push(keyed.value.check);
+        choices.push(keyed.value.choice);
       }
     }
 
@@ -1205,6 +1300,32 @@ const bindingOf = (location: string, pointer: string, wireName: string): Expr =>
     ["wireName", str(wireName)],
   ]);
 
+// What help says of a part option: its choices, or its header's marks and its part flag.
+const helpPartOption = (
+  command: PlannedCommand,
+  source: PartOptionSource,
+): HelpPartOption | undefined => {
+  const { option } = source;
+  if (option.kind === "content-type") {
+    return option;
+  }
+
+  const header = partHeaderOf(command.operation, source);
+  const part = command.flags.find(
+    (flag) => flag.source._tag === "Body" && flag.source.wireName === source.part,
+  );
+
+  return header === undefined || part === undefined
+    ? undefined
+    : {
+        deprecated: header.deprecated,
+        kind: "header",
+        name: header.name,
+        partFlag: part.name,
+        required: header.required,
+      };
+};
+
 const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFlag[] => {
   const { operation } = command;
   const positionals = command.positionals.flatMap((positional) => {
@@ -1230,9 +1351,11 @@ const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFla
       }
 
       if (source._tag === "PartOption") {
-        const { choices } = source.option;
+        const option = helpPartOption(command, source);
 
-        return [{ name: flag.name, source: { _tag: "PartOption", choices, part: source.part } }];
+        return option === undefined
+          ? []
+          : [{ name: flag.name, source: { _tag: "PartOption", option, part: source.part } }];
       }
 
       const parameter = parameterOf(operation, source.location, source.wireName);
