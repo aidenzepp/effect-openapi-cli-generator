@@ -13,6 +13,7 @@ import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
+import { sendsFormPairs } from "../normalize/bodies.ts";
 import { JsDocText } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
 import {
@@ -633,7 +634,9 @@ const partOf = (flag: PlannedFlag, context: PartContext): Result.Result<OrderedP
     return Result.fail(`part headers for multipart part ${pointer}`);
   }
 
-  if (rule.serialization !== undefined) {
+  // A style the writer sends (ENC-40) arrives typed `text/plain`; normalize refuses any other, and
+  // the names plan gives that part no flag.
+  if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
     return Result.fail(`a style for multipart part ${pointer}`);
   }
 
@@ -657,8 +660,8 @@ const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
  * command's request media alternatives; the part flags are those whose media lists it. Refused,
  * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
  * positional parts, a nested part, part headers (a declared `Content-Transfer-Encoding` beside
- * the rule's transfer encoding aside), a part style, a part whose `contentType` is not one
- * concrete media type, and a required part the names plan gave no flag.
+ * the rule's transfer encoding aside), a part style other than exploded `form`, a part whose
+ * `contentType` is not one concrete media type, and a required part the names plan gave no flag.
  */
 export const formParts = (
   command: PlannedCommand,

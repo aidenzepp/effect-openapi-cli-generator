@@ -482,16 +482,22 @@ const defaultOfTypes = (line: Line, facts: Facts, arrayDefault: ArrayDefault): D
 
 const nestedArrayDefault: ArrayDefault = () => ({ row: "ENC-23", type: "application/json" });
 
-const arrayDefault: ArrayDefault = (line, facts) =>
-  line === "3.2"
-    ? { row: "ENC-24", type: "application/json" }
-    : {
-        row: "ENC-23",
-        type: defaultOfTypes(line, facts.items ?? noFacts, nestedArrayDefault).type,
-      };
+// An array is typed by its items (ENC-23), except in 3.2, where an array is `application/json`
+// unless it is a top-level property under encoding by name, which is encoded per item (ENC-24).
+const arrayDefault =
+  (byName: boolean): ArrayDefault =>
+  (line, facts) => {
+    const items = defaultOfTypes(line, facts.items ?? noFacts, nestedArrayDefault).type;
+    if (line !== "3.2") {
+      return { row: "ENC-23", type: items };
+    }
+
+    return { row: "ENC-24", type: byName ? items : "application/json" };
+  };
 
 // ENC-17 to ENC-26: the default contentType of a part from the schema of its value.
-const defaultFor = (line: Line, facts: Facts): Default => defaultOfTypes(line, facts, arrayDefault);
+const defaultFor = (line: Line, facts: Facts, input: RuleInput): Default =>
+  defaultOfTypes(line, facts, arrayDefault(input.target.kind === "property" && input.depth === 0));
 
 // --- Encoding rules ---
 
@@ -581,6 +587,32 @@ const styleRows = (style: PlainSerialization): readonly string[] => [
   "ENC-13",
 ];
 
+/**
+ * Whether a style-based `multipart/form-data` part is sent the way the multipart writer sends it
+ * (ENC-40, Appendix C): `form` with `explode` gives one name and raw value per value, which is one
+ * part per value, under no contentType (RFC 7578: `text/plain`). `allowReserved` has no effect on
+ * multipart. Other styles and an unexploded `form` join values into one part, which the writer has
+ * no input for.
+ */
+export const sendsFormPairs = (serialization: {
+  readonly explode?: boolean | undefined;
+  readonly style?: string | undefined;
+}): boolean =>
+  (serialization.style === undefined || serialization.style === "form") &&
+  serialization.explode !== false;
+
+const formPairsType = "text/plain";
+
+const unsupportedPartStyle = (input: RuleInput): Finding =>
+  refusal(
+    "ENC-40/unsupported-part-style",
+    "appendix-c-using-rfc6570-based-serialization",
+    "Encoding style, explode or allowReserved",
+    `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
+    input.actual,
+    "Use style form with explode true, or remove the style fields",
+  );
+
 const styleIgnored = (actual: CanonicalKey): Finding =>
   notice(
     "ENC-12/style-ignored",
@@ -646,7 +678,7 @@ const typingOf = (
     }
 
     if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* facts);
+      const fallback = defaultFor(ctx.line, yield* facts, input);
 
       return {
         contentType: [fallback.type],
@@ -1014,13 +1046,22 @@ const buildRule = (
     }
 
     const nesting = yield* nestingOf(ctx, input, node, buildAll);
-    const findings = [...typing.findings, ...headers.findings, ...nesting.findings];
+    // ENC-40: a style the writer sends is name and raw value under `text/plain`; any other style
+    // refuses the part alone, and the rule keeps its style so the names plan gives it no flag.
+    const styled = typing.serialization;
+    const pairs = styled !== undefined && sendsFormPairs(styled);
+    const findings = [
+      ...typing.findings,
+      ...headers.findings,
+      ...nesting.findings,
+      ...(styled === undefined || pairs ? [] : [unsupportedPartStyle(input)]),
+    ];
     if (headers.headers === undefined || nesting.refused) {
       return { findings, rule: undefined };
     }
 
     const rule: PlainRule = {
-      contentType: typing.contentType,
+      contentType: pairs ? [formPairsType] : typing.contentType,
       headers: headers.headers,
       origin: input.actual,
       rows: sorted([
@@ -1028,6 +1069,7 @@ const buildRule = (
         ...nesting.rows,
         ...(headers.headers.length === 0 ? [] : ["ENC-03"]),
         ...(transfer.row === undefined ? [] : [transfer.row]),
+        ...(styled === undefined ? [] : ["ENC-40"]),
       ]),
       target: input.target,
     };
@@ -1533,7 +1575,7 @@ const formRule = (
 
     const explicit = typing.serialization === undefined && node.contentType !== undefined;
     const fallback = explicit
-      ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema))
+      ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema), input)
       : undefined;
     const [given] = typing.contentType;
     if (

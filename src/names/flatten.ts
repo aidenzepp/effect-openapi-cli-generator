@@ -5,6 +5,7 @@ import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
+import { sendsFormPairs } from "../normalize/bodies.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
@@ -169,7 +170,7 @@ const inProgress = Symbol("inProgress");
 interface Ctx {
   readonly defs: Defs;
   /**
-   * JSON bodies only: a base64 string property is a `file` flag, not a `string`.
+   * JSON and form bodies: a base64 string property is a `file` flag, not a `string`.
    */
   readonly base64Fields: boolean;
   /**
@@ -177,6 +178,11 @@ interface Ctx {
    * part: the runtime encodes the file's bytes, so typed text is never encoded in their place.
    */
   readonly base64Parts: ReadonlySet<string>;
+  /**
+   * Multipart only: the parts whose Encoding style joins values into one part (ENC-40). Normalize
+   * refuses each at element scope, so it gets no flag and no notice here.
+   */
+  readonly styleRefused: ReadonlySet<string>;
   /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
@@ -195,16 +201,29 @@ const base64PartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<stri
     ),
   );
 
+// The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
+const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.serialization !== undefined &&
+      !sendsFormPairs(rule.serialization) &&
+      rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
 const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
 ): Ctx => ({
-  base64Fields: codec === "json",
+  base64Fields: codec === "json" || codec === "form",
   base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
+  styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
 
@@ -562,7 +581,7 @@ const walkProperties = (
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
  * (repeated parts), or a `file` part when it is binary or its rule sends it base64 encoded; any
- * other shape is skipped with a reason.
+ * other shape is skipped with a reason. A part whose style normalize refused (ENC-40) gets nothing.
  */
 const walkParts = (
   ctx: Ctx,
@@ -574,6 +593,10 @@ const walkParts = (
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (ctx.styleRefused.has(key)) {
+      continue;
     }
 
     const pointer = formatPointer([key]);

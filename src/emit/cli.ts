@@ -216,6 +216,7 @@ interface FieldNode {
   readonly format: string | undefined;
   readonly int64: boolean;
   readonly items: Schema.Json | undefined;
+  readonly maxLength: number | undefined;
   readonly prose: string | undefined;
   readonly properties: JsonObject | undefined;
   readonly ref: string | undefined;
@@ -235,6 +236,7 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
   const allOf = own(json, "allOf");
   const properties = own(json, "properties");
   const prose = [own(json, "description"), own(json, "title")].find(Predicate.isString);
+  const maxLength = own(json, "maxLength");
   const unsafe = boundKeywords.some((keyword) => {
     const bound = own(json, keyword);
 
@@ -254,6 +256,10 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
     format: text("format"),
     int64: own(json, "format") === "int64" || unsafe,
     items: own(json, "items"),
+    maxLength:
+      Predicate.isNumber(maxLength) && Number.isSafeInteger(maxLength) && maxLength >= 0
+        ? maxLength
+        : undefined,
     properties: isJsonObject(properties) ? properties : undefined,
     prose,
     ref,
@@ -275,6 +281,10 @@ interface FieldSchema {
    */
   readonly encoding: FieldEncoding | undefined;
   readonly integer: IntegerWidth;
+  /**
+   * The tightest `maxLength` on the `$ref` chain: for a binary body, its byte limit (MED-21).
+   */
+  readonly maxLength: number | undefined;
   readonly mediaType: string | undefined;
 }
 
@@ -382,10 +392,15 @@ const fieldSchema = (
   const last = field.nodes.at(-1);
   const encoding = last === undefined ? undefined : encodingOf(last);
 
+  const bounds = field.nodes.flatMap((node) =>
+    node.maxLength === undefined ? [] : [node.maxLength],
+  );
+
   return {
     description: described?.prose ?? "",
     encoding,
     integer: width(),
+    maxLength: bounds.length === 0 ? undefined : Math.min(...bounds),
     mediaType: last?.contentMediaType,
   };
 };
@@ -521,10 +536,11 @@ const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): E
     : flagConstructor(flag, kind);
 };
 
-// A JSON body property the runtime reads from a file and encodes (design 6.3 Binary): its flag is
-// a `file` flag inside a JSON alternative, where a multipart part flag of the same kind is a part.
+// A JSON or form body property the runtime reads from a file and encodes (design 6.3 Binary): its
+// flag is a `file` flag inside a JSON or form alternative, where a multipart part flag of the same
+// kind is a part.
 const isEncodedField = (flag: PlannedFlag, alternative: MediaAlternative | undefined): boolean =>
-  alternative?.codec === "json" &&
+  (alternative?.codec === "json" || alternative?.codec === "form") &&
   flag.source._tag === "Body" &&
   flag.source.kind === "file" &&
   !flag.source.repeated;
@@ -648,7 +664,13 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
     );
     const schema: FieldSchema =
       alternative?.schema === undefined
-        ? { description: "", encoding: undefined, integer: "unsettled", mediaType: undefined }
+        ? {
+            description: "",
+            encoding: undefined,
+            integer: "unsettled",
+            maxLength: undefined,
+            mediaType: undefined,
+          }
         : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
@@ -715,9 +737,16 @@ const alternativeBody = (
       ["bodyFile", yield* wholeBody(command, "body-file")],
     ];
     if (isOpaque(alternative)) {
+      // MED-21: a binary body's `maxLength` counts its octets, so it bounds the upload.
+      const limit =
+        alternative.codec === "binary" && alternative.schema !== undefined
+          ? fieldSchema(context.defs, alternative.schema.key, "", false).maxLength
+          : undefined;
+      const bound: Entry[] = limit === undefined ? [] : [["maxBytes", num(limit)]];
+
       return {
         domain: [],
-        value: fn("Input.binaryBody", obj([...sources, ["required", bool(required)]])),
+        value: fn("Input.binaryBody", obj([...sources, ...bound, ["required", bool(required)]])),
       };
     }
 

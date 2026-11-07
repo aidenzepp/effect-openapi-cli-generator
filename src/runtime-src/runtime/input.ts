@@ -87,12 +87,12 @@ const usage = (flag: string, cause: string): UsageError =>
 
 const cannotReadIn = (flag: string): UsageError => usage(flag, "cannot read the file or stdin");
 
-const overLimitIn = (flag: string): UsageError =>
-  usage(flag, `the body is over ${maxBodyBytes} bytes`);
+const overLimitIn = (flag: string, limit: number = maxBodyBytes): UsageError =>
+  usage(flag, `the body is over ${limit} bytes`);
 
 const cannotRead = (): UsageError => cannotReadIn(bodyFileName);
 
-const overLimit = (): UsageError => overLimitIn(bodyFileName);
+const overLimit = (limit: number): UsageError => overLimitIn(bodyFileName, limit);
 
 const notAFile = (): UsageError =>
   usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
@@ -132,8 +132,11 @@ const bounded = (
     ),
   );
 
-const toUsage = (cause: OverLimit | ReadFailed, flag: string = bodyFileName): UsageError =>
-  cause instanceof OverLimit ? overLimitIn(flag) : cannotReadIn(flag);
+const toUsage = (
+  cause: OverLimit | ReadFailed,
+  flag: string = bodyFileName,
+  limit: number = maxBodyBytes,
+): UsageError => (cause instanceof OverLimit ? overLimitIn(flag, limit) : cannotReadIn(flag));
 
 const collect = (
   source: Stream.Stream<Uint8Array, unknown>,
@@ -180,10 +183,12 @@ const limited = (
   }
 
   return (body.contentLength ?? 0) > limit
-    ? Effect.fail(overLimit())
+    ? Effect.fail(overLimit(limit))
     : Effect.succeed(
         HttpBody.stream(
-          bounded(body.stream, limit).pipe(Stream.mapError(toUsage)),
+          bounded(body.stream, limit).pipe(
+            Stream.mapError((cause) => toUsage(cause, bodyFileName, limit)),
+          ),
           body.contentType,
           body.contentLength,
         ),
@@ -208,7 +213,7 @@ const openFile = (
     }
 
     if (limit !== undefined && info.size > BigInt(limit)) {
-      return yield* Effect.fail(overLimit());
+      return yield* Effect.fail(overLimit(limit));
     }
 
     yield* fs.open(path, { flag: "r" }).pipe(Effect.scoped, Effect.mapError(cannotRead));
@@ -237,8 +242,9 @@ const stdinBody: Effect.Effect<HttpBody.HttpBody, UsageError, Stdio.Stdio | Stdi
  * `Content-Length`. Both count their bytes against the limit as they stream, so an over-limit or
  * unreadable stdin fails the send with a `UsageError` naming `--body-file`. `--body` is refused,
  * and so is `--body` together with `--body-file`. With neither flag a required body is a
- * `UsageError` naming `--body-file` and an optional one is empty. `maxBytes` replaces the default
- * limit.
+ * `UsageError` naming `--body-file` and an optional one is empty. `maxBytes`, the body schema's
+ * `maxLength` (MED-21), lowers the limit and never raises it; the failure names the limit, never
+ * the content or the path.
  */
 export const binaryBody = (options: {
   readonly body: Option.Option<string>;
@@ -267,7 +273,7 @@ export const binaryBody = (options: {
       : Effect.succeed(HttpBody.empty);
   }
 
-  const limit = options.maxBytes ?? maxBodyBytes;
+  const limit = Math.min(options.maxBytes ?? maxBodyBytes, maxBodyBytes);
 
   return options.bodyFile.value === "-"
     ? stdinBody.pipe(Effect.flatMap((body) => limited(body, limit)))
