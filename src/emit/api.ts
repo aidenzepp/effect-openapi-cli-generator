@@ -1047,6 +1047,7 @@ const commandStatements = (
       ],
     ]);
     const meta: (readonly [string, Expr])[] = [
+      ...(operation.deprecated ? ([["deprecated", bool(true)]] as const) : []),
       ["media", ident(mediaName)],
       ["method", str(operation.key.method)],
       [
