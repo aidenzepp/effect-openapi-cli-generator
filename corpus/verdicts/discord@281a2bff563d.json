@@ -1,0 +1,3681 @@
+{
+  "commandSources": {
+    "config": 0,
+    "fern": 0,
+    "fold": 245,
+    "forge": 0
+  },
+  "corpusVersion": 1,
+  "counts": {
+    "informational": 3,
+    "nonStandard": 0,
+    "notices": 665,
+    "operations": {
+      "generated": 245,
+      "refused": 5,
+      "total": 250
+    },
+    "refusals": {
+      "document": 0,
+      "element": 46,
+      "operation": 5
+    }
+  },
+  "coverage": {
+    "byNotice": [],
+    "checked": true,
+    "invented": [],
+    "missing": []
+  },
+  "generator": {
+    "config": "corpus/config/discord.json",
+    "configSha256": "22a52cfe67c55d2b55a19375ed355873839f402aeb317dadd3dc974f756f0917",
+    "version": "0.0.0"
+  },
+  "nonStandard": [],
+  "notices": [
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActionRowComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ActivityActionTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AfkTimeouts/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandAttachmentOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandAttachmentOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandAutocompleteCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandBooleanOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandBooleanOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandChannelOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandChannelOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ApplicationCommandCreateRequest/properties/default_member_permissions",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandHandler/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandIntegerOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandIntegerOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandInteractionMetadataResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandMentionableOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandMentionableOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOption/properties/max_value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOption/properties/min_value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOptionResponse/properties/max_value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOptionResponse/properties/min_value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandNumberOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandOptionNumberChoice/properties/value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandOptionNumberChoiceResponse/properties/value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandOptionType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ApplicationCommandPatchRequestPartial/properties/default_member_permissions",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandPermissionType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandRoleOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandRoleOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandStringOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandStringOptionResponse/properties/max_length/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandStringOptionResponse/properties/min_length/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandStringOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandSubcommandGroupOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandSubcommandGroupOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandSubcommandOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandSubcommandOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ApplicationCommandUpdateRequest/properties/default_member_permissions",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandUserOption/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationCommandUserOptionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationEventWebhooksStatus/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationExplicitContentFilterTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/custom_install_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/event_webhooks_status/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/event_webhooks_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/interactions_endpoint_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/max_participants/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationFormPartial/properties/role_connections_verification_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationIncomingWebhookResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationIntegrationType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ApplicationOAuth2InstallParams/properties/permissions",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationResponse/properties/custom_install_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationResponse/properties/max_participants/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationResponse/properties/privacy_policy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationResponse/properties/terms_of_service_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ApplicationTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/clip_created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/duration_secs/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/height/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/placeholder_version/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/proxy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/size/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AttachmentResponse/properties/width/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AuditLogActionTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomodActionType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomodEventType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomodKeywordPresetType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomodTriggerType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicApplicationResponseWithBot/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicGuildMemberResponse/properties/communication_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicGuildMemberResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicGuildMemberResponse/properties/joined_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicGuildMemberResponse/properties/premium_since/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/edited_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/nonce/oneOf/0",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/nonce/oneOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/nonce/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BasicMessageResponse/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BlockMessageAction/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BlockMessageActionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentForMessageRequest/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonComponentResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ButtonStyleTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ByNWeekday/properties/n/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ByNWeekdayResponse/properties/n/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelFollowerWebhookResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelPermissionOverwrites/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentResponse/properties/max_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentResponse/properties/min_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelSelectComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChannelTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CheckboxComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CheckboxComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CheckboxGroupComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CheckboxGroupComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ConnectedAccountVisibility/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerComponentResponse/properties/accent_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContentScanMetadataResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateForumThreadRequest/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateGuildChannelRequest/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateGuildChannelRequest/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateGuildChannelRequest/properties/type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateGuildChannelRequest/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateGuildInviteRequest/properties/target_type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateMessageInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateMessageInteractionCallbackResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTextThreadWithMessageRequest/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTextThreadWithoutMessageRequest/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTextThreadWithoutMessageRequest/properties/type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/last_pin_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/message_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/total_message_sent/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreatedThreadResponse/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CustomClientThemeResponse/properties/base_mix/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CustomClientThemeResponse/properties/gradient_angle/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CustomClientThemeShareRequest/properties/base_mix/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CustomClientThemeShareRequest/properties/gradient_angle/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DefaultKeywordListUpsertRequest/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DefaultKeywordListUpsertRequestPartial/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/DefaultKeywordRuleResponse/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementOwnerTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementResponse/properties/ends_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementResponse/properties/fulfilled_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementResponse/properties/starts_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementTenantFulfillmentStatusResponse/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EntitlementTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalConnectionIntegrationResponse/properties/subscriber_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalConnectionIntegrationResponse/properties/synced_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventCreateRequest/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventCreateRequest/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventCreateRequest/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventPatchRequestPartial/properties/entity_type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventPatchRequestPartial/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventPatchRequestPartial/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventResponse/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventResponse/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventResponse/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalScheduledEventResponse/properties/user_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileComponentResponse/properties/size/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileUploadComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileUploadComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FlagToChannelAction/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FlagToChannelActionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ForumLayout/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/friends_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/max_age/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/max_uses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FriendInviteResponse/properties/uses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotResponse/properties/shards/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotSessionStartLimitResponse/properties/max_concurrency/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotSessionStartLimitResponse/properties/remaining/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotSessionStartLimitResponse/properties/reset_after/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayBotSessionStartLimitResponse/properties/total/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GatewayResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubCheckRun/properties/details_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubCheckRun/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubComment/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubCommit/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubDiscussion/properties/answer_html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubDiscussion/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubIssue/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubRelease/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubRepository/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubReview/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubUser/properties/avatar_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubUser/properties/html_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GithubWebhook/properties/compare/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupDMInviteResponse/properties/approximate_member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupDMInviteResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupDMInviteResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupDMInviteResponse/properties/max_age/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupDMInviteResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/default_thread_rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/last_pin_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildChannelResponse/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildExplicitContentFilterTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncidentActionsRequest/properties/dms_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncidentActionsRequest/properties/invites_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncidentsDataResponse/properties/dms_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncidentsDataResponse/properties/invites_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncomingWebhookResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildIncomingWebhookResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/approximate_member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/approximate_presence_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/max_age/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/max_uses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildInviteResponse/properties/uses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildJoinRequestResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildJoinRequestResponse/properties/reviewed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildJoinRequestsListResponse/properties/total/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildMFALevel/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildMemberResponse/properties/communication_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildMemberResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildMemberResponse/properties/joined_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildMemberResponse/properties/premium_since/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildNSFWContentLevel/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildOnboardingMode/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildPreviewResponse/properties/approximate_member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildPreviewResponse/properties/approximate_presence_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildPruneResponse/properties/pruned/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/max_members/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/max_presences/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/max_stage_video_channel_users/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/max_video_channel_users/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/premium_progress_bar_enabled_user_updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/premium_subscription_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildResponse/properties/system_channel_flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleColorsResponse/properties/primary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleColorsResponse/properties/secondary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleColorsResponse/properties/tertiary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleResponse/properties/color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildRoleResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventEntityTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionCreateRequest/properties/original_scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionCreateRequest/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionCreateRequest/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionPatchRequestPartial/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionPatchRequestPartial/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionResponse/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventExceptionResponse/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventPrivacyLevels/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventStatuses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildScheduledEventUserResponses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildSearchResponse/properties/documents_indexed/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildSearchResponse/properties/total_results/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildStickerResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/default_thread_rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/theme_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelResponse/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateChannelTags/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateResponse/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateResponse/properties/usage_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateRoleColorsResponse/properties/primary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateRoleColorsResponse/properties/secondary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateRoleColorsResponse/properties/tertiary_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateRoleResponse/properties/color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateRoleResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildTemplateSnapshotResponse/properties/system_channel_flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/approximate_member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/approximate_presence_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/max_members/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/max_presences/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/max_stage_video_channel_users/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/max_video_channel_users/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/premium_progress_bar_enabled_user_updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/premium_subscription_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GuildWithCountsResponse/properties/system_channel_flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/IncomingWebhookRequestPartial/properties/avatar_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/Int53Type",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Int53Type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/IntegrationApplicationResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/IntegrationExpireBehaviorTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/IntegrationExpireGracePeriodTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InteractionCallbackTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InteractionContextType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InteractionTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteApplicationResponse/properties/custom_install_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteApplicationResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteApplicationResponse/properties/max_participants/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteApplicationResponse/properties/privacy_policy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteApplicationResponse/properties/terms_of_service_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteGuildResponse/properties/premium_subscription_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteGuildRoleResponse/properties/color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteGuildRoleResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteTargetTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InviteTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/KeywordRuleResponse/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/KeywordUpsertRequest/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/KeywordUpsertRequestPartial/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LabelComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LabelComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LaunchActivityInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LaunchActivityInteractionCallbackResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LobbyMemberResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/LobbyMessageResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MLSpamRuleResponse/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MLSpamUpsertRequest/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MLSpamUpsertRequestPartial/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MediaGalleryComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MediaGalleryComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MediaGalleryComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MediaGalleryComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionSpamRuleResponse/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionSpamTriggerMetadataResponse/properties/mention_total_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionSpamUpsertRequest/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionSpamUpsertRequestPartial/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentResponse/properties/max_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentResponse/properties/min_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MentionableSelectComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentRequest/properties/duration_secs/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/clip_created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/duration_secs/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/height/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/placeholder_version/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/proxy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/size/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageAttachmentResponse/properties/width/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageCallResponse/properties/ended_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageComponentInteractionMetadataResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageComponentSeparatorSpacingSize/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageComponentTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/MessageCreateRequest/properties/nonce/oneOf/0",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageCreateRequest/properties/nonce/oneOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageCreateRequest/properties/nonce/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedAudioResponse/properties/proxy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedAuthorResponse/properties/proxy_icon_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedFooterResponse/properties/proxy_icon_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedImageResponse/properties/proxy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedProviderResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedResponse/properties/color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedResponse/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedResponse/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageEmbedVideoResponse/properties/proxy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageReactionCountDetailsResponse/properties/burst/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageReactionCountDetailsResponse/properties/normal/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageReactionResponse/properties/count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageReferenceType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/edited_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/MessageResponse/properties/nonce/oneOf/0",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/nonce/oneOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/nonce/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageResponse/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageRoleSubscriptionDataResponse/properties/total_months_subscribed/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageShareCustomUserThemeBaseTheme/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MetadataItemTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MinimalContentMessageResponse/properties/edited_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MinimalContentMessageResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MinimalContentMessageResponse/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ModalInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ModalSubmitInteractionMetadataResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MultipleChoiceFormFieldResponse/properties/response/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MyGuildResponse/properties/approximate_member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MyGuildResponse/properties/approximate_presence_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/NewMemberActionType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OAuth2GetAuthorizationResponse/properties/expires/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OnboardingPromptType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PinnedMessageResponse/properties/pinned_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollAnswerResponse/properties/answer_id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollCreateRequest/properties/duration/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollLayoutTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollResponse/properties/expiry/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollResultsEntryResponse/properties/count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PollResultsEntryResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PongInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PremiumGuildTiers/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PremiumTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/approximate_guild_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/approximate_user_authorization_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/approximate_user_install_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/custom_install_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/event_webhooks_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/interactions_endpoint_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/max_participants/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/privacy_policy_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/redirect_uris/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/role_connections_verification_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateApplicationResponse/properties/terms_of_service_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateChannelResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateChannelResponse/properties/last_pin_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateChannelResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGroupChannelResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGroupChannelResponse/properties/last_pin_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGroupChannelResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGuildMemberResponse/properties/communication_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGuildMemberResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGuildMemberResponse/properties/joined_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PrivateGuildMemberResponse/properties/premium_since/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProvisionalTokenResponse/properties/expires_at_s/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProvisionalTokenResponse/properties/expires_in/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/PurchaseType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/QuarantineUserAction/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/QuarantineUserActionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RadioGroupComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RadioGroupComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ReactionTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/by_month_day/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/by_year_day/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/interval/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRule/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleFrequencies/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleMonths/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/by_month_day/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/by_year_day/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/interval/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleResponse/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RecurrenceRuleWeekdays/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbed/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbed/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedAudio/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedAuthor/properties/icon_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedAuthor/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedFooter/properties/icon_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedImage/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedProvider/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedThumbnail/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RichEmbedVideo/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentResponse/properties/max_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentResponse/properties/min_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RoleSelectComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SDKMessageRequest/properties/nonce/oneOf/0",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SDKMessageRequest/properties/nonce/oneOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SDKMessageRequest/properties/nonce/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SKUIneligibilityReason/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScheduledEventResponse/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScheduledEventResponse/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScheduledEventResponse/properties/user_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScheduledEventUserCountResponse/properties/guild_scheduled_event_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScheduledEventUserCountResponse/properties/guild_scheduled_event_exception_counts/additionalProperties/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchIndexNotReadyResponse/properties/code/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchIndexNotReadyResponse/properties/documents_indexed/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchIndexNotReadyResponse/properties/retry_after/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/author_restriction_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/edited_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/nonce/oneOf/0",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/nonce/oneOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/nonce/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/restriction_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/source_author_restriction_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SearchMessageResponse/properties/timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SectionComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SectionComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SectionComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SectionComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SeparatorComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SeparatorComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SeparatorComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SeparatorComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SlackWebhook/properties/icon_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SnowflakeType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/SnowflakeType/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SocialLayerSKUPurchaseEligibilityInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SoundboardCreateRequest/properties/volume/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SoundboardPatchRequestPartial/properties/volume/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SoundboardSoundResponse/properties/volume/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageInstancesPrivacyLevels/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventCreateRequest/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventCreateRequest/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventCreateRequest/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventPatchRequestPartial/properties/entity_type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventPatchRequestPartial/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventPatchRequestPartial/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventResponse/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventResponse/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventResponse/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StageScheduledEventResponse/properties/user_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StandardStickerResponse/properties/sort_value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StandardStickerResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StickerFormatTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StickerTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentResponse/properties/max_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentResponse/properties/min_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/StringSelectComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubscriptionResponse/properties/canceled_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubscriptionResponse/properties/current_period_end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubscriptionResponse/properties/current_period_start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubscriptionResponseStatusType/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TargetUsersJobStatusResponse/properties/completed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TargetUsersJobStatusResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TargetUsersJobStatusTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TeamMembershipStates/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextDisplayComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentResponse/properties/max_length/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentResponse/properties/min_length/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TextInputStyleTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadAutoArchiveDuration/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadMemberResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadMemberResponse/properties/join_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadMetadataResponse/properties/archive_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadMetadataResponse/properties/create_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/last_pin_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/member_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/message_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/total_message_sent/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResponse/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadSearchResponse/properties/total_results/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadSortOrder/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThumbnailComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThumbnailComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThumbnailComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThumbnailComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/UInt32Type",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UInt32Type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaRequest/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaRequestWithAttachmentReferenceRequired/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaResponse/properties/flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaResponse/properties/height/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaResponse/properties/placeholder_version/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UnfurledMediaResponse/properties/width/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateGuildChannelRequestPartial/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateGuildChannelRequestPartial/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateGuildChannelRequestPartial/properties/type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateGuildChannelRequestPartial/properties/user_limit/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateMessageInteractionCallbackRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateMessageInteractionCallbackResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateRolePositionsRequest/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateSelfVoiceStateRequestPartial/properties/request_to_speak_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateThreadRequestPartial/properties/bitrate/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateThreadRequestPartial/properties/rate_limit_per_user/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserCommunicationDisabledAction/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserCommunicationDisabledActionMetadataResponse/properties/duration_seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserCommunicationDisabledActionResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserNotificationSettings/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserPIIResponse/properties/accent_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserPIIResponse/properties/public_flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserProfileRuleResponse/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserProfileUpsertRequest/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserProfileUpsertRequestPartial/properties/trigger_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserResponse/properties/accent_color/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserResponse/properties/public_flags/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentForMessageRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentForMessageRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentForModalRequest/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentForModalRequest/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentResponse/properties/id/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentResponse/properties/max_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentResponse/properties/min_values/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserSelectComponentResponse/properties/type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VanityURLErrorResponse/properties/code/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VanityURLResponse/properties/uses/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VerificationLevels/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VideoQualityModes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventCreateRequest/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventCreateRequest/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventCreateRequest/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventPatchRequestPartial/properties/entity_type/oneOf/1/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventPatchRequestPartial/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventPatchRequestPartial/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventResponse/properties/entity_type/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventResponse/properties/scheduled_end_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventResponse/properties/scheduled_start_time/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceScheduledEventResponse/properties/user_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceStateResponse/properties/request_to_speak_timestamp/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/author_icon/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/author_link/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/color/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/footer_icon/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/thumb_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSlackEmbed/properties/title_link/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookTypes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WidgetChannel/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WidgetMember/properties/avatar_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WidgetResponse/properties/presence_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1applications~1@me/patch/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1applications~1{application_id}/patch/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1applications~1{application_id}~1commands/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1channels~1{channel_id}~1messages/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1channels~1{channel_id}~1messages~1pins/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1channels~1{channel_id}~1messages~1{message_id}/patch/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1channels~1{channel_id}~1messages~1{message_id}~1reactions~1{emoji_name}/get/parameters/2",
+      "row": "PRM-02"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1channels~1{channel_id}~1permissions~1{overwrite_id}/put/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1channels~1{channel_id}~1polls~1{message_id}~1answers~1{answer_id}/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1channels~1{channel_id}~1threads~1archived~1private/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1channels~1{channel_id}~1threads~1archived~1public/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1guilds~1{guild_id}~1channels/patch/requestBody/content/application~1json/schema/items/properties/position/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1guilds~1{guild_id}~1channels/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1guilds~1{guild_id}~1members~1{user_id}/patch/requestBody/content/application~1json/schema/properties/communication_disabled_until/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1guilds~1{guild_id}~1roles~1member-counts/get/responses/200/content/application~1json/schema/additionalProperties/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1guilds~1{guild_id}~1stickers/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1lobbies/post/requestBody/content/application~1json/schema/properties/idle_timeout_seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1lobbies/post/requestBody/content/application~1json/schema/properties/override_event_webhooks_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1lobbies/put/requestBody/content/application~1json/schema/properties/idle_timeout_seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1lobbies~1{lobby_id}/patch/requestBody/content/application~1json/schema/properties/idle_timeout_seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1lobbies~1{lobby_id}/patch/requestBody/content/application~1json/schema/properties/override_event_webhooks_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1{webhook_token}~1messages~1@original/patch/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1{webhook_token}~1messages~1{message_id}/patch/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1webhooks~1{webhook_id}~1{webhook_token}~1slack/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    }
+  ],
+  "refusals": [
+    {
+      "code": "OAF-05/token-acquisition",
+      "pointer": "/components/securitySchemes/OAuth2/flows/authorizationCode",
+      "row": "OAF-05",
+      "scope": "element"
+    },
+    {
+      "code": "OAF-04/token-acquisition",
+      "pointer": "/components/securitySchemes/OAuth2/flows/clientCredentials",
+      "row": "OAF-04",
+      "scope": "element"
+    },
+    {
+      "code": "OAF-02/token-acquisition",
+      "pointer": "/components/securitySchemes/OAuth2/flows/implicit",
+      "row": "OAF-02",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1attachment/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands/put/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/delete/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/patch/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1entitlements/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}/delete/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}~1consume/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/put/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1permissions/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/delete/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/patch/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}~1permissions/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}~1permissions/put/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1channels~1{channel_id}~1messages/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1guilds~1{guild_id}~1channels/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1guilds~1{guild_id}~1messages~1search/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies/put/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1channel-linking/patch/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1members~1@me/delete/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1members~1@me~1invites/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages/post/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SCH-13/multipart-extra-fields",
+      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages~1{message_id}~1moderation-metadata/put/requestBody/content/multipart~1form-data/schema/additionalProperties",
+      "row": "SCH-13",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1oauth2~1@me/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1oauth2~1userinfo/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SCH-13/multipart-extra-fields",
+      "pointer": "/paths/~1partner-sdk~1dms~1{user_id_1}~1{user_id_2}~1messages~1{message_id}~1moderation-metadata/put/requestBody/content/multipart~1form-data/schema/additionalProperties",
+      "row": "SCH-13",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1skus~1{sku_id}~1subscriptions/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1skus~1{sku_id}~1subscriptions~1{subscription_id}/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SEC-06/no-satisfiable-alternative",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1entitlements/get",
+      "row": "SEC-06",
+      "scope": "operation"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1entitlements/get/security/0",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SEC-06/no-satisfiable-alternative",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/delete",
+      "row": "SEC-06",
+      "scope": "operation"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/delete/security/0",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SEC-06/no-satisfiable-alternative",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/get",
+      "row": "SEC-06",
+      "scope": "operation"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/get/security/0",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SEC-06/no-satisfiable-alternative",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/put",
+      "row": "SEC-06",
+      "scope": "operation"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/put/security/0",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1connections/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1guilds/get/security/1",
+      "row": "SSC-18",
+      "scope": "element"
+    },
+    {
+      "code": "SEC-06/no-satisfiable-alternative",
+      "pointer": "/paths/~1users~1@me~1guilds~1{guild_id}~1member/get",
+      "row": "SEC-06",
+      "scope": "operation"
+    },
+    {
+      "code": "SSC-18/not-implemented",
+      "pointer": "/paths/~1users~1@me~1guilds~1{guild_id}~1member/get/security/0",
+      "row": "SSC-18",
+      "scope": "element"
+    }
+  ],
+  "spec": {
+    "id": "discord",
+    "openapi": "3.1.0",
+    "sha256": "281a2bff563d77a19e51fc3bf8bbe3ebcef28e3dc86684ae395b06ac51ba7484"
+  },
+  "twinEquality": {
+    "checked": false,
+    "equal": false
+  },
+  "verdict": "partly-refused"
+}
