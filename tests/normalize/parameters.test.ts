@@ -80,6 +80,13 @@ const list: Json = { items: string, type: "array" };
 
 const query = (members: Members): Json => ({ in: "query", name: "q", schema: string, ...members });
 
+// An object with one scalar member: the schema deepObject is defined for.
+const flat: Json = { properties: { a: string }, type: "object" };
+
+const deep = (members: Members): Json => query({ schema: flat, style: "deepObject", ...members });
+
+const ref = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
+
 const path = (members: Members): Json => ({
   in: "path",
   name: "q",
@@ -240,15 +247,15 @@ describe("rules tag", () => {
 
 describe("STY-26 deepObject explode is a later-line correction", () => {
   test("STY-25 an exploded deepObject needs no notice", () => {
-    const outcome = implemented("3.1", query({ explode: true, style: "deepObject" }));
+    const outcome = implemented("3.1", deep({ explode: true }));
 
     expect(codes(outcome)).toEqual([]);
-    expect(styled("3.1", query({ explode: true, style: "deepObject" })).rows).toEqual(["STY-25"]);
+    expect(styled("3.1", deep({ explode: true })).rows).toEqual(["STY-25"]);
   });
 
   for (const line of ["3.0", "3.1"] as const) {
     test(`STY-26 ${line} deepObject without explode is exploded, with a notice`, () => {
-      const parameter = query({ style: "deepObject" });
+      const parameter = deep({});
       const outcome = implemented(line, parameter);
 
       expect(styled(line, parameter)).toEqual({
@@ -266,24 +273,22 @@ describe("STY-26 deepObject explode is a later-line correction", () => {
   }
 
   test("STY-26 explode false is corrected the same way", () => {
-    expect(codes(implemented("3.1", query({ explode: false, style: "deepObject" })))).toEqual([
+    expect(codes(implemented("3.1", deep({ explode: false })))).toEqual([
       "STY-26/explode-no-effect",
     ]);
   });
 
   test("STY-29 the allowReserved variant has its own row", () => {
-    const parameter = query({ allowReserved: true, style: "deepObject" });
+    const parameter = deep({ allowReserved: true });
 
     expect(codes(implemented("3.0", parameter))).toEqual(["STY-29/explode-no-effect"]);
     expect(styled("3.0", parameter).rows).toEqual(["STY-29"]);
-    expect(
-      styled("3.0", query({ allowReserved: true, explode: true, style: "deepObject" })).rows,
-    ).toEqual(["STY-28"]);
+    expect(styled("3.0", deep({ allowReserved: true, explode: true })).rows).toEqual(["STY-28"]);
   });
 
   test("STY-27 3.2 says explode has no effect, so there is nothing to correct", () => {
     for (const explode of [true, false]) {
-      const parameter = query({ explode, style: "deepObject" });
+      const parameter = deep({ explode });
 
       expect(codes(implemented("3.2", parameter))).toEqual([]);
       expect(styled("3.2", parameter)).toEqual({
@@ -294,9 +299,7 @@ describe("STY-26 deepObject explode is a later-line correction", () => {
       });
     }
 
-    expect(styled("3.2", query({ allowReserved: true, style: "deepObject" })).rows).toEqual([
-      "STY-30",
-    ]);
+    expect(styled("3.2", deep({ allowReserved: true })).rows).toEqual(["STY-30"]);
   });
 });
 
@@ -783,5 +786,126 @@ describe("ParameterNotReadable is what the earlier stages should have stopped", 
     expect(reasonOf("3.1", { in: "elsewhere", name: "q", schema: string })).toBe(
       "ParameterNotReadable:not-a-parameter",
     );
+  });
+});
+
+describe("PRM-27 deepObject is defined only for an object schema", () => {
+  // Each schema admits a value that is not an object, so every flag value would be refused.
+  const nonObject: readonly (readonly [string, Json])[] = [
+    ["anyOf with an integer member", { anyOf: [flat, { type: "integer" }] }],
+    ["oneOf with an untyped member", { oneOf: [flat, {}] }],
+    ["a primitive", string],
+    ["no type", {}],
+    ["a type list with null", { type: ["object", "null"] }],
+  ];
+
+  for (const [label, schema] of nonObject) {
+    test(`PRM-27 a deepObject over ${label} is refused at element scope`, () => {
+      const outcome = refused("3.1", deep({ schema }));
+
+      expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+      expect(outcome.diagnostics[0]?.severity).toBe("refusal");
+      expect(outcome.diagnostics[0]?.scope).toBe("element");
+      expect(outcome.required).toBe(false);
+    });
+  }
+
+  test("PRM-27 a required one keeps required, so its operation is raised", () => {
+    const outcome = refused("3.0", deep({ required: true, schema: { anyOf: [flat, string] } }));
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+    expect(outcome.required).toBe(true);
+  });
+
+  test("PRM-27 an anyOf or oneOf whose members are all objects is built", () => {
+    const other: Json = { properties: { b: string }, type: "object" };
+    for (const keyword of ["anyOf", "oneOf"]) {
+      for (const line of lines) {
+        expect(codes(implemented(line, deep({ schema: { [keyword]: [flat, other] } })))).toEqual(
+          line === "3.2" ? [] : ["STY-26/explode-no-effect"],
+        );
+      }
+    }
+  });
+
+  test("PRM-27 members are read through $ref, and an untyped member with properties is an object", () => {
+    const schema: Json = {
+      anyOf: [{ $ref: "#/components/schemas/Flat" }, { properties: { b: string } }],
+    };
+    const components = { schemas: { Flat: flat } };
+
+    expect(codes(implemented("3.2", deep({ schema }), components))).toEqual([]);
+    expect(
+      codes(
+        normalize("3.2", deep({ schema: { $ref: "#/components/schemas/Mixed" } }), {
+          schemas: { Mixed: { anyOf: [flat, string] } },
+        }),
+      ),
+    ).toEqual(["PRM-27/non-object-schema"]);
+  });
+
+  test("PRM-27 an array is still PRM-27/compound-nested", () => {
+    expect(codes(refused("3.2", deep({ schema: list })))).toEqual(["PRM-27/compound-nested"]);
+  });
+});
+
+// One normalization with its wall time in milliseconds.
+const timed = (run: () => ParameterOutcome) => {
+  const start = performance.now();
+  const outcome = run();
+
+  return { elapsed: performance.now() - start, outcome };
+};
+
+describe("PRM-27 the object test's schema walk is bounded", () => {
+  const depth = 30;
+
+  // A_i and B_i each hold anyOf [A_{i+1}, B_{i+1}]: 2^30 paths to the bottom, 62 distinct schemas.
+  const fanOut = (bottom: Json): Members => ({
+    schemas: Object.fromEntries([
+      ["A30", bottom],
+      ["B30", bottom],
+      ...Array.from({ length: depth }, (_, level): readonly (readonly [string, Json])[] => {
+        const next = { anyOf: [ref(`A${level + 1}`), ref(`B${level + 1}`)] };
+
+        return [
+          [`A${level}`, next],
+          [`B${level}`, next],
+        ];
+      }).flat(),
+    ]),
+  });
+
+  const top = deep({ schema: ref("A0") });
+
+  test("PRM-27 a fan-out of depth 30 over objects is decided once per schema and built", () => {
+    const { elapsed, outcome } = timed(() => normalize("3.2", top, fanOut(flat)));
+
+    expect(outcome._tag).toBe("Implemented");
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a fan-out of depth 30 that cycles back to its top fails closed, fast", () => {
+    const { elapsed, outcome } = timed(() =>
+      normalize("3.2", top, fanOut({ anyOf: [ref("A0"), flat] })),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a spent node budget fails closed", () => {
+    const value: Json = {
+      components: fanOut(flat),
+      info: { title: "t", version: "1" },
+      openapi: openapi["3.2"],
+      paths: { "/a": { get: { parameters: [top], responses: { "200": { description: "ok" } } } } },
+    };
+    const resolution = Effect.runSync(resolve({ document: entry, line: "3.2", value }));
+    const outcome = Effect.runSync(
+      normalizeParameter(resolution, { openapi: openapi["3.2"], pointer: site }, { maxNodes: 5 }),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
   });
 });

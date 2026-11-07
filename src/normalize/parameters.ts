@@ -4,13 +4,15 @@ import { MediaType, WireName } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
+import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
-import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
+import { appliesDynamicKeyword, budgetOf, charge, schemaKeyAt } from "./schemas.ts";
+import type { Budget, SchemaLimits } from "./schemas.ts";
 
 /**
  * Where a parameter is read: its use site in the entry document, the operation it belongs to when
@@ -350,6 +352,16 @@ const compoundNested = refusal(
   "Flatten the parameter, or set nonStandard.deepObjectBrackets in the author config to send the bracket convention",
 );
 
+// PRM-27 (style-values): deepObject is defined only for an object; a schema that also admits a
+// value that is not an object would generate a flag the runtime refuses for every value.
+const nonObjectSchema = refusal(
+  "PRM-27/non-object-schema",
+  "style-values",
+  "Parameter style deepObject",
+  "deepObject is defined only for an object; this schema also admits a value that is not an object.",
+  "Give the parameter an object schema, or use style: form",
+);
+
 const bracketAuthorChoice = notice(
   "PRM-27/bracket-author-choice",
   "style-values",
@@ -482,6 +494,7 @@ const styleNotices = (
 /**
  * What the schema shape and the author config add to a parameter's decision: `multiple` for a
  * cookie over an array or object (PRM-34), `nested` for a `deepObject` value beyond one level
+ * (PRM-27), `nonObject` for a `deepObject` schema that admits a value that is not an object
  * (PRM-27), `primitive` for a schema that declares only primitive types (STY-17, STY-21) and
  * `brackets` for the author config's bracket switch.
  */
@@ -489,6 +502,7 @@ interface Traits {
   readonly brackets: boolean;
   readonly multiple: boolean;
   readonly nested: boolean;
+  readonly nonObject: boolean;
   readonly primitive: boolean;
 }
 
@@ -521,6 +535,11 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
 
   if (delimitedStyles.has(style) && traits.primitive) {
     return refuse(primitiveNotApplicableFinding(row));
+  }
+
+  // PRM-27: a deepObject over a schema that admits non-objects is refused, bracket switch or not.
+  if (deepRow !== undefined && traits.nonObject) {
+    return refuse(nonObjectSchema);
   }
 
   // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
@@ -830,6 +849,99 @@ const nestsDeeply = (resolution: Resolution, source: Source): Effect.Effect<bool
     return false;
   });
 
+const CompositionSchema = Schema.Struct({
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  properties: Schema.optionalKey(Schema.Unknown),
+});
+
+// One `objectOnly` walk: each resolved schema is decided once (`memo`), a schema already on the
+// current path is a cycle, and every schema decided is charged to the call's node budget.
+interface ObjectWalk {
+  readonly budget: Budget;
+  readonly memo: Map<string, boolean>;
+  readonly path: Set<string>;
+}
+
+// What one resolved schema says on its own about admitting only objects, or arrays, which PRM-27's
+// nested test refuses: a declared type list must name nothing else; an untyped schema is read as
+// the emitted object test reads it (an object when it declares `properties`), except that its
+// anyOf and oneOf members, when it has any, decide with it.
+interface OwnVerdict {
+  readonly members: readonly CanonicalKey[];
+  readonly only: boolean;
+}
+
+const ownVerdict = (resolution: Resolution, home: CanonicalKey): Effect.Effect<OwnVerdict> =>
+  Effect.gen(function* own() {
+    const types = yield* typesAt(resolution, home);
+    if (types.length > 0) {
+      return { members: [], only: types.every((name) => name === "object" || name === "array") };
+    }
+
+    const declared = yield* nodeIn(resolution, home).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
+      Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
+    );
+    const members = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
+      (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
+    );
+
+    return { members, only: members.length > 0 || declared.properties !== undefined };
+  });
+
+// Whether the schema at `key`, through `$ref`, admits only objects: its own verdict, or every
+// anyOf and oneOf member's. A cycle or a spent budget fails closed (not object-only); a result
+// reached through either is false, so memoizing it is sound.
+const objectOnly = (
+  resolution: Resolution,
+  key: CanonicalKey,
+  walk: ObjectWalk,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* admitsOnlyObjects() {
+    const home = follow(resolution, key);
+    const id = keyOf(home);
+    const known = walk.memo.get(id);
+    if (known !== undefined) {
+      return known;
+    }
+
+    if (walk.path.has(id) || !charge(walk.budget)) {
+      return false;
+    }
+
+    walk.path.add(id);
+
+    const verdict = yield* ownVerdict(resolution, home);
+    let { only } = verdict;
+    for (const member of verdict.members) {
+      if (only) {
+        only = yield* objectOnly(resolution, member, walk);
+      }
+    }
+
+    walk.path.delete(id);
+    walk.memo.set(id, only);
+
+    return only;
+  });
+
+// Whether a deepObject query parameter's schema admits a value that is not an object (PRM-27).
+const admitsNonObject = (
+  resolution: Resolution,
+  source: Source,
+  limits: SchemaLimits,
+): Effect.Effect<boolean> => {
+  const { node, target } = source;
+  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
+    return Effect.succeed(false);
+  }
+
+  const walk: ObjectWalk = { budget: budgetOf(limits), memo: new Map(), path: new Set() };
+
+  return objectOnly(resolution, childKey(target, "schema"), walk).pipe(Effect.map((only) => !only));
+};
+
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
   if (mediaType === undefined) {
@@ -925,10 +1037,13 @@ const schemaSitesOf = (resolution: Resolution, source: Source): readonly Canonic
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
  * refusal (design 2.2, 6.1, 6.2). Defaults come from the line's text, never from a schema
  * `default`. A site the earlier stages should have stopped fails with `ParameterNotReadable`.
+ * `limits.maxNodes` bounds the schema walk behind the PRM-27 object test, which fails closed when
+ * it is spent.
  */
 export const normalizeParameter = (
   resolution: Resolution,
   site: ParameterSite,
+  limits: SchemaLimits = {},
 ): Effect.Effect<ParameterOutcome, ParameterNotReadable> =>
   Effect.gen(function* normalize() {
     const source = yield* read(resolution, site);
@@ -941,6 +1056,7 @@ export const normalizeParameter = (
       brackets: site.nonStandard?.deepObjectBrackets === true,
       multiple: yield* carriesMultiple(resolution, source),
       nested: yield* nestsDeeply(resolution, source),
+      nonObject: yield* admitsNonObject(resolution, source, limits),
       primitive: yield* declaresPrimitive(resolution, source),
     });
     const diagnostics = (findings: readonly Finding[]) =>
