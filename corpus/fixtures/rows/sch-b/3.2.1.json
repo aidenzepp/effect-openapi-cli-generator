@@ -1,0 +1,583 @@
+{
+  "components": {
+    "schemas": {
+      "Legacy": {
+        "definitions": {
+          "Small": {
+            "maximum": 5,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "JSON Schema keyword rows witness (SCH-34 to SCH-66)",
+    "version": "1.0.0"
+  },
+  "openapi": "3.2.1",
+  "paths": {
+    "/annotated": {
+      "post": {
+        "operationId": "annotated",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "legacy": {
+                    "deprecated": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "default": 10,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/content-encoding": {
+      "post": {
+        "operationId": "content-encoding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/content-media-type": {
+      "post": {
+        "operationId": "content-media-type",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "image/png"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/content-schema": {
+      "post": {
+        "operationId": "content-schema",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "contentMediaType": "application/json",
+                "contentSchema": {
+                  "required": ["a"],
+                  "type": "object"
+                },
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/definitions": {
+      "post": {
+        "operationId": "definitions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Legacy/definitions/Small"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/dependent-required": {
+      "post": {
+        "operationId": "dependent-required",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "dependentRequired": {
+                  "a": ["b"]
+                },
+                "properties": {
+                  "a": {
+                    "type": "integer"
+                  },
+                  "b": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/exclusive-minimum": {
+      "post": {
+        "operationId": "exclusive-minimum",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/max-contains": {
+      "post": {
+        "operationId": "max-contains",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "contains": {
+                  "type": "string"
+                },
+                "maxContains": 1,
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/max-items": {
+      "post": {
+        "operationId": "max-items",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 2,
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/max-length": {
+      "post": {
+        "operationId": "max-length",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "maxLength": 3,
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/max-properties": {
+      "post": {
+        "operationId": "max-properties",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "maxProperties": 1,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/min-contains": {
+      "post": {
+        "operationId": "min-contains",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "contains": {
+                  "type": "string"
+                },
+                "minContains": 2,
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/min-items": {
+      "post": {
+        "operationId": "min-items",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/min-length": {
+      "post": {
+        "operationId": "min-length",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "minLength": 2,
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/min-properties": {
+      "post": {
+        "operationId": "min-properties",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "minProperties": 1,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/pattern": {
+      "post": {
+        "operationId": "pattern",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "pattern": "^a+$",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/pattern-unicode": {
+      "post": {
+        "operationId": "pattern-unicode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "pattern": "^\\q$",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/read-only": {
+      "post": {
+        "operationId": "read-only",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {
+                    "readOnly": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "name"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/required": {
+      "post": {
+        "operationId": "required",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                },
+                "required": ["a"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/unique-items": {
+      "post": {
+        "operationId": "unique-items",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "uniqueItems": true
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/unknown-keyword": {
+      "post": {
+        "operationId": "unknown-keyword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "maximum": 5,
+                "type": "integer",
+                "unknownKeyword": {
+                  "maximum": 1
+                },
+                "x-hint": "a"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/write-only": {
+      "get": {
+        "operationId": "write-only",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "writeOnly": true
+                    }
+                  },
+                  "required": ["id", "secret"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/xml": {
+      "post": {
+        "operationId": "xml",
+        "requestBody": {
+          "content": {
+            "application/xml": {
+              "schema": {
+                "properties": {
+                  "a": {
+                    "type": "string",
+                    "xml": {
+                      "attribute": true
+                    }
+                  }
+                },
+                "type": "object",
+                "xml": {
+                  "name": "item"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}
