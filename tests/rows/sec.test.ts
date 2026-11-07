@@ -469,6 +469,7 @@ describe("SEC rows through generate()", () => {
     // declares a root list, so this one package is built here.
     const dir = nodePath.join(work, "absent");
     nodeFs.mkdirSync(dir, { recursive: true });
+
     const specPath = nodePath.join(dir, "openapi.json");
     const configPath = nodePath.join(dir, "author-config.json");
     nodeFs.writeFileSync(
@@ -476,6 +477,7 @@ describe("SEC rows through generate()", () => {
       JSON.stringify(members("3.1.2", { "/absent": unsecured("absent-get") })),
     );
     nodeFs.writeFileSync(configPath, JSON.stringify(authorConfig));
+
     const help = await Effect.runPromise(
       generateFixture({ configPath, specPath }).pipe(
         Effect.tap(preparePackage),
@@ -490,7 +492,7 @@ describe("SEC rows through generate()", () => {
       .split("\n")
       .filter((entry) => entry.startsWith("AUTH"));
 
-    expect([help.exitCode, auth.map((entry) => entry.replace(/^AUTH\s+/, ""))]).toEqual([
+    expect([help.exitCode, auth.map((entry) => entry.replace(/^AUTH\s+/u, ""))]).toEqual([
       0,
       ["no authentication documented"],
     ]);
