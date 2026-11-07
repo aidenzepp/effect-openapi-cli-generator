@@ -58,7 +58,8 @@ const unprintable = () => new PackageEmitError({ reason: "unprintable-package" }
 /**
  * Emits `package.json`, `tsconfig.json` and `tsconfig.build.json` (design 4.2, 4.3; X12), sorted by
  * path. The generated package types against Bun only, so `types` is `["bun"]` whatever the
- * generator lists.
+ * generator lists. Both tsc scripts run one checker (`--checkers 1`): full checking at under half
+ * the default peak memory.
  */
 export const emitPackageFiles = (
   config: AuthorConfig,
@@ -79,7 +80,10 @@ export const emitPackageFiles = (
       files: ["dist", "README.md"],
       name: config.package.name,
       packageManager: pins.packageManager,
-      scripts: { build: "tsc -p tsconfig.build.json", typecheck: "tsc --noEmit" },
+      scripts: {
+        build: "tsc -p tsconfig.build.json --checkers 1",
+        typecheck: "tsc --noEmit --checkers 1",
+      },
       type: "module",
       version: config.package.version,
     }).pipe(Effect.mapError(unprintable));

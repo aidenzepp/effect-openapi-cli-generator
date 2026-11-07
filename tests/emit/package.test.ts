@@ -107,10 +107,10 @@ describe("emitPackageFiles", () => {
     expect(parsePackage().packageManager).toBe("bun@1.4.3");
   });
 
-  test("build names tsconfig.build.json and typecheck is tsc --noEmit", () => {
+  test("build names tsconfig.build.json and both tsc scripts run one checker", () => {
     expect(parsePackage().scripts).toEqual({
-      build: "tsc -p tsconfig.build.json",
-      typecheck: "tsc --noEmit",
+      build: "tsc -p tsconfig.build.json --checkers 1",
+      typecheck: "tsc --noEmit --checkers 1",
     });
   });
 
