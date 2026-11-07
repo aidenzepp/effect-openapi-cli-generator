@@ -248,6 +248,14 @@ const summary = (found: Generated) =>
     String(diagnostic.pointer),
   ]);
 
+// The summary of one row's diagnostics only, so another row's finding on the same document (such
+// as a 3.0 header's HDR-15 notice) does not move the witness.
+const rowSummary = (found: Generated, row: string) =>
+  summary({
+    ...found,
+    diagnostics: found.diagnostics.filter((diagnostic) => diagnostic.row === row),
+  });
+
 // A refusal by the line's official schema, which runs before the generator's own rules: its code
 // is the schema row of the line (VAL-02, VAL-03 or VAL-04), so only severity, scope and pointer are
 // stable here.
@@ -682,7 +690,7 @@ describe("RSS, RSP and HDR rows in generation", () => {
           }),
         );
 
-        expect(summary(found)).toEqual([
+        expect(rowSummary(found, "RSP-09")).toEqual([
           [
             "RSP-09/ignored-content-type",
             "notice",
@@ -747,7 +755,7 @@ describe("RSS, RSP and HDR rows in generation", () => {
         }),
       );
 
-      expect(summary(found)).toEqual([
+      expect(rowSummary(found, "RSP-09")).toEqual([
         [
           "RSP-09/invalid-header-name",
           "refusal",
