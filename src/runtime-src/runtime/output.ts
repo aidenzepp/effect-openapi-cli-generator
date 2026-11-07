@@ -802,8 +802,10 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
  * template (the display name when it has no `operationId`), its declared media, its security
  * requirement, when the operation declares one, the request-id header chosen at generation, and,
  * when the operation or its path item overrides the root servers, its effective servers table.
+ * `deprecated` is set only for an operation the document marks deprecated.
  */
 export interface OperationMeta {
+  readonly deprecated?: true | undefined;
   readonly media: MediaDeclaration;
   readonly method: string;
   readonly operationId?: string | undefined;
@@ -901,6 +903,10 @@ export const send =
   (request: HttpClientRequest.HttpClientRequest) =>
     Effect.gen(function* sendRequest() {
       const operation = displayName(meta);
+      if (meta.deprecated === true) {
+        yield* printStderr(`Notice: the operation ${operation} is deprecated`);
+      }
+
       const servers = meta.servers ?? (yield* Servers).table;
       const selection = yield* select(
         {

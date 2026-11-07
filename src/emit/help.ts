@@ -296,6 +296,13 @@ export const operationHelp = (input: HelpInput): OperationHelp => {
     sections.push(["AUTH", auth]);
   }
 
+  if (operation.deprecated) {
+    sections.push([
+      "DEPRECATED",
+      "this command is deprecated; running it writes a notice to stderr",
+    ]);
+  }
+
   sections.push(["RESPONSES", responsesLine(operation)]);
   if (nonStandard !== undefined) {
     sections.push(["NON-STANDARD", nonStandard]);
