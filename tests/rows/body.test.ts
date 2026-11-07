@@ -17,7 +17,9 @@ import type { GeneratedPackage } from "../support/generated-cli.ts";
 // The Milestone 2 witness for the Request Body, Media Type and Binary data rows (RQB-*, MED-*,
 // BIN-*): one generated package per version line, built once, run against the capture server; the
 // generation rows call `generate()` in process. A row the product gets wrong is a `test.todo` with
-// what was observed. MED-03's response half and MED-16 to MED-20 are deferred to Milestone 3.
+// what was observed. MED-03's response half, MED-07, MED-08, MED-15 and MED-16 to MED-20 are
+// deferred to Milestone 3; the M2 refusal tests pin today's refusal of MED-07, MED-08 and MED-15
+// until M3-MP1 replaces them.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -293,7 +295,11 @@ const withBody = (line: Line, requestBody: Members): Members =>
   members(line, { paths: { "/a": { post: { requestBody, responses: ok } } } });
 
 interface Generated {
+  // The emitted commands' paths; empty for a refused run.
+  readonly commands: readonly (readonly string[])[];
   readonly diagnostics: readonly Diagnostic[];
+  // The generated package directory of a run that was not refused.
+  readonly out?: string;
 }
 
 let counter = 0;
@@ -328,7 +334,11 @@ const inProcess = async (document: Members): Promise<Generated> => {
     ).pipe(Effect.provide(layer)),
   );
   if (Exit.isSuccess(exit)) {
-    return { diagnostics: exit.value.diagnostics };
+    return {
+      commands: exit.value.report.commandNames.map((command) => command.path),
+      diagnostics: exit.value.diagnostics,
+      out: nodePath.join(dir, "out"),
+    };
   }
 
   const [failure] = exit.cause.reasons.flatMap((reason) =>
@@ -338,7 +348,7 @@ const inProcess = async (document: Members): Promise<Generated> => {
     throw new Error(`generate failed for a reason other than a refusal: ${String(exit.cause)}`);
   }
 
-  return { diagnostics: failure.diagnostics };
+  return { commands: [], diagnostics: failure.diagnostics };
 };
 
 const summary = (found: Generated) =>
@@ -364,6 +374,24 @@ const content = "/paths/~1a/post/requestBody/content";
 
 const withResponse = (line: Line, response: Members): Members =>
   members(line, { paths: { "/a": { get: { responses: { "200": response } } } } });
+
+// What a refused operation leaves: the one EMT-1 refusal, no command, and a CLI that never calls
+// the operation's request builder, so nothing can be sent for it.
+const refusedOperation = (found: Generated) => ({
+  builderCalled: nodeFs
+    .readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8")
+    .includes("postA"),
+  commands: found.commands,
+  diagnostics: summary(found),
+});
+
+const unsupportedBody = {
+  builderCalled: false,
+  commands: [],
+  diagnostics: [["EMT-1/unsupported-body", "refusal", "operation", "/paths/~1a/post"]],
+};
+
+const string: Members = { type: "string" };
 
 describe("RQB, MED and BIN rows through the built CLI", () => {
   for (const line of lines) {
@@ -747,17 +775,6 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
     ]);
     expect(usage(notInteger)).toEqual(refusedBeforeSending);
   }, 60_000);
-
-  // multipart/mixed is not emitted: `generate()` refuses the operation with EMT-1/unsupported-body
-  // at operation scope, so no positional part reaches the wire.
-  test.todo("MED-07: a multipart/mixed body with prefixEncoding is refused with EMT-1/unsupported-body at operation scope vs ordered parts, part i taking prefixEncoding[i] (3.2.1)", () =>
-    Promise.resolve());
-
-  test.todo("MED-08: a multipart/mixed body with itemEncoding is refused with EMT-1/unsupported-body at operation scope vs each remaining part encoded by itemEncoding (3.2.1)", () =>
-    Promise.resolve());
-
-  test.todo("MED-15: a multipart/mixed body with more prefixEncoding entries than items is refused with EMT-1/unsupported-body at operation scope vs the extra entries ignored (3.2.1)", () =>
-    Promise.resolve());
 });
 
 describe("RQB, MED and BIN rows through generate()", () => {
@@ -949,7 +966,56 @@ describe("RQB, MED and BIN rows through generate()", () => {
     ]);
   });
 
-  test("MED-26: a multipart/form-data array body is refused at element scope, and the operation is not generated (3.2.1)", async () => {
+  // Milestone 3 (M3-MP1) sends positional multipart/mixed bodies; until then the operation is
+  // refused, and these tests pin that refusal.
+  test("M2 refusal of MED-07 (M3-MP1): a multipart/mixed body with prefixEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", {
+        content: {
+          "multipart/mixed": {
+            prefixEncoding: [{ contentType: "text/plain" }],
+            schema: { prefixItems: [string], type: "array" },
+          },
+        },
+      }),
+    );
+
+    expect(refusedOperation(found)).toEqual(unsupportedBody);
+  });
+
+  test("M2 refusal of MED-08 (M3-MP1): a multipart/mixed body with itemEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", {
+        content: {
+          "multipart/mixed": {
+            itemEncoding: { contentType: "text/plain" },
+            schema: { items: string, type: "array" },
+          },
+        },
+      }),
+    );
+
+    expect(refusedOperation(found)).toEqual(unsupportedBody);
+  });
+
+  test("M2 refusal of MED-15 (M3-MP1): a multipart/mixed body with more prefixEncoding entries than items refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", {
+        content: {
+          "multipart/mixed": {
+            prefixEncoding: [{}, {}],
+            schema: { items: false, prefixItems: [string], type: "array" },
+          },
+        },
+      }),
+    );
+
+    expect(refusedOperation(found)).toEqual(unsupportedBody);
+  });
+
+  // Milestone 3 (M3-MP1) sends a fixed part order; until then the array body is refused, and this
+  // test pins that refusal.
+  test("M2 refusal of MED-26 (M3-MP1): a multipart/form-data array body is refused at element scope (3.2.1)", async () => {
     const found = await inProcess(
       withBody("3.2.1", {
         content: {
