@@ -372,6 +372,8 @@ describe("field scope: one refused optional form property", () => {
         severity: "refusal",
       },
     ]);
+    // The field refusal names the property by its wire name, which the help REFUSED line shows.
+    expect(outcome.diagnostics.map((diagnostic) => diagnostic.wire)).toEqual(["expand"]);
   });
 
   test("PRM-27: optional refused properties before a required one drop the alternative with no field record", () => {

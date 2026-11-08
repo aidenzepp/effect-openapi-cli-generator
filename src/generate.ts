@@ -585,7 +585,7 @@ export const generate = (
     const cli = yield* emitCli({
       api,
       config: author.value,
-      plan,
+      plan: { ...plan, diagnostics: planned },
       validationEdits: schemas.validation.edits,
     });
     const commands = commandOrder(plan);

@@ -199,14 +199,16 @@ const helpOf = async (mode: Mode): Promise<string> => {
 const flagNames = (help: string): readonly string[] =>
   [...help.matchAll(/^\s+(?<flag>--[^\s,=]+)/gmu)].map((match) => match.groups?.flag ?? "");
 
-// The entry names of the REFUSED line: `<wire or element>: <reason>; ...`.
+// The wire names on the REFUSED line: `<wire>: <reason>; ...`. A reason may itself hold "; ", so
+// an entry is a space-free name followed by ": " at the line start or after "; ".
 const refusedNames = (help: string): readonly string[] | undefined => {
   const line = help.split("\n").find((candidate) => candidate.startsWith("REFUSED"));
 
-  return line
-    ?.replace(/^REFUSED\s+/u, "")
-    .split("; ")
-    .map((entry) => entry.split(": ")[0] ?? "");
+  return line === undefined
+    ? undefined
+    : [...line.replace(/^REFUSED\s+/u, "").matchAll(/(?:^|; )(?<name>[^\s:;]+): /gu)].map(
+        (match) => match.groups?.name ?? "",
+      );
 };
 
 const describeOf = async (mode: Mode) => {
@@ -299,10 +301,8 @@ describe("field refusal, strict: the built CLI", () => {
     expect(unknown.connections).toBe(0);
   }, 60_000);
 
-  // C14: the product is wrong here, so the assertion is recorded, not fixed. The emitted help
-  // reads only the names plan's diagnostics (`src/emit/cli.ts` passes `plan.diagnostics` to
-  // `operationHelp`), never normalize's, so no REFUSED line is printed.
-  test.todo("help REFUSED line: no REFUSED line in `customers update --help` (refusedNames undefined) vs a REFUSED line listing filters and metadata", async () => {
+  // Design 8.5 rule 5: the field refusals normalize raised reach the command's REFUSED line.
+  test("help lists each refused field on the REFUSED line", async () => {
     expect(refusedNames(await helpOf("strict"))).toEqual(["filters", "metadata"]);
   }, 60_000);
 
