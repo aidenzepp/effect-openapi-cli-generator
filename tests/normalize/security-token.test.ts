@@ -148,14 +148,15 @@ describe("oauth2 and openIdConnect schemes are usable", () => {
     see(codes(diagnostics)).toEqual(["OAF-02/token-acquisition"]);
   });
 
-  test("a mutualTLS alternative is still refused as not implemented", () => {
+  test("a mutualTLS alternative is kept beside the key alternative with no refusal", () => {
     const { api, diagnostics } = run("3.1", { key, mtls: { type: "mutualTLS" } }, [
       { mtls: [] },
       { key: [] },
     ]);
 
-    see(codes(diagnostics)).toEqual(["SSC-20/not-implemented"]);
+    see(codes(diagnostics)).toEqual([]);
     see(api.operations[0]?.security.alternatives).toEqual([
+      { uses: [{ scheme: "mtls", scopes: [] }] },
       { uses: [{ scheme: "key", scopes: [] }] },
     ]);
   });

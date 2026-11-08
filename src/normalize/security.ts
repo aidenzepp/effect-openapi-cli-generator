@@ -113,12 +113,6 @@ const flowRules = new Map([
   ["password", { anchor: "oauth-flows-password", permanent: true, row: "OAF-03" }],
 ]);
 
-// Staged refusals by modelled scheme kind (design 2.4 Staged features). The hint, never the code,
-// names the milestone.
-const stagedRules = new Map([
-  ["mutualTls", { code: "SSC-20/not-implemented", what: "mutualTLS client certificates" }],
-]);
-
 const acquisitionHint = (permanent: boolean): string =>
   permanent
     ? "This flow is permanently refused. Supply an access token obtained elsewhere."
@@ -720,7 +714,6 @@ const judge = (
 ): Judged => {
   const findings: Finding[] = [];
   let refused = false;
-  const staged = new Set<string>();
   const lookup = lookupOf(schemes);
   const { declared: byName, unusable } = supplied ? lookup.author : lookup.spec;
   const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
@@ -734,9 +727,7 @@ const judge = (
       reached.set(resolved, declared);
     }
 
-    if (declared !== undefined && stagedRules.has(declared.kind.type)) {
-      staged.add(declared.kind.type);
-    } else if (declared === undefined) {
+    if (declared === undefined) {
       const refusal = nameRefusal(resolution, {
         checkRefused: schemes.checkRefused,
         name,
@@ -753,18 +744,6 @@ const judge = (
     }
   }
 
-  for (const kind of staged) {
-    const rule = stagedRules.get(kind);
-    findings.push({
-      anchor: "security-requirement-object",
-      code: rule?.code ?? "SEC-01/not-implemented",
-      element: "Security Requirement Object",
-      hint: `Milestone 3 implements ${rule?.what}; until then this alternative is refused. Use another alternative.`,
-      message: "The alternative names a security scheme that is not yet implemented.",
-      pointer,
-    });
-  }
-
   const conflict = conflictRefusal(reached, pointer);
   if (conflict !== undefined) {
     findings.push(conflict);
@@ -776,11 +755,11 @@ const judge = (
 /**
  * Normalizes the effective security policy of an operation, or of the root when `operation` is
  * omitted (design 6.5). `operation` is the pointer of the operation object. An alternative that
- * names an undeclared or refused scheme, a `mutualTLS` scheme (staged, SSC-20), or two schemes that
- * each set the `Authorization` header (`SEC-01/conflicting-authorization`) is removed whole with
- * element-scope refusals and never dropped silently. A spec name check already refused as
- * unresolved keeps that one diagnostic and gets no second here. Raising an operation with no
- * alternative left is the caller's job (`listed`).
+ * names an undeclared or refused scheme, or two schemes that each set the `Authorization` header
+ * (`SEC-01/conflicting-authorization`), is removed whole with element-scope refusals and never
+ * dropped silently. A `mutualTLS` scheme is usable like any other (design 6.5, D-SEC3). A spec name
+ * check already refused as unresolved keeps that one diagnostic and gets no second here. Raising an
+ * operation with no alternative left is the caller's job (`listed`).
  */
 export const normalizeSecurityPolicy = (
   resolution: Resolution,

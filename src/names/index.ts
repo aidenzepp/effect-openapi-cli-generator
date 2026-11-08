@@ -23,6 +23,7 @@ import {
 import type {
   Collector,
   CommandNameSource,
+  CredentialNames,
   Draft,
   DraftContext,
   DraftFlag,
@@ -30,6 +31,7 @@ import type {
   GroupNameSource,
   Namer,
   OverrideSite,
+  PlannedCertificate,
   PlannedCommand,
   PlannedCredential,
   PlannedGroup,
@@ -46,6 +48,7 @@ export type {
   FlagSource,
   GroupNameSource,
   NameSources,
+  PlannedCertificate,
   PlannedCommand,
   PlannedCredential,
   PlannedFlag,
@@ -65,11 +68,14 @@ export interface PlanOptions {
 /**
  * The name plan: untagged commands at the root, groups in first-use order (parents before
  * children), the credential names of every scheme the planned operations use, and the plan's
- * refusals and notices in diagnostic order. A refused operation is in no group. `domain` is the
- * export name of every stored schema key in `domain/schemas.ts` (`domainIdentifiers`); cli modules
- * import those names and the domain emitter takes the same map.
+ * refusals and notices in diagnostic order. A refused operation is in no group. `credentials` are
+ * the token schemes' flag and environment names; `certificates` are the `mutualTLS` schemes'
+ * environment-only names. `domain` is the export name of every stored schema key in
+ * `domain/schemas.ts` (`domainIdentifiers`); cli modules import those names and the domain emitter
+ * takes the same map.
  */
 export interface NamePlan {
+  readonly certificates: readonly PlannedCertificate[];
   readonly credentials: readonly PlannedCredential[];
   readonly diagnostics: readonly Diagnostic[];
   readonly domain: ReadonlyMap<string, SafeIdentifierValue>;
@@ -115,12 +121,6 @@ interface Named extends Candidate {
   readonly commandSource: CommandNameSource;
   readonly name: string;
   readonly notes: readonly FoldNote[];
-}
-
-interface CredentialNames {
-  readonly env: string;
-  readonly flag: string;
-  readonly slug: string;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -847,7 +847,25 @@ const schemeSite = (scheme: SecurityScheme) => ({
   pointer: scheme.origin.pointer,
 });
 
+const tally = (values: readonly string[]): ReadonlyMap<string, number> => {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return counts;
+};
+
+// The environment names a credential takes: a token's one, a certificate's three.
+const envsOf = (credential: CredentialNames): readonly string[] =>
+  credential._tag === "Token"
+    ? [credential.env]
+    : [credential.certEnv, credential.keyEnv, credential.caEnv];
+
 // Credential names: `<scheme>-file` and `<PREFIX>_<SCHEME>` distinct across schemes and reserved names.
+// A `mutualTLS` scheme's certificate names (`_CERT`, `_KEY`, `_CA`) must differ from every other used
+// scheme's environment names and from the reserved suffix names; the design's reserved set holds
+// them too, so a token taking one is refused already.
 const planCredentials = (
   api: Api,
   config: AuthorConfig,
@@ -867,23 +885,31 @@ const planCredentials = (
     }
   }
 
-  const all = [...names.values()];
-  const tally = (pick: (credential: CredentialNames) => string): ReadonlyMap<string, number> => {
-    const counts = new Map<string, number>();
-    for (const credential of all) {
-      counts.set(pick(credential), (counts.get(pick(credential)) ?? 0) + 1);
+  const all = [...names.values()].flatMap((credential) =>
+    credential._tag === "Token" ? [credential] : [],
+  );
+  const envCounts = tally([...names.values()].flatMap(envsOf));
+  const flagCounts = tally(all.map((entry) => entry.flag));
+  // The certificate names are in `reservedEnv` themselves; a certificate checks the suffixes only.
+  const reservedSuffixEnv = reservedEnvNames(envPrefix, reservedEnvSuffixes, []);
+  const clashes = (credential: CredentialNames): boolean => {
+    if (credential.slug === "") {
+      return false;
     }
 
-    return counts;
-  };
-  const envCounts = tally((entry) => entry.env);
-  const flagCounts = tally((entry) => entry.flag);
-  const clashes = (credential: CredentialNames): boolean =>
-    credential.slug !== "" &&
-    ((envCounts.get(credential.env) ?? 0) > 1 ||
+    if (credential._tag === "Certificate") {
+      return envsOf(credential).some(
+        (env) => (envCounts.get(env) ?? 0) > 1 || reservedSuffixEnv.has(env),
+      );
+    }
+
+    return (
+      (envCounts.get(credential.env) ?? 0) > 1 ||
       (flagCounts.get(credential.flag) ?? 0) > 1 ||
       reservedEnv.has(credential.env) ||
-      reservedCliNames.has(credential.flag));
+      reservedCliNames.has(credential.flag)
+    );
+  };
 
   for (const operation of operations) {
     const uses = usesOf(operation);
@@ -1257,7 +1283,10 @@ const planGroup = (
   return group;
 };
 
-const byScheme = Order.mapInput(Order.String, (credential: PlannedCredential) => credential.scheme);
+const byScheme = Order.mapInput(
+  Order.String,
+  (credential: { readonly scheme: string }) => credential.scheme,
+);
 
 /**
  * Builds the name plan for an `Api` (design 4.4, 4.5, D-NAME1 to D-NAME3, D-AD11). Visible names
@@ -1357,14 +1386,21 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),
     );
-    const plannedCredentials = [...credentials.names].flatMap(([scheme, names]) =>
-      planned.has(scheme) ? [{ env: names.env, flag: names.flag, scheme }] : [],
+    const plannedNames = [...credentials.names].filter(([scheme]) => planned.has(scheme));
+    const plannedCredentials = plannedNames.flatMap(([scheme, names]) =>
+      names._tag === "Token" ? [{ env: names.env, flag: names.flag, scheme }] : [],
+    );
+    const plannedCertificates = plannedNames.flatMap(([scheme, names]) =>
+      names._tag === "Certificate"
+        ? [{ caEnv: names.caEnv, certEnv: names.certEnv, keyEnv: names.keyEnv, scheme }]
+        : [],
     );
     const diagnostics = yield* Effect.all(
       collector.findings.map((finding) => toDiagnostic(api, finding)),
     );
 
     return {
+      certificates: Arr.sort(plannedCertificates, byScheme),
       credentials: Arr.sort(plannedCredentials, byScheme),
       diagnostics: sortDiagnostics([...api.documents, configDocument], diagnostics),
       domain,

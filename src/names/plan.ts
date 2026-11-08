@@ -8,7 +8,10 @@ import type {
   SecurityScheme,
 } from "../model/entities.ts";
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
-import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
+import type {
+  MutualTlsScheme,
+  SecurityScheme as RuntimeScheme,
+} from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
 import type { BodyFlag, BodyFlagKind, SkippedProperty } from "./flatten.ts";
 import type {
@@ -153,6 +156,37 @@ export interface PlannedCredential {
   readonly flag: string;
   readonly scheme: string;
 }
+
+/**
+ * A `mutualTLS` scheme's client certificate names: the environment variables holding the
+ * certificate, key and CA paths. It has no flag (design 6.5, D-SEC3).
+ */
+export interface PlannedCertificate {
+  readonly caEnv: string;
+  readonly certEnv: string;
+  readonly keyEnv: string;
+  readonly scheme: string;
+}
+
+/**
+ * The names a used scheme's credential is read by: a token scheme's `<scheme>-file` flag and
+ * environment name, or a `mutualTls` scheme's certificate environment names and no flag. `slug` is
+ * empty when the scheme name folds to nothing.
+ */
+export type CredentialNames =
+  | {
+      readonly _tag: "Token";
+      readonly env: string;
+      readonly flag: string;
+      readonly slug: string;
+    }
+  | {
+      readonly _tag: "Certificate";
+      readonly caEnv: string;
+      readonly certEnv: string;
+      readonly keyEnv: string;
+      readonly slug: string;
+    };
 
 export type OperationOverride = NonNullable<
   NonNullable<NonNullable<AuthorConfig["naming"]>["operations"]>[string]
@@ -409,7 +443,7 @@ export const isBooleanSchema = (
 const runtimeScheme = (
   scheme: SecurityScheme,
   env: string | undefined,
-): RuntimeScheme | undefined => {
+): Exclude<RuntimeScheme, MutualTlsScheme> | undefined => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
     return { env, in: kind.in, kind: "apiKey", name: kind.name };
@@ -427,17 +461,41 @@ const runtimeScheme = (
 };
 
 /**
- * The credential names of a scheme the runtime sends as a token (`apiKey`, `http`, `oauth2Token`
- * and `oidcToken`, whose operator-supplied token is passed through; design D-SEC1):
- * `<scheme>-file` and `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design
- * 6.5), through the runtime's own `schemeSlug` and `envName`. A `mutualTls` scheme has no single
- * credential name. `slug` is empty when the scheme name folds to nothing; the caller refuses that.
+ * The environment names of a `mutualTls` scheme's client certificate: `<PREFIX>_<SCHEME>_CERT`,
+ * `_KEY` and `_CA` (design 4.4). The one derivation: the reserved names and the plan entry both
+ * read it, and the runtime reads `Config` by the names the plan emits.
+ */
+export const certificateEnvNames = (
+  envPrefix: string,
+  scheme: string,
+): Omit<PlannedCertificate, "scheme"> => {
+  const stem = `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
+
+  return { caEnv: `${stem}_CA`, certEnv: `${stem}_CERT`, keyEnv: `${stem}_KEY` };
+};
+
+/**
+ * The credential names of a used scheme. A scheme the runtime sends as a token (`apiKey`, `http`,
+ * `oauth2Token` and `oidcToken`, whose operator-supplied token is passed through; design D-SEC1)
+ * gets `<scheme>-file` and `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design
+ * 6.5), through the runtime's own `schemeSlug` and `envName`. A `mutualTls` scheme gets its
+ * `certificateEnvNames` and no flag. `slug` is empty when the scheme name folds to nothing; the
+ * caller refuses that.
  */
 export const credentialNames = (
   config: AuthorConfig,
   envPrefix: string,
   scheme: SecurityScheme,
-): Option.Option<{ readonly env: string; readonly flag: string; readonly slug: string }> => {
+): Option.Option<CredentialNames> => {
+  const slug = schemeSlug(scheme.name);
+  if (scheme.kind.type === "mutualTls") {
+    return Option.some({
+      _tag: "Certificate",
+      ...certificateEnvNames(envPrefix, scheme.name),
+      slug,
+    });
+  }
+
   const configured = own(config.security, scheme.name);
   const definition = runtimeScheme(
     scheme,
@@ -447,9 +505,8 @@ export const credentialNames = (
     return Option.none();
   }
 
-  const slug = schemeSlug(scheme.name);
-
   return Option.some({
+    _tag: "Token",
     env: envName(envPrefix, scheme.name, definition),
     flag: `${slug}-file`,
     slug,
@@ -476,9 +533,9 @@ export const reservedEnvNames = (
     ...schemes
       .filter((scheme) => scheme.kind.type === "mutualTls")
       .flatMap((scheme) => {
-        const stem = `${envPrefix}_${schemeSlug(scheme.name).toUpperCase().replaceAll("-", "_")}`;
+        const names = certificateEnvNames(envPrefix, scheme.name);
 
-        return [`${stem}_CA`, `${stem}_CERT`, `${stem}_KEY`];
+        return [names.caEnv, names.certEnv, names.keyEnv];
       }),
   ]);
 
