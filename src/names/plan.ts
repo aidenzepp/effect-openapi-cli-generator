@@ -1,6 +1,12 @@
-import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import type { NamingAlias, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type {
+  MediaAlternative,
+  NamingAlias,
+  Operation,
+  Parameter,
+  SecurityScheme,
+} from "../model/entities.ts";
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
 import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
@@ -14,7 +20,7 @@ import type {
 } from "./fold.ts";
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
-import { escapeToken, formatPointer } from "../model/pointer.ts";
+import { escapeToken, formatPointer, parsePointer } from "../model/pointer.ts";
 import type { SpecLine } from "../model/spec-section.ts";
 
 /**
@@ -37,6 +43,12 @@ export type PartOptionKind =
   | { readonly kind: "header"; readonly name: string };
 
 /**
+ * A body flag's kind in the plan: a flattened kind, or `secret-file` for a `format: password`
+ * string property whose value is read from a file or stdin and never echoed (design 13.1 R4).
+ */
+export type BodyKind = BodyFlagKind | "secret-file";
+
+/**
  * Where a flag's value goes: a parameter by location and wire name, a body field by its RFC 6901
  * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media, or
  * an option of the multipart part at `part` (the part flag's body pointer). `pointer` is what
@@ -54,7 +66,7 @@ export type FlagSource =
     }
   | {
       readonly _tag: "Body";
-      readonly kind: BodyFlagKind;
+      readonly kind: BodyKind;
       readonly media: readonly string[];
       readonly pointer: string;
       readonly repeated: boolean;
@@ -807,16 +819,152 @@ const draftParameters = (
     return { flags, positionals };
   });
 
+// A flattened body flag as the plan names it: its kind may be `secret-file`.
+interface PlannedBodyFlag extends Omit<BodyFlag, "kind"> {
+  readonly kind: BodyKind;
+}
+
 interface Merged {
-  readonly flag: BodyFlag;
+  readonly flag: PlannedBodyFlag;
   readonly media: string[];
   readonly pointer: string;
 }
 
-const sameFlag = (left: BodyFlag, right: BodyFlag): boolean =>
+const sameFlag = (left: PlannedBodyFlag, right: PlannedBodyFlag): boolean =>
   left.pointer === right.pointer && left.kind === right.kind && left.repeated === right.repeated;
 
-const isWholeBody = (kind: BodyFlagKind): boolean => kind === "body" || kind === "body-file";
+const isWholeBody = (kind: BodyKind): boolean => kind === "body" || kind === "body-file";
+
+const maxSchemaVisits = 10_000;
+
+interface JsonObject {
+  readonly [key: string]: Schema.Json;
+}
+
+const isJsonObject = (json: Schema.Json | undefined): json is JsonObject =>
+  Predicate.isObject(json);
+
+const isJsonArray = (json: Schema.Json | undefined): json is readonly Schema.Json[] =>
+  Arr.isArray(json);
+
+// Follows a `$ref` chain into `defs`; a reference outside `#/$defs/`, a missing key or a chain
+// past the hop budget ends the search.
+const dereference = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  hops = 0,
+): JsonObject | undefined => {
+  if (!isJsonObject(json) || hops > maxRefHops) {
+    return undefined;
+  }
+
+  const { $ref } = json;
+  if ($ref === undefined) {
+    return json;
+  }
+
+  return Predicate.isString($ref) && $ref.startsWith(refPrefix)
+    ? dereference(defs, own(defs, unescapeKey($ref.slice(refPrefix.length))), hops + 1)
+    : undefined;
+};
+
+// The schema of member `key` of an object schema, found the way the body walk merged it: through
+// `$ref`, own `properties`, then `allOf` members. `budget` counts the nodes a hostile `allOf`
+// graph may make the search visit.
+const memberSchema = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  key: string,
+  budget: { visits: number },
+): Schema.Json | undefined => {
+  budget.visits += 1;
+  const node = dereference(defs, json);
+  if (node === undefined || budget.visits > maxSchemaVisits) {
+    return undefined;
+  }
+
+  const { allOf, properties } = node;
+  const found = isJsonObject(properties) ? own(properties, key) : undefined;
+  if (found !== undefined || !isJsonArray(allOf)) {
+    return found;
+  }
+
+  for (const member of allOf) {
+    const inMember = memberSchema(defs, member, key, budget);
+    if (inMember !== undefined) {
+      return inMember;
+    }
+  }
+
+  return undefined;
+};
+
+const branchesOf = (json: Schema.Json | undefined): readonly Schema.Json[] =>
+  isJsonArray(json) ? json : [];
+
+// Whether a flag's own schema carries `format: password` on any node the flattener reads (each node
+// of a `$ref` chain with its sibling keywords, each `allOf` member) or in any `anyOf` or `oneOf`
+// branch. It never descends into `properties` or `items`. It fails closed: past the hop or visit
+// budget the answer is yes, so a secret never falls back to an argv flag (design invariant I4).
+const isPassword = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  budget: { visits: number },
+  hops = 0,
+): boolean => {
+  budget.visits += 1;
+  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+    return true;
+  }
+
+  if (!isJsonObject(json)) {
+    return false;
+  }
+
+  if (json.format === "password") {
+    return true;
+  }
+
+  const { $ref, allOf, anyOf, oneOf } = json;
+  const target =
+    Predicate.isString($ref) && $ref.startsWith(refPrefix)
+      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
+      : undefined;
+
+  return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
+    isPassword(defs, branch, budget, hops + 1),
+  );
+};
+
+// A `format: password` property of a JSON or form body is read from a file or stdin: its flag is
+// --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). That holds for a
+// string flag and for a JSON flag whose own schema is a composition with a password branch; a
+// property inside a JSON-valued flag has no flag of its own and gets none (m3 open question 6). A
+// property the walk cannot locate within the budget fails closed. Repeated flags and multipart
+// parts are unchanged (R4 open for them).
+const secretFile = (
+  defs: DraftContext["defs"],
+  alternative: Pick<MediaAlternative, "codec" | "schema">,
+  flag: BodyFlag,
+): Effect.Effect<PlannedBodyFlag> =>
+  Effect.gen(function* secret() {
+    const key = alternative.schema?.key;
+    const flattened = alternative.codec === "json" || alternative.codec === "form";
+    const candidate = flag.kind === "string" || flag.kind === "json";
+    if (!flattened || key === undefined || !candidate || flag.repeated) {
+      return flag;
+    }
+
+    const budget = { visits: 0 };
+    let property = own(defs, key);
+    for (const token of yield* Effect.orDie(parsePointer(flag.pointer))) {
+      property = memberSchema(defs, property, token, budget);
+    }
+
+    return property === undefined || isPassword(defs, property, budget)
+      ? { ...flag, kind: "secret-file", name: `${flag.name}-file` }
+      : flag;
+  });
 
 // A skipped property's notice. A multipart body has no whole-body flag, so a part whose name
 // folds to nothing is not reachable at all.
@@ -834,18 +982,19 @@ const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => 
 const fieldHint = (site: OverrideSite, field: string): string =>
   `Rename the flag with ${site.configKey}.fields[${JSON.stringify(field)}].flag, or skip the operation with ${site.configKey}.skip.`;
 
-const kindOf = (flag: BodyFlag): string => (flag.repeated ? `repeated ${flag.kind}` : flag.kind);
+const kindOf = (flag: PlannedBodyFlag): string =>
+  flag.repeated ? `repeated ${flag.kind}` : flag.kind;
 
 // One body field that is a different kind of flag in two media alternatives (a plain value in one,
 // a file part in another) keeps one name: fields[...].flag renames it in every alternative.
-const splitReason = (field: string, left: Merged, right: BodyFlag, media: string): string =>
+const splitReason = (field: string, left: Merged, right: PlannedBodyFlag, media: string): string =>
   ` The body field ${field} is a ${kindOf(left.flag)} flag in ${left.media.join(", ")} and a ${kindOf(right)} flag in ${media}. A rename cannot separate them: fields[...].flag renames the field in every media type.`;
 
 const skipHint = (site: OverrideSite): string => `Skip the operation with ${site.configKey}.skip.`;
 
 // A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
 // names. The config is never inferred.
-const renamed = (site: OverrideSite, flag: BodyFlag): BodyFlag => {
+const renamed = (site: OverrideSite, flag: PlannedBodyFlag): PlannedBodyFlag => {
   const configured = isWholeBody(flag.kind) ? undefined : own(site.override?.fields, flag.pointer);
 
   return configured === undefined ? flag : { ...flag, name: configured.flag, notes: [] };
@@ -1072,7 +1221,8 @@ const draftBody = (
         );
       }
 
-      for (const flag of flattened.success.flags.map((found) => renamed(site, found))) {
+      for (const found of flattened.success.flags) {
+        const flag = renamed(site, yield* secretFile(context.defs, alternative, found));
         fields.add(flag.pointer);
 
         const known = merged.get(flag.name);
