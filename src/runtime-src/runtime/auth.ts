@@ -721,3 +721,25 @@ export const isLoopbackHost = (hostname: string): boolean => {
     mappedLoopback.test(name)
   );
 };
+
+/**
+ * The one stderr line for credentials sent over plaintext `http:` (design 13.1 R3, D-SEC2): when
+ * `--allow-credentials-for-base-url` let credentials reach the base URL, and that URL is `http:` on
+ * a host `isLoopbackHost` rejects. A loopback host gets none, because its requests go direct and
+ * never reach a proxy (design 6.5 Loopback hosts); `https:`, an unparsable URL and a run without
+ * the flag get none. The line names the flag and the host, never userinfo or a credential.
+ * Printing it once per run is the caller's.
+ */
+export const plaintextWarning = (baseUrl: string, allowed: boolean): Option.Option<string> => {
+  if (!allowed || !URL.canParse(baseUrl)) {
+    return Option.none();
+  }
+
+  const { host, hostname, protocol } = new URL(baseUrl);
+
+  return protocol === "http:" && !isLoopbackHost(hostname)
+    ? Option.some(
+        `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
+      )
+    : Option.none();
+};
