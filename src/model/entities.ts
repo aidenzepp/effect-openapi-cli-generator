@@ -182,7 +182,9 @@ export const DiscriminatorHint = Schema.Struct({
 
 /**
  * One media type a body or response offers; `codec` is derived from the media type.
- * `discriminator` is set on a request body alternative only.
+ * `discriminator` and `refusedFields` are set on a request body alternative only. `refusedFields`
+ * names the alternative's properties refused at `field` scope, in property order (design 8.5);
+ * absent, none is refused.
  */
 export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlternative")({
   codec: Schema.Literals([
@@ -203,6 +205,7 @@ export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlter
   mediaType: Schema.Union([MediaType, MediaRange]),
   origin: Origin,
   prefixEncoding: Schema.Array(EncodingRule),
+  refusedFields: Schema.optionalKey(Schema.Array(WireName)),
   rows,
   schema: Schema.optionalKey(SchemaRef),
 }) {}

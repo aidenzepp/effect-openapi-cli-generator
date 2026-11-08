@@ -43,6 +43,44 @@ describe("humanLine", () => {
     );
   });
 
+  test("a field refusal names the field and its media type after the operation", () => {
+    const pointer =
+      "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a~1b~0c";
+    const head = `refused PRM-27/compound-nested at #${pointer} (POST /v1/accounts/{account}, update-account)`;
+    const tail = ": deepObject value has nested objects; ";
+    const line = humanLine(
+      make({
+        element: "a/b~c",
+        operation: {
+          method: "POST",
+          operationId: "update-account",
+          path: "/v1/accounts/{account}",
+        },
+        pointer,
+        scope: "field",
+      }),
+    );
+
+    const between = line.slice(head.length, line.indexOf(tail));
+
+    expect(line.startsWith(head)).toBe(true);
+    expect(line.indexOf(tail)).toBeGreaterThan(head.length);
+    expect(between).toContain("a/b~c");
+    expect(between).toContain("application/x-www-form-urlencoded");
+  });
+
+  test("a hostile field name and media type render inert", () => {
+    const line = humanLine(
+      make({
+        element: "x",
+        pointer: "/paths/~1x/post/requestBody/content/a~1b\u001B[31m/encoding/x\u0007\ny",
+        scope: "field",
+      }),
+    );
+
+    expect(line).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+  });
+
   test("a hostile pointer, message and path render as one inert line", () => {
     const line = humanLine(
       make({

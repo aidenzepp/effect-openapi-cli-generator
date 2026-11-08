@@ -20,15 +20,30 @@ const operationLabel = (operation: NonNullable<Diagnostic["operation"]>): string
   return ` (${sanitizeField(label)})`;
 };
 
+const unescapeToken = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
+
+// A field refusal sits at its Encoding entry, `<media>/encoding/<name>` (design 8.5 rule 4), so the
+// pointer names the field and its media type; any other pointer falls back to `element`.
+const fieldLabel = (diagnostic: Diagnostic): string => {
+  const [media, keyword, name] = diagnostic.pointer.split("/").slice(-3);
+  const entry = keyword === "encoding" && media !== undefined && name !== undefined;
+  const field = JSON.stringify(entry ? unescapeToken(name) : diagnostic.element);
+  const label = entry ? `${field} in ${unescapeToken(media)}` : field;
+
+  return ` field ${sanitizeField(label)}`;
+};
+
 /**
  * Renders one diagnostic as one human line (design 8.1): `<refused|notice> <code> at #<pointer>[
- * (<METHOD> <path>[, <operationId>])]: <message>; <specSection>`. Every free-text field is
- * sanitized. `line`, `column`, `hint` and `related` stay out of the line.
+ * (<METHOD> <path>[, <operationId>])][ field "<name>" in <media type>]: <message>; <specSection>`.
+ * The field part is present for a `field` refusal only. Every free-text field is sanitized.
+ * `line`, `column`, `hint` and `related` stay out of the line.
  */
 export const humanLine = (diagnostic: Diagnostic): string => {
   const severity = diagnostic.severity === "refusal" ? "refused" : "notice";
   const where = `#${sanitizeField(diagnostic.pointer)}`;
   const operation = diagnostic.operation === undefined ? "" : operationLabel(diagnostic.operation);
+  const field = diagnostic.scope === "field" ? fieldLabel(diagnostic) : "";
 
-  return `${severity} ${sanitizeField(diagnostic.code)} at ${where}${operation}: ${sanitizeField(diagnostic.message)}; ${sanitizeField(diagnostic.specSection)}`;
+  return `${severity} ${sanitizeField(diagnostic.code)} at ${where}${operation}${field}: ${sanitizeField(diagnostic.message)}; ${sanitizeField(diagnostic.specSection)}`;
 };

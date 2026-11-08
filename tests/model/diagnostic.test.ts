@@ -75,6 +75,20 @@ describe("Diagnostic", () => {
     expect(rejected.every(Boolean)).toBe(true);
   });
 
+  test("a field-scope refusal decodes and round-trips; an unknown scope is rejected", () => {
+    const encoded: typeof Diagnostic.Encoded = {
+      ...base,
+      element: "metadata",
+      pointer:
+        "/paths/~1x/post/requestBody/content/application~1x-www-form-urlencoded/encoding/metadata",
+      scope: "field",
+    };
+    const diagnostic = Schema.decodeUnknownSync(Diagnostic)(encoded);
+    expect(diagnostic.scope).toBe("field");
+    expect(Schema.encodeSync(Diagnostic)(diagnostic)).toEqual(encoded);
+    expect(Exit.isFailure(decode({ ...base, scope: "property" }))).toBe(true);
+  });
+
   test("a pointer that is not RFC 6901 text is rejected", () => {
     expect(Exit.isFailure(decode({ ...base, pointer: "#/paths" }))).toBe(true);
   });
@@ -113,7 +127,7 @@ describe("Verdict", () => {
       nonStandard: 1,
       notices: 1,
       operations: { generated: 2, refused: 1, total: 3 },
-      refusals: { document: 0, element: 1, operation: 0 },
+      refusals: { document: 0, element: 1, field: 1, operation: 0 },
     },
     coverage: {
       byNotice: [
@@ -140,6 +154,13 @@ describe("Verdict", () => {
     notices: [{ code: "PRM-19/ignored-header", pointer: "/paths/~1x", row: "PRM-19" }],
     refusals: [
       { code: "PRM-27/compound-nested", pointer: "/paths/~1x", row: "PRM-27", scope: "element" },
+      {
+        code: "PRM-27/compound-nested",
+        pointer:
+          "/paths/~1z/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
+        row: "PRM-27",
+        scope: "field",
+      },
     ],
     spec: { id: "stripe", openapi: "3.0.0", sha256: "cd".repeat(32) },
     twinEquality: { checked: true, equal: true },
@@ -149,6 +170,11 @@ describe("Verdict", () => {
   test("a verdict round-trips", () => {
     const decoded = Schema.decodeUnknownSync(Verdict)(verdict);
     expect(Schema.encodeSync(Verdict)(decoded)).toEqual(verdict);
+  });
+
+  test("a refusal count without the field key is rejected", () => {
+    const counts = { ...verdict.counts, refusals: { document: 0, element: 1, operation: 0 } };
+    expect(Exit.isFailure(Schema.decodeUnknownExit(Verdict)({ ...verdict, counts }))).toBe(true);
   });
 
   test("an unknown verdict value is rejected", () => {

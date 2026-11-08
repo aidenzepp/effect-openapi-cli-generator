@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import nodePath from "node:path";
-import { Effect, Exit, Schema } from "effect";
+import { Array as Arr, Effect, Exit, Order, Schema } from "effect";
 import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { JsonPointer } from "../../src/model/brands.ts";
 import { Verdict, VerdictCoverage } from "../../src/model/verdict.ts";
@@ -21,7 +21,7 @@ const base = {
 
 const make = (
   severity: "notice" | "refusal",
-  scope: "document" | "element" | "operation",
+  scope: "document" | "element" | "field" | "operation",
   code: string,
   pointer: string,
 ) =>
@@ -41,6 +41,13 @@ const operationRefusal = make("refusal", "operation", "PRM-27/compound-nested", 
 const elementRefusal = make("refusal", "element", "PRM-9/ignored-style", "/paths/~1x/get/p/0");
 
 const notice = make("notice", "element", "PRM-19/ignored-header", "/paths/~1x/get/p/1");
+
+const fieldRefusal = make(
+  "refusal",
+  "field",
+  "PRM-27/compound-nested",
+  "/paths/~1x/post/requestBody/content/application~1x-www-form-urlencoded/encoding/metadata",
+);
 
 const noCoverage = { byNotice: [], checked: true, invented: [], missing: [] };
 
@@ -132,6 +139,11 @@ describe("classifyVerdict", () => {
     expect(classifyVerdict([notice, elementRefusal])).toBe("partly-refused");
   });
 
+  test("a field refusal is partly-refused", () => {
+    expect(classifyVerdict([fieldRefusal])).toBe("partly-refused");
+    expect(classifyVerdict([notice, fieldRefusal])).toBe("partly-refused");
+  });
+
   test("a document refusal is refused, whatever else is present", () => {
     expect(classifyVerdict([documentRefusal])).toBe("refused");
     expect(classifyVerdict([operationRefusal, documentRefusal, notice])).toBe("refused");
@@ -139,7 +151,7 @@ describe("classifyVerdict", () => {
 });
 
 describe("makeVerdict", () => {
-  const list = [operationRefusal, notice, elementRefusal, documentRefusal];
+  const list = [operationRefusal, notice, elementRefusal, fieldRefusal, documentRefusal];
 
   const verdict = makeVerdict(input(list));
 
@@ -151,7 +163,7 @@ describe("makeVerdict", () => {
       nonStandard: 0,
       notices: 1,
       operations: { generated: 5, refused: 3, total: 8 },
-      refusals: { document: 1, element: 1, operation: 1 },
+      refusals: { document: 1, element: 1, field: 1, operation: 1 },
     });
   });
 
@@ -168,6 +180,12 @@ describe("makeVerdict", () => {
         pointer: "/paths/~1x/get/p/0",
         row: "PRM-9",
         scope: "element",
+      },
+      {
+        code: "PRM-27/compound-nested",
+        pointer: fieldRefusal.pointer,
+        row: "PRM-27",
+        scope: "field",
       },
       { code: "DOC-1/unsupported-version", pointer: "", row: "DOC-1", scope: "document" },
     ]);
@@ -266,5 +284,34 @@ describe("revision 19 fields", () => {
     for (const list of [[], [notice], [elementRefusal], [documentRefusal]]) {
       expect(makeVerdict(full(list)).verdict).toBe(makeVerdict(input(list)).verdict);
     }
+  });
+});
+
+describe("field scope (revision 30)", () => {
+  const verdict = makeVerdict(input([fieldRefusal, notice]));
+
+  const text = Effect.runSync(printVerdict(verdict));
+
+  test("a report with one field refusal counts it and lists its scope", () => {
+    expect(verdict.counts.refusals).toEqual({ document: 0, element: 0, field: 1, operation: 0 });
+    expect(Schema.encodeSync(Verdict)(verdict).refusals).toEqual([
+      {
+        code: "PRM-27/compound-nested",
+        pointer: fieldRefusal.pointer,
+        row: "PRM-27",
+        scope: "field",
+      },
+    ]);
+    expect(verdict.verdict).toBe("partly-refused");
+  });
+
+  test("the refusal count keys print alphabetically and the file decodes back", () => {
+    const keys = ['"document"', '"element"', '"field"', '"operation"'].map((key) =>
+      text.indexOf(key, text.indexOf('"refusals"')),
+    );
+
+    expect(keys.every((index) => index > 0)).toBe(true);
+    expect(keys).toEqual(Arr.sort(keys, Order.Number));
+    expect(Schema.decodeUnknownSync(Verdict)(JSON.parse(text))).toEqual(verdict);
   });
 });
