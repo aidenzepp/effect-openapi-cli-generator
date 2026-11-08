@@ -2293,22 +2293,52 @@ interface DiagnosticFields {
   wire?: string;
 }
 
+// Where `at` sits below the content entry `mediaSite` when that entry is a reference, as a 3.2
+// `components/mediaTypes` one is: the same path under the entry instead of under its target. Undefined
+// when the entry is no reference or `at` lies outside its target.
+const underMediaSite = (
+  resolution: Resolution,
+  mediaSite: CanonicalKey | undefined,
+  at: CanonicalKey,
+): CanonicalKey | undefined => {
+  if (mediaSite === undefined) {
+    return undefined;
+  }
+
+  const home = follow(resolution, mediaSite);
+  const below = at.pointer === home.pointer || at.pointer.startsWith(`${home.pointer}/`);
+  if (keyOf(home) === keyOf(mediaSite) || at.document !== home.document || !below) {
+    return undefined;
+  }
+
+  return {
+    document: mediaSite.document,
+    pointer: `${mediaSite.pointer}${at.pointer.slice(home.pointer.length)}`,
+  };
+};
+
 // The use site is the operation's request body; when it is a reference, the element's own
 // location in the target is `related[0]` (design 8.1). Otherwise the element names its own
-// location, in whichever document of the set holds it.
+// location, in whichever document of the set holds it. Under a content entry `mediaSite` that is a
+// reference, the use site is that entry: inline, the element sits below it with its location in the
+// target as `related[0]`; under a referenced body, the same place below the body's entry follows
+// `related[0]`, so the media key stays known.
 const toDiagnostics = (
   ctx: Context,
   findings: readonly Finding[],
+  mediaSite?: CanonicalKey,
 ): Effect.Effect<readonly Diagnostic[]> =>
   Effect.all(
     findings.map((item) => {
+      const viaEntry = underMediaSite(ctx.resolution, mediaSite, item.at);
+      const own = viaEntry ?? item.at;
       const fields: DiagnosticFields = {
         code: item.code,
-        document: ctx.reference === undefined ? item.at.document : ctx.resolution.document,
+        document: ctx.reference === undefined ? own.document : ctx.resolution.document,
         element: item.element,
         message: item.message,
         openapi: ctx.site.openapi,
-        pointer: ctx.reference === undefined ? item.at.pointer : ctx.site.pointer,
+        pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
         row: item.code.slice(0, item.code.indexOf("/")),
         scope: item.scope ?? "element",
         severity: item.severity,
@@ -2326,7 +2356,11 @@ const toDiagnostics = (
         fields.operation = ctx.site.operation;
       }
 
-      const related = [...(ctx.reference === undefined ? [] : [item.at]), ...(item.related ?? [])];
+      // Placed away from its own location, the element names it first; under a referenced body,
+      // the same place below the body's content entry follows.
+      const moved = ctx.reference !== undefined || viaEntry !== undefined;
+      const bodyEntry = ctx.reference === undefined || viaEntry === undefined ? [] : [viaEntry];
+      const related = [...(moved ? [item.at] : []), ...bodyEntry, ...(item.related ?? [])];
       if (related.length > 0) {
         fields.related = related;
       }
@@ -2548,10 +2582,12 @@ export const normalizeBody = (
     }
 
     const results = yield* Effect.all(keys.map((key) => normalizeAlternative(ctx, target, key)));
-    const diagnostics = yield* toDiagnostics(
-      ctx,
-      results.flatMap((result) => result.findings),
+    const placed = yield* Effect.all(
+      results.map((result, index) =>
+        toDiagnostics(ctx, result.findings, childKey(target, "content", keys[index] ?? "")),
+      ),
     );
+    const diagnostics = placed.flat();
     const alternatives = results.flatMap((result) =>
       result.alternative === undefined ? [] : [result.alternative],
     );
@@ -2604,21 +2640,19 @@ export const formContentRules = (
     const reference = referenceIn(resolution, use);
     const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
     const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
-    const media = yield* readMedia(
-      resolution,
-      childKey(follow(resolution, use), "content", mediaType),
-    );
+    const mediaSite = childKey(follow(resolution, use), "content", mediaType);
+    const media = yield* readMedia(resolution, mediaSite);
     const parts = yield* formParts(ctx, media, false);
     if (parts.refused) {
       return {
         _tag: "Refused",
-        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings)),
+        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings), mediaSite),
       };
     }
 
     return {
       _tag: "Implemented",
-      diagnostics: yield* toDiagnostics(ctx, parts.findings),
+      diagnostics: yield* toDiagnostics(ctx, parts.findings, mediaSite),
       encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
         Effect.orDie,
       ),

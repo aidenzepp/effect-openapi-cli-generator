@@ -183,6 +183,18 @@ const useSite = /^(?<operation>.*)\/requestBody$/u;
 
 const encodingEntry = /\/content\/(?<media>[^/]*)\/encoding\/(?<name>[^/]*)$/u;
 
+// A 3.2 media type reached through `$ref` lives in `components/mediaTypes`, outside any `content`,
+// so `related[0]` there names no media key; the producer puts the same entry under the body's
+// `content/<media>` as `related[1]` (design 8.1).
+const mediaTypesTarget = "/components/mediaTypes/";
+
+// The related location that names the field refusal's Encoding entry under `content/<media>`.
+const entryOf = (record: typeof Record.Type): string => {
+  const [first, second] = record.related ?? [];
+
+  return ((first?.pointer ?? "").startsWith(mediaTypesTarget) ? second : first)?.pointer ?? "";
+};
+
 // RFC 6901: `~1` before `~0`, so `~01` stays `~1`.
 const unescape = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
 
@@ -197,12 +209,12 @@ interface FieldSite {
 }
 
 // A field refusal's operation pointer, request media type and property name: from its pointer when
-// the body is inline, else from the use site and `related[0]`. Undefined when it is anchored at
-// neither.
+// the body is inline, else from the use site and `related[0]`, or `related[1]` when `related[0]` is a
+// `components/mediaTypes` target. Undefined when it is anchored at neither.
 const fieldSiteOf = (record: typeof Record.Type): FieldSite | undefined => {
   const direct = fieldAnchor.exec(record.pointer)?.groups;
   const operation = direct?.operation ?? useSite.exec(record.pointer)?.groups?.operation;
-  const entry = direct ?? encodingEntry.exec(record.related?.[0]?.pointer ?? "")?.groups;
+  const entry = direct ?? encodingEntry.exec(entryOf(record))?.groups;
   if (operation === undefined || entry?.media === undefined || entry.name === undefined) {
     return undefined;
   }
@@ -320,7 +332,8 @@ const carries = (offer: Offer, element: WalkElement): boolean => {
  * command of it carries the refusal's request media type and lists the field in `refusedFields`;
  * otherwise it is missing, as is one not anchored at `<op>/requestBody/content/<media>/encoding/
  * <name>` of a walked operation, or under a `$ref` body at `<op>/requestBody` with `related[0]`
- * ending in `content/<media>/encoding/<name>`. It never accounts for its request media type. A
+ * ending in `content/<media>/encoding/<name>` (`related[1]` when `related[0]` is a 3.2
+ * `components/mediaTypes` target). It never accounts for its request media type. A
  * described refused field with no `field` refusal at its Encoding entry is invented.
  *
  * The report and `--describe` are indexed once, so the join's cost grows with the elements and
