@@ -14,6 +14,7 @@ import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // The Milestone 2 witness for the format value rows FMT-01 to FMT-28: one generated package per
 // version line, built once, run against the capture server; the tier of each format value comes
@@ -45,9 +46,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "wt-fmt-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 interface Members {
   readonly [key: string]: Json;
@@ -160,7 +159,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const text = (bytes: Uint8Array): string => Buffer.from(bytes).toString("utf-8");

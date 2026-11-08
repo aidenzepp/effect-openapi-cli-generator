@@ -13,6 +13,7 @@ import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // The Milestone 2 witness for the Encoding Object field and style rows ENC-01 to ENC-16: part types
 // from `contentType`, part headers, `style`, `explode` and `allowReserved` on form and multipart
@@ -40,9 +41,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "wt-enc-fields-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 interface Members {
   readonly [key: string]: Json;
@@ -105,7 +104,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const header = (request: RecordedRequest, name: string): string | undefined =>

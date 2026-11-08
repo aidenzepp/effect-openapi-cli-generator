@@ -13,6 +13,7 @@ import { startCaptureServer } from "./fixtures/capture-server.ts";
 import type { RecordedRequest } from "./fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "./support/generated-cli.ts";
 import type { GeneratedPackage } from "./support/generated-cli.ts";
+import { setEnv } from "./support/env.ts";
 
 // The Milestone 2 witness for naming extensions (NMX-6): one 3.1.1 spec whose operations are named
 // by Forge and Fern extensions, by tag and operationId, and by the author config, with aliases, one
@@ -62,7 +63,7 @@ interface Built {
 
 let built: Built | undefined;
 
-let previousTmp: string | undefined;
+let restoreTmpdir: (() => void) | undefined;
 
 const builtPackage = (): Built => {
   if (built === undefined) {
@@ -73,9 +74,8 @@ const builtPackage = (): Built => {
 };
 
 beforeAll(async () => {
-  previousTmp = process.env.TMPDIR;
   nodeFs.mkdirSync(scratch, { recursive: true });
-  process.env.TMPDIR = scratch;
+  restoreTmpdir = setEnv("TMPDIR", scratch);
 
   // The port is known only once the capture server listens, so the bound origin is added here.
   const configPath = nodePath.join(scratch, "author-config.json");
@@ -111,11 +111,7 @@ beforeAll(async () => {
 afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(buildScope, Exit.void));
-  if (previousTmp === undefined) {
-    delete process.env.TMPDIR;
-  } else {
-    process.env.TMPDIR = previousTmp;
-  }
+  restoreTmpdir?.();
 
   nodeFs.rmSync(scratch, { force: true, recursive: true });
 });

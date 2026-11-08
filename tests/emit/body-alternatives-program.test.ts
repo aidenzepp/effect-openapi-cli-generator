@@ -7,6 +7,7 @@ import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { BinRun, GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // Design 6.6 through the built CLI and the capture server: `--content-type` chooses among every
 // declared request media alternative, JSON is the default even when multipart is listed first, and
@@ -26,9 +27,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "body-alternatives-program-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -64,7 +63,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const built = (): GeneratedPackage => {

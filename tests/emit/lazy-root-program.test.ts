@@ -6,6 +6,7 @@ import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { BinRun, GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // Design 4.1 Lazy root, through the built CLI (M1 TS-2) and the capture server (M1 TS-1): the lazy
 // build prints what an eager build of the same package prints, `tsc` rewrites each
@@ -43,9 +44,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "lazy-root-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -135,7 +134,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const built = (): GeneratedPackage => {

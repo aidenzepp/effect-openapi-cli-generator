@@ -11,6 +11,7 @@ import type { Resolution } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import { Description } from "../../src/runtime-src/runtime/describe.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 const golden = nodePath.resolve(import.meta.dir, "../fixtures/golden/users-update");
 
@@ -35,7 +36,7 @@ interface Golden {
 
 let built: Golden | undefined;
 
-let previousTmp: string | undefined;
+let restoreTmpdir: (() => void) | undefined;
 
 const goldenRun = (): Golden => {
   if (built === undefined) {
@@ -46,9 +47,8 @@ const goldenRun = (): Golden => {
 };
 
 beforeAll(async () => {
-  previousTmp = process.env.TMPDIR;
   nodeFs.mkdirSync(scratch, { recursive: true });
-  process.env.TMPDIR = scratch;
+  restoreTmpdir = setEnv("TMPDIR", scratch);
 
   built = await Effect.runPromise(
     Effect.scoped(
@@ -87,11 +87,7 @@ beforeAll(async () => {
 }, 300_000);
 
 afterAll(() => {
-  if (previousTmp === undefined) {
-    delete process.env.TMPDIR;
-  } else {
-    process.env.TMPDIR = previousTmp;
-  }
+  restoreTmpdir?.();
 
   nodeFs.rmSync(scratch, { force: true, recursive: true });
 });

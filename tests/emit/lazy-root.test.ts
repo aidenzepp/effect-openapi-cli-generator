@@ -12,6 +12,7 @@ import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import { generateFixture } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // Design 4.1 Lazy root: `cli/root.ts` holds a header table of the top-level groups, each loaded by a
 // literal `import()`, and `main.ts` builds the root from the `Stdio` arguments. In process, on the
@@ -186,8 +187,7 @@ describe("lazy root: tags named like the root's bindings", () => {
     nodeFs.writeFileSync(configPath, JSON.stringify(config));
 
     // Generate under the work directory, then read and type-check the package inside its scope.
-    const priorTmpdir = process.env.TMPDIR;
-    process.env.TMPDIR = work;
+    const restoreTmpdir = setEnv("TMPDIR", work);
     const checked = Effect.gen(function* check() {
       const { dir } = yield* generateFixture({ configPath, specPath });
       const read = (path: string) => nodeFs.readFileSync(nodePath.join(dir, path), "utf-8");
@@ -213,7 +213,7 @@ describe("lazy root: tags named like the root's bindings", () => {
         Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
       ),
     ).finally(() => {
-      process.env.TMPDIR = priorTmpdir;
+      restoreTmpdir();
     });
 
     expect(root).toContain('import * as Groups from "../runtime/groups.ts";');
