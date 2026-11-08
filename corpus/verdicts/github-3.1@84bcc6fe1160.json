@@ -18,6 +18,7 @@
     "refusals": {
       "document": 0,
       "element": 7,
+      "field": 0,
       "operation": 4
     }
   },

@@ -1,35 +1,123 @@
 import {
+  Clock,
+  Config,
+  Duration,
   Effect,
   Exit,
   Inspectable,
   Option,
   Pipeable,
+  Pull,
   Redacted,
   Result,
+  Schedule,
   Scope,
+  Stdio,
   Stream,
 } from "effect";
+import { CliError, Flag, GlobalFlag } from "effect/cli";
 import {
   FetchHttpClient,
   Headers,
   HttpBody,
   HttpClient,
+  HttpClientError,
   HttpClientRequest,
   HttpClientResponse,
   HttpIncomingMessage,
   Url,
   UrlParams,
 } from "effect/http";
-import { RedirectRefused } from "../domain/errors.ts";
-import type { UsageError } from "../domain/errors.ts";
+import { RedirectRefused, UsageError } from "../domain/errors.ts";
+import type { TransportError } from "../domain/errors.ts";
 import { isLoopbackHost } from "./auth.ts";
+import { Servers } from "./base-url.ts";
 import { queryWireForm } from "./redact.ts";
+import { mapClientError } from "./response.ts";
 
 /**
  * The most redirects one request follows (design 6.5 Redirect loop). The response to the last
  * followed hop may not redirect again: an eleventh `Location` is refused with `hopLimit`.
  */
 export const maxRedirects = 10;
+
+/**
+ * The built-in `--timeout` in seconds (design D-AD7), used when no flag, environment value or
+ * author default sets one.
+ */
+export const defaultTimeoutSeconds = 30;
+
+const wholeSeconds = /^\d+$/u;
+
+const invalidTimeout = (): UsageError =>
+  new UsageError({
+    flag: "--timeout",
+    message: "--timeout must be a whole number of seconds, 0 or more",
+  });
+
+// Whole seconds, 0 or more. The failure names `--timeout` only, never the value.
+const parseTimeout = (raw: string): Effect.Effect<number, UsageError> => {
+  const seconds = Number(raw);
+
+  return wholeSeconds.test(raw) && Number.isSafeInteger(seconds)
+    ? Effect.succeed(seconds)
+    : Effect.fail(invalidTimeout());
+};
+
+// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
+const asCliError = (error: UsageError): CliError.CliError =>
+  new CliError.UserError({ cause: error, userMessage: error.message });
+
+/**
+ * `--timeout <seconds>` bounds each attempt's wait for response headers; 0 disables it (design
+ * D-AD7). The flag holds only the operator's value; `effectiveTimeoutSeconds` applies the
+ * fallbacks, because the env name needs the prefix the root supplies.
+ */
+export const timeoutSetting = GlobalFlag.Setting("timeout")({
+  flag: Flag.String("timeout").pipe(
+    Flag.withMetavar("seconds"),
+    Flag.withDescription("Seconds to wait for response headers on each attempt; 0 waits forever"),
+    Flag.mapEffect((raw) => parseTimeout(raw).pipe(Effect.mapError(asCliError))),
+    Flag.optional,
+  ),
+});
+
+// The operator's `--timeout`, if the root registers the setting and the flag was given.
+const flagTimeout = Effect.map(Effect.serviceOption(timeoutSetting), Option.flatten);
+
+/**
+ * The effective `--timeout` in seconds: the flag, then `<envPrefix>_TIMEOUT` read by that explicit
+ * name (as `base-url.ts` reads `<PREFIX>_BASE_URL`), then `defaultTimeoutSeconds`. The author
+ * default reaches the env read through the `ConfigProvider` `main.ts` provides (design D-AD7). An
+ * unprefixed `TIMEOUT` is never read. A root that registers no `timeoutSetting` has no flag value.
+ */
+export const effectiveTimeoutSeconds = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveTimeout() {
+    const flag = yield* flagTimeout;
+    if (Option.isSome(flag)) {
+      return flag.value;
+    }
+
+    const env = yield* Config.option(Config.String(`${envPrefix}_TIMEOUT`)).pipe(
+      Effect.mapError(invalidTimeout),
+    );
+
+    return Option.isSome(env) ? yield* parseTimeout(env.value) : defaultTimeoutSeconds;
+  });
+
+/**
+ * The effective `--timeout` for a request. The prefix is the one the root supplies with the servers
+ * table; without that layer there is no env name to read, so only the flag and the built-in value
+ * apply.
+ */
+const requestTimeoutSeconds: Effect.Effect<number, UsageError> = Effect.serviceOption(Servers).pipe(
+  Effect.flatMap(
+    Option.match({
+      onNone: () => flagTimeout.pipe(Effect.map(Option.getOrElse(() => defaultTimeoutSeconds))),
+      onSome: ({ envPrefix }) => effectiveTimeoutSeconds(envPrefix),
+    }),
+  ),
+);
 
 /**
  * The per-hop attach step: `Auth.attach` with the run's table and attachment. It strips every
@@ -180,9 +268,10 @@ const nextHop = (
 };
 
 /**
- * The final hop's response. Its scope closes when the body ends, fails or is cancelled; the scope
- * is a child of the caller's, so a response dropped unread is aborted when the caller's scope
- * closes. `upgrade` hands the connection over, so it leaves the scope to the caller's.
+ * The final hop's response. `release` closes its scope, and runs when the body ends, fails or is
+ * cancelled; the scope is a child of the caller's, so a response dropped unread is aborted when
+ * the caller's scope closes. `upgrade` hands the connection over, so it leaves the scope to the
+ * caller's.
  */
 class OwnedResponse implements HttpClientResponse.HttpClientResponse {
   readonly [HttpClientResponse.TypeId] = HttpClientResponse.TypeId;
@@ -190,9 +279,9 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
   readonly #original: HttpClientResponse.HttpClientResponse;
   readonly #release: Effect.Effect<void>;
 
-  constructor(original: HttpClientResponse.HttpClientResponse, scope: Scope.Closeable) {
+  constructor(original: HttpClientResponse.HttpClientResponse, release: Effect.Effect<void>) {
     this.#original = original;
-    this.#release = Scope.close(scope, Exit.void);
+    this.#release = release;
   }
 
   get request() {
@@ -341,12 +430,23 @@ const foldUrlParams = (
  * turned into `GET`: a miss is a defect (exit 70) and nothing is sent, because Bun's `fetch` sends
  * any token outside its own table as `GET`. The token is compared as given, with no case folding,
  * and the defect carries only the JSON-quoted token, never the URL.
+ *
+ * One run of the loop is one attempt, and `HttpClient.timeout` bounds it by the effective
+ * `--timeout` (design D-AD7): the bound ends when the final hop's headers arrive, so the body is
+ * the idle timeout's. `HttpClient.timeout` fixes its duration when the client is built, and the
+ * setting is read per request, so the timed client is built per request; 0 leaves it untimed. An
+ * invalid `<PREFIX>_TIMEOUT` fails the request with a `UsageError` before anything is sent.
+ * Expiry is an `HttpClientError` with a `TimeoutError` cause, which `mapClientError` reports as
+ * `TransportError` `timeout`.
  */
 export const redirectLoop =
   (attach: Attach, direct: DirectRoute, allowed: ReadonlySet<string>) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
-  ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R | Scope.Scope> => {
+  ): HttpClient.HttpClient.With<
+    E | HttpClientError.HttpClientError | RedirectRefused | UsageError,
+    R | Scope.Scope
+  > => {
     const scoped = HttpClient.withScope(client);
     const hop = (request: HttpClientRequest.HttpClientRequest, followed: number) =>
       Effect.uninterruptibleMask((restore) =>
@@ -365,7 +465,7 @@ export const redirectLoop =
             Effect.onError(() => Scope.close(scope, Exit.void)),
           );
           if (Option.isNone(next)) {
-            return { next, response: new OwnedResponse(response, scope) };
+            return { next, response: new OwnedResponse(response, Scope.close(scope, Exit.void)) };
           }
 
           yield* Scope.close(scope, Exit.void);
@@ -385,7 +485,16 @@ export const redirectLoop =
         Option.isNone(next) ? Effect.succeed(response) : loop(next.value, followed + 1),
       );
 
-    return HttpClient.transform(client, (_unsent, request) => loop(request, 0));
+    const attempt = HttpClient.transform(client, (_unsent, request) => loop(request, 0));
+
+    const timed = (seconds: number) =>
+      seconds === 0 ? attempt : HttpClient.timeout(attempt, Duration.seconds(seconds));
+
+    return HttpClient.transform(client, (_unsent, request) =>
+      requestTimeoutSeconds.pipe(
+        Effect.flatMap((value) => timed(value).postprocess(Effect.succeed(request))),
+      ),
+    );
   };
 
 /**
@@ -399,4 +508,458 @@ export const withUserAgent =
     HttpClient.mapRequestInput(
       client,
       HttpClientRequest.setHeader("user-agent", `${binName}/${version}`),
+    );
+
+/**
+ * The methods retried without `--retry-unsafe` (design D-AD7): RFC 9110 9.2.2's idempotent
+ * methods and `QUERY`.
+ */
+const idempotentMethods: ReadonlySet<string> = new Set([
+  "DELETE",
+  "GET",
+  "HEAD",
+  "OPTIONS",
+  "PUT",
+  "QUERY",
+  "TRACE",
+]);
+
+/**
+ * The final statuses retried (design D-AD7). The status is the redirect loop's final response.
+ */
+const retriedStatuses: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
+
+/**
+ * The `TransportError` reasons retried (design D-AD7, m3 P13). `tls` repeats and `aborted` is
+ * an interrupt or a closed pipe, so neither is retried.
+ */
+const retriedReasons: ReadonlySet<TransportError["reason"]> = new Set([
+  "connect",
+  "dns",
+  "timeout",
+]);
+
+/**
+ * Whether a method is retried without `--retry-unsafe`: an idempotent method, or any method when
+ * the request carries an `Idempotency-Key` header (design D-AD7). The table the retry hints of
+ * design 7.4 read.
+ */
+export const wouldRetry = (method: string, idempotencyKeyPresent: boolean): boolean =>
+  idempotencyKeyPresent || idempotentMethods.has(method);
+
+/**
+ * The built-in `--retries` (design D-AD7), used when no flag, environment value or author default
+ * sets one.
+ */
+export const defaultRetries = 2;
+
+const maxRetries = 10;
+
+const invalidRetries = (): UsageError =>
+  new UsageError({
+    flag: "--retries",
+    message: `--retries must be a whole number from 0 to ${maxRetries}`,
+  });
+
+// A whole number from 0 to `maxRetries`. The failure names `--retries` only, never the value.
+const parseRetries = (raw: string): Effect.Effect<number, UsageError> => {
+  const retries = Number(raw);
+
+  return wholeSeconds.test(raw) && retries <= maxRetries
+    ? Effect.succeed(retries)
+    : Effect.fail(invalidRetries());
+};
+
+/**
+ * `--retries <n>`: how many times a transient failure is retried (design D-AD7). The flag holds
+ * only the operator's value; `effectiveRetries` applies the fallbacks.
+ */
+export const retriesSetting = GlobalFlag.Setting("retries")({
+  flag: Flag.String("retries").pipe(
+    Flag.withMetavar("n"),
+    Flag.withDescription(`Times to retry a transient failure, 0 to ${maxRetries}`),
+    Flag.mapEffect((raw) => parseRetries(raw).pipe(Effect.mapError(asCliError))),
+    Flag.optional,
+  ),
+});
+
+/**
+ * `--retry-unsafe` retries any method, `POST` and `PATCH` included (design D-AD7). A one-shot
+ * body is still never retried.
+ */
+export const retryUnsafeSetting = GlobalFlag.Setting("retry-unsafe")({
+  flag: Flag.Boolean("retry-unsafe").pipe(
+    Flag.withDescription("Retry methods that are not idempotent, such as POST and PATCH"),
+    Flag.withDefault(false),
+  ),
+});
+
+const flagRetries = Effect.map(Effect.serviceOption(retriesSetting), Option.flatten);
+
+/**
+ * The effective `--retries`: the flag, then `<envPrefix>_RETRIES` read by that explicit name (as
+ * `effectiveTimeoutSeconds` reads `<PREFIX>_TIMEOUT`), then `defaultRetries`. The author default
+ * reaches the env read through the `ConfigProvider` `main.ts` provides. An unprefixed `RETRIES` is
+ * never read.
+ */
+export const effectiveRetries = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveRetries() {
+    const flag = yield* flagRetries;
+    if (Option.isSome(flag)) {
+      return flag.value;
+    }
+
+    const env = yield* Config.option(Config.String(`${envPrefix}_RETRIES`)).pipe(
+      Effect.mapError(invalidRetries),
+    );
+
+    return Option.isSome(env) ? yield* parseRetries(env.value) : defaultRetries;
+  });
+
+// Exponential from 500 ms, jittered (design D-AD7). Used when the response names no `Retry-After`.
+const backoff = Schedule.jittered(Schedule.exponential("500 millis"));
+
+/**
+ * The final response of a request whose retrying stopped at the `Retry-After` cap (design D-AD7):
+ * the server asked for a longer wait than the effective `--timeout`, so that wait was not taken.
+ * `retryAfterSeconds` is the server's delay in whole seconds, rounded up; `send` passes it to
+ * `ApiResponseError.retryAfterSeconds` (m3 P14). The response itself is the last one, unchanged.
+ */
+export class CappedResponse extends OwnedResponse {
+  readonly retryAfterSeconds: number;
+
+  constructor(response: HttpClientResponse.HttpClientResponse, retryAfterSeconds: number) {
+    super(response, Effect.void);
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * The server's `Retry-After` delay in seconds when retrying stopped at the cap; `None` for every
+ * other response, including one whose retries ran out or ended for another reason.
+ */
+export const retryAfterCapSeconds = (
+  response: HttpClientResponse.HttpClientResponse,
+): Option.Option<number> =>
+  response instanceof CappedResponse ? Option.some(response.retryAfterSeconds) : Option.none();
+
+/**
+ * The response's `Retry-After` as a delay from `nowMillis`: whole seconds, or an HTTP date (a past
+ * date is no delay). `None` when it is absent or does not parse, which RFC 9110 10.2.3 treats as
+ * absent, so the backoff applies.
+ */
+const retryAfterDelay = (
+  response: HttpClientResponse.HttpClientResponse,
+  nowMillis: number,
+): Option.Option<Duration.Duration> =>
+  Option.flatMap(Headers.get(response.headers, "retry-after"), (value) => {
+    const parsed = Headers.parseRetryAfter(value);
+
+    return Result.isSuccess(parsed)
+      ? Option.some(Headers.retryAfterDelay(parsed.success, nowMillis))
+      : Option.none();
+  });
+
+/**
+ * Whether a server delay exceeds the cap: the effective `--timeout` in seconds, where 0 removes
+ * the cap with the timeout (design 13.1 R6). A delay equal to the cap is waited.
+ */
+const exceedsCap = (delay: Duration.Duration, timeoutSeconds: number): boolean =>
+  timeoutSeconds !== 0 && Duration.isGreaterThan(delay, Duration.seconds(timeoutSeconds));
+
+/**
+ * Why an attempt's outcome is retried: the final status, or the `TransportError` reason as
+ * `mapClientError` classifies it. `None` for every other outcome, interrupts and defects included.
+ */
+const retryCause = <E>(
+  exit: Exit.Exit<HttpClientResponse.HttpClientResponse, E>,
+): Effect.Effect<Option.Option<string>> => {
+  if (Exit.isSuccess(exit)) {
+    const { status } = exit.value;
+
+    return Effect.succeed(
+      retriedStatuses.has(status) ? Option.some(String(status)) : Option.none(),
+    );
+  }
+
+  const error = Exit.findErrorOption(exit);
+  if (
+    Exit.hasInterrupts(exit) ||
+    Option.isNone(error) ||
+    !HttpClientError.isHttpClientError(error.value) ||
+    error.value.reason._tag !== "TransportError"
+  ) {
+    return Effect.succeedNone;
+  }
+
+  return Effect.flip(mapClientError(error.value)).pipe(
+    Effect.map(({ reason }) => (retriedReasons.has(reason) ? Option.some(reason) : Option.none())),
+  );
+};
+
+const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* printRetryNote() {
+    const stdio = yield* Stdio.Stdio;
+
+    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
+  }).pipe(Effect.ignore);
+
+/**
+ * The retry policy (design D-AD7, 5 Retries row), an `HttpClient.transform` applied outside the
+ * redirect loop, so one attempt is one run of the loop with its hops, and the loop's replay rule
+ * is the retry's. An attempt is retried when its method is retried (`wouldRetry`, or any method
+ * with `--retry-unsafe`), its outcome is a retried status or `TransportError` reason, and attempts
+ * remain (`effectiveRetries` + 1 in all). A one-shot body (stdin, `isOneShot`) is never retried:
+ * one stderr line names `unreplayableBody` and the outcome stands. File and in-memory bodies
+ * re-run from the start.
+ *
+ * Each attempt runs in its own scope, a child of the caller's, so a discarded response is aborted
+ * by closing that scope, not drained; the final response's scope closes with the caller's. Before
+ * each retry one stderr note names the method, the URL through `scrub` (the RT-6 scrubber `send`
+ * passes), the cause, the attempt and the delay: the response's `Retry-After` (seconds or an HTTP
+ * date) when it carries one that parses, else exponential from 500 ms, jittered. A `Retry-After`
+ * longer than the effective `--timeout` is not waited (design D-AD7): retrying stops and the last
+ * response is returned as a `CappedResponse` carrying the server's delay, which
+ * `retryAfterCapSeconds` reads. Every other last outcome is returned or failed unchanged. An
+ * invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT` fails with a `UsageError` before anything is
+ * sent.
+ */
+export const retryTransform =
+  (scrub: (text: string) => string) =>
+  <E, R>(
+    client: HttpClient.HttpClient.With<E, R>,
+  ): HttpClient.HttpClient.With<E | UsageError, R | Scope.Scope | Stdio.Stdio> =>
+    HttpClient.transform(client, (attempt, request) =>
+      Effect.gen(function* retrying() {
+        // The prefix comes with the root's servers table; without it only the flag and the
+        // built-in value apply, as for the timeout.
+        const retries = yield* Effect.serviceOption(Servers).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => flagRetries.pipe(Effect.map(Option.getOrElse(() => defaultRetries))),
+              onSome: ({ envPrefix }) => effectiveRetries(envPrefix),
+            }),
+          ),
+        );
+        const unsafe = Option.getOrElse(
+          yield* Effect.serviceOption(retryUnsafeSetting),
+          () => false,
+        );
+        const retried =
+          unsafe || wouldRetry(request.method, Headers.has(request.headers, "idempotency-key"));
+        const timeout = yield* requestTimeoutSeconds;
+        const total = retries + 1;
+        const label = `${request.method} ${scrub(UrlParams.redactUrl(request.url))}`;
+        const caller = yield* Scope.Scope;
+        const step = yield* Schedule.toStep(backoff);
+
+        for (let made = 1; ; made += 1) {
+          const scope = yield* Scope.fork(caller);
+          const exit = yield* Effect.exit(attempt.pipe(Scope.provide(scope)));
+          const cause = yield* retryCause(exit);
+          if (retried && made < total && Option.isSome(cause)) {
+            if (!isOneShot(request.body)) {
+              const now = yield* Clock.currentTimeMillis;
+              const server = Exit.isSuccess(exit)
+                ? retryAfterDelay(exit.value, now)
+                : Option.none<Duration.Duration>();
+              if (
+                Exit.isSuccess(exit) &&
+                Option.isSome(server) &&
+                exceedsCap(server.value, timeout)
+              ) {
+                return new CappedResponse(exit.value, Math.ceil(Duration.toSeconds(server.value)));
+              }
+
+              yield* Scope.close(scope, Exit.void);
+
+              const delay = Option.isSome(server)
+                ? server.value
+                : yield* step(now, cause.value).pipe(
+                    Effect.map(([, next]) => next),
+                    Pull.catchDone((leftover) => Effect.succeed(leftover)),
+                  );
+              yield* printNote(
+                `Notice: retrying ${label} after ${cause.value} ` +
+                  `(attempt ${made + 1} of ${total}) in ${Math.round(Duration.toMillis(delay))} ms`,
+              );
+              yield* Effect.sleep(delay);
+              continue;
+            }
+
+            yield* printNote(
+              `Notice: not retrying ${label} after ${cause.value}: unreplayableBody, ` +
+                "the request body was read once and cannot be sent again",
+            );
+          }
+
+          if (Exit.isFailure(exit)) {
+            yield* Scope.close(scope, exit);
+          }
+
+          return yield* exit;
+        }
+      }),
+    );
+
+/**
+ * `--verbose` prints each attempt's and each redirect hop's request and response summary to
+ * stderr, redacted (design 4.6, DM3-8). `verboseTransform` reads it per request.
+ */
+export const verboseSetting = GlobalFlag.Setting("verbose")({
+  flag: Flag.Boolean("verbose").pipe(
+    Flag.withDescription("Print each request's and response's status line and headers to stderr"),
+    Flag.withDefault(false),
+  ),
+});
+
+// A name-redacted value, from `Headers.CurrentRedactedNames` or `UrlParams.CurrentRedactedNames`.
+const redactedValue = "<redacted>";
+
+// A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
+const decodedName = (raw: string): string =>
+  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
+
+/**
+ * A URI reference, absolute or relative, with userinfo redacted (`UrlParams.redactUrl`) and each
+ * query value whose decoded name `names` lists replaced by `<redacted>`. Every other byte, the
+ * fragment included, stays as given.
+ */
+const redactUriText = (text: string, names: readonly (string | RegExp)[]): string => {
+  const reference = UrlParams.redactUrl(text, []);
+  const hash = reference.indexOf("#");
+  const end = hash === -1 ? reference.length : hash;
+  const at = reference.slice(0, end).indexOf("?");
+  if (at === -1) {
+    return reference;
+  }
+
+  const query = reference
+    .slice(at + 1, end)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+
+      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+        ? `${part.slice(0, equals + 1)}${redactedValue}`
+        : part;
+    });
+
+  return `${reference.slice(0, at + 1)}${query.join("&")}${reference.slice(end)}`;
+};
+
+/**
+ * The URL a hop is sent to, without its fragment, redacted as `redactUriText` redacts.
+ */
+const verboseUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+  names: readonly (string | RegExp)[],
+): string => {
+  const url = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash));
+  if (Result.isSuccess(url)) {
+    url.success.hash = "";
+  }
+
+  return redactUriText(Result.isSuccess(url) ? url.success.href : request.url, names);
+};
+
+// Each `<URI-reference>` of a `Link` value (RFC 8288).
+const linkTarget = /<(?<uri>[^>]*)>/gu;
+
+// The `url=` part of a `Refresh` value, unquoted or in matching quotes.
+const refreshTarget = /^(?<lead>.*?\burl\s*=\s*)(?<quote>["']?)(?<uri>.*?)\k<quote>$/isu;
+
+/**
+ * A header value with each URL it carries redacted by `redactUriText`: the whole value of
+ * `Location` and `Content-Location`, each `<URI>` of `Link`, and the `url=` part of `Refresh`.
+ * Any other header's value is returned as given.
+ */
+const redactHeaderUrls = (
+  name: string,
+  value: string,
+  names: readonly (string | RegExp)[],
+): string => {
+  const header = name.toLowerCase();
+  if (header === "location" || header === "content-location") {
+    return redactUriText(value, names);
+  }
+
+  if (header === "link") {
+    return value.replaceAll(linkTarget, (_match, uri: string) => `<${redactUriText(uri, names)}>`);
+  }
+
+  const refresh = header === "refresh" ? refreshTarget.exec(value)?.groups : undefined;
+  if (refresh === undefined) {
+    return value;
+  }
+
+  const { lead = "", quote = "", uri = "" } = refresh;
+
+  return `${lead}${quote}${redactUriText(uri, names)}${quote}`;
+};
+
+/**
+ * One block's header lines in the order the record holds them, which is the order they were set.
+ * A value whose name `names` lists is `<redacted>`; a URL a header carries is redacted by
+ * `redactHeaderUrls` with `queryNames`; the caller scrubs each whole line.
+ */
+const headerLines = (
+  prefix: "<" | ">",
+  headers: Headers.Headers,
+  names: readonly (string | RegExp)[],
+  queryNames: readonly (string | RegExp)[],
+): readonly string[] =>
+  Object.entries(headers).map(
+    ([name, value]) =>
+      `${prefix} ${name}: ${
+        Headers.isRedactedName(name, names)
+          ? redactedValue
+          : redactHeaderUrls(name, value, queryNames)
+      }`,
+  );
+
+// One block on stderr, each whole line through the RT-6 value scrubber.
+const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =>
+  printNote(lines.map(scrub).join("\n"));
+
+/**
+ * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it
+ * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in send order) before
+ * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
+ * arrive; no bodies. A send that fails writes only its request block. Header and query values
+ * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
+ * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
+ * `<redacted:<scheme>>`. A URL a header carries (`Location`, `Content-Location`, `Link`,
+ * `Refresh`) is redacted as the request URL is. The scrubber runs over each whole line.
+ *
+ * It wraps the inner client `redirectLoop` receives, inside the loop and inside `retryTransform`,
+ * because only there does it see each hop as sent, after the attach step, of every attempt.
+ */
+export const verboseTransform =
+  (scrub: (text: string) => string) =>
+  <E, R>(
+    client: HttpClient.HttpClient.With<E, R>,
+  ): HttpClient.HttpClient.With<E, R | Stdio.Stdio> =>
+    HttpClient.transform(client, (send, request) =>
+      Effect.gen(function* verbose() {
+        const on = Option.getOrElse(yield* Effect.serviceOption(verboseSetting), () => false);
+        if (!on) {
+          return yield* send;
+        }
+
+        const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+        const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
+        yield* printBlock(scrub, [
+          `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
+          ...headerLines(">", request.headers, headerNames, queryNames),
+        ]);
+
+        const response = yield* send;
+        yield* printBlock(scrub, [
+          `< ${response.status}`,
+          ...headerLines("<", response.headers, headerNames, queryNames),
+        ]);
+
+        return response;
+      }),
     );

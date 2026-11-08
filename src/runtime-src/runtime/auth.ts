@@ -5,11 +5,14 @@ import {
   FileSystem,
   Layer,
   Option,
+  Path,
   Redacted,
   Stdio,
   Stream,
+  Terminal,
 } from "effect";
-import { Flag, GlobalFlag } from "effect/cli";
+import { Flag, GlobalFlag, Prompt, TerminalCapabilities } from "effect/cli";
+import type { FetchHttpClient } from "effect/http";
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
@@ -23,7 +26,12 @@ export type SecurityRequirement = readonly (readonly string[])[];
 
 /**
  * A scheme the runtime sends. `env` overrides the default environment name `<PREFIX>_<SCHEME>`;
- * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it.
+ * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it. An `oauth2` or
+ * `openIdConnect` scheme is operator-supplied token pass-through (design 6.5, D-SEC1): the token is
+ * sent as `Authorization: Bearer`, and no token is acquired, no discovery is run, and no scope or
+ * role is sent. A `mutualTLS` scheme is a client certificate (design 6.5, D-SEC3): its paths are
+ * read from `Config` by the names it carries, `certEnv`, `keyEnv` and `caEnv`, which the name plan
+ * derives once (design 4.4) and the runtime never folds itself; it is never a header.
  */
 export type SecurityScheme =
   | {
@@ -38,7 +46,29 @@ export type SecurityScheme =
       readonly env?: string | undefined;
       readonly kind: "http";
       readonly scheme: "basic" | "bearer";
+    }
+  | {
+      readonly deprecated?: true;
+      readonly env?: string | undefined;
+      readonly kind: "oauth2";
+    }
+  | {
+      readonly deprecated?: true;
+      readonly env?: string | undefined;
+      readonly kind: "openIdConnect";
+    }
+  | {
+      readonly caEnv: string;
+      readonly certEnv: string;
+      readonly deprecated?: true;
+      readonly keyEnv: string;
+      readonly kind: "mutualTLS";
     };
+
+/**
+ * A `mutualTLS` scheme: a client certificate, not a header credential.
+ */
+export type MutualTlsScheme = Extract<SecurityScheme, { readonly kind: "mutualTLS" }>;
 
 /**
  * The emitted `api/security.ts`: every scheme the operations name, by component name.
@@ -84,10 +114,13 @@ export const schemeSlug = (scheme: string): string =>
     .toLowerCase();
 
 /**
- * The environment name of a scheme's credential: the scheme's own `env`, else `<PREFIX>_<SCHEME>`.
+ * The environment name of a token scheme's credential: the scheme's own `env`, else
+ * `<PREFIX>_<SCHEME>`. A `mutualTLS` scheme has no single credential name: the runtime reads its
+ * `certEnv`, `keyEnv` and `caEnv` instead and never calls this for one.
  */
 export const envName = (envPrefix: string, scheme: string, definition: SecurityScheme): string =>
-  definition.env ?? `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
+  ("env" in definition ? definition.env : undefined) ??
+  `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
 
 type FileSetting = GlobalFlag.Setting<string, Option.Option<string>>;
 
@@ -188,6 +221,53 @@ const fromEnv = (scheme: string, name: string): Effect.Effect<Option.Option<stri
     Effect.mapError(() => usage(scheme, `cannot read ${name} for ${scheme}`)),
   );
 
+/**
+ * The configured client-certificate paths of one `mutualTLS` scheme.
+ */
+export interface ClientCertificatePaths {
+  readonly ca: Option.Option<string>;
+  readonly cert: string;
+  readonly key: string;
+}
+
+// An empty variable is unset, as for every other credential.
+const certificatePath = (name: string): Config.Config<Option.Option<string>> =>
+  Config.option(Config.String(name)).pipe(Config.map(Option.filter((path) => path !== "")));
+
+/**
+ * The `Config` descriptor of a `mutualTLS` scheme's three paths, read by exactly the names the
+ * scheme carries: some when both `certEnv` and `keyEnv` are set, the CA optional, none otherwise.
+ * `bin.ts` reads it to build the certificate init; `evaluate` reads it to decide satisfaction.
+ */
+export const clientCertificatePaths = (
+  definition: MutualTlsScheme,
+): Config.Config<Option.Option<ClientCertificatePaths>> =>
+  Config.all({
+    ca: certificatePath(definition.caEnv),
+    cert: certificatePath(definition.certEnv),
+    key: certificatePath(definition.keyEnv),
+  }).pipe(
+    Config.map(({ ca, cert, key }) =>
+      Option.map(Option.all({ cert, key }), (paths) => ({ ca, ...paths })),
+    ),
+  );
+
+// A satisfied `mutualTLS` scheme is a credential whose value is the certificate path, held
+// redacted: never sent, and scrubbed like any other credential if a response echoes it.
+const certificateOf = (
+  scheme: string,
+  definition: MutualTlsScheme,
+): Effect.Effect<Option.Option<Credential>, UsageError> =>
+  clientCertificatePaths(definition).pipe(
+    Effect.map(Option.map((paths) => ({ definition, scheme, value: Redacted.make(paths.cert) }))),
+    Effect.mapError(
+      () =>
+        new UsageError({
+          message: `cannot read ${definition.certEnv} or ${definition.keyEnv} for ${scheme}`,
+        }),
+    ),
+  );
+
 const credentialOf = (
   scheme: string,
   definition: SecurityScheme,
@@ -198,6 +278,10 @@ const credentialOf = (
   FileSystem.FileSystem | Stdio.Stdio | StdinClaim
 > =>
   Effect.gen(function* readCredential() {
+    if (definition.kind === "mutualTLS") {
+      return yield* certificateOf(scheme, definition);
+    }
+
     const file = Option.flatten(yield* Effect.serviceOption(credentialFileSetting(scheme)));
     const value = Option.isSome(file)
       ? yield* fromFile(scheme, file.value).pipe(
@@ -240,6 +324,51 @@ const noticeDeprecated = (
     }
   }).pipe(Effect.ignore);
 
+interface PromptServices {
+  readonly path: Path.Path;
+  readonly terminal: Terminal.Terminal;
+}
+
+// `Terminal` and `Path` are read optionally, so `evaluate` adds no requirement: `Command.run`
+// provides both, and without them the prompt is skipped as off a TTY.
+const promptServices: Effect.Effect<Option.Option<PromptServices>> = Effect.gen(
+  function* promptServicesOf() {
+    const { canPrompt } = yield* TerminalCapabilities.TerminalCapabilities;
+    const terminal = yield* Effect.serviceOption(Terminal.Terminal);
+    const path = yield* Effect.serviceOption(Path.Path);
+
+    return canPrompt && Option.isSome(terminal) && Option.isSome(path)
+      ? Option.some({ path: path.value, terminal: terminal.value })
+      : Option.none();
+  },
+);
+
+/**
+ * Ask for one scheme's credential with `Prompt.Password`, which masks the input and returns it
+ * `Redacted`. An empty answer is no credential; a quit prompt interrupts the run.
+ */
+const ask = (
+  scheme: string,
+  { path, terminal }: PromptServices,
+): Effect.Effect<Option.Option<Redacted.Redacted>, never, FileSystem.FileSystem> =>
+  Prompt.run(
+    Prompt.Password({ message: `Credential for ${scheme.replaceAll(unsafeName, "")}` }),
+  ).pipe(
+    Effect.provideService(Terminal.Terminal, terminal),
+    Effect.provideService(Path.Path, path),
+    Effect.map(Option.liftPredicate((value) => Redacted.value(value) !== "")),
+    Effect.catchTag("QuitError", () => Effect.interrupt),
+  );
+
+// The prompt reads stdin, so it takes the one stdin claim; `false` when a `-` consumer holds it.
+const claimStdin = (scheme: string): Effect.Effect<boolean, never, StdinClaim> =>
+  Effect.flatMap(Effect.service(StdinClaim), (stdin) =>
+    stdin.claim(`${schemeSlug(scheme)}-file`),
+  ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  );
+
 const describeAlternative = (
   envPrefix: string,
   table: SecurityTable,
@@ -248,11 +377,40 @@ const describeAlternative = (
   alternative
     .map((scheme) => {
       const definition = table.schemes[scheme];
+      if (definition?.kind === "mutualTLS") {
+        return `${scheme} (env ${definition.certEnv} + ${definition.keyEnv})`;
+      }
+
       const env = definition === undefined ? "" : `, env ${envName(envPrefix, scheme, definition)}`;
 
       return `${scheme} (--${schemeSlug(scheme)}-file${env})`;
     })
     .join(" + ");
+
+/**
+ * The alternative the prompt fills: the first, in document order, whose schemes are all defined
+ * and whose every `mutualTLS` scheme is configured, because a certificate path is never asked for.
+ */
+const promptTarget = <R>(
+  table: SecurityTable,
+  requirement: SecurityRequirement,
+  resolve: (scheme: string) => Effect.Effect<Option.Option<Credential>, UsageError, R>,
+): Effect.Effect<Option.Option<readonly string[]>, UsageError, R> =>
+  Effect.gen(function* findPromptTarget() {
+    for (const alternative of requirement) {
+      if (alternative.every((scheme) => Object.hasOwn(table.schemes, scheme))) {
+        const certificates = alternative.filter(
+          (scheme) => table.schemes[scheme]?.kind === "mutualTLS",
+        );
+        const configured = yield* Effect.all(certificates.map((scheme) => resolve(scheme)));
+        if (configured.every(Option.isSome)) {
+          return Option.some(alternative);
+        }
+      }
+    }
+
+    return Option.none();
+  });
 
 /**
  * Choose the credentials one operation sends (design 6.5 Run-time choice): the first alternative,
@@ -262,6 +420,15 @@ const describeAlternative = (
  * be configured. A chosen deprecated scheme is named once on stderr before the request. Each scheme
  * is resolved once, so stdin is claimed at most once, shared with the body flags through
  * `StdinClaim`.
+ *
+ * The TTY prompt is the last credential source (design 6.5, D-SEC5: file flag > env > prompt).
+ * It is asked only when no alternative qualifies from the file flags and the environment and no
+ * `{}` allows anonymous access, so a configured alternative is never preceded by a prompt. It
+ * fills the first alternative, in document order, whose schemes are all defined, asking for each
+ * scheme with no configured credential. It runs only when stdin and stdout are TTYs
+ * (`TerminalCapabilities.canPrompt`, the check `Flag.withFallbackPrompt` makes) and stdin is
+ * unclaimed: the prompt reads stdin, so it takes the one stdin claim (design 4.5), and a `-`
+ * consumer that holds it skips the prompt. A skipped or unanswered prompt is `CredentialMissing`.
  */
 export const evaluate = (
   operation: string,
@@ -314,6 +481,46 @@ export const evaluate = (
 
     if (requirement.length === 0 || requirement.some((alternative) => alternative.length === 0)) {
       return [];
+    }
+
+    const target = Option.getOrUndefined(yield* promptTarget(table, requirement, resolve));
+    const services = target === undefined ? Option.none() : yield* promptServices;
+    if (target !== undefined && Option.isSome(services)) {
+      // Every file flag is read before the first prompt, so a `--<scheme>-file -` keeps stdin.
+      const configured: (readonly [string, Option.Option<Credential>])[] = [];
+      for (const scheme of target) {
+        configured.push([scheme, yield* resolve(scheme)]);
+      }
+
+      const credentials: Credential[] = [];
+      let claimed = false;
+      for (const [scheme, found] of configured) {
+        const definition = table.schemes[scheme];
+        if (Option.isSome(found)) {
+          credentials.push(found.value);
+        } else if (definition !== undefined) {
+          if (!claimed) {
+            claimed = yield* claimStdin(scheme);
+          }
+
+          if (!claimed) {
+            break;
+          }
+
+          const answer = yield* ask(scheme, services.value);
+          if (Option.isNone(answer)) {
+            break;
+          }
+
+          credentials.push({ definition, scheme, value: answer.value });
+        }
+      }
+
+      if (credentials.length === target.length) {
+        yield* noticeDeprecated(credentials);
+
+        return credentials;
+      }
     }
 
     return yield* new CredentialMissing({
@@ -371,6 +578,53 @@ export const credentialOrigins = (gate: CredentialGate): readonly string[] => {
   ];
 };
 
+// Whether a URL's origin is one of `origins`. An unparsable URL or origin is never bound.
+const isBound = (url: string, origins: readonly string[]): boolean => {
+  const origin = originOf(url);
+  const allowed = new Set(origins.flatMap((raw) => Option.toArray(originOf(raw))));
+
+  return Option.isSome(origin) && allowed.has(origin.value);
+};
+
+/**
+ * The client-certificate request init `bin.ts` builds from `clientCertificatePaths` (Bun's `tls`
+ * option). Opaque to the runtime, which only decides which hop carries it.
+ */
+export type CertificateInit = FetchHttpClient.RequestInit["Service"];
+
+/**
+ * The certificate init for this run, or none. `bin.ts` provides it when the package has a
+ * `mutualTLS` scheme with its paths configured; otherwise it is none.
+ */
+export const ClientCertificate = Context.Reference<Option.Option<CertificateInit>>(
+  "openapi-cli/runtime/ClientCertificate",
+  { defaultValue: Option.none },
+);
+
+/**
+ * The per-hop certificate decision (design 6.5 Origin binding; MIND): the `ClientCertificate`
+ * init only when `url`'s origin is in the operation's bound origin set, none otherwise. It takes
+ * the bound origins alone, never `credentialOrigins`, because `--allow-credentials-for-base-url`
+ * never extends to the certificate. A request decided none is sent without the certificate, not
+ * refused.
+ */
+export const certificateInitFor = (
+  url: string,
+  boundOrigins: readonly string[],
+): Effect.Effect<Option.Option<CertificateInit>> =>
+  Effect.map(Effect.service(ClientCertificate), (init) =>
+    isBound(url, boundOrigins) ? init : Option.none(),
+  );
+
+/**
+ * The certificate clause of the R1 withheld notice (design 6.4; m3.md P19): it names
+ * `--allow-credentials-for-base-url` only to say the flag does not extend to the certificate,
+ * and never names a path or certificate material.
+ */
+export const withheldCertificateClause =
+  "not presenting the mutualTLS client certificate to an unbound base URL; " +
+  "--allow-credentials-for-base-url does not extend to it";
+
 /**
  * The credentials to attach and the origins that may carry them (`credentialOrigins`).
  */
@@ -386,8 +640,11 @@ const apiKeyNames = (table: SecurityTable, place: "cookie" | "header" | "query")
     ),
   );
 
-const hasHttpScheme = (table: SecurityTable): boolean =>
-  Object.values(table.schemes).some((definition) => definition.kind === "http");
+// Every kind but `apiKey` and `mutualTLS` sends `Authorization`.
+const hasAuthorizationScheme = (table: SecurityTable): boolean =>
+  Object.values(table.schemes).some(
+    (definition) => definition.kind !== "apiKey" && definition.kind !== "mutualTLS",
+  );
 
 const cookiePairs = (cookie: string): readonly string[] =>
   cookie
@@ -414,8 +671,8 @@ const stripUrlQuery = (url: string, names: ReadonlySet<string>): string => {
 };
 
 /**
- * Remove every managed credential the table can name: `Authorization` when any `http` scheme is
- * declared, each `apiKey` header, query name and cookie name.
+ * Remove every managed credential the table can name: `Authorization` when any `http`, `oauth2` or
+ * `openIdConnect` scheme is declared, each `apiKey` header, query name and cookie name.
  */
 const strip = (
   table: SecurityTable,
@@ -425,7 +682,7 @@ const strip = (
   const cookieNames = apiKeyNames(table, "cookie");
   const headerNames = [
     ...apiKeyNames(table, "header"),
-    ...(hasHttpScheme(table) ? ["authorization"] : []),
+    ...(hasAuthorizationScheme(table) ? ["authorization"] : []),
   ];
   let { headers } = request;
   for (const name of headerNames) {
@@ -505,7 +762,18 @@ const attachOne = (
   request: HttpClientRequest.HttpClientRequest,
   { definition, scheme, value }: Credential,
 ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
+  // The certificate is presented by the request init (`certificateInitFor`), never as a header.
+  if (definition.kind === "mutualTLS") {
+    return Effect.succeed(request);
+  }
+
   const secret = Redacted.value(value);
+  if (definition.kind === "oauth2" || definition.kind === "openIdConnect") {
+    return Effect.map(headerValue(scheme, secret), (token) =>
+      HttpClientRequest.bearerToken(request, token),
+    );
+  }
+
   if (definition.kind === "http") {
     return definition.scheme === "bearer"
       ? Effect.map(headerValue(scheme, secret), (token) =>
@@ -553,10 +821,8 @@ export const attach =
     request: HttpClientRequest.HttpClientRequest,
   ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
     const clean = strip(table, request);
-    const origin = originOf(clean.url);
-    const allowed = new Set(attachment.origins.flatMap((raw) => Option.toArray(originOf(raw))));
 
-    return Option.isSome(origin) && allowed.has(origin.value)
+    return isBound(clean.url, attachment.origins)
       ? Effect.reduce(attachment.credentials, () => clean, attachOne)
       : Effect.succeed(clean);
   };
@@ -602,4 +868,26 @@ export const isLoopbackHost = (hostname: string): boolean => {
     dottedLoopback.test(name) ||
     mappedLoopback.test(name)
   );
+};
+
+/**
+ * The one stderr line for credentials sent over plaintext `http:` (design 13.1 R3, D-SEC2): when
+ * `--allow-credentials-for-base-url` let credentials reach the base URL, and that URL is `http:` on
+ * a host `isLoopbackHost` rejects. A loopback host gets none, because its requests go direct and
+ * never reach a proxy (design 6.5 Loopback hosts); `https:`, an unparsable URL and a run without
+ * the flag get none. The line names the flag and the host, never userinfo or a credential.
+ * Printing it once per run is the caller's.
+ */
+export const plaintextWarning = (baseUrl: string, allowed: boolean): Option.Option<string> => {
+  if (!allowed || !URL.canParse(baseUrl)) {
+    return Option.none();
+  }
+
+  const { host, hostname, protocol } = new URL(baseUrl);
+
+  return protocol === "http:" && !isLoopbackHost(hostname)
+    ? Option.some(
+        `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
+      )
+    : Option.none();
 };

@@ -5,7 +5,9 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { checkCoverage, coverageOf } from "../../corpus/tools/coverage.ts";
 import type { Coverage } from "../../corpus/tools/coverage.ts";
+import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Resolution } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -598,10 +600,11 @@ const formBody: Json = {
   },
 };
 
-// A POST at `/a` whose request body is `requestBody`, beside `components`.
-const postSpec = (requestBody: Json, components: Json = {}): Json => ({
+// A POST at `/a` whose request body is `requestBody`, beside `components`, on `openapi`.
+const postSpec = (requestBody: Json, components: Json = {}, openapi = "3.1.1"): Json => ({
   ...bare,
   components,
+  openapi,
   paths: { "/a": { post: { requestBody, responses: { "200": { description: "ok" } } } } },
 });
 
@@ -751,6 +754,159 @@ describe("coverage join of field refusals", () => {
     expect(result.invented).toEqual([
       expect.objectContaining({ kind: "refusedField", mediaType: form, name: "meta" }),
     ]);
+  });
+});
+
+// One optional `deepObject` form property, `expand`, that the bracket switch refuses at field scope
+// (design 8.5 rule 4), beside a plain `name`.
+const expandMedia: Json = {
+  encoding: { expand: { explode: true, style: "deepObject" } },
+  schema: {
+    properties: {
+      expand: {
+        anyOf: [
+          { properties: { a: { type: "string" } }, type: "object" },
+          { enum: [""], type: "string" },
+        ],
+      },
+      name: { type: "string" },
+    },
+    type: "object",
+  },
+};
+
+const bracketConfig = Schema.decodeUnknownSync(AuthorConfig)({
+  binName: "example",
+  nonStandard: { deepObjectBrackets: true },
+  package: { name: "example-cli", version: "1.0.0" },
+});
+
+const configUri = Schema.decodeUnknownSync(DocumentUri)("file:///fixture/author.json");
+
+interface Placed {
+  readonly pointer: string;
+  readonly related: readonly string[];
+}
+
+// The document normalized, its field refusals as placed, and the coverage join over its report and
+// a `--describe` read off the normalized model: each command's kept request media and their
+// refused fields.
+interface NormalizedJoin {
+  readonly fields: readonly Placed[];
+  readonly join: Coverage;
+}
+
+const normalizedJoin = (spec: Json, line: "3.1" | "3.2"): NormalizedJoin => {
+  const resolution = Effect.runSync(resolve({ document: entry, line, value: spec }));
+  const { api, diagnostics } = Effect.runSync(
+    normalize(resolution, { checkFindings: [], config: bracketConfig, configDocument: configUri }),
+  );
+  const commands = api.operations.map((operation) => {
+    const alternatives = operation.body?.alternatives ?? [];
+
+    return post({
+      pointer: operation.origin.pointer,
+      refusedFields: alternatives.flatMap((alternative) =>
+        (alternative.refusedFields ?? []).map((name) => ({
+          mediaType: alternative.mediaType,
+          name,
+        })),
+      ),
+      requestMedia: alternatives.map((alternative) => alternative.mediaType),
+    });
+  });
+  const report = {
+    notices: diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
+    refusals: diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
+  };
+  const join = Effect.runSync(
+    coverageOf({
+      describe: encodeDescription({ commands, describeVersion: 1 }),
+      report: JSON.stringify(report),
+      resolution,
+    }).pipe(Effect.orDie),
+  );
+  const fields = diagnostics
+    .filter((diagnostic) => diagnostic.scope === "field")
+    .map((diagnostic) => ({
+      pointer: diagnostic.pointer,
+      related: (diagnostic.related ?? []).map((related) => related.pointer),
+    }));
+
+  return { fields, join };
+};
+
+const expandEntry = `${formMedia}/encoding/expand`;
+
+const componentEntry = "/components/mediaTypes/Form/encoding/expand";
+
+const mediaRef: Json = { $ref: "#/components/mediaTypes/Form" };
+
+describe("coverage join of a field refusal under a 3.2 components/mediaTypes media type", () => {
+  test("an inline body: the refusal sits at the use site, the component entry related, and joins both ways", () => {
+    const { fields, join } = normalizedJoin(
+      postSpec({ content: { [form]: mediaRef } }, { mediaTypes: { Form: expandMedia } }, "3.2.0"),
+      "3.2",
+    );
+
+    expect(join.missing).toEqual([]);
+    expect(join.invented).toEqual([]);
+    expect(fields).toEqual([{ pointer: expandEntry, related: [componentEntry] }]);
+  });
+
+  test("a $ref body: the refusal sits at the body's use site, the component entry then the body's content entry related, and joins both ways", () => {
+    const { fields, join } = normalizedJoin(
+      postSpec(
+        { $ref: "#/components/requestBodies/Create" },
+        {
+          mediaTypes: { Form: expandMedia },
+          requestBodies: { Create: { content: { [form]: mediaRef } } },
+        },
+        "3.2.0",
+      ),
+      "3.2",
+    );
+
+    expect(join.missing).toEqual([]);
+    expect(join.invented).toEqual([]);
+    expect(fields).toEqual([
+      {
+        pointer: useSite,
+        related: [
+          componentEntry,
+          "/components/requestBodies/Create/content/application~1x-www-form-urlencoded/encoding/expand",
+        ],
+      },
+    ]);
+  });
+
+  test("guard: a 3.1 inline media type keeps its own Encoding entry and joins both ways", () => {
+    const { fields, join } = normalizedJoin(postSpec({ content: { [form]: expandMedia } }), "3.1");
+
+    expect(fields).toEqual([{ pointer: expandEntry, related: [] }]);
+    expect(join.missing).toEqual([]);
+    expect(join.invented).toEqual([]);
+  });
+
+  test("guard: a 3.1 $ref body keeps the m3-fl6r placement and joins both ways", () => {
+    const { fields, join } = normalizedJoin(
+      postSpec(
+        { $ref: "#/components/requestBodies/Create" },
+        { requestBodies: { Create: { content: { [form]: expandMedia } } } },
+      ),
+      "3.1",
+    );
+
+    expect(fields).toEqual([
+      {
+        pointer: useSite,
+        related: [
+          "/components/requestBodies/Create/content/application~1x-www-form-urlencoded/encoding/expand",
+        ],
+      },
+    ]);
+    expect(join.missing).toEqual([]);
+    expect(join.invented).toEqual([]);
   });
 });
 
