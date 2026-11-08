@@ -1,4 +1,6 @@
 import {
+  Config,
+  Duration,
   Effect,
   Exit,
   Inspectable,
@@ -9,6 +11,7 @@ import {
   Scope,
   Stream,
 } from "effect";
+import { CliError, Flag, GlobalFlag } from "effect/cli";
 import {
   FetchHttpClient,
   Headers,
@@ -20,8 +23,8 @@ import {
   Url,
   UrlParams,
 } from "effect/http";
-import { RedirectRefused } from "../domain/errors.ts";
-import type { UsageError } from "../domain/errors.ts";
+import type { HttpClientError } from "effect/http";
+import { RedirectRefused, UsageError } from "../domain/errors.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { queryWireForm } from "./redact.ts";
 
@@ -30,6 +33,54 @@ import { queryWireForm } from "./redact.ts";
  * followed hop may not redirect again: an eleventh `Location` is refused with `hopLimit`.
  */
 export const maxRedirects = 10;
+
+/**
+ * The built-in `--timeout` in seconds (design D-AD7), used when no flag, environment value or
+ * author default sets one.
+ */
+export const defaultTimeoutSeconds = 30;
+
+const wholeSeconds = /^\d+$/u;
+
+// A flag's mapEffect fails in CliError; the UsageError rides as the cause and names only the flag.
+const parseTimeout = (raw: string): Effect.Effect<number, CliError.CliError> => {
+  const seconds = Number(raw);
+  if (wholeSeconds.test(raw) && Number.isSafeInteger(seconds)) {
+    return Effect.succeed(seconds);
+  }
+
+  const error = new UsageError({
+    flag: "--timeout",
+    message: "--timeout must be a whole number of seconds, 0 or more",
+  });
+
+  return Effect.fail(new CliError.UserError({ cause: error, userMessage: error.message }));
+};
+
+/**
+ * `--timeout <seconds>` bounds each attempt's wait for response headers; 0 disables it (design
+ * D-AD7). Precedence is the flag, then the `TIMEOUT` key, which `main.ts`'s provider reads under
+ * the env prefix (`<PREFIX>_TIMEOUT`) before the author default, then `defaultTimeoutSeconds`.
+ * The flag and the config value are validated alike; a bad value fails naming `--timeout` only.
+ */
+export const timeoutSetting = GlobalFlag.Setting("timeout")({
+  flag: Flag.String("timeout").pipe(
+    Flag.withMetavar("seconds"),
+    Flag.withDescription("Seconds to wait for response headers on each attempt; 0 waits forever"),
+    Flag.withFallbackConfig(Config.String("TIMEOUT")),
+    Flag.mapEffect(parseTimeout),
+    Flag.withDefault(defaultTimeoutSeconds),
+  ),
+});
+
+/**
+ * The effective `--timeout` in seconds. A root that registers no `timeoutSetting` runs with the
+ * built-in value.
+ */
+export const effectiveTimeoutSeconds: Effect.Effect<number> = Effect.map(
+  Effect.serviceOption(timeoutSetting),
+  Option.getOrElse(() => defaultTimeoutSeconds),
+);
 
 /**
  * The per-hop attach step: `Auth.attach` with the run's table and attachment. It strips every
@@ -341,12 +392,22 @@ const foldUrlParams = (
  * turned into `GET`: a miss is a defect (exit 70) and nothing is sent, because Bun's `fetch` sends
  * any token outside its own table as `GET`. The token is compared as given, with no case folding,
  * and the defect carries only the JSON-quoted token, never the URL.
+ *
+ * One run of the loop is one attempt, and `HttpClient.timeout` bounds it by the effective
+ * `--timeout` (design D-AD7): the bound ends when the final hop's headers arrive, so the body is
+ * the idle timeout's. `HttpClient.timeout` fixes its duration when the client is built, and the
+ * setting is read per request, so the timed client is built per request; 0 leaves it untimed.
+ * Expiry is an `HttpClientError` with a `TimeoutError` cause, which `mapClientError` reports as
+ * `TransportError` `timeout`.
  */
 export const redirectLoop =
   (attach: Attach, direct: DirectRoute, allowed: ReadonlySet<string>) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
-  ): HttpClient.HttpClient.With<E | RedirectRefused | UsageError, R | Scope.Scope> => {
+  ): HttpClient.HttpClient.With<
+    E | HttpClientError.HttpClientError | RedirectRefused | UsageError,
+    R | Scope.Scope
+  > => {
     const scoped = HttpClient.withScope(client);
     const hop = (request: HttpClientRequest.HttpClientRequest, followed: number) =>
       Effect.uninterruptibleMask((restore) =>
@@ -385,7 +446,16 @@ export const redirectLoop =
         Option.isNone(next) ? Effect.succeed(response) : loop(next.value, followed + 1),
       );
 
-    return HttpClient.transform(client, (_unsent, request) => loop(request, 0));
+    const attempt = HttpClient.transform(client, (_unsent, request) => loop(request, 0));
+
+    const timed = (seconds: number) =>
+      seconds === 0 ? attempt : HttpClient.timeout(attempt, Duration.seconds(seconds));
+
+    return HttpClient.transform(client, (_unsent, request) =>
+      effectiveTimeoutSeconds.pipe(
+        Effect.flatMap((seconds) => timed(seconds).postprocess(Effect.succeed(request))),
+      ),
+    );
   };
 
 /**
