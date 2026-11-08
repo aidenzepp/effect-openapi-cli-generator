@@ -5,6 +5,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { generateFixture } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // Design 6.6 and the em9 ruling: a body with several media alternatives is offered whole behind
 // `--content-type`. The fixture holds a Discord-shaped `json + form + multipart` body, an
@@ -23,9 +24,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "body-alternatives-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -45,7 +44,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const file = (path: string): string => {

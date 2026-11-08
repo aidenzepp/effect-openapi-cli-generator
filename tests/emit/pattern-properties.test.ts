@@ -7,6 +7,7 @@ import type { Json } from "../../src/model/pointer.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // `patternProperties` is not asserted client-side (SCH-15/not-asserted), whatever form it takes:
 // open, closed by `additionalProperties: false`, or nested in a property. Generation never aborts
@@ -24,9 +25,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "pattern-properties-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const capture = startCaptureServer();
 
@@ -108,7 +107,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 interface Sent {

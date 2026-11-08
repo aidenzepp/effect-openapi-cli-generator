@@ -14,6 +14,7 @@ import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // The Milestone 2 witness for the 3.0 schema keyword rows S30-02 to S30-36 and the Schema Object
 // rule rows SCO-02 to SCO-10: one generated package per version line, built once, run against the
@@ -42,9 +43,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "wt-s30-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 interface Members {
   readonly [key: string]: Json;
@@ -184,7 +183,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const text = (bytes: Uint8Array): string => Buffer.from(bytes).toString("utf-8");

@@ -11,6 +11,7 @@ import { resolve } from "../../src/resolve/index.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
+import { setEnv } from "../support/env.ts";
 
 // The schema fixes of m2-schfx through one built CLI: a keyword beside `$ref` is asserted
 // (SCH-03), `additionalProperties: false` rejects an undeclared key (SCH-13), and a body field's
@@ -30,9 +31,7 @@ nodeFs.mkdirSync(scratch, { recursive: true });
 
 const work = nodeFs.mkdtempSync(nodePath.join(scratch, "schema-fixes-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const capture = startCaptureServer();
 
@@ -112,7 +111,7 @@ afterAll(async () => {
   capture.stop();
   await Effect.runPromise(Scope.close(scope, Exit.void));
   nodeFs.rmSync(work, { force: true, recursive: true });
-  process.env.TMPDIR = priorTmpdir;
+  restoreTmpdir();
 });
 
 const decoder = new TextDecoder();
