@@ -189,6 +189,70 @@ describe("help marks non-standard flags", () => {
   });
 });
 
+// A 3.2 `querystring` parameter whose form content carries Encoding rules: the marker sits on a
+// rule, not on the serialization, and still marks the flag (design 6.1, D-OQ1).
+const querystringOperation = (marked: boolean) => {
+  const { body: _body, ...bodiless } = operationPlain(false);
+
+  return {
+    ...bodiless,
+    parameters: [
+      {
+        deprecated: false,
+        docs: {},
+        location: "querystring",
+        origin,
+        required: false,
+        rows,
+        schema,
+        serialization: {
+          encoding: [rule("filter", marked ? "deepObjectBrackets" : undefined), rule("sort")],
+          kind: "content",
+          mediaType: "application/x-www-form-urlencoded",
+          origin,
+          rows,
+          rules: "rfc3986-3.1+",
+          schema,
+        },
+        wireName: "qs",
+      },
+    ],
+  };
+};
+
+const querystringHelp = (marked: boolean) => {
+  const operation = Schema.decodeUnknownSync(Operation)(querystringOperation(marked));
+  const [qs] = operation.parameters;
+  if (qs === undefined) {
+    throw new Error("fixture parameter qs is missing");
+  }
+
+  return operationHelp({
+    credentials: [],
+    diagnostics: [],
+    flags: [{ name: "qs", source: { _tag: "Parameter", negatable: false, parameter: qs } }],
+    operation,
+    schemes: [],
+  });
+};
+
+describe("help marks a querystring parameter by its form Encoding rules", () => {
+  test("a bracket-marked Encoding rule marks the flag and adds the NON-STANDARD line", () => {
+    const help = querystringHelp(true);
+
+    expect(help.flags).toEqual({ qs: `querystring qs; ${note}` });
+    expect(titles(help)).toEqual(["REQUEST", "AUTH", "RESPONSES", "NON-STANDARD"]);
+    expect(help.sections.at(-1)?.[1]).toBe("--qs (deepObjectBrackets)");
+  });
+
+  test("unmarked Encoding rules leave the flag and the sections unmarked", () => {
+    const help = querystringHelp(false);
+
+    expect(help.flags).toEqual({ qs: "querystring qs" });
+    expect(titles(help)).toEqual(["REQUEST", "AUTH", "RESPONSES"]);
+  });
+});
+
 const fixture = nodePath.resolve(import.meta.dir, "../fixtures/golden/users-update");
 
 const readJson = (relative: string) =>
