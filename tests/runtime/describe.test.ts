@@ -59,8 +59,29 @@ const list = Command.make("list").pipe(
   }),
 );
 
+// A form alternative with one property refused at `field` scope, as m3-fl3's emitted media
+// declaration lists it.
+const setAvatar = Command.make("set-avatar").pipe(
+  Command.annotate(Describe.Binding, {
+    operation: {
+      media: {
+        refused: { "application/x-www-form-urlencoded": ["avatar"] },
+        request: ["application/json", "application/x-www-form-urlencoded"],
+        responses: { "204": [] },
+      },
+      method: "PUT",
+      origin: { document: "openapi.json", pointer: "/paths/~1users~1{id}~1avatar/put" },
+      pathTemplate: "/users/{id}/avatar",
+      security: [],
+    },
+    parameters: {},
+  }),
+);
+
 const root = Command.make("example").pipe(
-  Command.withSubcommands([Command.make("users").pipe(Command.withSubcommands([update, list]))]),
+  Command.withSubcommands([
+    Command.make("users").pipe(Command.withSubcommands([update, list, setAvatar])),
+  ]),
   Command.withGlobalFlags([Describe.describeFlag]),
 );
 
@@ -112,11 +133,15 @@ const describeWith = async <A>(services: Layer.Layer<A>) => {
 };
 
 describe("--describe", () => {
-  test("a two-command tree prints the expected document, which the codec decodes", async () => {
+  test("a command tree prints the expected document, which the codec decodes", async () => {
     const decoded = await describeWith(declaredRoot);
 
     expect(decoded.describeVersion).toBe(1);
-    expect(decoded.commands.map((c) => c.path.join(" "))).toEqual(["users update", "users list"]);
+    expect(decoded.commands.map((c) => c.path.join(" "))).toEqual([
+      "users update",
+      "users list",
+      "users set-avatar",
+    ]);
     expect(decoded.commands[0]).toEqual({
       document: "openapi.json",
       flags: [
@@ -143,6 +168,7 @@ describe("--describe", () => {
       path: ["users", "update"],
       pathTemplate: "/users/{id}",
       pointer: "/paths/~1users~1{id}/patch",
+      refusedFields: [],
       requestMedia: ["application/json", "application/merge-patch+json"],
       responses: ["200", "4XX", "default"],
       security: [["bearerAuth"], ["apiKey", "session"]],
@@ -196,6 +222,23 @@ describe("--describe", () => {
     expect(decoded.commands[1]?.responses).toEqual(["200"]);
   });
 
+  test("a field refused under a request media type is listed with that type", async () => {
+    const decoded = await describeWith(declaredRoot);
+
+    expect(decoded.commands[2]?.refusedFields).toEqual([
+      { mediaType: "application/x-www-form-urlencoded", name: "avatar" },
+    ]);
+  });
+
+  test("a command with no refused field lists refusedFields as an empty array", async () => {
+    const lines = await run(declaredRoot);
+    const decoded = decode(lines[0] ?? "");
+
+    expect(decoded.commands[0]?.refusedFields).toEqual([]);
+    expect(decoded.commands[1]?.refusedFields).toEqual([]);
+    expect(lines[0]).toContain('"refusedFields": []');
+  });
+
   test("the output is byte-stable and fields are alphabetical", async () => {
     const first = await run(declaredRoot);
     const second = await run(declaredRoot);
@@ -205,7 +248,8 @@ describe("--describe", () => {
     expect(text.indexOf('"commands"')).toBeLessThan(text.indexOf('"describeVersion"'));
     expect(text.indexOf('"location"')).toBeLessThan(text.indexOf('"name"'));
     expect(text.indexOf('"name"')).toBeLessThan(text.indexOf('"wireName"'));
-    expect(text.indexOf('"pointer": "/paths')).toBeLessThan(text.indexOf('"requestMedia"'));
+    expect(text.indexOf('"pointer": "/paths')).toBeLessThan(text.indexOf('"refusedFields"'));
+    expect(text.indexOf('"refusedFields"')).toBeLessThan(text.indexOf('"requestMedia"'));
     expect(text.indexOf('"requestMedia"')).toBeLessThan(text.indexOf('"responses"'));
     expect(text.indexOf('"responses"')).toBeLessThan(text.indexOf('"security"'));
     expect(text.indexOf('"security"')).toBeLessThan(text.indexOf('"servers"'));

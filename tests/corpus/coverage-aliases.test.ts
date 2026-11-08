@@ -35,6 +35,7 @@ const carrying = (path: readonly string[], fields: Partial<Command> = {}): Comma
   path,
   pathTemplate: "/a",
   pointer: operation,
+  refusedFields: [],
   requestMedia: [],
   responses: ["200"],
   security: [],
