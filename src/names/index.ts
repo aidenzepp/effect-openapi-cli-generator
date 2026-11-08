@@ -23,6 +23,7 @@ import {
 import type {
   Collector,
   CommandNameSource,
+  CredentialNames,
   Draft,
   DraftContext,
   DraftFlag,
@@ -30,6 +31,7 @@ import type {
   GroupNameSource,
   Namer,
   OverrideSite,
+  PlannedCertificate,
   PlannedCommand,
   PlannedCredential,
   PlannedGroup,
@@ -46,6 +48,7 @@ export type {
   FlagSource,
   GroupNameSource,
   NameSources,
+  PlannedCertificate,
   PlannedCommand,
   PlannedCredential,
   PlannedFlag,
@@ -65,11 +68,14 @@ export interface PlanOptions {
 /**
  * The name plan: untagged commands at the root, groups in first-use order (parents before
  * children), the credential names of every scheme the planned operations use, and the plan's
- * refusals and notices in diagnostic order. A refused operation is in no group. `domain` is the
- * export name of every stored schema key in `domain/schemas.ts` (`domainIdentifiers`); cli modules
- * import those names and the domain emitter takes the same map.
+ * refusals and notices in diagnostic order. A refused operation is in no group. `credentials` are
+ * the token schemes' flag and environment names; `certificates` are the `mutualTLS` schemes'
+ * environment-only names. `domain` is the export name of every stored schema key in
+ * `domain/schemas.ts` (`domainIdentifiers`); cli modules import those names and the domain emitter
+ * takes the same map.
  */
 export interface NamePlan {
+  readonly certificates: readonly PlannedCertificate[];
   readonly credentials: readonly PlannedCredential[];
   readonly diagnostics: readonly Diagnostic[];
   readonly domain: ReadonlyMap<string, SafeIdentifierValue>;
@@ -117,13 +123,9 @@ interface Named extends Candidate {
   readonly notes: readonly FoldNote[];
 }
 
-interface CredentialNames {
-  readonly env: string;
-  readonly flag: string;
-  readonly slug: string;
-}
-
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+type Token = Extract<CredentialNames, { readonly _tag: "Token" }>;
 
 const root = "";
 
@@ -848,6 +850,8 @@ const schemeSite = (scheme: SecurityScheme) => ({
 });
 
 // Credential names: `<scheme>-file` and `<PREFIX>_<SCHEME>` distinct across schemes and reserved names.
+// A `mutualTLS` scheme's certificate names are reserved names themselves; only its empty fold is
+// refused here.
 const planCredentials = (
   api: Api,
   config: AuthorConfig,
@@ -867,8 +871,10 @@ const planCredentials = (
     }
   }
 
-  const all = [...names.values()];
-  const tally = (pick: (credential: CredentialNames) => string): ReadonlyMap<string, number> => {
+  const all = [...names.values()].flatMap((credential) =>
+    credential._tag === "Token" ? [credential] : [],
+  );
+  const tally = (pick: (credential: Token) => string): ReadonlyMap<string, number> => {
     const counts = new Map<string, number>();
     for (const credential of all) {
       counts.set(pick(credential), (counts.get(pick(credential)) ?? 0) + 1);
@@ -879,6 +885,7 @@ const planCredentials = (
   const envCounts = tally((entry) => entry.env);
   const flagCounts = tally((entry) => entry.flag);
   const clashes = (credential: CredentialNames): boolean =>
+    credential._tag === "Token" &&
     credential.slug !== "" &&
     ((envCounts.get(credential.env) ?? 0) > 1 ||
       (flagCounts.get(credential.flag) ?? 0) > 1 ||
@@ -1257,7 +1264,10 @@ const planGroup = (
   return group;
 };
 
-const byScheme = Order.mapInput(Order.String, (credential: PlannedCredential) => credential.scheme);
+const byScheme = Order.mapInput(
+  Order.String,
+  (credential: { readonly scheme: string }) => credential.scheme,
+);
 
 /**
  * Builds the name plan for an `Api` (design 4.4, 4.5, D-NAME1 to D-NAME3, D-AD11). Visible names
@@ -1357,14 +1367,21 @@ export const planNames = (api: Api, options: PlanOptions): Effect.Effect<NamePla
     const planned = new Set(
       finals.flatMap((entry) => credentials.usesOf(entry.operation).map((scheme) => scheme.name)),
     );
-    const plannedCredentials = [...credentials.names].flatMap(([scheme, names]) =>
-      planned.has(scheme) ? [{ env: names.env, flag: names.flag, scheme }] : [],
+    const plannedNames = [...credentials.names].filter(([scheme]) => planned.has(scheme));
+    const plannedCredentials = plannedNames.flatMap(([scheme, names]) =>
+      names._tag === "Token" ? [{ env: names.env, flag: names.flag, scheme }] : [],
+    );
+    const plannedCertificates = plannedNames.flatMap(([scheme, names]) =>
+      names._tag === "Certificate"
+        ? [{ caEnv: names.caEnv, certEnv: names.certEnv, keyEnv: names.keyEnv, scheme }]
+        : [],
     );
     const diagnostics = yield* Effect.all(
       collector.findings.map((finding) => toDiagnostic(api, finding)),
     );
 
     return {
+      certificates: Arr.sort(plannedCertificates, byScheme),
       credentials: Arr.sort(plannedCredentials, byScheme),
       diagnostics: sortDiagnostics([...api.documents, configDocument], diagnostics),
       domain,

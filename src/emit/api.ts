@@ -12,7 +12,13 @@ import type {
 } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
-import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
+import type {
+  NamePlan,
+  PlannedCertificate,
+  PlannedCommand,
+  PlannedFlag,
+  PlannedGroup,
+} from "../names/index.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
 import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
@@ -1521,19 +1527,44 @@ const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr,
   return Effect.fail(refuse("unsupported-scheme", scheme.name));
 };
 
+// A `mutualTLS` scheme's descriptor: the certificate environment names the plan derived (design
+// 4.4), which the runtime reads `Config` by; never a header.
+const certificateScheme = (scheme: SecurityScheme, names: PlannedCertificate): Expr =>
+  obj([
+    ["caEnv", str(names.caEnv)],
+    ["certEnv", str(names.certEnv)],
+    ...deprecation(scheme),
+    ["keyEnv", str(names.keyEnv)],
+    ["kind", str("mutualTLS")],
+  ]);
+
+const byEntryScheme = Order.mapInput(
+  Order.String,
+  (entry: { readonly scheme: string }) => entry.scheme,
+);
+
 const securityFile = (api: Api, plan: NamePlan) =>
   Effect.gen(function* file() {
+    const entries = Arr.sort(
+      [
+        ...plan.credentials.map((credential) => ({
+          describe: (scheme: SecurityScheme) => runtimeScheme(scheme, credential.env),
+          scheme: credential.scheme,
+        })),
+        ...plan.certificates.map((names) => ({
+          describe: (scheme: SecurityScheme) => Effect.succeed(certificateScheme(scheme, names)),
+          scheme: names.scheme,
+        })),
+      ],
+      byEntryScheme,
+    );
     const schemes = yield* Effect.all(
-      plan.credentials.map((credential) => {
-        const scheme = api.securitySchemes.find(
-          (candidate) => candidate.name === credential.scheme,
-        );
+      entries.map((entry) => {
+        const scheme = api.securitySchemes.find((candidate) => candidate.name === entry.scheme);
 
         return scheme === undefined
-          ? Effect.fail(refuse("unknown-scheme", credential.scheme))
-          : runtimeScheme(scheme, credential.env).pipe(
-              Effect.map((value) => [credential.scheme, value] as const),
-            );
+          ? Effect.fail(refuse("unknown-scheme", entry.scheme))
+          : entry.describe(scheme).pipe(Effect.map((value) => [entry.scheme, value] as const));
       }),
     );
     const content = yield* printModule({
@@ -1613,7 +1644,9 @@ export const emitApi = (
       document: (uri) => documentLabel(api.entry, uri),
       line: api.line,
       memo: new Map(),
-      schemes: new Set(plan.credentials.map((credential) => credential.scheme)),
+      schemes: new Set(
+        [...plan.credentials, ...plan.certificates].map((credential) => credential.scheme),
+      ),
     };
     const byTag = new Map(plan.groups.map((group) => [group.tag, group] as const));
     const withPrimaries = plan.groups.filter((group) => primaries(group.commands).length > 0);
