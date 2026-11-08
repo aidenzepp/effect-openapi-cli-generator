@@ -371,10 +371,14 @@ const writeStream = <E, R>(
  * Write a response body as received to its destination: stdout, or with `--output <path>` a temp
  * sibling renamed into place (an existing path is refused unless `--force`). `--output -` is
  * stdout. Binary media to a terminal is refused before the body is read unless `--output -` is
- * given. EPIPE on stdout stops the stream and succeeds.
+ * given; the sequential types (`framerFor`) are text, so their raw bytes (`--raw`) are not. EPIPE
+ * on stdout stops the stream and succeeds.
  */
 export const writeBody = <E, R>(response: ResponseBody<E, R>) =>
-  writeStream(response.bytes, !isText(response.mediaType));
+  writeStream(
+    response.bytes,
+    !isText(response.mediaType) && framerFor(response.mediaType) === undefined,
+  );
 
 /**
  * Write a 2xx response body by its matched media key (design 4.6): a sequential type

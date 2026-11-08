@@ -4,7 +4,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, FileSystem, Layer, Option, Path, Sink, Stdio, Stream } from "effect";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
-import { ResponseStreamError } from "../../src/runtime-src/domain/errors.ts";
+import { ResponseStreamError, UsageError } from "../../src/runtime-src/domain/errors.ts";
 import {
   Force,
   MaxRecordBytes,
@@ -229,6 +229,28 @@ describe("sequential output dispatch", () => {
 
     expect(Exit.isSuccess(result.exit)).toBe(true);
     expect(pulled).toBeLessThan(3);
+  });
+
+  test("--raw writes a sequential type to a terminal; a binary type is still refused", async () => {
+    const outcomes = await Promise.all(
+      (["application/x-ndjson", "application/jsonl", "application/octet-stream"] as const).map(
+        async (mediaType) => {
+          const result = await run(
+            { isTerminal: true, raw: true },
+            writeResponse(bodyOf(mediaType, ndjson)),
+          );
+          const error = failure(result.exit);
+
+          return [error instanceof UsageError ? error._tag : "written", result.stdout()] as const;
+        },
+      ),
+    );
+
+    expect(outcomes).toEqual([
+      ["written", ndjson],
+      ["written", ndjson],
+      ["UsageError", ""],
+    ]);
   });
 
   test("sequential lines reach a terminal: the binary guard does not apply", async () => {
