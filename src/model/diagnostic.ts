@@ -47,7 +47,8 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")(
     pointer: JsonPointer,
     related: Schema.optionalKey(Schema.Array(Site)),
     row: Row,
-    scope: Schema.Literals(["document", "operation", "element"]),
+    // `field` (design 8.5): one property of a request body alternative that stays generated.
+    scope: Schema.Literals(["document", "operation", "element", "field"]),
     severity: Schema.Literals(["refusal", "notice"]),
     specSection: DocumentUri,
     wire: Schema.optionalKey(Schema.String),

@@ -244,6 +244,25 @@ describe("model entities", () => {
     ).toBe(false);
   });
 
+  test("a media alternative lists its refused fields in order, and absent means none", () => {
+    const form = {
+      ...mediaAlternative,
+      codec: "form",
+      mediaType: "application/x-www-form-urlencoded",
+    };
+    const refused = { ...form, refusedFields: ["metadata", "expand"] };
+    const decoded = Schema.decodeUnknownSync(MediaAlternative)(refused);
+
+    expect(decoded.refusedFields?.map(String)).toEqual(["metadata", "expand"]);
+    expect(Schema.encodeSync(MediaAlternative)(decoded).refusedFields).toEqual([
+      "metadata",
+      "expand",
+    ]);
+    expect(Schema.decodeUnknownSync(MediaAlternative)(form).refusedFields).toBeUndefined();
+    expect(decodes(MediaAlternative, { ...form, refusedFields: "metadata" })).toBe(false);
+    expect(decodes(MediaAlternative, { ...form, refusedFields: [""] })).toBe(false);
+  });
+
   test("an encoding rule's transfer encoding is base64 or absent", () => {
     expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64" })).toBe(true);
     expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64url" })).toBe(false);

@@ -55,7 +55,7 @@ const Record = Schema.Struct({
   document: Schema.String,
   operation: Schema.optionalKey(Schema.Struct({ method: Schema.String, path: Schema.String })),
   pointer: Schema.String,
-  scope: Schema.Literals(["document", "operation", "element"]),
+  scope: Schema.Literals(["document", "operation", "element", "field"]),
 });
 
 // `skipped` is optional so a hand-built report naming no skip still decodes; the generator always

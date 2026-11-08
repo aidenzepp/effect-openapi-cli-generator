@@ -71,7 +71,7 @@ export const Verdict = Schema.Struct({
     nonStandard: Count,
     notices: Count,
     operations: Schema.Struct({ generated: Count, refused: Count, total: Count }),
-    refusals: Schema.Struct({ document: Count, element: Count, operation: Count }),
+    refusals: Schema.Struct({ document: Count, element: Count, field: Count, operation: Count }),
   }),
   coverage: VerdictCoverage,
   generator: Schema.Struct({ config: Schema.String, configSha256: Sha256, version: Schema.String }),
@@ -83,7 +83,7 @@ export const Verdict = Schema.Struct({
   refusals: Schema.Array(
     Schema.Struct({
       ...Entry.fields,
-      scope: Schema.Literals(["document", "operation", "element"]),
+      scope: Schema.Literals(["document", "operation", "element", "field"]),
     }),
   ),
   spec: Schema.Struct({ id: Schema.String, openapi: Schema.String, sha256: Sha256 }),
