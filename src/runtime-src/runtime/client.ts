@@ -801,3 +801,113 @@ export const retryTransform =
         }
       }),
     );
+
+/**
+ * `--verbose` prints each attempt's and each redirect hop's request and response summary to
+ * stderr, redacted (design 4.6, DM3-8). `verboseTransform` reads it per request.
+ */
+export const verboseSetting = GlobalFlag.Setting("verbose")({
+  flag: Flag.Boolean("verbose").pipe(
+    Flag.withDescription("Print each request's and response's status line and headers to stderr"),
+    Flag.withDefault(false),
+  ),
+});
+
+// A name-redacted value, from `Headers.CurrentRedactedNames` or `UrlParams.CurrentRedactedNames`.
+const redactedValue = "<redacted>";
+
+// A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
+const decodedName = (raw: string): string =>
+  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
+
+/**
+ * The URL a hop is sent to, without its fragment: userinfo redacted, and each query value whose
+ * decoded name `names` lists replaced by `<redacted>`. Every other byte stays as sent.
+ */
+const verboseUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+  names: readonly (string | RegExp)[],
+): string => {
+  const url = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash));
+  if (Result.isSuccess(url)) {
+    url.success.hash = "";
+  }
+
+  const href = UrlParams.redactUrl(Result.isSuccess(url) ? url.success.href : request.url, []);
+  const at = href.indexOf("?");
+  if (at === -1) {
+    return href;
+  }
+
+  const query = href
+    .slice(at + 1)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+
+      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+        ? `${part.slice(0, equals + 1)}${redactedValue}`
+        : part;
+    });
+
+  return `${href.slice(0, at + 1)}${query.join("&")}`;
+};
+
+/**
+ * One block's header lines in the order the record holds them, which is the order they were set.
+ * A value whose name `names` lists is `<redacted>`; the caller scrubs each whole line.
+ */
+const headerLines = (
+  prefix: "<" | ">",
+  headers: Headers.Headers,
+  names: readonly (string | RegExp)[],
+): readonly string[] =>
+  Object.entries(headers).map(
+    ([name, value]) =>
+      `${prefix} ${name}: ${Headers.isRedactedName(name, names) ? redactedValue : value}`,
+  );
+
+// One block on stderr, each whole line through the RT-6 value scrubber.
+const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =>
+  printNote(lines.map(scrub).join("\n"));
+
+/**
+ * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it
+ * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in send order) before
+ * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
+ * arrive; no bodies. A send that fails writes only its request block. Header and query values
+ * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
+ * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
+ * `<redacted:<scheme>>`. The scrubber runs over each whole line, the URL included.
+ *
+ * It wraps the inner client `redirectLoop` receives, inside the loop and inside `retryTransform`,
+ * because only there does it see each hop as sent, after the attach step, of every attempt.
+ */
+export const verboseTransform =
+  (scrub: (text: string) => string) =>
+  <E, R>(
+    client: HttpClient.HttpClient.With<E, R>,
+  ): HttpClient.HttpClient.With<E, R | Stdio.Stdio> =>
+    HttpClient.transform(client, (send, request) =>
+      Effect.gen(function* verbose() {
+        const on = Option.getOrElse(yield* Effect.serviceOption(verboseSetting), () => false);
+        if (!on) {
+          return yield* send;
+        }
+
+        const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+        const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
+        yield* printBlock(scrub, [
+          `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
+          ...headerLines(">", request.headers, headerNames),
+        ]);
+
+        const response = yield* send;
+        yield* printBlock(scrub, [
+          `< ${response.status}`,
+          ...headerLines("<", response.headers, headerNames),
+        ]);
+
+        return response;
+      }),
+    );
