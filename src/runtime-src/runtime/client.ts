@@ -106,6 +106,20 @@ export const effectiveTimeoutSeconds = (envPrefix: string): Effect.Effect<number
   });
 
 /**
+ * The effective `--timeout` for a request. The prefix is the one the root supplies with the servers
+ * table; without that layer there is no env name to read, so only the flag and the built-in value
+ * apply.
+ */
+const requestTimeoutSeconds: Effect.Effect<number, UsageError> = Effect.serviceOption(Servers).pipe(
+  Effect.flatMap(
+    Option.match({
+      onNone: () => flagTimeout.pipe(Effect.map(Option.getOrElse(() => defaultTimeoutSeconds))),
+      onSome: ({ envPrefix }) => effectiveTimeoutSeconds(envPrefix),
+    }),
+  ),
+);
+
+/**
  * The per-hop attach step: `Auth.attach` with the run's table and attachment. It strips every
  * managed credential and re-attaches only for a bound origin.
  */
@@ -254,9 +268,10 @@ const nextHop = (
 };
 
 /**
- * The final hop's response. Its scope closes when the body ends, fails or is cancelled; the scope
- * is a child of the caller's, so a response dropped unread is aborted when the caller's scope
- * closes. `upgrade` hands the connection over, so it leaves the scope to the caller's.
+ * The final hop's response. `release` closes its scope, and runs when the body ends, fails or is
+ * cancelled; the scope is a child of the caller's, so a response dropped unread is aborted when
+ * the caller's scope closes. `upgrade` hands the connection over, so it leaves the scope to the
+ * caller's.
  */
 class OwnedResponse implements HttpClientResponse.HttpClientResponse {
   readonly [HttpClientResponse.TypeId] = HttpClientResponse.TypeId;
@@ -264,9 +279,9 @@ class OwnedResponse implements HttpClientResponse.HttpClientResponse {
   readonly #original: HttpClientResponse.HttpClientResponse;
   readonly #release: Effect.Effect<void>;
 
-  constructor(original: HttpClientResponse.HttpClientResponse, scope: Scope.Closeable) {
+  constructor(original: HttpClientResponse.HttpClientResponse, release: Effect.Effect<void>) {
     this.#original = original;
-    this.#release = Scope.close(scope, Exit.void);
+    this.#release = release;
   }
 
   get request() {
@@ -450,7 +465,7 @@ export const redirectLoop =
             Effect.onError(() => Scope.close(scope, Exit.void)),
           );
           if (Option.isNone(next)) {
-            return { next, response: new OwnedResponse(response, scope) };
+            return { next, response: new OwnedResponse(response, Scope.close(scope, Exit.void)) };
           }
 
           yield* Scope.close(scope, Exit.void);
@@ -475,19 +490,10 @@ export const redirectLoop =
     const timed = (seconds: number) =>
       seconds === 0 ? attempt : HttpClient.timeout(attempt, Duration.seconds(seconds));
 
-    // The prefix is the one the root supplies with the servers table. Without that layer there is
-    // no env name to read, so only the flag and the built-in value apply.
-    const seconds = Effect.serviceOption(Servers).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () => flagTimeout.pipe(Effect.map(Option.getOrElse(() => defaultTimeoutSeconds))),
-          onSome: ({ envPrefix }) => effectiveTimeoutSeconds(envPrefix),
-        }),
-      ),
-    );
-
     return HttpClient.transform(client, (_unsent, request) =>
-      seconds.pipe(Effect.flatMap((value) => timed(value).postprocess(Effect.succeed(request)))),
+      requestTimeoutSeconds.pipe(
+        Effect.flatMap((value) => timed(value).postprocess(Effect.succeed(request))),
+      ),
     );
   };
 
@@ -610,8 +616,56 @@ export const effectiveRetries = (envPrefix: string): Effect.Effect<number, Usage
     return Option.isSome(env) ? yield* parseRetries(env.value) : defaultRetries;
   });
 
-// Exponential from 500 ms, jittered (design D-AD7). `Retry-After` is not read here.
+// Exponential from 500 ms, jittered (design D-AD7). Used when the response names no `Retry-After`.
 const backoff = Schedule.jittered(Schedule.exponential("500 millis"));
+
+/**
+ * The final response of a request whose retrying stopped at the `Retry-After` cap (design D-AD7):
+ * the server asked for a longer wait than the effective `--timeout`, so that wait was not taken.
+ * `retryAfterSeconds` is the server's delay in whole seconds, rounded up; `send` passes it to
+ * `ApiResponseError.retryAfterSeconds` (m3 P14). The response itself is the last one, unchanged.
+ */
+export class CappedResponse extends OwnedResponse {
+  readonly retryAfterSeconds: number;
+
+  constructor(response: HttpClientResponse.HttpClientResponse, retryAfterSeconds: number) {
+    super(response, Effect.void);
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * The server's `Retry-After` delay in seconds when retrying stopped at the cap; `None` for every
+ * other response, including one whose retries ran out or ended for another reason.
+ */
+export const retryAfterCapSeconds = (
+  response: HttpClientResponse.HttpClientResponse,
+): Option.Option<number> =>
+  response instanceof CappedResponse ? Option.some(response.retryAfterSeconds) : Option.none();
+
+/**
+ * The response's `Retry-After` as a delay from `nowMillis`: whole seconds, or an HTTP date (a past
+ * date is no delay). `None` when it is absent or does not parse, which RFC 9110 10.2.3 treats as
+ * absent, so the backoff applies.
+ */
+const retryAfterDelay = (
+  response: HttpClientResponse.HttpClientResponse,
+  nowMillis: number,
+): Option.Option<Duration.Duration> =>
+  Option.flatMap(Headers.get(response.headers, "retry-after"), (value) => {
+    const parsed = Headers.parseRetryAfter(value);
+
+    return Result.isSuccess(parsed)
+      ? Option.some(Headers.retryAfterDelay(parsed.success, nowMillis))
+      : Option.none();
+  });
+
+/**
+ * Whether a server delay exceeds the cap: the effective `--timeout` in seconds, where 0 removes
+ * the cap with the timeout (design 13.1 R6). A delay equal to the cap is waited.
+ */
+const exceedsCap = (delay: Duration.Duration, timeoutSeconds: number): boolean =>
+  timeoutSeconds !== 0 && Duration.isGreaterThan(delay, Duration.seconds(timeoutSeconds));
 
 /**
  * Why an attempt's outcome is retried: the final status, or the `TransportError` reason as
@@ -662,9 +716,13 @@ const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
  * Each attempt runs in its own scope, a child of the caller's, so a discarded response is aborted
  * by closing that scope, not drained; the final response's scope closes with the caller's. Before
  * each retry one stderr note names the method, the URL through `scrub` (the RT-6 scrubber `send`
- * passes), the cause, the attempt and the delay: exponential from 500 ms, jittered. The last
- * outcome is returned or failed unchanged. An invalid `<PREFIX>_RETRIES` fails with a `UsageError`
- * before anything is sent.
+ * passes), the cause, the attempt and the delay: the response's `Retry-After` (seconds or an HTTP
+ * date) when it carries one that parses, else exponential from 500 ms, jittered. A `Retry-After`
+ * longer than the effective `--timeout` is not waited (design D-AD7): retrying stops and the last
+ * response is returned as a `CappedResponse` carrying the server's delay, which
+ * `retryAfterCapSeconds` reads. Every other last outcome is returned or failed unchanged. An
+ * invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT` fails with a `UsageError` before anything is
+ * sent.
  */
 export const retryTransform =
   (scrub: (text: string) => string) =>
@@ -689,6 +747,7 @@ export const retryTransform =
         );
         const retried =
           unsafe || wouldRetry(request.method, Headers.has(request.headers, "idempotency-key"));
+        const timeout = yield* requestTimeoutSeconds;
         const total = retries + 1;
         const label = `${request.method} ${scrub(UrlParams.redactUrl(request.url))}`;
         const caller = yield* Scope.Scope;
@@ -700,13 +759,26 @@ export const retryTransform =
           const cause = yield* retryCause(exit);
           if (retried && made < total && Option.isSome(cause)) {
             if (!isOneShot(request.body)) {
+              const now = yield* Clock.currentTimeMillis;
+              const server = Exit.isSuccess(exit)
+                ? retryAfterDelay(exit.value, now)
+                : Option.none<Duration.Duration>();
+              if (
+                Exit.isSuccess(exit) &&
+                Option.isSome(server) &&
+                exceedsCap(server.value, timeout)
+              ) {
+                return new CappedResponse(exit.value, Math.ceil(Duration.toSeconds(server.value)));
+              }
+
               yield* Scope.close(scope, Exit.void);
 
-              const now = yield* Clock.currentTimeMillis;
-              const delay = yield* step(now, cause.value).pipe(
-                Effect.map(([, next]) => next),
-                Pull.catchDone((leftover) => Effect.succeed(leftover)),
-              );
+              const delay = Option.isSome(server)
+                ? server.value
+                : yield* step(now, cause.value).pipe(
+                    Effect.map(([, next]) => next),
+                    Pull.catchDone((leftover) => Effect.succeed(leftover)),
+                  );
               yield* printNote(
                 `Notice: retrying ${label} after ${cause.value} ` +
                   `(attempt ${made + 1} of ${total}) in ${Math.round(Duration.toMillis(delay))} ms`,
@@ -727,5 +799,167 @@ export const retryTransform =
 
           return yield* exit;
         }
+      }),
+    );
+
+/**
+ * `--verbose` prints each attempt's and each redirect hop's request and response summary to
+ * stderr, redacted (design 4.6, DM3-8). `verboseTransform` reads it per request.
+ */
+export const verboseSetting = GlobalFlag.Setting("verbose")({
+  flag: Flag.Boolean("verbose").pipe(
+    Flag.withDescription("Print each request's and response's status line and headers to stderr"),
+    Flag.withDefault(false),
+  ),
+});
+
+// A name-redacted value, from `Headers.CurrentRedactedNames` or `UrlParams.CurrentRedactedNames`.
+const redactedValue = "<redacted>";
+
+// A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
+const decodedName = (raw: string): string =>
+  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
+
+/**
+ * A URI reference, absolute or relative, with userinfo redacted (`UrlParams.redactUrl`) and each
+ * query value whose decoded name `names` lists replaced by `<redacted>`. Every other byte, the
+ * fragment included, stays as given.
+ */
+const redactUriText = (text: string, names: readonly (string | RegExp)[]): string => {
+  const reference = UrlParams.redactUrl(text, []);
+  const hash = reference.indexOf("#");
+  const end = hash === -1 ? reference.length : hash;
+  const at = reference.slice(0, end).indexOf("?");
+  if (at === -1) {
+    return reference;
+  }
+
+  const query = reference
+    .slice(at + 1, end)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+
+      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+        ? `${part.slice(0, equals + 1)}${redactedValue}`
+        : part;
+    });
+
+  return `${reference.slice(0, at + 1)}${query.join("&")}${reference.slice(end)}`;
+};
+
+/**
+ * The URL a hop is sent to, without its fragment, redacted as `redactUriText` redacts.
+ */
+const verboseUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+  names: readonly (string | RegExp)[],
+): string => {
+  const url = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash));
+  if (Result.isSuccess(url)) {
+    url.success.hash = "";
+  }
+
+  return redactUriText(Result.isSuccess(url) ? url.success.href : request.url, names);
+};
+
+// Each `<URI-reference>` of a `Link` value (RFC 8288).
+const linkTarget = /<(?<uri>[^>]*)>/gu;
+
+// The `url=` part of a `Refresh` value, unquoted or in matching quotes.
+const refreshTarget = /^(?<lead>.*?\burl\s*=\s*)(?<quote>["']?)(?<uri>.*?)\k<quote>$/isu;
+
+/**
+ * A header value with each URL it carries redacted by `redactUriText`: the whole value of
+ * `Location` and `Content-Location`, each `<URI>` of `Link`, and the `url=` part of `Refresh`.
+ * Any other header's value is returned as given.
+ */
+const redactHeaderUrls = (
+  name: string,
+  value: string,
+  names: readonly (string | RegExp)[],
+): string => {
+  const header = name.toLowerCase();
+  if (header === "location" || header === "content-location") {
+    return redactUriText(value, names);
+  }
+
+  if (header === "link") {
+    return value.replaceAll(linkTarget, (_match, uri: string) => `<${redactUriText(uri, names)}>`);
+  }
+
+  const refresh = header === "refresh" ? refreshTarget.exec(value)?.groups : undefined;
+  if (refresh === undefined) {
+    return value;
+  }
+
+  const { lead = "", quote = "", uri = "" } = refresh;
+
+  return `${lead}${quote}${redactUriText(uri, names)}${quote}`;
+};
+
+/**
+ * One block's header lines in the order the record holds them, which is the order they were set.
+ * A value whose name `names` lists is `<redacted>`; a URL a header carries is redacted by
+ * `redactHeaderUrls` with `queryNames`; the caller scrubs each whole line.
+ */
+const headerLines = (
+  prefix: "<" | ">",
+  headers: Headers.Headers,
+  names: readonly (string | RegExp)[],
+  queryNames: readonly (string | RegExp)[],
+): readonly string[] =>
+  Object.entries(headers).map(
+    ([name, value]) =>
+      `${prefix} ${name}: ${
+        Headers.isRedactedName(name, names)
+          ? redactedValue
+          : redactHeaderUrls(name, value, queryNames)
+      }`,
+  );
+
+// One block on stderr, each whole line through the RT-6 value scrubber.
+const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =>
+  printNote(lines.map(scrub).join("\n"));
+
+/**
+ * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it
+ * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in send order) before
+ * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
+ * arrive; no bodies. A send that fails writes only its request block. Header and query values
+ * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
+ * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
+ * `<redacted:<scheme>>`. A URL a header carries (`Location`, `Content-Location`, `Link`,
+ * `Refresh`) is redacted as the request URL is. The scrubber runs over each whole line.
+ *
+ * It wraps the inner client `redirectLoop` receives, inside the loop and inside `retryTransform`,
+ * because only there does it see each hop as sent, after the attach step, of every attempt.
+ */
+export const verboseTransform =
+  (scrub: (text: string) => string) =>
+  <E, R>(
+    client: HttpClient.HttpClient.With<E, R>,
+  ): HttpClient.HttpClient.With<E, R | Stdio.Stdio> =>
+    HttpClient.transform(client, (send, request) =>
+      Effect.gen(function* verbose() {
+        const on = Option.getOrElse(yield* Effect.serviceOption(verboseSetting), () => false);
+        if (!on) {
+          return yield* send;
+        }
+
+        const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+        const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
+        yield* printBlock(scrub, [
+          `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
+          ...headerLines(">", request.headers, headerNames, queryNames),
+        ]);
+
+        const response = yield* send;
+        yield* printBlock(scrub, [
+          `< ${response.status}`,
+          ...headerLines("<", response.headers, headerNames, queryNames),
+        ]);
+
+        return response;
       }),
     );
