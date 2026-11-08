@@ -72,10 +72,10 @@ const bodyOf = (properties: Members, required = true, json = false): Json => ({
   required,
 });
 
-const documentOf = (requestBody: Json): Json => ({
-  components,
+const documentOf = (requestBody: Json, version = openapi, requestBodies?: Members): Json => ({
+  components: requestBodies === undefined ? components : { ...components, requestBodies },
   info: { title: "t", version: "1" },
-  openapi,
+  openapi: version,
   paths: {
     "/v1/customers": { post: { requestBody, responses: { "200": { description: "ok" } } } },
   },
@@ -311,10 +311,9 @@ const config = Schema.decodeUnknownSync(AuthorConfig)({
 
 // The coverage join over a normalized document, with `--describe` read off the normalized model:
 // each operation's kept request media and their refused fields.
-const joined = (requestBody: Json) => {
-  const resolution = resolutionOf(requestBody);
+const joined = (resolution: ReturnType<typeof resolutionOf>, settings = config) => {
   const { api, diagnostics } = Effect.runSync(
-    normalize(resolution, { checkFindings: [], config, configDocument: configUri }),
+    normalize(resolution, { checkFindings: [], config: settings, configDocument: configUri }),
   );
   const commands = api.operations.map((operation) => {
     const alternatives = operation.body?.alternatives ?? [];
@@ -388,7 +387,7 @@ describe("field scope: one refused optional form property", () => {
       media,
     ]);
 
-    const coverage = joined(requestBody);
+    const coverage = joined(resolutionOf(requestBody));
 
     expect(coverage.missing).toEqual([]);
     expect(coverage.invented).toEqual([]);
@@ -413,5 +412,72 @@ describe("field scope: one refused optional form property", () => {
 
     expect(outcome._tag).toBe("Refused");
     expect(scopes(outcome)).not.toContain("field");
+  });
+});
+
+// Design 8.5 rule 4 under a `$ref` body: a 3.1 operation whose request body is `$ref` to
+// `components/requestBodies`. The field refusal is placed as an element refusal of that body is,
+// at the use site with its Encoding entry in the target as `related[0]` (design 8.1), and the
+// coverage join credits it there.
+
+const openapi31 = "3.1.0";
+
+const target = "/components/requestBodies/Create";
+
+const resolution31 = (requestBody: Json, requestBodies?: Members) =>
+  Effect.runSync(
+    resolve({
+      document: entry,
+      line: "3.1",
+      value: documentOf(requestBody, openapi31, requestBodies),
+    }),
+  );
+
+const switchedConfig = Schema.decodeUnknownSync(AuthorConfig)({
+  binName: "example",
+  nonStandard: { deepObjectBrackets: true },
+  package: { name: "example-cli", version: "1.0.0" },
+});
+
+const createBody = fieldBody({ expand: objectOrEmpty, name: string }, ["expand"]);
+
+describe("field scope under a $ref request body", () => {
+  test("PRM-27: the field refusal sits at the use site, its Encoding entry in the target related", () => {
+    const outcome = Effect.runSync(
+      normalizeBody(resolution31({ $ref: `#${target}` }, { Create: createBody }), {
+        nonStandard: { deepObjectBrackets: true },
+        openapi: openapi31,
+        pointer: site,
+      }),
+    );
+
+    expect(formAlternative(outcome).refusedFields?.map(String)).toEqual(["expand"]);
+    expect(findings(outcome.diagnostics)).toEqual([
+      {
+        code: "PRM-27/non-object-schema",
+        pointer: site,
+        related: [`${target}/content/application~1x-www-form-urlencoded/encoding/expand`],
+        row: "PRM-27",
+        scope: "field",
+        severity: "refusal",
+      },
+    ]);
+  });
+
+  test("PRM-27: the coverage join reports nothing missing or invented", () => {
+    const coverage = joined(
+      resolution31({ $ref: `#${target}` }, { Create: createBody }),
+      switchedConfig,
+    );
+
+    expect(coverage.missing).toEqual([]);
+    expect(coverage.invented).toEqual([]);
+  });
+
+  test("PRM-27: the same body inline joins with nothing missing or invented", () => {
+    const coverage = joined(resolution31(createBody), switchedConfig);
+
+    expect(coverage.missing).toEqual([]);
+    expect(coverage.invented).toEqual([]);
   });
 });

@@ -74,11 +74,15 @@ export type CoverageError = Schema.SchemaError | WalkError;
 
 // Only the fields the join reads. The checker decodes the report itself instead of importing the
 // generator's report codec, which would pull in the model it checks (design 8.3). `operation` is the
-// request method token and path template of the operation a diagnostic concerns.
+// request method token and path template of the operation a diagnostic concerns; `related` locates
+// the element in a `$ref` target when the pointer is the use site (design 8.1).
 const Record = Schema.Struct({
   document: Schema.String,
   operation: Schema.optionalKey(Schema.Struct({ method: Schema.String, path: Schema.String })),
   pointer: Schema.String,
+  related: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ document: Schema.String, pointer: Schema.String })),
+  ),
   scope: Schema.Literals(["document", "operation", "element", "field"]),
 });
 
@@ -173,12 +177,38 @@ const memo = <K, V>(make: (at: K) => V): ((at: K) => V) => {
 const fieldAnchor =
   /^(?<operation>.*)\/requestBody\/content\/(?<media>[^/]*)\/encoding\/(?<name>[^/]*)$/u;
 
+// Under a `$ref` request body every refusal of it sits at the use site, `<op>/requestBody`, with its
+// own location in the target as `related[0]` (design 8.1); a field refusal's is its Encoding entry.
+const useSite = /^(?<operation>.*)\/requestBody$/u;
+
+const encodingEntry = /\/content\/(?<media>[^/]*)\/encoding\/(?<name>[^/]*)$/u;
+
 // RFC 6901: `~1` before `~0`, so `~01` stays `~1`.
 const unescape = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
 
 // Where the field refusal for property `name` of `mediaType` under the operation at `pointer` sits.
 const fieldPointer = (pointer: string, mediaType: string, name: string): string =>
   `${pointer}/requestBody/content/${escapeToken(mediaType)}/encoding/${escapeToken(name)}`;
+
+interface FieldSite {
+  readonly mediaType: string;
+  readonly name: string;
+  readonly operation: string;
+}
+
+// A field refusal's operation pointer, request media type and property name: from its pointer when
+// the body is inline, else from the use site and `related[0]`. Undefined when it is anchored at
+// neither.
+const fieldSiteOf = (record: typeof Record.Type): FieldSite | undefined => {
+  const direct = fieldAnchor.exec(record.pointer)?.groups;
+  const operation = direct?.operation ?? useSite.exec(record.pointer)?.groups?.operation;
+  const entry = direct ?? encodingEntry.exec(record.related?.[0]?.pointer ?? "")?.groups;
+  if (operation === undefined || entry?.media === undefined || entry.name === undefined) {
+    return undefined;
+  }
+
+  return { mediaType: unescape(entry.media), name: unescape(entry.name), operation };
+};
 
 // A refused field as `--describe` lists it: its request media type and property name.
 const fieldName = (mediaType: string, name: string): string => `${mediaType}\u0000${name}`;
@@ -289,8 +319,9 @@ const carries = (offer: Offer, element: WalkElement): boolean => {
  * walk. A `field` refusal is accounted for when its operation is refused or skipped, or when every
  * command of it carries the refusal's request media type and lists the field in `refusedFields`;
  * otherwise it is missing, as is one not anchored at `<op>/requestBody/content/<media>/encoding/
- * <name>` of a walked operation. It never accounts for its request media type. A described refused
- * field with no `field` refusal at its Encoding entry is invented.
+ * <name>` of a walked operation, or under a `$ref` body at `<op>/requestBody` with `related[0]`
+ * ending in `content/<media>/encoding/<name>`. It never accounts for its request media type. A
+ * described refused field with no `field` refusal at its Encoding entry is invented.
  *
  * The report and `--describe` are indexed once, so the join's cost grows with the elements and
  * claims, not their product. `count`, when given, receives the number of index lookups and
@@ -344,9 +375,13 @@ export const coverageOf = (
         .map((record) => key(record.document, record.pointer)),
     );
     const fieldRefusalSites = new Set(
-      refusals
-        .filter((record) => record.scope === "field")
-        .map((record) => key(record.document, record.pointer)),
+      refusals.flatMap((record) => {
+        const field = record.scope === "field" ? fieldSiteOf(record) : undefined;
+
+        return field === undefined
+          ? []
+          : [key(record.document, fieldPointer(field.operation, field.mediaType, field.name))];
+      }),
     );
     const operationRefusals = refusals.filter((record) => record.scope === "operation");
     const operationRefusalSites = new Set(
@@ -487,10 +522,10 @@ export const coverageOf = (
     // A field refusal agrees with `--describe` when its operation has no command by decision, or
     // when every command of it carries the media type and lists the field.
     const agreed = (record: (typeof report.refusals)[number]): readonly RefusedField[] => {
-      const anchor = fieldAnchor.exec(record.pointer)?.groups;
-      const mediaType = unescape(anchor?.media ?? "");
-      const name = unescape(anchor?.name ?? "");
-      const at = anchor?.operation;
+      const field = fieldSiteOf(record);
+      const mediaType = field?.mediaType ?? "";
+      const name = field?.name ?? "";
+      const at = field?.operation;
       const operation =
         at === undefined ? undefined : lookup(operations, key(label(record.document), at));
       const missed = [

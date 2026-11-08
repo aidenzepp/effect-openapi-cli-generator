@@ -587,26 +587,25 @@ describe("coverage join without a build", () => {
   });
 });
 
-// A POST at `/a` whose body offers JSON and a form alternative with an optional `meta` property.
-const formSpec: Json = {
-  ...bare,
-  paths: {
-    "/a": {
-      post: {
-        requestBody: {
-          content: {
-            "application/json": { schema: { type: "object" } },
-            "application/x-www-form-urlencoded": {
-              encoding: { meta: { style: "deepObject" } },
-              schema: { properties: { meta: { type: "object" } }, type: "object" },
-            },
-          },
-        },
-        responses: { "200": { description: "ok" } },
-      },
+// A body offering JSON and a form alternative with an optional `meta` property.
+const formBody: Json = {
+  content: {
+    "application/json": { schema: { type: "object" } },
+    "application/x-www-form-urlencoded": {
+      encoding: { meta: { style: "deepObject" } },
+      schema: { properties: { meta: { type: "object" } }, type: "object" },
     },
   },
 };
+
+// A POST at `/a` whose request body is `requestBody`, beside `components`.
+const postSpec = (requestBody: Json, components: Json = {}): Json => ({
+  ...bare,
+  components,
+  paths: { "/a": { post: { requestBody, responses: { "200": { description: "ok" } } } } },
+});
+
+const formSpec = postSpec(formBody);
 
 const form = "application/x-www-form-urlencoded";
 
@@ -634,6 +633,34 @@ const fieldReport = (pointer: string, refusals: readonly Json[] = []): Json => (
     ...refusals,
   ],
 });
+
+// The same body as `components/requestBodies/Form`, reached through `$ref`. Its refusals sit at the
+// use site, each locating itself in the target as `related[0]` (design 8.1).
+const refFormSpec = postSpec(
+  { $ref: "#/components/requestBodies/Form" },
+  { requestBodies: { Form: formBody } },
+);
+
+const useSite = "/paths/~1a/post/requestBody";
+
+const refFieldReport: Json = {
+  notices: [],
+  refusals: [
+    {
+      code: "PRM-27/compound-nested",
+      document: entry,
+      pointer: useSite,
+      related: [
+        {
+          document: entry,
+          pointer:
+            "/components/requestBodies/Form/content/application~1x-www-form-urlencoded/encoding/meta",
+        },
+      ],
+      scope: "field",
+    },
+  ],
+};
 
 describe("coverage join of field refusals", () => {
   test("a field refusal every command lists under a media type it carries accounts both ways", () => {
@@ -702,6 +729,28 @@ describe("coverage join of field refusals", () => {
     };
 
     expect(joinSpec(formSpec, [], fieldReport(metaField, [refusedPost])).missing).toEqual([]);
+  });
+
+  test("under a $ref body, a field refusal at the use site with its entry related accounts both ways", () => {
+    const result = joinSpec(refFormSpec, [post({ refusedFields: [refusedMeta] })], refFieldReport);
+
+    expect(result.missing).toEqual([]);
+    expect(result.invented).toEqual([]);
+  });
+
+  test("under a $ref body, a field refusal at the use site with no entry related is missing", () => {
+    const result = joinSpec(
+      refFormSpec,
+      [post({ refusedFields: [refusedMeta] })],
+      fieldReport(useSite),
+    );
+
+    expect(result.missing).toEqual([
+      { document: entry, kind: "refusedField", mediaType: "", name: "", pointer: useSite },
+    ]);
+    expect(result.invented).toEqual([
+      expect.objectContaining({ kind: "refusedField", mediaType: form, name: "meta" }),
+    ]);
   });
 });
 
