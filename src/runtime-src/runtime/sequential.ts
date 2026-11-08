@@ -24,13 +24,49 @@ const nonWhitespace = /[^\t\n\r ]/u;
 type Framed = string | ResponseStreamError;
 
 /**
- * One record's text with its insignificant whitespace removed, and whether the text ended outside
- * every string and container.
+ * One record's text with its insignificant whitespace removed, and its status: `complete`;
+ * `truncated` when it ends inside a string or an open container; or `invalid` when removing the
+ * whitespace would change the data, which the text is then not returned for.
  */
-interface Compacted {
-  readonly complete: boolean;
-  readonly text: string;
-}
+type Compacted =
+  | { readonly status: "complete" | "truncated"; readonly text: string }
+  | { readonly status: "invalid" };
+
+/**
+ * Characters that are JSON syntax or whitespace; every other character outside a string belongs
+ * to a number or to `true`, `false` or `null`.
+ */
+const delimiters = new Set(["{", "}", "[", "]", ":", ",", '"', " ", "\t", "\n", "\r"]);
+
+/**
+ * Characters that open a value, besides a number or literal.
+ */
+const valueOpeners = new Set(["{", "[", '"']);
+
+/**
+ * The whitespace JSON allows between tokens, which the compactor removes.
+ */
+const whitespace = new Set([" ", "\t", "\n", "\r"]);
+
+/**
+ * The container depth each bracket adds.
+ */
+const depthChange = new Map([
+  ["{", 1],
+  ["[", 1],
+  ["}", -1],
+  ["]", -1],
+]);
+
+/**
+ * The punctuation after which another value may follow.
+ */
+const separators = new Set([",", ":"]);
+
+/**
+ * The first code point JSON allows raw inside a string; every one below must be escaped.
+ */
+const firstStringCodePoint = 0x20;
 
 /**
  * The JSON-seq framer's state between body chunks: the open record's text and UTF-8 size, the index
@@ -75,37 +111,104 @@ const utf8Length = (text: string): number => {
 };
 
 /**
+ * The compactor's position in one record: container depth, whether it is inside a string (and
+ * just after a backslash there) or inside a number or literal, and whether a value has just ended.
+ */
+interface Scan {
+  afterValue: boolean;
+  depth: number;
+  escaped: boolean;
+  inScalar: boolean;
+  inString: boolean;
+}
+
+/**
+ * Advance the scan over one character inside a string. Returns false for a raw character below
+ * U+0020, which JSON requires to be escaped.
+ */
+const scanString = (scan: Scan, char: string): boolean => {
+  if ((char.codePointAt(0) ?? 0) < firstStringCodePoint) {
+    return false;
+  }
+
+  scan.inString = scan.escaped || char !== '"';
+  scan.escaped = !scan.escaped && char === "\\";
+  scan.afterValue = !scan.inString;
+
+  return true;
+};
+
+/**
+ * Advance the scan over one character outside strings. Returns false when a value starts right
+ * after another value, so removing the whitespace between them would join them, or when a
+ * container closes that was never opened.
+ */
+const scanToken = (scan: Scan, char: string): boolean => {
+  if (!delimiters.has(char)) {
+    const joins = scan.afterValue && !scan.inScalar;
+
+    scan.inScalar = true;
+
+    return !joins;
+  }
+
+  scan.afterValue ||= scan.inScalar;
+  scan.inScalar = false;
+
+  if (scan.afterValue && valueOpeners.has(char)) {
+    return false;
+  }
+
+  const change = depthChange.get(char) ?? 0;
+
+  scan.inString = char === '"';
+  scan.depth += change;
+  scan.afterValue = change < 0 || (scan.afterValue && !separators.has(char));
+
+  return scan.depth >= 0;
+};
+
+/**
  * Remove the whitespace JSON allows between tokens from one record's text. Nothing is parsed:
  * strings, numbers and key order are copied as received, so a number past 2^53 and every escape
  * survive byte for byte, which `JSON.parse` followed by `JSON.stringify` would not keep (design
  * 4.6). Only ASCII code units are inspected, so indexing by UTF-16 code unit is exact.
+ *
+ * Removing whitespace is safe only where it separates a value from punctuation, so the record is
+ * `invalid` when a value follows another value with no `,` or `:` between them (whitespace in
+ * `1 2` would otherwise join two numbers into `12`), when a string holds a raw character below
+ * U+0020, or when a container closes that was never opened. It is not a full JSON check: input
+ * the compactor cannot alter passes unchanged.
  */
 const compact = (record: string): Compacted => {
+  const scan: Scan = {
+    afterValue: false,
+    depth: 0,
+    escaped: false,
+    inScalar: false,
+    inString: false,
+  };
   let text = "";
   let start = 0;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
 
   for (let index = 0; index < record.length; index += 1) {
-    const char = record[index];
+    const char = record.charAt(index);
+    const { inString } = scan;
 
-    if (inString) {
-      inString = escaped || char !== '"';
-      escaped = !escaped && char === "\\";
-    } else if (char === '"') {
-      inString = true;
-    } else if (char === "{" || char === "[") {
-      depth += 1;
-    } else if (char === "}" || char === "]") {
-      depth -= 1;
-    } else if (char === " " || char === "\t" || char === "\n" || char === "\r") {
+    if (!(inString ? scanString(scan, char) : scanToken(scan, char))) {
+      return { status: "invalid" };
+    }
+
+    if (!inString && whitespace.has(char)) {
       text += record.slice(start, index);
       start = index + 1;
     }
   }
 
-  return { complete: !inString && depth <= 0, text: text + record.slice(start) };
+  return {
+    status: scan.inString || scan.depth > 0 ? "truncated" : "complete",
+    text: text + record.slice(start),
+  };
 };
 
 /**
@@ -162,9 +265,11 @@ const boundLines = (maxRecordBytes: number) =>
  * The body is decoded as UTF-8 and split by `Stream.splitLines`, so LF, CRLF and CR end a line and
  * a final line needs no terminator; blank lines are skipped. `Ndjson.decode` is not used because
  * it yields `JSON.parse` values, which lose number precision (design 5, NDJSON row). A line over
- * `maxRecordBytes` UTF-8 bytes fails with `recordTooLarge`, and a line that ends inside a string
- * or an open container fails with `truncated`; both carry the zero-based `itemIndex` of the record
- * among the non-blank lines, after every record before it has been emitted.
+ * `maxRecordBytes` UTF-8 bytes fails with `recordTooLarge`, a line that ends inside a string or
+ * an open container fails with `truncated`, and a line the compactor would change (two values
+ * apart only by whitespace, a raw control character in a string, an unopened close) fails with
+ * `invalidFraming`. Each failure carries the zero-based `itemIndex` of the record among the
+ * non-blank lines, after every record before it has been emitted.
  */
 export const ndjsonRecords =
   (maxRecordBytes: number) =>
@@ -179,15 +284,19 @@ export const ndjsonRecords =
       Stream.mapAccumEffect(
         () => 0,
         (itemIndex, line: string) => {
-          const { complete, text } = compact(line);
+          const compacted = compact(line);
 
-          if (text === "") {
-            return Effect.succeed([itemIndex, []] as const);
+          if (compacted.status !== "complete") {
+            const reason = compacted.status === "invalid" ? "invalidFraming" : "truncated";
+
+            return Effect.fail(new ResponseStreamError({ itemIndex, reason }));
           }
 
-          return complete
-            ? Effect.succeed([itemIndex + 1, [text]] as const)
-            : Effect.fail(new ResponseStreamError({ itemIndex, reason: "truncated" }));
+          return Effect.succeed(
+            compacted.text === ""
+              ? ([itemIndex, []] as const)
+              : ([itemIndex + 1, [compacted.text]] as const),
+          );
         },
       ),
     );
@@ -209,12 +318,12 @@ const seqState = (): SeqState => ({
  */
 const closeRecord = (state: SeqState, maxRecordBytes: number): Framed | undefined => {
   const { bytes, itemIndex, record } = state;
-  const { complete, text } = compact(record);
+  const compacted = compact(record);
 
   state.bytes = 0;
   state.record = "";
 
-  if (text === "") {
+  if (compacted.status === "complete" && compacted.text === "") {
     return undefined;
   }
 
@@ -222,13 +331,17 @@ const closeRecord = (state: SeqState, maxRecordBytes: number): Framed | undefine
     return new ResponseStreamError({ itemIndex, reason: "recordTooLarge" });
   }
 
-  if (!complete || !closedByLineFeed.test(record)) {
+  if (compacted.status === "invalid") {
+    return new ResponseStreamError({ itemIndex, reason: "invalidFraming" });
+  }
+
+  if (compacted.status === "truncated" || !closedByLineFeed.test(record)) {
     return new ResponseStreamError({ itemIndex, reason: "truncated" });
   }
 
   state.itemIndex += 1;
 
-  return text;
+  return compacted.text;
 };
 
 /**
@@ -299,8 +412,9 @@ const frameChunk = (state: SeqState, chunk: string, maxRecordBytes: number): Fra
  * record (separators in a row, or only whitespace) is skipped and takes no index. A record over
  * `maxRecordBytes` UTF-8 bytes, not counting its closing LF, fails with `recordTooLarge` as soon as
  * the bound is passed; a record that does not end with LF, or ends inside a string or an open
- * container, fails with `truncated`. Each failure carries the zero-based `itemIndex` of the record
- * being read, after every record before it has been emitted.
+ * container, fails with `truncated`; a record the compactor would change fails with
+ * `invalidFraming`. Each failure carries the zero-based `itemIndex` of the record being read,
+ * after every record before it has been emitted.
  */
 export const jsonSeqRecords =
   (maxRecordBytes: number) =>

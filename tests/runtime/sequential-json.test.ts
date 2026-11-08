@@ -116,6 +116,44 @@ describe("NDJSON and JSONL records", () => {
   });
 });
 
+// Removing whitespace must never change the data: a record whose whitespace separates two values,
+// whose string holds a raw control character, or that closes more containers than it opens fails.
+describe("records the compactor would change", () => {
+  const malformed = {
+    "a container closed that was never opened": "]",
+    "a raw tab inside a string": '{"a":"x\ty"}',
+    "two numbers separated by whitespace": "1 2",
+    "two objects on one line": '{"a":1} {"b":2}',
+  };
+
+  for (const [name, record] of Object.entries(malformed)) {
+    test(`NDJSON: ${name} is invalidFraming`, async () => {
+      expect(await failure(ndjsonRecords, [`[0]\n${record}\n`])).toEqual({
+        _tag: "ResponseStreamError",
+        itemIndex: 1,
+        reason: "invalidFraming",
+      });
+    });
+
+    test(`JSON-seq: ${name} is invalidFraming`, async () => {
+      expect(await failure(jsonSeqRecords, [`${rs}[0]\n${rs}${record}\n`])).toEqual({
+        _tag: "ResponseStreamError",
+        itemIndex: 1,
+        reason: "invalidFraming",
+      });
+    });
+  }
+
+  test("valid records keep their bytes, numbers and escapes", async () => {
+    expect(
+      await lines(ndjsonRecords, [
+        '[ -1.5e+3 , true , null , "a b" , { } , [ ] ]\n',
+        '{ "k" : [ 1 , "\\u0009" ] }\n',
+      ]),
+    ).toEqual(['[-1.5e+3,true,null,"a b",{},[]]', '{"k":[1,"\\u0009"]}']);
+  });
+});
+
 describe("JSON-seq records (RFC 7464)", () => {
   test("records containing LF are compacted and keep numbers and key order", async () => {
     expect(
@@ -168,7 +206,7 @@ describe("JSON-seq records (RFC 7464)", () => {
       itemIndex: 1,
       reason: "truncated",
     });
-    expect(await failure(jsonSeqRecords, [`${rs}{"a":"b\n`])).toEqual({
+    expect(await failure(jsonSeqRecords, [`${rs}{"a":[1,2]\n`])).toEqual({
       _tag: "ResponseStreamError",
       itemIndex: 0,
       reason: "truncated",
