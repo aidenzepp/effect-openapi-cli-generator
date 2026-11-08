@@ -112,13 +112,16 @@ const locationNote = (response: HttpClientResponse.HttpClientResponse): string =
  * `apiKey` name); outside a fiber only Effect's defaults apply. The body excerpt is bounded and
  * rendered elsewhere (RT-6), so the caller passes it in. A 3xx with no excerpt carries its redacted
  * `Location` there instead. `credentials` are scrubbed from the request id before it is bounded;
- * they are required so a caller cannot silently skip the scrub.
+ * they are required so a caller cannot silently skip the scrub. `retryAfterSeconds` is the server's
+ * `Retry-After` delay when retrying stopped at the cap (design D-AD7, 7.1; m3 P14), and sets
+ * `ApiResponseError.retryAfterSeconds`; `None`, the default, leaves it unset.
  */
 export const toApiResponseError = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
   bodyExcerpt: string,
   credentials: readonly Credential[],
+  retryAfterSeconds: Option.Option<number> = Option.none(),
 ): ApiResponseError => {
   const key = matchResponse(table.responses, response.status);
   const mediaType = mediaTypeOf(response);
@@ -132,9 +135,13 @@ export const toApiResponseError = (
     status: response.status,
   } as const;
   const withMediaType = mediaType === undefined ? base : { ...base, mediaType };
+  const withRequestId = requestId === undefined ? withMediaType : { ...withMediaType, requestId };
 
   return new ApiResponseError(
-    requestId === undefined ? withMediaType : { ...withMediaType, requestId },
+    Option.match(retryAfterSeconds, {
+      onNone: () => withRequestId,
+      onSome: (seconds) => ({ ...withRequestId, retryAfterSeconds: seconds }),
+    }),
   );
 };
 

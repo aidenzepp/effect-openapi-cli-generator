@@ -8,6 +8,7 @@ import {
   Duration,
   Effect,
   FileSystem,
+  Layer,
   Option,
   Path,
   Ref,
@@ -36,6 +37,7 @@ import {
   attach,
   credentialOrigins,
   evaluate,
+  plaintextWarning,
   redactedNames,
   Schemes,
 } from "./auth.ts";
@@ -50,7 +52,14 @@ import {
 } from "./base-url.ts";
 import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
-import { redirectLoop, withUserAgent } from "./client.ts";
+import {
+  redirectLoop,
+  retryAfterCapSeconds,
+  retryTransform,
+  verboseSetting,
+  verboseTransform,
+  withUserAgent,
+} from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import type { ScrubEntry } from "./redact.ts";
@@ -1004,6 +1013,24 @@ export class ClientPolicy extends Context.Service<
 >()("openapi-cli/runtime/ClientPolicy") {}
 
 /**
+ * The once-per-run warning lines this run has printed (design 13.1 R3): `send` prints such a line
+ * only when it is not here yet, then records it. Run-scoped, like `RunCredentials`; the emitted
+ * `bin.ts` provides `runWarningsLayer`. `send` reads it with `Effect.serviceOption`, and without it
+ * the documented default applies: nothing printed yet, so each `send` prints its warning (audit
+ * ad9f808b F2).
+ */
+export class RunWarnings extends Context.Service<RunWarnings, Ref.Ref<ReadonlySet<string>>>()(
+  "openapi-cli/runtime/RunWarnings",
+) {}
+
+/**
+ * A fresh record per run: no warning printed yet.
+ */
+export const runWarningsLayer: Layer.Layer<RunWarnings> = Layer.effect(RunWarnings)(
+  Ref.make<ReadonlySet<string>>(new Set()),
+);
+
+/**
  * The errors `send` fails with.
  */
 export type SendError =
@@ -1123,21 +1150,81 @@ const warnMissingHeaders = (
 };
 
 /**
+ * Print `line` on stderr unless this run printed it already (`RunWarnings`).
+ */
+const warnOncePerRun = (line: Option.Option<string>): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* warnOnce() {
+    if (Option.isNone(line)) {
+      return;
+    }
+
+    const record = yield* Effect.serviceOption(RunWarnings);
+    const first = Option.isNone(record)
+      ? true
+      : yield* Ref.modify(record.value, (printed) =>
+          printed.has(line.value) ? [false, printed] : [true, new Set([...printed, line.value])],
+        );
+    if (first) {
+      yield* printStderr(sanitize(line.value));
+    }
+  });
+
+/**
+ * Under `--verbose`, one stderr notice that a 2xx response's media type matches no declared key
+ * of its status, so its bytes are written as received (design 6.6). The type is the response's
+ * `Content-Type` through `scrub`, or `none` when it has none.
+ */
+const undeclaredMediaNotice = (
+  operation: string,
+  response: HttpClientResponse.HttpClientResponse,
+  scrub: (text: string) => string,
+): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* noticeUndeclaredMedia() {
+    if (!Option.getOrElse(yield* Effect.serviceOption(verboseSetting), () => false)) {
+      return;
+    }
+
+    const type = Option.match(Headers.get(response.headers, "content-type"), {
+      onNone: () => "none",
+      onSome: scrub,
+    });
+    yield* printStderr(
+      oneLine(
+        `Notice: ${operation} returned ${response.status} with the undeclared media type ` +
+          `${type}; writing its bytes as received`,
+      ),
+    );
+  });
+
+/**
  * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a typed
  * error, and the only runtime function that sends. In order: the base URL (`--base-url`,
  * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
  * operation's effective servers: its meta's override, else the root table from `Servers`) joined to
  * the builder's path and query; `Accept` from the declared response media or `accept` (`--accept`),
  * leaving the builder's `Content-Type`; the security requirement evaluated against `Schemes` before
- * any connection (`CredentialMissing`); the policy client (redirect loop with the per-hop attach
- * gated by the base's provenance, method allowlist, direct route for loopback hops, `User-Agent`);
- * then response matching, after a stderr warning for each required header the matched case declares
- * and the response lacks. A 2xx streams to the output sink (a bodiless one, `isBodiless`, writes
- * nothing and reads nothing); any other status fails with `ApiResponseError` carrying the body
+ * any connection (`CredentialMissing`); the plaintext warning of design 13.1 R3, once per run
+ * (`RunWarnings`), when `--allow-credentials-for-base-url` is what lets credentials reach an
+ * `http:` base; the policy client; then response matching, after a stderr warning for each required
+ * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
+ * bodiless one, `isBodiless`, writes nothing and reads nothing), after the `--verbose` notice for
+ * an undeclared media type; any other status fails with `ApiResponseError` carrying the body
  * excerpt, bounded and scrubbed of every value the run recorded (its credentials, added to the
- * record, and its secret-file values). Every body read, the excerpt's included, is bounded by the
- * stream idle timeout (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request
- * and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
+ * record, and its secret-file values), and the server's `Retry-After` when retrying stopped at the
+ * cap.
+ *
+ * The policy client, innermost first (design D-AD7; audit ad9f808b F5): `verboseTransform` on the
+ * inner client the redirect loop receives, so `--verbose` sees each hop of each attempt as sent;
+ * `redirectLoop` (per-hop attach gated by the base's provenance, method allowlist, direct route for
+ * loopback hops, the per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
+ * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
+ * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
+ * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
+ * operation declares and the operator supplied, never a credential (design D-AD7). Every line the
+ * transforms print passes through the run's scrubber (`scrubbedAndSanitized` over the recorded
+ * values). Every body read, the excerpt's included, is bounded by the stream idle timeout
+ * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
+ * run in one scope. Errors are not rendered here: `finalCatch` does.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -1175,21 +1262,32 @@ export const send =
 
       const { table: security } = yield* Schemes;
       const baseOrigin = new URL(baseUrl).origin;
-      const origins = credentialOrigins({
+      const gate = {
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
         baseOrigin,
         boundOrigins: servers.boundOrigins,
         provenance: selection.provenance,
-      });
+      };
+      const origins = credentialOrigins(gate);
+      const sendsToBase = credentials.length > 0 && origins.includes(baseOrigin);
 
-      if (credentials.length > 0 && !origins.includes(baseOrigin)) {
+      if (credentials.length > 0 && !sendsToBase) {
         yield* printStderr(withheldNotice(credentials));
       }
 
+      // The flag let them through only when the base is not bound without it.
+      const allowedByFlag =
+        sendsToBase &&
+        !credentialOrigins({ ...gate, allowUnboundBase: false }).includes(baseOrigin);
+      yield* warnOncePerRun(plaintextWarning(baseUrl, allowedByFlag));
+
       const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
       const policy = yield* ClientPolicy;
+      const scrub = (text: string): string => scrubbedAndSanitized(text, scrubbed);
       const client = (yield* HttpClient.HttpClient).pipe(
+        verboseTransform(scrub),
         redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );
       const table = {
@@ -1212,18 +1310,30 @@ export const send =
                     () => Effect.succeed(""),
                   ),
                   Effect.flatMap((excerpt) =>
-                    Effect.fail(toApiResponseError(table, response, excerpt, credentials)),
+                    Effect.fail(
+                      toApiResponseError(
+                        table,
+                        response,
+                        excerpt,
+                        credentials,
+                        retryAfterCapSeconds(response),
+                      ),
+                    ),
                   ),
                 ),
               onSuccess: (ok) =>
                 isBodiless(ok)
                   ? Effect.void
-                  : writeResponse({
-                      bytes: bodyOf(ok, idleSeconds),
-                      mediaType: dispatchResponse(
+                  : Effect.gen(function* writeOk() {
+                      const mediaType = dispatchResponse(
                         declaredMedia(meta, ok.status),
                         Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
-                      ),
+                      );
+                      if (mediaType === undefined) {
+                        yield* undeclaredMediaNotice(operation, ok, scrub);
+                      }
+
+                      yield* writeResponse({ bytes: bodyOf(ok, idleSeconds), mediaType });
                     }),
             }),
           ),
