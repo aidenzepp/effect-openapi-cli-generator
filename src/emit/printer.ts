@@ -158,7 +158,8 @@ export type Expr =
       readonly consequent: Expr;
       readonly alternate: Expr;
     }
-  | { readonly _tag: "Plus"; readonly left: Expr; readonly right: Expr };
+  | { readonly _tag: "Plus"; readonly left: Expr; readonly right: Expr }
+  | { readonly _tag: "DynamicImport"; readonly from: ModuleSpecifierType };
 
 export interface Field {
   readonly key: string;
@@ -277,6 +278,11 @@ export const conditional = (test: Expr, consequent: Expr, alternate: Expr): Expr
 });
 
 export const plus = (left: Expr, right: Expr): Expr => ({ _tag: "Plus", left, right });
+
+/**
+ * `import("<from>")`: a dynamic import of a module, printed with a literal specifier.
+ */
+export const dynamicImport = (from: ModuleSpecifierType): Expr => ({ _tag: "DynamicImport", from });
 
 export const typeRef = (
   head: IdentifierType,
@@ -499,6 +505,7 @@ const flat = (expr: Expr): string | undefined =>
         " : ",
         flat(choice.alternate),
       ),
+    DynamicImport: (entry) => `import(${stringLiteral(entry.from)})`,
     Identifier: (name) => name.name,
     Member: (access) => flatPair(flat(access.object), ".", access.name),
     New: (construct) =>
@@ -778,6 +785,7 @@ const render: Render = (expr, place) => {
       return `${callee}${renderArgs(invocation.args, { ...place, column }, render)}`;
     },
     Conditional: (choice) => renderConditional(choice, place, render),
+    DynamicImport: leaf,
     Identifier: leaf,
     Member: (access) => {
       const tail = place.tail + 1 + access.name.length;
@@ -901,6 +909,7 @@ const check = (expr: Expr, role: Role): Issue => {
         ? firstIssue(operands, asValue)
         : issue("unsupported-conditional", nested._tag);
     },
+    DynamicImport: none,
     Identifier: none,
     Member: (access) => {
       if (isPath(access)) {
@@ -934,7 +943,8 @@ const withDoc = (doc: JsDocTextType | undefined, text: string): string =>
 
 // A line past column 100 is allowed when `vp fmt` keeps it there: its only wide parts are
 // identifiers, which cannot break. A type with several union members or type arguments is one
-// `vp fmt` breaks across lines, and the printer does not, so such a line is refused.
+// `vp fmt` breaks across lines. The printer breaks a union that is a field's or alias's whole type
+// (see `brokenUnion`); any other such line is refused.
 const breaksWhenWide = (type: TypeExpr): boolean =>
   Match.valueTags(type, {
     TypeKeyword: () => false,
@@ -948,6 +958,38 @@ const unbreakable = (line: string, type: TypeExpr | undefined, subject: string):
   type !== undefined && breaksWhenWide(type) && textWidth(line) > lineWidth
     ? issue("unbreakable-line", subject)
     : Option.none();
+
+/**
+ * A declaration's printed text, and the reason it cannot be printed, if any.
+ */
+interface Layout {
+  readonly failure: Issue;
+  readonly text: string;
+}
+
+// The members of a union, nested unions flattened: `typeText` prints a nested union without
+// parentheses, so it parses as part of the outer one.
+const unionMembers = (type: TypeExpr): readonly TypeExpr[] =>
+  type._tag === "TypeUnion" ? type.members.flatMap(unionMembers) : [type];
+
+// A union that does not fit on its line, as `vp fmt` prints it: `head` ends the line, then each
+// member starts a line one level deeper than `indent` with `| `, and the last member ends with `;`.
+// A member that `vp fmt` would break further is refused.
+const brokenUnion = (head: string, type: TypeExpr, indent: number, subject: string): Layout => {
+  const members = unionMembers(type);
+  const lines = members.map(
+    (part, index) =>
+      `${pad(indent + 2)}| ${typeText(part)}${index === members.length - 1 ? ";" : ""}`,
+  );
+  const failure = Option.firstSomeOf(
+    members.map((part, index) => unbreakable(lines[index] ?? "", part, subject)),
+  );
+
+  return { failure, text: [head, ...lines].join("\n") };
+};
+
+const isLongUnion = (line: string, type: TypeExpr): boolean =>
+  textWidth(line) > lineWidth && unionMembers(type).length > 1;
 
 const succeedUnless = (failure: Issue, text: () => string): Effect.Effect<string, PrinterError> =>
   Option.match(failure, {
@@ -990,18 +1032,25 @@ const printConst = (statement: Extract<Statement, { readonly _tag: "Const" }>) =
 
 const byFieldKey = Order.mapInput(Order.String, (field: Field) => field.key);
 
-const fieldLine = (field: Field): string =>
-  `  readonly ${keyText(field.key)}${field.optional ? "?" : ""}: ${typeText(field.type)};`;
+const fieldLayout = (field: Field, subject: string): Layout => {
+  const head = `  readonly ${keyText(field.key)}${field.optional ? "?" : ""}:`;
+  const line = `${head} ${typeText(field.type)};`;
+
+  return isLongUnion(line, field.type)
+    ? brokenUnion(head, field.type, 2, subject)
+    : { failure: unbreakable(line, field.type, subject), text: line };
+};
 
 const printInterface = (statement: Extract<Statement, { readonly _tag: "Interface" }>) => {
   const head = `export interface ${statement.name} {`;
   const duplicate = duplicateKey(statement.fields.map((field) => field.key));
-  const lines = Arr.sort(statement.fields, byFieldKey).map(fieldLine);
-  const wide = Option.firstSomeOf(
-    statement.fields.map((field) => unbreakable(fieldLine(field), field.type, statement.name)),
+  const layouts = Arr.sort(statement.fields, byFieldKey).map((field) =>
+    fieldLayout(field, statement.name),
   );
+  const wide = Option.firstSomeOf(layouts.map((layout) => layout.failure));
   const duplicated = duplicate === undefined ? Option.none() : issue("duplicate-key", duplicate);
   const failure = Option.orElse(duplicated, () => wide);
+  const lines = layouts.map((layout) => layout.text);
   const text = lines.length === 0 ? `${head}}` : [head, ...lines, "}"].join("\n");
 
   return succeedUnless(failure, () => withDoc(statement.doc, text));
@@ -1023,16 +1072,18 @@ const printStatement = (statement: Statement): Effect.Effect<string, PrinterErro
     Expression: printExpression,
     Interface: printInterface,
     TypeAlias: (alias) => {
-      const line = `export type ${alias.name} = ${typeText(alias.type)};`;
-      // Past column 100 the type moves to its own line, as `vp fmt` moves it.
-      const text =
-        textWidth(line) > lineWidth
-          ? `export type ${alias.name} =\n  ${typeText(alias.type)};`
-          : line;
+      const head = `export type ${alias.name} =`;
+      const line = `${head} ${typeText(alias.type)};`;
+      // Past column 100 a union breaks, and any other type moves to its own line, as `vp fmt` does.
+      const moved = `${head}\n  ${typeText(alias.type)};`;
+      const layout = isLongUnion(line, alias.type)
+        ? brokenUnion(head, alias.type, 0, alias.name)
+        : {
+            failure: unbreakable(line, alias.type, alias.name),
+            text: textWidth(line) > lineWidth ? moved : line,
+          };
 
-      return succeedUnless(unbreakable(line, alias.type, alias.name), () =>
-        withDoc(alias.doc, text),
-      );
+      return succeedUnless(layout.failure, () => withDoc(alias.doc, layout.text));
     },
   });
 

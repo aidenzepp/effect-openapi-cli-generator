@@ -47,12 +47,19 @@ import {
   Servers,
   serverVariableSetting,
 } from "./base-url.ts";
+import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import { redirectLoop, withUserAgent } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
-import { dropTrailingFragment, longestFormBytes, scrub } from "./redact.ts";
-import { classify, mapClientError, matchResponse, toApiResponseError } from "./response.ts";
+import { dropTrailingFragment, longestFormBytes, scrubAround } from "./redact.ts";
+import {
+  classify,
+  isBodiless,
+  mapClientError,
+  matchResponse,
+  toApiResponseError,
+} from "./response.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -100,6 +107,48 @@ export const MaxErrorBytes = GlobalFlag.Setting("max-error-bytes")({
     Flag.withDefault(defaultMaxErrorBytes),
   ),
 });
+
+/**
+ * `--help` without effect's `-h` alias. A flag value that starts with "-" lexes as short options,
+ * so with `-h` registered, `--hostname -bad_.host-` would run help and exit 0 with no request
+ * sent; without it the value is a usage error (exit 2). It runs effect's built-in help.
+ */
+export const HelpFlag: GlobalFlag.Action<boolean> = GlobalFlag.Action({
+  flag: Flag.Boolean("help").pipe(
+    Flag.withDescription("Show help information"),
+    Flag.withDefault(false),
+  ),
+  run: GlobalFlag.Help.run,
+});
+
+/**
+ * `--version` without effect's `-v` alias, for the reason `HelpFlag` drops `-h`.
+ */
+export const VersionFlag: GlobalFlag.Action<boolean> = GlobalFlag.Action({
+  flag: Flag.Boolean("version").pipe(
+    Flag.withDescription("Show version information"),
+    Flag.withDefault(false),
+  ),
+  run: GlobalFlag.Version.run,
+});
+
+/**
+ * The generated CLI's built-in global flags (design 4.3), in precedence order: every effect
+ * default but `--wizard`, with help and version carrying no short alias. `bin.ts` provides them
+ * through `CliConfig.layer`.
+ */
+export const builtIns = [
+  HelpFlag,
+  VersionFlag,
+  GlobalFlag.Completions,
+  GlobalFlag.LogLevel,
+] as const;
+
+/**
+ * How to pass a flag value that starts with "-": the line of the root help's last section,
+ * `FLAG VALUES`.
+ */
+export const dashValueEscape = 'Write a flag value that starts with "-" as --flag=-value';
 
 /**
  * A response body: its media type (absent when the response declared none) and its bytes, not
@@ -242,6 +291,13 @@ const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
  */
 export const sanitize = (text: string): string => text.replaceAll(unsafeText, "");
 
+/**
+ * Credential values scrubbed, then the text sanitized, then scrubbed again (design 7.4, audit
+ * S2), so neither a credential holding a removed character nor one split by them survives.
+ */
+const scrubbedAndSanitized = (text: string, credentials: readonly Credential[]): string =>
+  scrubAround(text, credentials, sanitize);
+
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
 const oneByteLimit = 128;
 
@@ -284,15 +340,15 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
 };
 
 /**
- * The excerpt of an error body: credential values scrubbed, then sanitized, then bounded to
- * `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
+ * The excerpt of an error body: credential values scrubbed, sanitized and scrubbed again, then
+ * bounded to `maxBytes` of UTF-8. The bound comes last because scrubbing can lengthen text and
  * `ApiResponseError` refuses an excerpt over 64 KiB (audit F6).
  */
 export const boundedExcerpt = (
   text: string,
   maxBytes: number,
   credentials: readonly Credential[],
-): string => truncateUtf8(sanitize(scrub(text, credentials)), maxBytes);
+): string => truncateUtf8(scrubbedAndSanitized(text, credentials), maxBytes);
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
 // larger than the limit, so each chunk is cut at the remaining budget instead.
@@ -326,7 +382,7 @@ const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
  * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
  * form, so a credential cut by the limit is still found and scrubbed. When the read stops at that
  * budget, an incomplete character and any trailing partial credential are dropped first; then the
- * text is scrubbed, sanitized and bounded.
+ * text is scrubbed, sanitized, scrubbed again and bounded.
  */
 export const readExcerpt = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
@@ -344,7 +400,11 @@ export const readExcerpt = <E, R>(
     const text =
       read.length < budget
         ? new TextDecoder().decode(read)
-        : dropTrailingFragment(new TextDecoder().decode(read, { stream: true }), credentials);
+        : dropTrailingFragment(
+            new TextDecoder().decode(read, { stream: true }),
+            credentials,
+            sanitize,
+          );
 
     return boundedExcerpt(text, maxBytes, credentials);
   });
@@ -373,7 +433,7 @@ const isKnownError = (error: unknown): error is KnownError =>
 const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
 
 const singleLine = (text: string, credentials: readonly Credential[]): string =>
-  oneLine(sanitize(scrub(text, credentials)));
+  oneLine(scrubbedAndSanitized(text, credentials));
 
 /**
  * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
@@ -400,15 +460,21 @@ export const renderError = (error: KnownError, credentials: readonly Credential[
 
 const base = CliOutput.defaultFormatter({ colors: false });
 
-const valueFreeMessage = (error: CliError.CliError): string => {
-  if (error._tag !== "InvalidValue") {
-    return base.formatCliError(error);
-  }
-
+const invalidValueMessage = (error: CliError.InvalidValue): string => {
   const subject = error.kind === "flag" ? `flag --${error.option}` : `argument <${error.option}>`;
 
   return `Invalid value for ${subject}. Run with --help for usage.`;
 };
+
+const valueFreeMessage = (error: CliError.CliError): string =>
+  error._tag === "InvalidValue" ? invalidValueMessage(error) : base.formatCliError(error);
+
+const errorsText = (messages: readonly string[]): string =>
+  messages.length === 0
+    ? ""
+    : `\nERROR${messages.length === 1 ? "" : "S"}\n${messages
+        .map((message) => `  ${message}`)
+        .join("\n")}`;
 
 /**
  * Renders a `CliError.InvalidValue` by `kind` and `option` only: its `value` is the raw flag text
@@ -417,13 +483,8 @@ const valueFreeMessage = (error: CliError.CliError): string => {
  */
 export const valueFreeFormatter: CliOutput.Formatter = {
   formatCliError: valueFreeMessage,
-  formatError: (error) => `\nERROR\n  ${valueFreeMessage(error)}`,
-  formatErrors: (errors) =>
-    errors.length === 0
-      ? ""
-      : `\nERROR${errors.length === 1 ? "" : "S"}\n${errors
-          .map((error) => `  ${valueFreeMessage(error)}`)
-          .join("\n")}`,
+  formatError: (error) => errorsText([valueFreeMessage(error)]),
+  formatErrors: (errors) => errorsText(errors.map(valueFreeMessage)),
   formatHelpDoc: base.formatHelpDoc,
   formatVersion: base.formatVersion,
 };
@@ -458,17 +519,20 @@ const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
     yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
   }).pipe(Effect.ignore);
 
+const rawMessage = (error: CliError.CliError): string =>
+  error._tag === "InvalidValue" ? invalidValueMessage(error) : error.message;
+
 /**
  * The text printed on stderr for a `CliError`, or `undefined` when there is nothing to print:
- * help with no parse errors, which `Command.run` has already presented. Parse errors go through
- * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value.
+ * help with no parse errors, which `Command.run` has already presented. It has the layout of
+ * `valueFreeFormatter`, so an `InvalidValue` shows its kind and option, never its value; other
+ * messages stay raw, because the default formatter escapes C0 characters into text that no longer
+ * matches a credential holding them (audit S2). The caller scrubs and sanitizes the result.
  */
 const renderCliError = (error: CliError.CliError): string | undefined => {
-  if (error._tag !== "ShowHelp") {
-    return valueFreeFormatter.formatError(error);
-  }
+  const errors = error._tag === "ShowHelp" ? error.errors : [error];
 
-  return error.errors.length === 0 ? undefined : valueFreeFormatter.formatErrors(error.errors);
+  return errors.length === 0 ? undefined : errorsText(errors.map(rawMessage));
 };
 
 /**
@@ -515,7 +579,7 @@ const renderCause = <E>(
 
     return text === undefined
       ? Effect.failCause(cause)
-      : reportOnce(sanitize(scrub(text, credentials)), failure.value);
+      : reportOnce(scrubbedAndSanitized(text, credentials), failure.value);
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
@@ -770,38 +834,52 @@ const helpNotesOf = (
     ),
   );
 
+const isRootHelp = (doc: HelpDoc.HelpDoc): boolean => (doc.commandPath ?? []).length <= 1;
+
 /**
  * The help formatter for a command tree (design 4.6). A command that carries `Output.Help` prints
  * its DESCRIPTION, USAGE, ARGUMENTS and FLAGS with a third column of notes, then its sections,
  * then the pointer to the global flags. Any other command prints as effect's default formatter
- * prints it, without colors and with global flags as a pointer. Errors render through
- * `valueFreeFormatter`.
+ * prints it, without colors and with global flags as a pointer. Root help ends with a
+ * `FLAG VALUES` section holding `dashValueEscape`, apart from SUBCOMMANDS so nothing reading that
+ * list sees it. Errors render through `valueFreeFormatter`.
  */
 export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
   formatCliError: valueFreeFormatter.formatCliError,
   formatError: valueFreeFormatter.formatError,
   formatErrors: valueFreeFormatter.formatErrors,
-  formatHelpDoc: (doc) =>
-    Option.match(helpNotesOf(root, doc.commandPath), {
+  formatHelpDoc: (doc) => {
+    const text = Option.match(helpNotesOf(root, doc.commandPath), {
       onNone: () => helpBase.formatHelpDoc(doc),
       onSome: (notes) =>
         isNotesLayout(doc) ? renderNotedHelp(doc, notes) : helpBase.formatHelpDoc(doc),
-    }),
+    });
+
+    return isRootHelp(doc) ? `${text.trimEnd()}\n\nFLAG VALUES\n  ${dashValueEscape}` : text;
+  },
   formatVersion: valueFreeFormatter.formatVersion,
 });
 
 /**
  * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path
  * template (the display name when it has no `operationId`), its declared media, its security
- * requirement and, when the operation declares one, the request-id header chosen at generation.
+ * requirement, when the operation declares one, the request-id header chosen at generation, and,
+ * when the operation or its path item overrides the root servers, its effective servers table.
+ * `deprecated` is printed only for an operation the document marks deprecated; the meta object is
+ * not `as const`, so it arrives widened to `boolean`, and only `true` writes the notice.
+ * `requiredHeaders` lists, by response key, the required headers a case declares; it is present
+ * only when some case declares one.
  */
 export interface OperationMeta {
+  readonly deprecated?: boolean | undefined;
   readonly media: MediaDeclaration;
   readonly method: string;
   readonly operationId?: string | undefined;
   readonly pathTemplate: string;
   readonly requestIdHeader?: string | undefined;
+  readonly requiredHeaders?: Readonly<Record<string, readonly string[]>> | undefined;
   readonly security: SecurityRequirement;
+  readonly servers?: ServersTable | undefined;
 }
 
 /**
@@ -857,12 +935,15 @@ const withheldNotice = (credentials: readonly Credential[]): string => {
 };
 
 /**
- * A response body read that fails part-way is a truncated body (exit 5).
+ * A response body read that fails part-way is a truncated body (exit 5). A bodiless response
+ * (`isBodiless`) is the empty body and is never read.
  */
 const bodyOf = (
   response: HttpClientResponse.HttpClientResponse,
 ): Stream.Stream<Uint8Array, ResponseStreamError> =>
-  Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+  isBodiless(response)
+    ? Stream.empty
+    : Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
 
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
@@ -871,14 +952,39 @@ const declaredMedia = (meta: OperationMeta, status: number): readonly string[] =
 };
 
 /**
+ * One stderr warning per required header the matched case declares and the response lacks, in
+ * document order (HDR-03). Names are matched case-insensitively and only the name is printed,
+ * never a value; an undeclared status matches no case and checks nothing.
+ */
+const warnMissingHeaders = (
+  meta: OperationMeta,
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<void, never, Stdio.Stdio> => {
+  const key = matchResponse(meta.media.responses, response.status);
+  const required =
+    meta.requiredHeaders !== undefined && Object.hasOwn(meta.requiredHeaders, key)
+      ? (meta.requiredHeaders[key] ?? [])
+      : [];
+
+  return Effect.forEach(
+    required.filter((name) => Option.isNone(Headers.get(response.headers, name))),
+    (name) => printStderr(`Warning: the response is missing the required header ${name}`),
+    { discard: true },
+  );
+};
+
+/**
  * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
  * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
- * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from `Servers`)
+ * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
+ * operation's effective servers: its meta's override, else the root table from `Servers`)
  * joined to the builder's path and query; `Accept` from the declared response media or
  * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
  * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
  * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching. A 2xx streams to the output sink; any
+ * loopback hops, `User-Agent`); then response matching, after a stderr warning for each required
+ * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
+ * bodiless one, `isBodiless`, writes nothing and reads nothing); any
  * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
  * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
  */
@@ -887,12 +993,20 @@ export const send =
   (request: HttpClientRequest.HttpClientRequest) =>
     Effect.gen(function* sendRequest() {
       const operation = displayName(meta);
-      const selection = yield* select({
-        baseUrl: yield* baseUrlSetting,
-        server: yield* serverSetting,
-        serverVariables: yield* serverVariableSetting,
-      });
-      const baseUrl = yield* resolve(selection);
+      if (meta.deprecated === true) {
+        yield* printStderr(`Notice: the operation ${operation} is deprecated`);
+      }
+
+      const servers = meta.servers ?? (yield* Servers).table;
+      const selection = yield* select(
+        {
+          baseUrl: yield* baseUrlSetting,
+          server: yield* serverSetting,
+          serverVariables: yield* serverVariableSetting,
+        },
+        servers,
+      );
+      const baseUrl = yield* resolve(selection, servers);
       const [path, query] = splitTarget(request.url);
       const accepted = yield* acceptValue(meta.media, accept);
       const located = HttpClientRequest.setUrl(request, requestUrl(baseUrl, path, query));
@@ -905,7 +1019,6 @@ export const send =
       yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
 
       const { table: security } = yield* Schemes;
-      const { table: servers } = yield* Servers;
       const baseOrigin = new URL(baseUrl).origin;
       const origins = credentialOrigins({
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
@@ -931,6 +1044,7 @@ export const send =
 
       yield* client.execute(built).pipe(
         Effect.catchTag("HttpClientError", mapClientError),
+        Effect.tap((response) => warnMissingHeaders(meta, response)),
         Effect.flatMap((response) =>
           classify(table, response, credentials).pipe(
             Effect.matchEffect({
@@ -942,13 +1056,15 @@ export const send =
                   ),
                 ),
               onSuccess: (ok) =>
-                writeBody({
-                  bytes: bodyOf(ok),
-                  mediaType: dispatchResponse(
-                    declaredMedia(meta, ok.status),
-                    Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
-                  ),
-                }),
+                isBodiless(ok)
+                  ? Effect.void
+                  : writeBody({
+                      bytes: bodyOf(ok),
+                      mediaType: dispatchResponse(
+                        declaredMedia(meta, ok.status),
+                        Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
+                      ),
+                    }),
             }),
           ),
         ),

@@ -22,16 +22,19 @@ import { StdinClaim } from "./input.ts";
 export type SecurityRequirement = readonly (readonly string[])[];
 
 /**
- * A scheme the runtime sends. `env` overrides the default environment name `<PREFIX>_<SCHEME>`.
+ * A scheme the runtime sends. `env` overrides the default environment name `<PREFIX>_<SCHEME>`;
+ * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it.
  */
 export type SecurityScheme =
   | {
+      readonly deprecated?: true;
       readonly env?: string | undefined;
       readonly in: "cookie" | "header" | "query";
       readonly kind: "apiKey";
       readonly name: string;
     }
   | {
+      readonly deprecated?: true;
       readonly env?: string | undefined;
       readonly kind: "http";
       readonly scheme: "basic" | "bearer";
@@ -215,6 +218,28 @@ const credentialOf = (
     );
   });
 
+// A scheme name comes from the generated table, but a terminal must never see a control character.
+const unsafeName = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
+
+/**
+ * The one stderr notice for a chosen deprecated scheme: it names the scheme and never a value.
+ */
+const noticeDeprecated = (
+  credentials: readonly Credential[],
+): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* notify() {
+    const stdio = yield* Stdio.Stdio;
+    for (const { definition, scheme } of credentials) {
+      if (definition.deprecated === true) {
+        const name = scheme.replaceAll(unsafeName, "");
+        yield* Stream.run(
+          Stream.make(`Notice: the security scheme ${name} is deprecated\n`),
+          stdio.stderr(),
+        );
+      }
+    }
+  }).pipe(Effect.ignore);
+
 const describeAlternative = (
   envPrefix: string,
   table: SecurityTable,
@@ -234,8 +259,9 @@ const describeAlternative = (
  * in document order, that names a scheme and whose every scheme has a configured credential. A `{}`
  * alternative, or no requirement at all, sends no credentials and is used only when no credentialed
  * alternative qualifies. Otherwise `CredentialMissing`. A scheme the table does not define cannot
- * be configured. Each scheme is resolved once, so stdin is claimed at most once, shared with the
- * body flags through `StdinClaim`.
+ * be configured. A chosen deprecated scheme is named once on stderr before the request. Each scheme
+ * is resolved once, so stdin is claimed at most once, shared with the body flags through
+ * `StdinClaim`.
  */
 export const evaluate = (
   operation: string,
@@ -280,6 +306,8 @@ export const evaluate = (
       }
 
       if (credentials.length === alternative.length) {
+        yield* noticeDeprecated(credentials);
+
         return credentials;
       }
     }

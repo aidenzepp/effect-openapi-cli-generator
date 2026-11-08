@@ -1,7 +1,10 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
-import { runtimeNamespaces } from "../names/domain.ts";
+import { formatPointer } from "../model/pointer.ts";
+import type { SchemaEdit } from "../normalize/schemas.ts";
+import type { SpecLine } from "../model/spec-section.ts";
+import { packageImports, rootNamespaceImports, runtimeNamespaces } from "../names/domain.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
   NamePlan,
@@ -10,11 +13,20 @@ import type {
   PlannedGroup,
   PlannedPositional,
 } from "../names/index.ts";
-import { envPrefixOf, isBooleanSchema } from "../names/plan.ts";
-import { formParts, inputKeys, isScalarArraySchema } from "./api.ts";
-import type { FormPart } from "./api.ts";
+import type { FieldEncoding, NumericKind } from "../runtime-src/runtime/input.ts";
+import { envPrefixOf, isBooleanSchema, rootNamespace } from "../names/plan.ts";
+import {
+  buildsParameter,
+  encodesByKey,
+  formParts,
+  inputKeys,
+  isScalarArraySchema,
+  scalarTypeOf,
+  takesJsonContent,
+} from "./api.ts";
+import type { FormPart, PartHeader } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
-import type { HelpFlag } from "./help.ts";
+import type { HelpBodyField, HelpFlag, HelpPartOption } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
 import {
   Identifier,
@@ -24,40 +36,51 @@ import {
   arrow,
   bool,
   call,
+  dynamicImport,
   ident,
   member,
+  newExpr,
   num,
   obj,
   printModule,
   str,
+  typeKeyword,
+  typeReadonlyArray,
 } from "./printer.ts";
 import type { Expr, Import, PrinterError, Statement } from "./printer.ts";
 
 /**
- * What the `cli/` layer is emitted from: the normalized `Api`, its name plan, and the author config
- * (bin name, environment prefix and the author-owned commands module).
+ * What the `cli/` layer is emitted from: the normalized `Api`, its name plan, the author config
+ * (bin name, environment prefix and the author-owned commands module), and the edits normalize
+ * recorded deriving the schemas' validation copy, from which help learns the defaults it refused
+ * (S30-27). Required: a spec with no refused default passes an empty list, written explicitly.
  */
 export interface CliEmitInput {
   readonly api: Api;
   readonly config: AuthorConfig;
   readonly plan: NamePlan;
+  readonly validationEdits: readonly SchemaEdit[];
 }
 
 /**
- * The plan, model or author config holds something the `cli/` layer cannot express. Text and form
- * request bodies are `unsupported-body` until their merge exists, and so is a multipart body the
- * runtime writer cannot send exactly (`formParts` names why); an XML body is opaque `--body-file`
- * bytes, like a binary one (design 6.3). `unsupported-flag` is a flag
- * with no call-expression form today: an integer field whose width the walk cannot settle, and a
- * required boolean parameter (absent would send `false`). `unsupported-parameter` is a boolean path
- * parameter, or a path array before another positional (a repeated argument would take the later
- * ones). Those three refuse one operation (`CliRefusal`); every other reason fails `emitCli`.
+ * The plan, model or author config holds something the `cli/` layer cannot express. An SSE body is
+ * `unsupported-body`, and so is a multipart body the runtime writer cannot send exactly
+ * (`formParts` names why), alone or beside other media; an XML body is opaque `--body-file` bytes,
+ * like a binary one, and a text or sequential body is the operator's `--body` text or
+ * `--body-file` stream (design 6.3).
+ * `unsupported-flag` is a flag with no call-expression form today: an integer field whose width the
+ * walk cannot settle, and a required boolean parameter (absent would send `false`).
+ * `unsupported-parameter` is a parameter the `api/` layer does not build (`buildsParameter`), a
+ * boolean path parameter, or a path array before another positional (a repeated argument would take
+ * the later ones). Those three refuse one operation (`CliRefusal`); every other reason fails
+ * `emitCli`.
  */
 export class CliEmitError extends Data.TaggedError("CliEmitError")<{
   readonly reason:
     | "name-clash"
     | "reserved-segment"
     | "unknown-parent"
+    | "unknown-primary"
     | "unplanned-parameter"
     | "unprintable-name"
     | "unresolved-schema"
@@ -193,15 +216,27 @@ const boundKeywords: readonly string[] = [
 
 interface FieldNode {
   readonly allOf: readonly Schema.Json[];
+  readonly contentEncoding: string | undefined;
+  readonly contentMediaType: string | undefined;
+  readonly default: Schema.Json | undefined;
+  readonly deprecated: boolean;
+  readonly enum: readonly Schema.Json[] | undefined;
+  readonly format: string | undefined;
   readonly int64: boolean;
   readonly items: Schema.Json | undefined;
+  readonly maxLength: number | undefined;
   readonly prose: string | undefined;
   readonly properties: JsonObject | undefined;
+  readonly readOnly: boolean;
   readonly ref: string | undefined;
 }
 
-// `None` for a node the walk cannot read: not an object, or a `$ref` that is not a string.
-const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
+// `None` for a node the walk cannot read: not an object, or a `$ref` that is not a string. A
+// `default` normalize refused reads as absent.
+const fieldNode = (
+  json: Schema.Json,
+  refusedDefaults: ReadonlySet<Schema.Json>,
+): Option.Option<FieldNode> => {
   if (!isJsonObject(json)) {
     return Option.none();
   }
@@ -212,34 +247,69 @@ const fieldNode = (json: Schema.Json): Option.Option<FieldNode> => {
   }
 
   const allOf = own(json, "allOf");
+  const values = own(json, "enum");
   const properties = own(json, "properties");
   const prose = [own(json, "description"), own(json, "title")].find(Predicate.isString);
+  const maxLength = own(json, "maxLength");
   const unsafe = boundKeywords.some((keyword) => {
     const bound = own(json, keyword);
 
     return Predicate.isNumber(bound) && Math.abs(bound) > Number.MAX_SAFE_INTEGER;
   });
 
+  const text = (key: string): string | undefined => {
+    const value = own(json, key);
+
+    return Predicate.isString(value) ? value : undefined;
+  };
+
   return Option.some({
     allOf: Array.isArray(allOf) ? allOf : [],
+    contentEncoding: text("contentEncoding"),
+    contentMediaType: text("contentMediaType"),
+    default: refusedDefaults.has(json) ? undefined : own(json, "default"),
+    deprecated: own(json, "deprecated") === true,
+    enum: Array.isArray(values) ? values : undefined,
+    format: text("format"),
     int64: own(json, "format") === "int64" || unsafe,
     items: own(json, "items"),
+    maxLength:
+      Predicate.isNumber(maxLength) && Number.isSafeInteger(maxLength) && maxLength >= 0
+        ? maxLength
+        : undefined,
     properties: isJsonObject(properties) ? properties : undefined,
     prose,
+    readOnly: own(json, "readOnly") === true,
     ref,
   });
 };
 
 /**
- * Whether an integer field flag fits `Flag.Int`: `int64` when a node on its scalar's `$ref`
- * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `unsettled`
- * when the walk cannot reach that scalar (an unreadable node, a cycle, an exhausted budget).
+ * Which flag an integer field takes: `int64` (`Input.int64Flag`) when a node on its scalar's `$ref`
+ * chain (an array's `items` for a repeated flag) is `int64` or has an unsafe bound, `safe`
+ * (`Input.numericFlag`) otherwise, and `unsettled` when the walk cannot reach that scalar (an
+ * unreadable node, a cycle, an exhausted budget).
  */
 type IntegerWidth = "int64" | "safe" | "unsettled";
 
 interface FieldSchema {
   readonly description: string;
+  /**
+   * The text encoding of a base64 string field (3.0 `format: byte`; 3.1+ `contentEncoding`),
+   * read from the end of the `$ref` chain as the name plan's walk reads it.
+   */
+  readonly encoding: FieldEncoding | undefined;
   readonly integer: IntegerWidth;
+  /**
+   * The tightest `maxLength` on the `$ref` chain: for a binary body, its byte limit (MED-21).
+   */
+  readonly maxLength: number | undefined;
+  readonly mediaType: string | undefined;
+  /**
+   * The annotations help notes (SCH-29, 49, 50, 51): the first `enum` and `default` on the `$ref`
+   * chain (an array's `items` too, for `enum`), and whether any node is read-only or deprecated.
+   */
+  readonly notes: HelpBodyField;
 }
 
 // The node chain a schema reaches through `$ref`, starting at the schema itself; `settled` when
@@ -253,8 +323,28 @@ type Work =
   | { readonly _tag: "Direct"; readonly node: FieldNode }
   | { readonly _tag: "Expand"; readonly json: Schema.Json };
 
+// The text encoding of a base64 string node: `contentEncoding` on every line, or `format: byte`
+// without one on 3.0 only (FMT-10), as `flattenBody` reads it.
+const encodingOf = (node: FieldNode, line: SpecLine): FieldEncoding | undefined => {
+  if (node.contentEncoding === "base64" || node.contentEncoding === "base64url") {
+    return node.contentEncoding;
+  }
+
+  return line === "3.0" && node.contentEncoding === undefined && node.format === "byte"
+    ? "base64"
+    : undefined;
+};
+
+// The stored `$defs`, the nodes among them whose `default` normalize refused (S30-27), and the
+// OpenAPI line, which decides whether `format: byte` is a base64 encoding.
+interface FieldStore {
+  readonly defs: Defs;
+  readonly line: SpecLine;
+  readonly refusedDefaults: ReadonlySet<Schema.Json>;
+}
+
 const fieldSchema = (
-  defs: Defs,
+  { defs, line, refusedDefaults }: FieldStore,
   rootKey: string,
   pointer: string,
   repeated: boolean,
@@ -268,7 +358,7 @@ const fieldSchema = (
       seen.add(current);
       visits += 1;
 
-      const node = fieldNode(current);
+      const node = fieldNode(current, refusedDefaults);
       if (Option.isNone(node)) {
         break;
       }
@@ -334,19 +424,70 @@ const fieldSchema = (
     return field.settled && items.settled ? "safe" : "unsettled";
   };
 
-  return { description: described?.prose ?? "", integer: width() };
+  const last = field.nodes.at(-1);
+  const encoding = last === undefined ? undefined : encodingOf(last, line);
+
+  const bounds = field.nodes.flatMap((node) =>
+    node.maxLength === undefined ? [] : [node.maxLength],
+  );
+
+  const notes: HelpBodyField = {
+    default: field.nodes.find((node) => node.default !== undefined)?.default,
+    deprecated: field.nodes.some((node) => node.deprecated),
+    enum: [...field.nodes, ...items.nodes].find((node) => node.enum !== undefined)?.enum,
+    readOnly: field.nodes.some((node) => node.readOnly),
+  };
+
+  return {
+    description: described?.prose ?? "",
+    encoding,
+    integer: width(),
+    maxLength: bounds.length === 0 ? undefined : Math.min(...bounds),
+    mediaType: last?.contentMediaType,
+    notes,
+  };
+};
+
+const unknownField: FieldSchema = {
+  description: "",
+  encoding: undefined,
+  integer: "unsettled",
+  maxLength: undefined,
+  mediaType: undefined,
+  notes: { default: undefined, deprecated: false, enum: undefined, readOnly: false },
+};
+
+type BodyFlagSource = Extract<PlannedFlag["source"], { readonly _tag: "Body" }>;
+
+// The body alternative a field flag writes into, and that field's schema.
+const bodyField = (operation: Operation, source: BodyFlagSource, store: FieldStore) => {
+  const alternative = operation.body?.alternatives.find((candidate) =>
+    source.media.includes(candidate.mediaType),
+  );
+  const schema =
+    alternative?.schema === undefined
+      ? unknownField
+      : fieldSchema(store, alternative.schema.key, source.wireName, source.repeated);
+
+  return { alternative, schema };
 };
 
 // ---------------------------------------------------------------------------------------------
 // One command.
 
-interface CommandContext {
+// Where an operation's builder and meta live: its primary command's `api/` module (design 4.4).
+interface Target {
+  readonly from: string;
+  readonly identifier: string;
+  readonly namespace: string;
+}
+
+interface CommandContext extends FieldStore {
   readonly api: Api;
   readonly booleans: Map<string, boolean>;
-  readonly defs: Defs;
   readonly domain: NamePlan["domain"];
-  readonly namespace: string;
   readonly plan: NamePlan;
+  readonly targets: ReadonlyMap<Operation, Target>;
 }
 
 const parameterOf = (operation: Operation, location: string, wireName: string) =>
@@ -354,8 +495,11 @@ const parameterOf = (operation: Operation, location: string, wireName: string) =
     (parameter) => parameter.location === location && parameter.wireName === wireName,
   );
 
+// What typing a header-shaped value reads: a parameter, or a part header typed as one (ENC-03).
+type Typed = Pick<Parameter, "location" | "schema" | "serialization">;
+
 // Whether a parameter is an array of scalar items, given once per item (design 6.1).
-const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
+const isArrayParameter = (parameter: Pick<Typed, "schema">, context: CommandContext) =>
   Effect.gen(function* scalarArray() {
     const array = isScalarArraySchema(context.defs, parameter.schema.key);
     if (Result.isFailure(array)) {
@@ -365,8 +509,37 @@ const isArrayParameter = (parameter: Parameter, context: CommandContext) =>
     return array.success;
   });
 
+// Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
+// builder hands to the style serializer. A `content` parameter is one value whatever its schema.
+const isObjectParameter = ({ serialization }: Pick<Typed, "serialization">): boolean =>
+  serialization.kind === "style" && serialization.objectValued;
+
+// The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
+// 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
+// `content` parameter is one value whatever its schema, so it has none.
+const numericKindOf = (parameter: Typed, context: CommandContext) =>
+  Effect.gen(function* numeric() {
+    let kind: NumericKind | undefined;
+    if (parameter.serialization.kind === "style") {
+      const type = scalarTypeOf(context.defs, parameter.schema.key);
+      if (Result.isFailure(type)) {
+        return yield* refuse("unresolved-schema", type.failure);
+      }
+
+      if (type.success === "integer" || type.success === "number") {
+        kind = type.success;
+      }
+    }
+
+    return kind;
+  });
+
 const parameterDescription = (parameter: Parameter): string =>
   parameter.docs.description ?? parameter.docs.summary ?? "";
+
+// The notice step of a deprecated parameter's flag or argument (PRM-07); none for any other.
+const deprecation = (parameter: Parameter, combinator: string, name: string): readonly Expr[] =>
+  parameter.deprecated ? [fn(combinator, str(name))] : [];
 
 const positionalEntry = (
   operation: Operation,
@@ -395,41 +568,206 @@ const positionalEntry = (
       return yield* refuse("unsupported-parameter", `path:${positional.wireName}`);
     }
 
+    const object = isObjectParameter(parameter);
+    const numeric = yield* numericKindOf(parameter, context);
+    let head = fn("Argument.String", str(positional.name));
+    if (object) {
+      head = fn("Input.jsonArgument", str(positional.name));
+    } else if (numeric !== undefined) {
+      head = fn("Input.numericArgument", str(positional.name), str(numeric));
+    }
+
     const described = describedBy(parameterDescription(parameter));
-    const value = pipe(fn("Argument.String", str(positional.name)), [
+    const value = pipe(head, [
+      ...(object ? [fn("Argument.withMetavar", str("json"))] : []),
       ...(array ? [fn("Argument.atLeast", num(1))] : []),
+      ...deprecation(parameter, "Input.deprecatedArgument", positional.name),
       ...(described.length === 0 ? [] : [fn("Argument.withDescription", ...described)]),
     ]);
 
     return [positional.identifier, value] as const;
   });
 
-const flagConstructor = (flag: PlannedFlag, kind: string): Expr => {
-  if (flag.boolean || kind === "boolean") {
-    return fn("Flag.Boolean", str(flag.name));
-  }
+// The step that carries a numeric flag's checked text as a `JsonNumber`, so the JSON body or the
+// multipart part sends the operator's digits unchanged (FMT-04).
+const asJsonNumber = fn(
+  "Flag.map",
+  arrow([{ name: I("text") }], newExpr(path("Input.JsonNumber"), [ident(I("text"))])),
+);
 
-  if (kind === "integer") {
-    return fn("Flag.Int", str(flag.name));
-  }
+// A body field flag's constructor and the steps before its presence wrapper.
+interface BodyFlagHead {
+  readonly head: Expr;
+  readonly steps: readonly Expr[];
+}
 
-  return fn("Flag.Finite", str(flag.name));
-};
-
-const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): Expr => {
+// An `integer` or `number` field is checked against the same grammar as an `integer` or `number`
+// parameter (an `int64` one as digits by `Input.int64Flag`), never parsed to a JavaScript number.
+const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): BodyFlagHead => {
   if (kind === "json") {
-    return fn("Input.jsonFlag", str(flag.name));
+    return { head: fn("Input.jsonFlag", str(flag.name)), steps: [] };
   }
 
   if (kind === "integer" && integer === "int64") {
-    return fn("Input.int64Flag", str(flag.name));
+    return { head: fn("Input.int64Flag", str(flag.name)), steps: [] };
   }
 
   // A multipart `file` part flag carries a path, or `-` for stdin.
-  return kind === "string" || kind === "file"
-    ? fn("Flag.String", str(flag.name))
-    : flagConstructor(flag, kind);
+  if (kind === "string" || kind === "file") {
+    return { head: fn("Flag.String", str(flag.name)), steps: [] };
+  }
+
+  if (flag.boolean || kind === "boolean") {
+    return { head: fn("Flag.Boolean", str(flag.name)), steps: [] };
+  }
+
+  return {
+    head: fn("Input.numericFlag", str(flag.name), str(kind === "integer" ? "integer" : "number")),
+    steps: [asJsonNumber],
+  };
 };
+
+// A JSON or form body property the runtime reads from a file and encodes (design 6.3 Binary): its
+// flag is a `file` flag inside a JSON or form alternative, where a multipart part flag of the same
+// kind is a part.
+const isEncodedField = (flag: PlannedFlag, alternative: MediaAlternative | undefined): boolean =>
+  (alternative?.codec === "json" || alternative?.codec === "form") &&
+  flag.source._tag === "Body" &&
+  flag.source.kind === "file" &&
+  !flag.source.repeated;
+
+const fileDescription = ({ description, encoding, mediaType }: FieldSchema): string =>
+  [
+    description,
+    `File path, or - for stdin; the ${encoding ?? "base64"} encoding is applied for you.`,
+    ...(mediaType === undefined ? [] : [`Content type: ${mediaType}.`]),
+  ]
+    .filter((part) => part !== "")
+    .join(" ");
+
+// The transfer encoding of a multipart `file` part flag, from its Encoding rule and never its
+// schema (design 6.3 Multipart transfer encoding): the runtime encodes the file's bytes.
+const partEncoding = (
+  flag: PlannedFlag,
+  alternative: MediaAlternative | undefined,
+): FieldEncoding | undefined => {
+  const { source } = flag;
+  if (alternative?.codec !== "multipart" || source._tag !== "Body" || source.kind !== "file") {
+    return undefined;
+  }
+
+  return alternative.encoding.find(
+    (rule) =>
+      rule.target.kind === "property" && formatPointer([rule.target.name]) === source.wireName,
+  )?.contentEncoding;
+};
+
+// A field flag's help text; an encoded field the walk cannot settle an encoding for is refused.
+const fieldDescription = (
+  flag: PlannedFlag,
+  alternative: MediaAlternative | undefined,
+  schema: FieldSchema,
+) =>
+  Effect.gen(function* described() {
+    const encoding = partEncoding(flag, alternative);
+    if (encoding !== undefined) {
+      return fileDescription({ ...schema, encoding });
+    }
+
+    if (!isEncodedField(flag, alternative)) {
+      return schema.description;
+    }
+
+    if (schema.encoding === undefined) {
+      return yield* refuse("unsupported-flag", flag.name);
+    }
+
+    return fileDescription(schema);
+  });
+
+// A parameter flag's constructor. A `content` parameter's value (any location, `querystring`
+// included) is JSON data under JSON media and form querystring media (design 6.1), decoded the way
+// a non-flattened JSON field flag is, and the operator's string under any other media; a boolean
+// styled parameter is negatable, an object one takes JSON, and an `integer` or `number` one (per item
+// for an array) is checked against its grammar.
+const parameterFlagHead = (
+  flag: PlannedFlag,
+  parameter: Typed,
+  object: boolean,
+  numeric: NumericKind | undefined,
+): Expr => {
+  const { location, serialization } = parameter;
+  if (serialization.kind === "content") {
+    return takesJsonContent(location, serialization.mediaType)
+      ? fn("Input.jsonFlag", str(flag.name))
+      : fn("Flag.String", str(flag.name));
+  }
+
+  if (object) {
+    return fn("Input.jsonFlag", str(flag.name));
+  }
+
+  if (flag.boolean) {
+    return fn("Flag.Boolean", str(flag.name));
+  }
+
+  return numeric === undefined
+    ? fn("Flag.String", str(flag.name))
+    : fn("Input.numericFlag", str(flag.name), str(numeric));
+};
+
+type PartOptionSource = Extract<PlannedFlag["source"], { readonly _tag: "PartOption" }>;
+
+// The Encoding header a part header option sets, from the first multipart alternative it applies to.
+const partHeaderOf = (operation: Operation, source: PartOptionSource) => {
+  const { option } = source;
+
+  return (operation.body?.alternatives ?? [])
+    .filter((alternative) => source.media.includes(alternative.mediaType))
+    .flatMap((alternative) => alternative.encoding)
+    .find(
+      ({ target }) => target.kind === "property" && formatPointer([target.name]) === source.part,
+    )
+    ?.headers.find((header) => option.kind === "header" && header.name === option.name);
+};
+
+// A content type option takes one of the listed values, with no default (ENC-10). A part header
+// option is typed as a header parameter of its schema or content is, and is optional at parse:
+// `Input.partOptions` requires it only when its part is sent (ENC-03).
+const partOptionEntry = (
+  flag: PlannedFlag,
+  source: PartOptionSource,
+  operation: Operation,
+  context: CommandContext,
+) =>
+  Effect.gen(function* entry() {
+    if (source.option.kind === "content-type") {
+      const choices = arr(source.option.choices.map((choice) => str(choice)));
+
+      return [
+        flag.identifier,
+        pipe(fn("Flag.Literals", str(flag.name), choices), [path("Flag.optional")]),
+      ] as const;
+    }
+
+    const header = partHeaderOf(operation, source);
+    if (header === undefined) {
+      return yield* refuse("unsupported-flag", flag.name);
+    }
+
+    const typed: Typed = { ...header, location: "header" };
+    const array =
+      header.serialization.kind === "style" && (yield* isArrayParameter(typed, context));
+    const object = isObjectParameter(typed);
+    const head = parameterFlagHead(flag, typed, object, yield* numericKindOf(typed, context));
+    const steps = [
+      ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
+      array ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
+      ...(header.deprecated ? [fn("Input.deprecated", str(flag.name))] : []),
+    ];
+
+    return [flag.identifier, pipe(head, steps)] as const;
+  });
 
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
@@ -448,17 +786,27 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
         return yield* refuse("unplanned-parameter", `${source.location}:${source.wireName}`);
       }
 
-      if (parameter.required && flag.boolean) {
+      // A `content` parameter is one value, whatever its schema: never negatable, never repeated.
+      const styled = parameter.serialization.kind === "style";
+      if (styled && parameter.required && flag.boolean) {
         return yield* refuse("unsupported-flag", flag.name);
       }
 
-      const array = yield* isArrayParameter(parameter, context);
-      const head = flag.boolean
-        ? fn("Flag.Boolean", str(flag.name))
-        : fn("Flag.String", str(flag.name));
+      const array = styled && (yield* isArrayParameter(parameter, context));
+      const object = isObjectParameter(parameter);
+      const head = parameterFlagHead(
+        flag,
+        parameter,
+        object,
+        yield* numericKindOf(parameter, context),
+      );
       const presence = parameter.required ? [] : [path("Flag.optional")];
+      // A deprecated parameter's notice goes outside the presence wrapper, which settles whether
+      // the operator gave the flag (PRM-07).
       const steps = [
+        ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
+        ...deprecation(parameter, "Input.deprecated", flag.name),
         ...describedBy(parameterDescription(parameter)).map((text) =>
           fn("Flag.withDescription", text),
         ),
@@ -467,21 +815,21 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return [flag.identifier, pipe(head, steps)] as const;
     }
 
-    const alternative = operation.body?.alternatives.find((candidate) =>
-      source.media.includes(candidate.mediaType),
-    );
-    const schema: { readonly description: string; readonly integer: IntegerWidth } =
-      alternative?.schema === undefined
-        ? { description: "", integer: "unsettled" }
-        : fieldSchema(context.defs, alternative.schema.key, source.wireName, source.repeated);
+    if (source._tag === "PartOption") {
+      return yield* partOptionEntry(flag, source, operation, context);
+    }
+
+    const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
 
-    const head = bodyFlagHead(flag, source.kind, schema.integer);
+    const description = yield* fieldDescription(flag, alternative, schema);
+    const { head, steps: carried } = bodyFlagHead(flag, source.kind, schema.integer);
     const steps = [
+      ...carried,
       source.repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
-      ...describedBy(schema.description).map((text) => fn("Flag.withDescription", text)),
+      ...describedBy(description).map((text) => fn("Flag.withDescription", text)),
     ];
 
     return [flag.identifier, pipe(head, steps)] as const;
@@ -513,6 +861,19 @@ const wholeBody = (
 const isOpaque = (alternative: MediaAlternative): boolean =>
   alternative.codec === "binary" || alternative.codec === "xml";
 
+// Bodies sent as the operator's bytes, as given: `--body` text or a `--body-file` stream, never
+// parsed or framed (design 6.3 Sequential uploads).
+const isVerbatim = (alternative: MediaAlternative): boolean =>
+  alternative.codec === "ndjson" || alternative.codec === "jsonseq" || alternative.codec === "text";
+
+// Bodies the command hands to the builder as an `HttpBody`, not a JSON value.
+const isLoaded = (alternative: MediaAlternative): boolean =>
+  isOpaque(alternative) || isVerbatim(alternative);
+
+// A form-urlencoded body is merged from the JSON body sources into the value the `api/` builder
+// encodes (`Input.structuredBody`). A text or sequential body is `Input.sequentialBody`; the
+// builder's `Serialize.body` sets its media type as `Content-Type`. A multipart body is
+// `formBody`'s, and an SSE body is refused.
 const alternativeBody = (
   command: PlannedCommand,
   alternative: MediaAlternative,
@@ -525,13 +886,28 @@ const alternativeBody = (
       ["bodyFile", yield* wholeBody(command, "body-file")],
     ];
     if (isOpaque(alternative)) {
+      // MED-21: a binary body's `maxLength` counts its octets, so it bounds the upload.
+      const limit =
+        alternative.codec === "binary" && alternative.schema !== undefined
+          ? fieldSchema(context, alternative.schema.key, "", false).maxLength
+          : undefined;
+      const bound: Entry[] = limit === undefined ? [] : [["maxBytes", num(limit)]];
+
       return {
         domain: [],
-        value: fn("Input.binaryBody", obj([...sources, ["required", bool(required)]])),
+        value: fn("Input.binaryBody", obj([...sources, ...bound, ["required", bool(required)]])),
       };
     }
 
-    if (alternative.codec !== "json") {
+    if (isVerbatim(alternative)) {
+      return {
+        domain: [],
+        value: fn("Input.sequentialBody", obj([...sources, ["required", bool(required)]])),
+      };
+    }
+
+    const structured = alternative.codec === "form";
+    if (alternative.codec !== "json" && !structured) {
       return yield* refuse("unsupported-body", `${alternative.codec}:${alternative.mediaType}`);
     }
 
@@ -541,17 +917,49 @@ const alternativeBody = (
       return yield* refuse("unresolved-schema", alternative.mediaType);
     }
 
+    const schemaKey = alternative.schema?.key ?? "";
     const fields: Entry[] = [];
     for (const flag of command.flags.filter(isFieldFlag)) {
-      if (flag.source._tag === "Body" && flag.source.media.includes(alternative.mediaType)) {
-        fields.push([flag.source.wireName, yield* flagValue(flag.identifier)]);
+      const { source } = flag;
+      if (source._tag !== "Body" || !source.media.includes(alternative.mediaType)) {
+        continue;
       }
+
+      const value = yield* flagValue(flag.identifier);
+      if (!isEncodedField(flag, alternative)) {
+        fields.push([source.wireName, value]);
+        continue;
+      }
+
+      const { encoding } = fieldSchema(context, schemaKey, source.wireName, false);
+      if (encoding === undefined) {
+        return yield* refuse("unsupported-flag", flag.name);
+      }
+
+      // The flag stays a path string at parse; the runtime reads and encodes it (m2-b64a).
+      fields.push([
+        source.wireName,
+        fn(
+          "Option.map",
+          value,
+          arrow(
+            [{ name: I("path") }],
+            newExpr(path("Input.FileField"), [
+              obj([
+                ["encoding", str(encoding)],
+                ["flag", str(flag.name)],
+                ["path", ident(I("path"))],
+              ]),
+            ]),
+          ),
+        ),
+      ]);
     }
 
     return {
       domain: [schemaName],
       value: fn(
-        "Input.mergeBody",
+        structured ? "Input.structuredBody" : "Input.mergeBody",
         obj([
           ...sources,
           ["fields", obj(fields)],
@@ -563,12 +971,20 @@ const alternativeBody = (
   });
 
 // A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
-// file part opens each path, or stdin for `-` under the invocation's one stdin claim.
+// JSON part's value is `Serialize.jsonPart`'s (ENC-22). A file part opens each path, or stdin for
+// `-` under the invocation's one stdin claim.
 const partValues = (part: FormPart) =>
   Effect.gen(function* values() {
     const { flag } = part;
     const repeated = flag.source._tag === "Body" && flag.source.repeated;
     const value = yield* flagValue(flag.identifier);
+    if (flag.source._tag === "Body" && flag.source.kind === "json" && !repeated) {
+      return fn(
+        "Effect.succeed",
+        fn("Option.toArray", fn("Option.map", value, path("Serialize.jsonPart"))),
+      );
+    }
+
     const list = repeated ? value : fn("Option.toArray", value);
     if (flag.source._tag !== "Body" || flag.source.kind !== "file") {
       return fn("Effect.succeed", list);
@@ -598,13 +1014,13 @@ const partValues = (part: FormPart) =>
 // 4.5, C2), and the domain name it imports; none for a multipart body that declares no schema.
 const formAssertion = (
   command: PlannedCommand,
+  alternative: MediaAlternative,
   parts: readonly FormPart[],
   context: CommandContext,
 ) =>
   Effect.gen(function* assertion() {
     const { body } = command.operation;
-    const key = body?.alternatives.find((alternative) => alternative.codec === "multipart")?.schema
-      ?.key;
+    const key = alternative.schema?.key;
     if (body === undefined || key === undefined) {
       return { domain: [], steps: [] };
     }
@@ -630,32 +1046,182 @@ const formAssertion = (
     };
   });
 
-// A `multipart/form-data` body: the part values, asserted against the body's schema and then
-// streamed by the `api/` builder through the runtime writer (design 6.3). There is no whole-body
-// flag (D-ENC1 a).
-const formBody = (command: PlannedCommand, context: CommandContext) =>
+// Whether the operator gave a flag at least once; a repeated flag's value is a list.
+const gaveFlag = (flag: PlannedFlag, repeated: boolean) =>
+  Effect.map(flagValue(flag.identifier), (value) =>
+    repeated ? fn("Option.isSome", fn("Option.fromIterable", value)) : fn("Option.isSome", value),
+  );
+
+const isRepeatedPart = (flag: PlannedFlag): boolean =>
+  flag.source._tag === "Body" && flag.source.repeated;
+
+// One part header's value as a header parameter (ENC-03, HDR-01), serialized by its style or
+// content as a header parameter is, and never required on its own: `Input.partOptions` settles
+// whether the sent part needs it. An array header's flag repeats, and its list is the value.
+const headerValue = (entry: PartHeader, array: boolean) =>
+  Effect.gen(function* value() {
+    const { flag, header } = entry;
+    const raw = yield* flagValue(flag.identifier);
+    const { serialization } = header;
+    if (serialization.kind === "content") {
+      return fn(
+        "Serialize.headerContent",
+        str(header.name),
+        str(serialization.mediaType),
+        fn("Option.getOrUndefined", raw),
+        obj([["required", bool(false)]]),
+      );
+    }
+
+    const options = obj([
+      ["explode", bool(serialization.explode)],
+      ["required", bool(false)],
+    ]);
+
+    return fn(
+      "Serialize.header",
+      str(header.name),
+      array ? raw : fn("Option.getOrUndefined", raw),
+      options,
+    );
+  });
+
+interface KeyedPart {
+  readonly check: Expr;
+  readonly choice: readonly [string, Expr];
+}
+
+// A keyed part (ENC-10, ENC-03): `Input.partOptions` refuses an option flag without the part and a
+// sent part without a required option, before any request, and `Serialize.chooseParts` moves the
+// sent part's values beside its type and header parameters under its key in the builder's form.
+const keyedPart = (part: FormPart, context: CommandContext) =>
+  Effect.gen(function* keyed() {
+    const { contentType, key } = part;
+    if (key === undefined) {
+      return Option.none<KeyedPart>();
+    }
+
+    const options: Expr[] = [];
+    let type: Expr;
+    if (contentType._tag === "Declared") {
+      type = str(contentType.mediaType);
+    } else {
+      type = yield* flagValue(contentType.flag.identifier);
+      options.push(arr([str(contentType.flag.name), fn("Option.isSome", type), bool(true)]));
+    }
+
+    const headers: Expr[] = [];
+    for (const entry of part.headers) {
+      const { header } = entry;
+      const array =
+        header.serialization.kind === "style" && (yield* isArrayParameter(header, context));
+      options.push(
+        arr([str(entry.flag.name), yield* gaveFlag(entry.flag, array), bool(header.required)]),
+      );
+      headers.push(yield* headerValue(entry, array));
+    }
+
+    const sent = yield* gaveFlag(part.flag, isRepeatedPart(part.flag));
+    const choice = arr([str(part.name), type, ...(headers.length === 0 ? [] : [arr(headers)])]);
+
+    return Option.some<KeyedPart>({
+      check: fn("Input.partOptions", str(part.flag.name), sent, arr(options)),
+      choice: [key, choice],
+    });
+  });
+
+// A `multipart/form-data` alternative's body: the part values, asserted against its schema and
+// then streamed by the `api/` builder through the runtime writer (design 6.3). There is no
+// whole-body flag (D-ENC1 a). A part with a chosen type leaves the values for the builder's form.
+const formBody = (
+  command: PlannedCommand,
+  alternative: MediaAlternative,
+  context: CommandContext,
+) =>
   Effect.gen(function* form() {
-    const parts = formParts(command, context.defs);
+    const parts = formParts(command, alternative, context.defs);
     if (Result.isFailure(parts)) {
       return yield* refuse("unsupported-body", parts.failure);
     }
 
     const entries: Entry[] = [];
+    const checks: Expr[] = [];
+    const choices: Entry[] = [];
     for (const part of parts.success) {
       entries.push([part.name, yield* partValues(part)]);
+
+      const keyed = yield* keyedPart(part, context);
+      if (Option.isSome(keyed)) {
+        checks.push(keyed.value.check);
+        choices.push(keyed.value.choice);
+      }
     }
 
-    const assertion = yield* formAssertion(command, parts.success, context);
+    const assertion = yield* formAssertion(command, alternative, parts.success, context);
+    const values = fn("Effect.all", obj(entries));
+    const [check, ...more] = checks;
+    const ordered = [...more, values].map((next) => fn("Effect.andThen", next));
+    const split =
+      choices.length === 0 ? [] : [fn("Effect.flatMap", fn("Serialize.chooseParts", obj(choices)))];
 
     return {
       args: [["body", ident(I("parts"))]],
       domain: assertion.domain,
-      head: fn("Effect.all", obj(entries)),
+      head: check ?? values,
       parameter: "parts",
-      steps: assertion.steps,
+      steps: [...(check === undefined ? [] : ordered), ...assertion.steps, ...split],
     } satisfies BodyPlan;
   });
 
+// The body flags that do not apply to one alternative, each mapped to whether the operator gave
+// it (`Input.selectBody`'s `foreign`): a field, part or part option flag whose media does not list
+// the key, and `--body` and `--body-file` for a multipart key (D-ENC1 a). A binary or XML key keeps
+// its own `--body` refusal.
+const foreignFlags = (command: PlannedCommand, alternative: MediaAlternative) =>
+  Effect.gen(function* foreign() {
+    const entries: Entry[] = [];
+    for (const flag of command.flags) {
+      const { source } = flag;
+      if (source._tag === "Parameter") {
+        continue;
+      }
+
+      const applies = isWholeBody(flag)
+        ? alternative.codec !== "multipart"
+        : source.media.includes(alternative.mediaType);
+      if (applies) {
+        continue;
+      }
+
+      const value = yield* flagValue(flag.identifier);
+      const repeated = source._tag === "Body" && source.repeated;
+      const given = repeated ? fn("Option.fromIterable", value) : value;
+      entries.push([flag.name, fn("Option.isSome", given)]);
+    }
+
+    return entries;
+  });
+
+// One alternative's unevaluated body effect in the `Input.selectBody` table.
+const choiceEntry = (
+  command: PlannedCommand,
+  alternative: MediaAlternative,
+  required: boolean,
+  context: CommandContext,
+) =>
+  Effect.gen(function* entry() {
+    if (alternative.codec !== "multipart") {
+      return yield* alternativeBody(command, alternative, required, context);
+    }
+
+    const form = yield* formBody(command, alternative, context);
+
+    return { domain: form.domain, value: pipe(form.head, form.steps ?? []) };
+  });
+
+// A lone alternative is built directly. Several, or a range key, go into the `Input.selectBody`
+// table with each key's foreign flags; the builder takes the whole choice when it encodes per key
+// (`encodesByKey`), else the chosen body and its `Content-Type`.
 const bodyPlan = (
   command: PlannedCommand,
   meta: Expr,
@@ -669,13 +1235,13 @@ const bodyPlan = (
       return Option.none();
     }
 
-    if (body.alternatives.some((alternative) => alternative.codec === "multipart")) {
-      return Option.some(yield* formBody(command, context));
+    if (!choosesType && first.codec === "multipart") {
+      return Option.some(yield* formBody(command, first, context));
     }
 
     if (!choosesType) {
       const single = yield* alternativeBody(command, first, body.required, context);
-      const parameter = isOpaque(first) ? "loaded" : "merged";
+      const parameter = isLoaded(first) ? "loaded" : "merged";
 
       return Option.some({
         args: [["body", ident(I(parameter))]],
@@ -687,28 +1253,37 @@ const bodyPlan = (
 
     const alternatives: Entry[] = [];
     const domain: string[] = [];
+    const foreign: Entry[] = [];
     for (const alternative of body.alternatives) {
-      const built = yield* alternativeBody(command, alternative, body.required, context);
+      const built = yield* choiceEntry(command, alternative, body.required, context);
       alternatives.push([alternative.mediaType, built.value]);
       domain.push(...built.domain);
+
+      const misplaced = yield* foreignFlags(command, alternative);
+      if (misplaced.length > 0) {
+        foreign.push([alternative.mediaType, obj(misplaced)]);
+      }
     }
 
     const selected = ident(I("selected"));
+    const options: Entry[] = [
+      ["alternatives", obj(alternatives)],
+      ["chosen", path("flags.contentType")],
+      ["media", member(meta, M("media"))],
+    ];
+    if (foreign.length > 0) {
+      options.push(["foreign", obj(foreign)]);
+    }
 
     return Option.some({
-      args: [
-        ["body", member(selected, M("body"))],
-        ["contentType", member(selected, M("contentType"))],
-      ],
+      args: encodesByKey(body.alternatives)
+        ? [["body", selected]]
+        : [
+            ["body", member(selected, M("body"))],
+            ["contentType", member(selected, M("contentType"))],
+          ],
       domain,
-      head: fn(
-        "Input.selectBody",
-        obj([
-          ["alternatives", obj(alternatives)],
-          ["chosen", path("flags.contentType")],
-          ["media", member(meta, M("media"))],
-        ]),
-      ),
+      head: fn("Input.selectBody", obj(options)),
       parameter: "selected",
     });
   });
@@ -725,7 +1300,33 @@ const bindingOf = (location: string, pointer: string, wireName: string): Expr =>
     ["wireName", str(wireName)],
   ]);
 
-const helpFlags = (command: PlannedCommand): readonly HelpFlag[] => {
+// What help says of a part option: its choices, or its header's marks and its part flag.
+const helpPartOption = (
+  command: PlannedCommand,
+  source: PartOptionSource,
+): HelpPartOption | undefined => {
+  const { option } = source;
+  if (option.kind === "content-type") {
+    return option;
+  }
+
+  const header = partHeaderOf(command.operation, source);
+  const part = command.flags.find(
+    (flag) => flag.source._tag === "Body" && flag.source.wireName === source.part,
+  );
+
+  return header === undefined || part === undefined
+    ? undefined
+    : {
+        deprecated: header.deprecated,
+        kind: "header",
+        name: header.name,
+        partFlag: part.name,
+        required: header.required,
+      };
+};
+
+const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFlag[] => {
   const { operation } = command;
   const positionals = command.positionals.flatMap((positional) => {
     const parameter = parameterOf(operation, "path", positional.wireName);
@@ -744,7 +1345,17 @@ const helpFlags = (command: PlannedCommand): readonly HelpFlag[] => {
     .flatMap((flag): readonly HelpFlag[] => {
       const { source } = flag;
       if (source._tag === "Body") {
-        return [{ name: flag.name, source: { _tag: "Body", pointer: source.wireName } }];
+        const field = bodyField(operation, source, store).schema.notes;
+
+        return [{ name: flag.name, source: { _tag: "Body", field, pointer: source.wireName } }];
+      }
+
+      if (source._tag === "PartOption") {
+        const option = helpPartOption(command, source);
+
+        return option === undefined
+          ? []
+          : [{ name: flag.name, source: { _tag: "PartOption", option, part: source.part } }];
       }
 
       const parameter = parameterOf(operation, source.location, source.wireName);
@@ -770,9 +1381,10 @@ const describeParameters = (command: PlannedCommand): Expr =>
       .filter((flag) => !isWholeBody(flag))
       .map((flag) => {
         const { source } = flag;
-        const location = source._tag === "Body" ? "body" : source.location;
+        const location = source._tag === "Parameter" ? source.location : "body";
+        const wireName = source._tag === "PartOption" ? source.part : source.wireName;
 
-        return [flag.name, bindingOf(location, source.pointer, source.wireName)] as const;
+        return [flag.name, bindingOf(location, source.pointer, wireName)] as const;
       }),
   ]);
 
@@ -853,7 +1465,7 @@ const annotationsOf = (command: PlannedCommand, meta: Expr, context: CommandCont
   const help = operationHelp({
     credentials: context.plan.credentials,
     diagnostics: context.plan.diagnostics,
-    flags: helpFlags(command),
+    flags: helpFlags(command, context),
     operation: command.operation,
     schemes: context.api.securitySchemes,
   });
@@ -885,9 +1497,22 @@ const commandStatement = (
   context: CommandContext,
 ): Effect.Effect<CommandParts, CliEmitError> =>
   Effect.gen(function* statement() {
-    const namespace = ident(yield* identifier(context.namespace));
+    // The `api/` layer emits no builder for an operation with a parameter it does not build.
+    const unbuilt = command.operation.parameters.find((parameter) => !buildsParameter(parameter));
+    if (unbuilt !== undefined) {
+      return yield* refuse("unsupported-parameter", `${unbuilt.location}:${unbuilt.wireName}`);
+    }
+
+    // Every command of an operation, alias or not, calls the primary's builder and meta, so each
+    // sends the same bytes and binds the same operation.
+    const target = context.targets.get(command.operation);
+    if (target === undefined) {
+      return yield* refuse("unknown-primary", command.name);
+    }
+
+    const namespace = ident(yield* identifier(target.namespace));
     const name = yield* identifier(command.identifier);
-    const meta = member(namespace, yield* memberName(`${command.identifier}Meta`));
+    const meta = member(namespace, yield* memberName(`${target.identifier}Meta`));
     const choices = choicesOf(command.operation);
     const config = yield* configOf(command, choices, context);
     const body = yield* bodyPlan(command, meta, choices.choosesType, context);
@@ -895,7 +1520,7 @@ const commandStatement = (
       ...Option.match(body, { onNone: () => [], onSome: (plan) => plan.args }),
       ...(yield* parameterInputs(command, context)),
     ];
-    const builder = member(namespace, yield* memberName(command.identifier));
+    const builder = member(namespace, yield* memberName(target.identifier));
     const built = call(builder, inputs.length === 0 ? [] : [obj(inputs)]);
     const send = fn(
       "Effect.flatMap",
@@ -977,6 +1602,7 @@ const heads = (expr: Expr, into: Set<string>): Set<string> => {
       break;
     }
     case "Boolean":
+    case "DynamicImport":
     case "Number":
     case "String":
     case "Undefined": {
@@ -989,16 +1615,6 @@ const heads = (expr: Expr, into: Set<string>): Set<string> => {
 
   return into;
 };
-
-const packageImports: readonly (readonly [string, string])[] = [
-  ["Effect", "effect"],
-  ["Layer", "effect"],
-  ["Option", "effect"],
-  ["Schema", "effect"],
-  ["Argument", "effect/cli"],
-  ["Command", "effect/cli"],
-  ["Flag", "effect/cli"],
-];
 
 interface Binding {
   readonly from: string;
@@ -1115,7 +1731,50 @@ const commandsOf = (
     };
   });
 
-const groupFile = (group: PlannedGroup, built: Commands, children: readonly PlannedGroup[]) =>
+interface ApiModule {
+  readonly commands: readonly PlannedCommand[];
+  readonly from: string;
+  readonly namespace: string;
+}
+
+// Every api module under the namespace the names plan gave it, unique across the modules.
+const apiModules = (plan: NamePlan): readonly ApiModule[] => [
+  ...plan.groups.map((group) => ({
+    commands: group.commands,
+    from: `../api/${group.segment}.ts`,
+    namespace: String(group.namespace),
+  })),
+  { commands: plan.root, from: "../api/root.ts", namespace: rootNamespace },
+];
+
+const targetsOf = (plan: NamePlan): ReadonlyMap<Operation, Target> =>
+  new Map(
+    apiModules(plan).flatMap(({ commands, from, namespace }) =>
+      commands
+        .filter((command) => command.alias === undefined)
+        .map((command) => [command.operation, { from, identifier: command.identifier, namespace }]),
+    ),
+  );
+
+// The api namespaces a cli module may read, one per api module under its planned name; only the
+// ones its commands use are imported.
+const apiBindings = (plan: NamePlan): readonly Binding[] =>
+  apiModules(plan).map(({ from, namespace }) => ({ from, kind: "Namespace", name: namespace }));
+
+// The header fields a group module's `Command.make` sets, which its root table entry carries
+// (`runtime/groups.ts` `Header`): today the name only.
+interface GroupHeader {
+  readonly name: string;
+}
+
+const headerOf = (group: PlannedGroup): GroupHeader => ({ name: group.name });
+
+const groupFile = (
+  group: PlannedGroup,
+  built: Commands,
+  children: readonly PlannedGroup[],
+  api: readonly Binding[],
+) =>
   Effect.gen(function* file() {
     const { domain, emitted, statements } = built;
     const subcommands = [
@@ -1128,7 +1787,7 @@ const groupFile = (group: PlannedGroup, built: Commands, children: readonly Plan
         _tag: "Const",
         exported: true,
         name: I("group"),
-        value: pipe(fn("Command.make", str(group.name)), [
+        value: pipe(fn("Command.make", str(headerOf(group).name)), [
           fn("Command.withSubcommands", arr(subcommands)),
         ]),
       },
@@ -1136,7 +1795,7 @@ const groupFile = (group: PlannedGroup, built: Commands, children: readonly Plan
     yield* checkDistinct(declaredNames(all));
 
     const imports = yield* moduleImports(all, [
-      { from: `../api/${group.segment}.ts`, kind: "Namespace", name: group.namespace },
+      ...api,
       ...domainBindings(domain),
       ...children.map((child) => ({
         from: `./${child.segment}.ts`,
@@ -1201,18 +1860,30 @@ const globalSettings: readonly string[] = [
   "Describe.describeFlag",
 ];
 
+// One table row per top-level group: its header and a thunk importing its module by a literal
+// specifier, so the module loads only when `Groups.root` selects it (design 4.1 Lazy root).
+const tableEntry = (group: PlannedGroup) =>
+  specifier(`./${group.segment}.ts`, "unprintable-name").pipe(
+    Effect.map((from) =>
+      obj([
+        ["load", arrow([], dynamicImport(from))],
+        ["name", str(headerOf(group).name)],
+      ]),
+    ),
+  );
+
 const rootFile = (
   topLevel: readonly PlannedGroup[],
   built: Commands,
   plan: NamePlan,
   config: AuthorConfig,
+  api: readonly Binding[],
 ) =>
   Effect.gen(function* file() {
     const { domain, emitted, statements } = built;
     const author = yield* authorCommands(config);
     const prefix = str(envPrefixOf(config));
-    const subcommands = [
-      ...topLevel.map((group) => member(ident(I(cliAlias(group))), M("group"))),
+    const others = [
       ...emitted.map((command) => ident(I(command.identifier))),
       ...author.names.map((name) => ident(I(name))),
     ];
@@ -1222,17 +1893,47 @@ const rootFile = (
         fn("Auth.credentialFileSetting", str(credential.scheme)),
       ),
     ];
+    // The loaded groups come first, then the untagged and author commands, as the eager order was.
+    const subcommands =
+      others.length === 0 ? path("groups") : fn("Arr.appendAll", path("groups"), arr(others));
+    const header = (children: Expr) =>
+      pipe(fn("Command.make", str(config.binName)), [
+        fn("Command.withSubcommands", children),
+        fn("Command.withGlobalFlags", arr(settings)),
+      ]);
+    const entries = yield* Effect.all(topLevel.map(tableEntry));
+    // With no top-level group there is nothing to load, and an empty table would infer `unknown`
+    // requirements, so the root is the header over the other commands.
+    const lazy: Statement[] =
+      topLevel.length === 0
+        ? [
+            {
+              _tag: "Const",
+              exported: true,
+              name: I("root"),
+              value: arrow([], fn("Effect.succeed", header(arr(others)))),
+            },
+          ]
+        : [
+            { _tag: "Const", exported: true, name: I("table"), value: arr(entries) },
+            {
+              _tag: "Const",
+              exported: true,
+              name: I("root"),
+              value: arrow(
+                [{ name: I("args"), type: typeReadonlyArray(typeKeyword("string")) }],
+                fn(
+                  "Groups.root",
+                  path("table"),
+                  arrow([{ name: I("groups") }], header(subcommands)),
+                  path("args"),
+                ),
+              ),
+            },
+          ];
     const all: Statement[] = [
       ...statements,
-      {
-        _tag: "Const",
-        exported: true,
-        name: I("root"),
-        value: pipe(fn("Command.make", str(config.binName)), [
-          fn("Command.withSubcommands", arr(subcommands)),
-          fn("Command.withGlobalFlags", arr(settings)),
-        ]),
-      },
+      ...lazy,
       {
         _tag: "Const",
         exported: true,
@@ -1246,20 +1947,15 @@ const rootFile = (
         ),
       },
     ];
-    yield* checkDistinct([...declaredNames(all), ...author.names]);
+    // `args` and `groups` are the root's parameters: a command of either name would be shadowed.
+    yield* checkDistinct([...declaredNames(all), ...author.names, "args", "groups"]);
 
     const imports = yield* moduleImports(all, [
-      ...(emitted.length === 0
-        ? []
-        : [{ from: "../api/root.ts", kind: "Namespace" as const, name: "Root" }]),
+      ...api,
       { from: "../api/security.ts", kind: "Named", name: "security" },
       { from: "../api/servers.ts", kind: "Named", name: "servers" },
+      ...rootNamespaceImports.map(([name, from]) => ({ from, kind: "Namespace" as const, name })),
       ...domainBindings(domain),
-      ...topLevel.map((group) => ({
-        from: `./${group.segment}.ts`,
-        kind: "Namespace" as const,
-        name: cliAlias(group),
-      })),
       ...author.bindings,
     ]);
     const content = yield* printModule({ imports, statements: all });
@@ -1273,13 +1969,56 @@ const decodeDefs = Schema.decodeUnknownOption(
 
 const byPath = Order.mapInput(Order.String, (file: EmittedFile) => file.path);
 
+// The code normalize's validation copy records when it removes a 3.0 `default` (S30-27).
+const refusedDefaultCode = "S30-27/nonconforming-default";
+
+const isJsonArray = (json: Schema.Json | undefined): json is readonly Schema.Json[] =>
+  Arr.isArray(json);
+
+// The member of an object, or the element of an array, that one path token names.
+const childAt = (json: Schema.Json | undefined, token: string): Schema.Json | undefined => {
+  if (isJsonObject(json)) {
+    return own(json, token);
+  }
+
+  return isJsonArray(json) ? json[Number(token)] : undefined;
+};
+
+/**
+ * The stored nodes whose `default` normalize refused (S30-27, D-OC3: a refused default is not
+ * shown): the validation copy's edits under that code, located in `defs`, so help reads the one
+ * fact normalize records rather than re-checking conformance. Only the 3.0 line records one.
+ */
+const refusedDefaultsOf = (edits: readonly SchemaEdit[], defs: Defs): ReadonlySet<Schema.Json> => {
+  const nodes = new Set<Schema.Json>();
+  for (const edit of edits) {
+    if (edit.code !== refusedDefaultCode) {
+      continue;
+    }
+
+    let node: Schema.Json | undefined = own(defs, edit.key);
+    for (const token of edit.path.slice(0, -1)) {
+      node = childAt(node, token);
+    }
+
+    if (node !== undefined) {
+      nodes.add(node);
+    }
+  }
+
+  return nodes;
+};
+
 /**
  * Emits the V1 `cli/` layer (design 4.1, 4.4, 4.6, 4.8, 5, 6.6, 8.3; §14 D4, D5): `cli/<group>.ts`
- * per planned group with one `Command.make` per operation (inline `Flag` and `Argument`
- * constructors, three-state booleans, a handler that builds the body, calls the `api/` builder
- * with `inputKeys` and runs `Output.send`), its describe binding and help notes, and `group`;
- * and `cli/root.ts` with the untagged commands, the root command and its global settings, the
- * author-owned commands, and `services`. Files are sorted by path. An operation the layer cannot
+ * per planned group with one `Command.make` per planned command (inline `Flag` and `Argument`
+ * constructors, three-state booleans, a handler that builds the body, calls the operation's one
+ * `api/` builder, in its primary command's module, with `inputKeys` and runs `Output.send`), its
+ * describe binding and help notes, and `group`, so an alias is a full command for its operation;
+ * and `cli/root.ts` with the untagged commands, the header table that loads each top-level group
+ * by a literal `import()`, `root` building the root command and its global settings through
+ * `Groups.root` from the arguments, the author-owned commands, and `services`. Files are sorted by
+ * path. An operation the layer cannot
  * express is refused alone (`CliRefusal`), and a group left with no command and no emitted child
  * group is not emitted.
  */
@@ -1301,25 +2040,27 @@ export const emitCli = (
       return yield* refuse("unknown-parent", orphan.tag);
     }
 
-    const base: Omit<CommandContext, "namespace"> = {
+    const targets = targetsOf(plan);
+    const defs = Option.match(decodeDefs(api.schemas.document), {
+      onNone: (): Defs => ({}),
+      onSome: (store) => store.$defs,
+    });
+    const context: CommandContext = {
       api,
       booleans: new Map(),
-      defs: Option.match(decodeDefs(api.schemas.document), {
-        onNone: () => ({}),
-        onSome: (store) => store.$defs,
-      }),
+      defs,
       domain: plan.domain,
+      line: api.line,
       plan,
+      refusedDefaults: refusedDefaultsOf(input.validationEdits, defs),
+      targets,
     };
     const built = new Map<string, Commands>();
     for (const group of plan.groups) {
-      built.set(
-        group.tag,
-        yield* commandsOf(group.commands, { ...base, namespace: group.namespace }),
-      );
+      built.set(group.tag, yield* commandsOf(group.commands, context));
     }
 
-    const rootCommands = yield* commandsOf(plan.root, { ...base, namespace: "Root" });
+    const rootCommands = yield* commandsOf(plan.root, context);
     // A group is emitted when it keeps a command or has an emitted child group.
     const emitted = new Set<string>();
     let grew = true;
@@ -1344,7 +2085,9 @@ export const emitCli = (
       groups.filter((child) => child.parent === group.tag);
     const files: EmittedFile[] = [
       ...(yield* Effect.all(
-        groups.map((group) => groupFile(group, commandsFor(group), childrenOf(group))),
+        groups.map((group) =>
+          groupFile(group, commandsFor(group), childrenOf(group), apiBindings(plan)),
+        ),
       )),
     ];
     files.push(
@@ -1353,6 +2096,7 @@ export const emitCli = (
         rootCommands,
         plan,
         config,
+        apiBindings(plan),
       ),
     );
 

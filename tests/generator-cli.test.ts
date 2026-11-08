@@ -25,7 +25,7 @@ const goldenText = readFixture("openapi.json");
 
 const goldenSpec = decodeRecord(JSON.parse(goldenText));
 
-// The golden spec plus one operation whose only request body is `text/plain` (EMT-1).
+// The golden spec plus one operation whose only request body is `text/event-stream` (EMT-1).
 const withTextBody = JSON.stringify({
   ...goldenSpec,
   paths: {
@@ -33,7 +33,10 @@ const withTextBody = JSON.stringify({
     "/notes": {
       post: {
         operationId: "notes-create",
-        requestBody: { content: { "text/plain": { schema: { type: "string" } } }, required: true },
+        requestBody: {
+          content: { "text/event-stream": { schema: { type: "string" } } },
+          required: true,
+        },
         responses: { "204": { description: "Stored." } },
         tags: ["notes"],
       },
@@ -160,6 +163,20 @@ describe("generator CLI", () => {
       expect(lines(ran.stderr)).toHaveLength(1);
       expect(entries(ran.dir)).toEqual(["c.json"]);
     }
+  });
+
+  test("an unsupported openapi version prints its DOC-02 refusal line and exits 1", () => {
+    const spec = JSON.stringify({ ...goldenSpec, openapi: "2.0" });
+    const generated = cli(generateArgs("openapi.json"), { spec });
+    const validated = cli(["validate", "openapi.json"], { spec });
+    const verdict = cli(["verdict", "openapi.json", "--config", "c.json"], { spec });
+    const line =
+      'refused DOC-02/unsupported-version at #/openapi: The openapi version "2.0" is not supported. Declare a 3.0.x, 3.1.x or 3.2.x version.; https://spec.openapis.org/oas/v3.2.1.html#oas-version';
+
+    expect([generated.exitCode, lines(generated.stderr)]).toEqual([1, [line]]);
+    expect([validated.exitCode, lines(validated.stderr)]).toEqual([1, [line]]);
+    expect([verdict.exitCode, verdict.stdout]).toEqual([0, "refused\n"]);
+    expect(entries(generated.dir)).toEqual(["c.json", "openapi.json"]);
   });
 
   test("an operation refusal exits 0 and writes the rest; --strict exits 1 and writes nothing", () => {

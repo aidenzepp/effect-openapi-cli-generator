@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
+import { checkSpecText } from "../../src/check/index.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
-import type { Diagnostic } from "../../src/model/diagnostic.ts";
+import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { normalizeSecurityPolicy, normalizeSecuritySchemes } from "../../src/normalize/security.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -15,7 +16,8 @@ interface Members {
   readonly [key: string]: Json;
 }
 
-const run = (line: Line, members: Members, operation?: string) =>
+// `checked` replaces check's own findings for the run; omitted, check runs on the spec.
+const run = (line: Line, members: Members, operation?: string, checked?: readonly Diagnostic[]) =>
   Effect.runSync(
     Effect.gen(function* normalize() {
       const resolution = yield* resolve({
@@ -28,7 +30,8 @@ const run = (line: Line, members: Members, operation?: string) =>
           ...members,
         },
       });
-      const schemes = yield* normalizeSecuritySchemes(resolution);
+      const findings = checked ?? (yield* checkSpecText(resolution));
+      const schemes = yield* normalizeSecuritySchemes(resolution, undefined, findings);
       const policy = yield* normalizeSecurityPolicy(resolution, schemes, operation);
 
       return { policy, schemes };
@@ -219,7 +222,8 @@ describe("policy shapes", () => {
 });
 
 describe("undeclared names", () => {
-  test("remove only their alternative with an element-scope refusal at the name", () => {
+  // Check raises SEC-09 or SEC-10 `unresolved-scheme` at the name; normalize adds no second one.
+  test("remove only their alternative, leaving the refusal to check", () => {
     const { policy } = run("3.1", {
       ...withSchemes({ key: keyed }),
       security: [{ missing: [] }, { key: [] }],
@@ -227,9 +231,7 @@ describe("undeclared names", () => {
 
     expect(policy.policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
     expect(policy.listed).toBe(2);
-    expect(policy.diagnostics.map((d) => [d.code, d.scope, d.severity, d.pointer])).toEqual([
-      ["SEC-09/undeclared-scheme", "element", "refusal", "/security/0/missing"],
-    ]);
+    expect(policy.diagnostics).toEqual([]);
   });
 
   test("the only alternative gone leaves none with listed 1", () => {
@@ -339,6 +341,65 @@ describe("token acquisition stays refused", () => {
   });
 });
 
+// A check finding at `pointer`, for a run that replaces check's own.
+const unresolved = (code: string, pointer: string): Diagnostic =>
+  Schema.decodeUnknownSync(Diagnostic)({
+    code,
+    document: entry,
+    element: "Security Requirement Object",
+    message: "The requirement names a security scheme that does not resolve.",
+    openapi: "3.2.0",
+    pointer,
+    row: code.split("/")[0],
+    scope: "element",
+    severity: "refusal",
+    specSection: "https://spec.openapis.org/oas/v3.2.0#security-requirement-object",
+  });
+
+describe("names check refused", () => {
+  // Normalize reads check's findings and never re-derives them. Each spec below is one where the
+  // implicit connection and the findings disagree, so only reading the findings passes.
+  test("a finding at the name suppresses normalize's own, though the name reaches an object", () => {
+    // The URI reaches an object that is no component scheme: the connection finds it, check has
+    // no finding of its own, and only the injected one says refused.
+    const name = "#/components/schemas/X";
+    const members = {
+      components: { schemas: { X: { type: "object" } }, securitySchemes: { key: keyed } },
+      security: [{ [name]: [] }],
+    };
+    const pointer = "/security/0/#~1components~1schemas~1X";
+
+    expect(codes(run("3.2", members, undefined, []).policy.diagnostics)).toEqual([
+      "SEC-10/undeclared-scheme",
+    ]);
+
+    const { policy } = run("3.2", members, undefined, [
+      unresolved("SEC-10/unresolved-scheme", pointer),
+    ]);
+
+    expect(policy.policy.alternatives).toEqual([]);
+    expect(codes(policy.diagnostics)).toEqual([]);
+  });
+
+  test("no finding at the name keeps normalize's own, though the name reaches nothing", () => {
+    const { policy } = run("3.1", { security: [{ missing: [] }] }, undefined, []);
+
+    expect(policy.policy.alternatives).toEqual([]);
+    expect(policy.diagnostics.map((d) => [d.code, d.scope, d.pointer])).toEqual([
+      ["SEC-09/undeclared-scheme", "element", "/security/0/missing"],
+    ]);
+  });
+
+  test("a finding with another code or pointer suppresses nothing", () => {
+    const { policy } = run("3.1", { security: [{ missing: [] }] }, undefined, [
+      unresolved("SEC-09/unresolved-scheme", "/security/0/other"),
+      unresolved("SEC-06/no-satisfiable-alternative", "/security/0/missing"),
+    ]);
+
+    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+  });
+});
+
 describe("3.2 scheme URIs (SEC-10)", () => {
   const uriName = "https://evil.example/s";
 
@@ -371,7 +432,8 @@ describe("3.2 scheme URIs (SEC-10)", () => {
     });
 
     expect(policy.policy.alternatives).toEqual([]);
-    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+    // Check refuses the name (SEC-09/unresolved-scheme); normalize adds nothing.
+    expect(codes(policy.diagnostics)).toEqual([]);
   });
 
   test("a scheme URI outside the component names stays undeclared", () => {
@@ -380,25 +442,76 @@ describe("3.2 scheme URIs (SEC-10)", () => {
       security: [{ "#/components/securitySchemes/missing": [] }],
     });
 
-    expect(codes(policy.diagnostics)).toEqual(["SEC-09/undeclared-scheme"]);
+    expect(policy.policy.alternatives).toEqual([]);
+    // Check refuses the name (SEC-10/unresolved-scheme); normalize adds nothing.
+    expect(codes(policy.diagnostics)).toEqual([]);
   });
 });
 
-describe("scheme lookup budget", () => {
-  test("50k schemes and one 50k-name alternative normalize in linear time", () => {
-    const names = Array.from({ length: 50_000 }, (_, index) => `s${index}`);
-    const securitySchemes: Record<string, Json> = {};
-    const requirement: Record<string, Json> = {};
-    for (const name of names) {
-      securitySchemes[name] = keyed;
-      requirement[name] = [];
+// The scheme list's element reads while `normalizeSecurityPolicy` resolves one alternative that
+// names all `count` schemes. A lookup built once reads each scheme a bounded number of times; a
+// scan per requirement name reads about count² of them.
+const elementReads = (count: number): number => {
+  const securitySchemes: Record<string, Json> = {};
+  const requirement: Record<string, Json> = {};
+  for (let index = 0; index < count; index += 1) {
+    securitySchemes[`s${index}`] = keyed;
+    requirement[`s${index}`] = [];
+  }
+
+  let reads = 0;
+  const reader =
+    <T>(item: T) =>
+    (): T => {
+      reads += 1;
+
+      return item;
+    };
+  // A copy of `items` whose elements count each read.
+  const counted = <T>(items: readonly T[]): readonly T[] => {
+    const tracked: T[] = [];
+    for (const [index, item] of items.entries()) {
+      Object.defineProperty(tracked, index, { enumerable: true, get: reader(item) });
     }
 
-    const { policy } = run("3.1", {
-      ...withSchemes(securitySchemes),
-      security: [requirement],
-    });
+    return tracked;
+  };
 
-    expect(policy.policy.alternatives[0]?.uses.length).toBe(50_000);
-  }, 3000);
+  const uses = Effect.runSync(
+    Effect.gen(function* normalize() {
+      const resolution = yield* resolve({
+        document: entry,
+        line: "3.1",
+        value: {
+          info: { title: "t", version: "1" },
+          openapi: openapi["3.1"],
+          paths: {},
+          ...withSchemes(securitySchemes, { security: [requirement] }),
+        },
+      });
+      const schemes = yield* normalizeSecuritySchemes(
+        resolution,
+        undefined,
+        yield* checkSpecText(resolution),
+      );
+      const policy = yield* normalizeSecurityPolicy(resolution, {
+        ...schemes,
+        schemes: counted(schemes.schemes),
+        unusable: counted(schemes.unusable),
+      });
+
+      return policy.policy.alternatives[0]?.uses.length ?? 0;
+    }),
+  );
+  expect(uses).toBe(count);
+
+  return reads;
+};
+
+describe("scheme lookup budget", () => {
+  test("resolving an alternative of every scheme reads each scheme a bounded number of times (linear, not quadratic)", () => {
+    const count = 2000;
+
+    expect(elementReads(count)).toBeLessThanOrEqual(2 * count);
+  });
 });

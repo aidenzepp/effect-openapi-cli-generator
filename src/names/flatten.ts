@@ -5,10 +5,13 @@ import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
+import { sendsFormPairs } from "../normalize/bodies.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
- * binary multipart part), or the whole body.
+ * binary multipart part, or a base64 body property or multipart part the runtime encodes from the
+ * file), or the whole body.
  */
 export type BodyFlagKind =
   | "body"
@@ -50,8 +53,8 @@ export interface ReservedClash {
 
 /**
  * A property that has no field flag: its name folds to nothing (`EmptyFold`), or it is a multipart
- * part whose shape no part flag carries (`UnsupportedPart`: an object, an array of objects, a map
- * or a `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
+ * part whose shape no part flag carries (`UnsupportedPart`: an array of objects, a map or a
+ * `oneOf`/`anyOf`). Multipart bodies have no whole-body flags, so nothing else reaches it.
  */
 export interface SkippedProperty {
   readonly pointer: string;
@@ -168,17 +171,73 @@ const inProgress = Symbol("inProgress");
 interface Ctx {
   readonly defs: Defs;
   /**
+   * JSON and form bodies: a base64 string property is a `file` flag, not a `string`.
+   */
+  readonly base64Fields: boolean;
+  /**
+   * 3.0 only: `format: byte` marks a base64 string (D-ENC). On 3.1 and 3.2 it is an annotation and
+   * only `contentEncoding` does (FMT-10).
+   */
+  readonly byteIsBase64: boolean;
+  /**
+   * Multipart only: the parts whose Encoding rule sends them base64 encoded. Each is a `file`
+   * part: the runtime encodes the file's bytes, so typed text is never encoded in their place.
+   */
+  readonly base64Parts: ReadonlySet<string>;
+  /**
+   * Multipart only: the parts whose Encoding style joins values into one part (ENC-40). Normalize
+   * refuses each at element scope, so it gets no flag and no notice here.
+   */
+  readonly styleRefused: ReadonlySet<string>;
+  /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
+  /**
+   * 3.0 only: a read-only property is not offered as a flag (S30-31, D-SCH2). 3.1 and 3.2 keep
+   * it (SCH-51).
+   */
+  readonly readOnlyOmitted: boolean;
   readonly memo: Map<string, Result.Result<Classified, FlattenError> | typeof inProgress>;
   visits: number;
 }
 
-const newCtx = (defs: Defs, fileParts: boolean): Ctx => ({
+// The property parts of a multipart alternative whose rule declares a transfer encoding.
+const base64PartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.contentEncoding !== undefined && rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
+// The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
+const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.serialization !== undefined &&
+      !sendsFormPairs(rule.serialization) &&
+      rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
+const newCtx = (
+  defs: Defs,
+  codec: "form" | "json" | "multipart",
+  encoding: MediaAlternative["encoding"],
+  line: SpecLine,
+): Ctx => ({
+  base64Fields: codec === "json" || codec === "form",
+  base64Parts: codec === "multipart" ? base64PartsOf(encoding) : new Set(),
+  byteIsBase64: line === "3.0",
   defs,
-  fileParts,
+  fileParts: codec === "multipart",
   memo: new Map(),
+  readOnlyOmitted: line === "3.0",
+  styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
 
@@ -281,13 +340,23 @@ const isScalar = (value: string): value is Scalar => scalarKinds.has(value);
 
 const isBareSchema = (schema: SchemaNode): boolean => Object.keys(schema).length === 0;
 
+const identityEncodings: ReadonlySet<string> = new Set(["7bit", "8bit", "binary"]);
+
+// A `contentEncoding` that sends the bytes as they are: `binary`, `7bit` or `8bit`, any case.
+const isIdentityEncoding = (value: Schema.Json | undefined): boolean =>
+  Predicate.isString(value) && identityEncodings.has(value.toLowerCase());
+
 /**
- * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, or 3.1+ `contentMediaType`
- * without a `contentEncoding`, or a schema with no keyword at all. `format: byte`, any
- * `contentEncoding` and any other type are text.
+ * A binary part (design 6.3 Binary): 3.0 `format: binary` on a string, a string whose
+ * `contentEncoding` is an identity encoding (`binary`, `7bit`, `8bit`, any case), or 3.1+
+ * `contentMediaType` without a `contentEncoding`, or a schema with no keyword at all.
+ * `format: byte`, any other `contentEncoding` and any other type are text.
  */
 const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
-  if (type === "string" && schema.format === "binary") {
+  if (
+    type === "string" &&
+    (schema.format === "binary" || isIdentityEncoding(schema.contentEncoding))
+  ) {
     return true;
   }
 
@@ -303,6 +372,17 @@ const isBinary = (schema: SchemaNode, type: SchemaNode["type"]): boolean => {
     Predicate.isString(schema.contentMediaType) || (type === undefined && isBareSchema(schema))
   );
 };
+
+/**
+ * A base64 string property (design 6.3 Binary): `contentEncoding` `base64` or `base64url` on every
+ * line, or `format: byte` without a `contentEncoding` where `byteIsBase64` (3.0). Other encodings,
+ * 3.1 and 3.2 `format: byte` (FMT-10) and other types are text.
+ */
+const isBase64 = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): boolean =>
+  type === "string" &&
+  (schema.contentEncoding === "base64" ||
+    schema.contentEncoding === "base64url" ||
+    (ctx.byteIsBase64 && schema.contentEncoding === undefined && schema.format === "byte"));
 
 /**
  * The `allOf` merge: every member an object, and a key two members declare equal in both (its
@@ -364,6 +444,10 @@ const lookupRef = (
 
 const leaf = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): Classified => {
   if (ctx.fileParts && isBinary(schema, type)) {
+    return { _tag: "Scalar", kind: "file", repeated: false };
+  }
+
+  if (ctx.base64Fields && isBase64(ctx, schema, type)) {
     return { _tag: "Scalar", kind: "file", repeated: false };
   }
 
@@ -438,13 +522,44 @@ const classify = (
   }
 
   if (type === "array" && schema.items !== undefined) {
-    return Result.map(classify(ctx, schema.items, below(site, "items"), hops + 1), (item) =>
-      item._tag === "Scalar" && !item.repeated ? { ...item, repeated: true } : opaque,
-    );
+    return Result.map(classify(ctx, schema.items, below(site, "items"), hops + 1), (item) => {
+      if (item._tag !== "Scalar" || item.repeated) {
+        return opaque;
+      }
+
+      // An array of base64 strings repeats a text flag; only a lone property is a file.
+      const kind = item.kind === "file" && !ctx.fileParts ? "string" : item.kind;
+
+      return { ...item, kind, repeated: true };
+    });
   }
 
   return Result.succeed(leaf(ctx, schema, type));
 };
+
+// Whether a property schema is `readOnly: true` itself or at the end of one `$ref` (S30-31).
+const isReadOnly = (ctx: Ctx, schema: Schema.Json): boolean => {
+  if (!isObject(schema)) {
+    return false;
+  }
+
+  if (schema.readOnly === true) {
+    return true;
+  }
+
+  const { $ref } = schema;
+  if (!Predicate.isString($ref) || !$ref.startsWith(refPrefix)) {
+    return false;
+  }
+
+  const target = ctx.defs[$ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~")];
+
+  return isObject(target) && target.readOnly === true;
+};
+
+// A property the line does not offer as a flag: it gets no flag and no skip notice.
+const omitted = (ctx: Ctx, schema: Schema.Json): boolean =>
+  ctx.readOnlyOmitted && isReadOnly(ctx, schema);
 
 interface Walk {
   readonly flags: readonly BodyFlag[];
@@ -466,6 +581,10 @@ const walkProperties = (
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (omitted(ctx, child)) {
+      continue;
     }
 
     const tokens = [...at.tokens, key];
@@ -514,7 +633,9 @@ const walkProperties = (
 
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
- * (repeated parts) or a binary `file` part; any other shape is skipped with a reason.
+ * (repeated parts), a `file` part when it is binary or its rule sends it base64 encoded, or a
+ * `json` flag for an object part, sent as one JSON part (ENC-22); any other shape is skipped with
+ * a reason. A part whose style normalize refused (ENC-40) gets nothing.
  */
 const walkParts = (
   ctx: Ctx,
@@ -526,6 +647,10 @@ const walkParts = (
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (ctx.styleRefused.has(key) || omitted(ctx, child)) {
+      continue;
     }
 
     const pointer = formatPointer([key]);
@@ -540,18 +665,24 @@ const walkParts = (
       return Result.fail(classified.failure);
     }
 
-    if (classified.success._tag !== "Scalar") {
+    const part = classified.success;
+    if (part._tag === "Opaque") {
       skipped.push({ pointer, reason: "UnsupportedPart" });
       continue;
     }
 
+    const base = { name: folded.success.name, notes: folded.success.notes, pointer };
+    const schemaPointer = sourcePointer(site);
+    if (part._tag === "Object") {
+      flags.push({ ...base, kind: "json", repeated: false, schemaPointer });
+      continue;
+    }
+
     flags.push({
-      kind: classified.success.kind,
-      name: folded.success.name,
-      notes: folded.success.notes,
-      pointer,
-      repeated: classified.success.repeated,
-      schemaPointer: sourcePointer(site),
+      ...base,
+      kind: ctx.base64Parts.has(key) ? "file" : part.kind,
+      repeated: part.repeated,
+      schemaPointer,
     });
   }
 
@@ -594,12 +725,20 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * `alternative.schema` is the root's key in it. JSON and form bodies get field flags plus `--body`
  * and `--body-file`; a binary or XML body only `--body-file`; a multipart body one flag per
  * top-level part and no whole-body flag (design 6.3, D-ENC1 a); any other codec both whole-body
- * flags and no field flags. Work is bounded: each `$defs` key is classified once per call, and node
- * visits, including every property entry, share one budget (`BodyBudgetExceeded`).
+ * flags and no field flags. A multipart part reads its transfer encoding from
+ * `alternative.encoding` (absent: no rules), never from its schema. Work is bounded: each `$defs`
+ * key is classified once per call, and node visits, including every property entry, share one
+ * budget (`BodyBudgetExceeded`). On the 3.0 `line`, a property or part whose schema is
+ * `readOnly: true`, directly or through one `$ref`, gets no flag and no skip notice (S30-31,
+ * D-SCH2); `--body` and `--body-file` still send it as given. On 3.1 and 3.2 a read-only property
+ * keeps its flag (SCH-51). `format: byte` makes a JSON or form property a base64 `file` flag on 3.0
+ * only; on 3.1 and 3.2 it is a `string` flag sent as given (FMT-10).
  */
 export const flattenBody = (
   defs: Defs,
-  alternative: Pick<MediaAlternative, "codec" | "schema">,
+  alternative: Pick<MediaAlternative, "codec" | "schema"> &
+    Partial<Pick<MediaAlternative, "encoding">>,
+  line: SpecLine,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
   if (codec === "binary") {
@@ -617,7 +756,7 @@ export const flattenBody = (
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs, multipart);
+  const ctx = newCtx(defs, codec, alternative.encoding ?? [], line);
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));

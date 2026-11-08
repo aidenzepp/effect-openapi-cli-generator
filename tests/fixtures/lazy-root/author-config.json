@@ -1,0 +1,7 @@
+{
+  "package": { "name": "lazy-root-cli", "version": "0.1.0" },
+  "binName": "lazy",
+  "envPrefix": "LAZY",
+  "servers": { "accepted": ["https://api.example.com"] },
+  "commands": { "module": "./custom/commands.ts", "names": ["login"] }
+}

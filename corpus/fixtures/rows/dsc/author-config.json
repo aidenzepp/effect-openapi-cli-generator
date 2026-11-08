@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "dsc",
+  "envPrefix": "DSC",
+  "package": {
+    "name": "dsc-witness-cli",
+    "version": "0.1.0"
+  }
+}

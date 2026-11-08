@@ -4,6 +4,20 @@ import type { SafeIdentifierValue } from "./fold.ts";
 import { suffixed } from "./plan.ts";
 
 /**
+ * The names a cli module imports by name from packages, as [name, module specifier]: the one list
+ * the cli emitter writes those imports from and the names plan reserves from.
+ */
+export const packageImports: readonly (readonly [string, string])[] = [
+  ["Effect", "effect"],
+  ["Layer", "effect"],
+  ["Option", "effect"],
+  ["Schema", "effect"],
+  ["Argument", "effect/cli"],
+  ["Command", "effect/cli"],
+  ["Flag", "effect/cli"],
+];
+
+/**
  * The runtime namespaces a cli module imports, as [name, module path]: the one list the cli
  * emitter writes its imports from and the names plan reserves from.
  */
@@ -19,36 +33,44 @@ export const runtimeNamespaces: readonly (readonly [string, string])[] = [
 ];
 
 /**
- * The names every cli module imports besides its domain schemas: the package namespaces and
- * every runtime namespace.
+ * The namespaces `cli/root.ts` imports besides the fixed ones, as [name, module specifier]: the
+ * `Groups` runtime namespace and the `Arr` array namespace of the lazy root.
+ */
+export const rootNamespaceImports: readonly (readonly [string, string])[] = [
+  ["Arr", "effect/Array"],
+  ["Groups", "../runtime/groups.ts"],
+];
+
+/**
+ * The names every cli module imports besides its domain schemas and api namespaces: every
+ * package import and every runtime namespace. No planned module-level name takes one.
  */
 export const fixedNamespaces: ReadonlySet<string> = new Set([
-  "Argument",
-  "Command",
-  "Effect",
-  "Flag",
-  "Option",
+  ...packageImports.map(([name]) => name),
   ...runtimeNamespaces.map(([name]) => name),
 ]);
 
 /**
- * The names `cli/root.ts` holds besides the slice's fixed namespaces: the `services` layer it
- * defines (`Layer.mergeAll` of `BaseUrl`, `Auth` and `Input` layers) and the `servers` and
- * `security` tables it reads from `api/servers.ts` and `api/security.ts`.
+ * The names `cli/root.ts` holds besides the fixed namespaces: its own namespace imports, the
+ * `services` layer it defines, the `servers` and `security` tables it reads from
+ * `api/servers.ts` and `api/security.ts`, and the lazy root's `table` of group loaders, `root`
+ * function and its `args` and `groups` parameters.
  */
 export const rootModuleNames: ReadonlySet<string> = new Set([
-  "Auth",
-  "BaseUrl",
-  "Layer",
+  ...rootNamespaceImports.map(([name]) => name),
+  "args",
+  "groups",
+  "root",
   "security",
   "servers",
   "services",
+  "table",
 ]);
 
 // `domain/schemas.ts` imports `Schema`; a cli module imports the fixed namespaces beside the
 // domain names it reads, and `cli/root.ts` also its own names. Keywords, predefined types and
 // globals never get here: the fold suffixes them with `_`.
-const reserved: ReadonlySet<string> = new Set(["Schema", ...fixedNamespaces, ...rootModuleNames]);
+const reserved: ReadonlySet<string> = new Set([...fixedNamespaces, ...rootModuleNames]);
 
 // The base of a key with no letters or digits to fold.
 const unnamed = "Definition";

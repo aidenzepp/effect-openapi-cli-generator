@@ -1,0 +1,2749 @@
+{
+  "commandSources": {
+    "config": 0,
+    "fern": 0,
+    "fold": 371,
+    "forge": 0
+  },
+  "corpusVersion": 1,
+  "counts": {
+    "informational": 374,
+    "nonStandard": 0,
+    "notices": 505,
+    "operations": {
+      "generated": 371,
+      "refused": 17,
+      "total": 388
+    },
+    "refusals": {
+      "document": 0,
+      "element": 12,
+      "operation": 17
+    }
+  },
+  "coverage": {
+    "byNotice": [],
+    "checked": true,
+    "invented": [],
+    "missing": []
+  },
+  "generator": {
+    "config": "corpus/config/openai.json",
+    "configSha256": "494d5699a5f2dc2a0323a0e2ada9edca3d90b2fe8d809c143b7a19362b68fb11",
+    "version": "0.0.0"
+  },
+  "nonStandard": [],
+  "notices": [
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AdminApiKey/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AdminApiKey/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AdminApiKey/properties/last_used_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AdminApiKey/properties/owner/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AgentResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AgentResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AgentResource/properties/updated_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AgentResource/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AssignedRoleDetails/properties/created_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AssignedRoleDetails/properties/updated_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AssistantMessageItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AssistantObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Attachment/properties/preview_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AuditLog/properties/effective_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AutomationInvocationResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomationInvocationResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AutomationInvocationResource/properties/scheduled_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomationInvocationResource/properties/scheduled_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AutomationResourceOnce/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomationResourceOnce/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AutomationResourceOnce/properties/run_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomationResourceOnce/properties/run_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/AutomationResourcePeriodic/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/AutomationResourcePeriodic/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/AwsExternalKeyParams/properties/role_arn/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/AzureExternalKeyParams/properties/key_name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/AzureExternalKeyParams/properties/key_version/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/AzureExternalKeyParams/properties/tenant_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/AzureExternalKeyParams/properties/vault_uri/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/cancelled_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/cancelling_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/completed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/expired_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/failed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/finalizing_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Batch/properties/in_progress_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/BatchFileExpirationAfter/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BatchFileExpirationAfter/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaCodeInterpreterOutputImage/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaCompactResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaComputerScreenshotContent/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaComputerScreenshotImage/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaFileSearchToolCall/properties/results/anyOf/0/items/properties/score/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaFunctionCallOutputItemParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaFunctionToolParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaInputFileContent/properties/file_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaInputFileContentParam/properties/file_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaInputImageContent/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaInputImageContentParamAutoParam/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaMCPTool/properties/server_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaMCPTool/properties/tunnel_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/BetaMisalignmentErrorDetailsResource/properties/review_target/anyOf/0/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaMisalignmentErrorDetailsResource/properties/review_target/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaResponse/allOf/2/properties/completed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaResponse/allOf/2/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaResponsesClientEventResponseCreate/allOf/0/properties/stream_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/BetaToolSearchOutputFunctionToolParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaUrlCitationBody/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaUrlCitationParam/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaWebSearchActionFind/properties/url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaWebSearchActionOpenPage/properties/url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/BetaWebSearchActionSearch/properties/sources/items/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Certificate/properties/certificate_details/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Certificate/properties/certificate_details/properties/valid_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Certificate/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChatCompletionRequestMessageContentPartImage/properties/image_url/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChatCompletionResponseMessage/properties/annotations/items/properties/url_citation/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChatCompletionResponseMessage/properties/audio/anyOf/0/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChatCompletionStreamResponseDelta/properties/audio/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ChatSessionResource/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ClientToolCallItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CodeInterpreterOutputImage/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/CommandExecutionItemResource/properties/duration_ms",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CommandExecutionItemResource/properties/duration_ms/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/CommandExecutionItemResource/properties/exit_code",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CommandExecutionItemResource/properties/exit_code/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CompactResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ComputerScreenshotContent/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ComputerScreenshotImage/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/ComputerUseApprovalResponseParamBrowserAuthentication/oneOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerFileResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ContainerResource/properties/last_active_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ConversationResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/CreateAssistantRequest/properties/tool_resources/anyOf/0/properties/file_search/oneOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/CreateAutomationParamsOnce/properties/run_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateAutomationParamsOnce/properties/run_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/CreateChatCompletionRequest/allOf/1/properties/seed",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateChatCompletionRequest/allOf/1/properties/seed/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateChatCompletionResponse/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateChatCompletionStreamResponse/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/CreateCompletionRequest/properties/seed",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateCompletionRequest/properties/seed/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateCompletionResponse/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateModerationRequest/properties/input/oneOf/2/items/oneOf/0/properties/image_url/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateRunRequest/properties/response_format/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateRunRequest/properties/tool_choice/allOf/1/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateRunRequest/properties/truncation_strategy/allOf/1/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateThreadAndRunRequest/properties/response_format/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateThreadAndRunRequest/properties/tool_choice/allOf/1/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/CreateThreadAndRunRequest/properties/truncation_strategy/allOf/1/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/CreateThreadRequest/properties/tool_resources/anyOf/0/properties/file_search/oneOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTranscriptionResponseDiarizedJson/properties/duration/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTranscriptionResponseVerboseJson/properties/duration/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/CreateTranslationResponseVerboseJson/properties/duration/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/CreateVectorStoreFileBatchRequest/anyOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionInputCustomToolCall/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionInputCustomToolCall/properties/namespace/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionInputFunctionCall/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionInputFunctionCall/properties/namespace/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionInputImage/properties/image_url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/DecisionQuestionInputImage/properties/image_url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Embedding/properties/embedding/anyOf/0/items/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/EnvironmentFileResource/properties/size_bytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EnvironmentFileResource/properties/size_bytes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/EnvironmentParamOpenaiHosted/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/EnvironmentTemplateResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EnvironmentTemplateResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/EnvironmentTemplateResource/properties/updated_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EnvironmentTemplateResource/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Eval/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EvalItemInputImage/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EvalRun/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EvalRun/properties/report_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/EvalRunOutputItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ExpiresAfterParam/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExpiresAfterParam/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ExternalStorageResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/FileExpirationAfter/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileExpirationAfter/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FileSearchToolCall/properties/results/anyOf/0/items/properties/score/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningCheckpointPermission/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-20/not-asserted",
+      "pointer": "/components/schemas/FineTuningJob/else",
+      "row": "SCH-20"
+    },
+    {
+      "code": "SCH-18/not-asserted",
+      "pointer": "/components/schemas/FineTuningJob/if",
+      "row": "SCH-18"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningJob/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningJob/properties/estimated_finish/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningJob/properties/finished_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningJobCheckpoint/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/FineTuningJobEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/FunctionCallOutputItemParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/FunctionToolParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/GcpExternalKeyParams/properties/kms_key_version/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/GcpExternalKeyParams/properties/workload_identity_project_number/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Group/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupResourceWithSuccess/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/GroupResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/HostedEnvironmentFileResourceFileId/properties/size_bytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/HostedEnvironmentFileResourceFileId/properties/size_bytes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/HostedEnvironmentFileResourceInline/properties/size_bytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/HostedEnvironmentFileResourceInline/properties/size_bytes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/HostedTemplateFileResourceInline/properties/size_bytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/HostedTemplateFileResourceInline/properties/size_bytes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Image/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageEditCompletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageEditPartialImageEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageGenCompletedEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageGenPartialImageEvent/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/ImageRefParam/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageRefParam/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImageRefParam-2/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ImagesResponse/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputFileContent/properties/file_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputFileContentParam/properties/file_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputImageContent/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputImageContentParamAutoParam/properties/image_url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/InputTokensDetailsResource/properties/cache_write_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputTokensDetailsResource/properties/cache_write_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/InputTokensDetailsResource/properties/cached_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputTokensDetailsResource/properties/cached_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/InputTokensDetailsResource-2/properties/cached_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/InputTokensDetailsResource-2/properties/cached_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Invite/properties/accepted_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Invite/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Invite/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveCallReferRequest/properties/target_uri/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDataChannelConfigParam/properties/allowed_client_events/oneOf/1/items/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionCustomToolCallParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionCustomToolCallParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionFunctionCallParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionFunctionCallParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionInputImageParam/properties/image_url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/LiveDecisionInputItemParam/oneOf/0/oneOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionStoredCustomToolCallParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionStoredCustomToolCallParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionStoredFunctionCallParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionStoredFunctionCallParam/properties/namespace/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/LiveDecisionStoredInputItemParam/oneOf/0/oneOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveDecisionUserInputImageParam/properties/image_url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveSIPTransport/properties/destination/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveSIPTrunk/properties/caller_number/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveTransportDTMFReceived/properties/event/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveTransportDTMFSendParam/properties/event/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/LiveTransportDTMFSent/properties/event/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MCPTool/properties/server_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/MCPTool/properties/tunnel_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageContentImageUrlObject/properties/image_url/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageDeltaContentImageUrlObject/properties/image_url/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageObject/properties/completed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MessageObject/properties/incomplete_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/MisalignmentErrorDetailsResource/properties/review_target/anyOf/0/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/MisalignmentErrorDetailsResource/properties/review_target/anyOf/0/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Model/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Model/properties/shutdown_date/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/MultiAgentConfigCurrentParam/properties/max_concurrent_subagents",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MultiAgentConfigCurrentParam/properties/max_concurrent_subagents/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/MultiAgentConfigResource/properties/max_concurrent_subagents",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/MultiAgentConfigResource/properties/max_concurrent_subagents/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OpenAIFile/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OpenAIFile/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationCertificate/properties/certificate_details/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationCertificate/properties/certificate_details/properties/valid_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationCertificate/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationProjectCertificate/properties/certificate_details/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationProjectCertificate/properties/certificate_details/properties/valid_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OrganizationProjectCertificate/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/OutputTokensDetailsResource/properties/reasoning_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OutputTokensDetailsResource/properties/reasoning_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/OutputTokensDetailsResource-2/properties/reasoning_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/OutputTokensDetailsResource-2/properties/reasoning_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Project/properties/archived_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Project/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectApiKey/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectApiKey/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectApiKey/properties/last_used_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectApiKeyOwnerServiceAccount/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectApiKeyOwnerUser/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectGroup/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectServiceAccount/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectServiceAccountApiKey/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectServiceAccountApiKey/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectServiceAccountCreateResponse/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProjectUser/properties/added_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ProvenanceResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/PublicCreateEndpointBody/properties/url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/PublicUpdateEndpointBody/properties/url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeConversationItemMessageUser/properties/content/items/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/RealtimeCreateClientSecretRequest/properties/expires_after/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeCreateClientSecretRequest/properties/expires_after/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeCreateClientSecretResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCall/properties/call_id/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCall/properties/call_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCall/properties/id/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCall/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCall/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCallOutput/properties/call_id/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCallOutput/properties/call_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCallOutput/properties/id/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputFunctionCallOutput/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputImage/properties/image_url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputImage/properties/image_url/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputMessageFields/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseInputMessageFields/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseItemReference/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/RealtimeResponseItemReference/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeServerEventConversationItemInputAudioTranscriptionSegment/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeServerEventConversationItemInputAudioTranscriptionSegment/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeSession/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeSession/properties/input_audio_noise_reduction/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeSessionCreateRequest/properties/client_secret/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeSessionCreateRequestGA/properties/audio/properties/input/properties/noise_reduction/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeSessionCreateResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeSessionCreateResponseGA/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranscriptionSessionCreateRequest/properties/input_audio_noise_reduction/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-24/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranscriptionSessionCreateRequestGA/properties/audio/properties/input/properties/noise_reduction/not",
+      "row": "SCH-24"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranscriptionSessionCreateResponse/properties/client_secret/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranscriptionSessionCreateResponseGA/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/RealtimeTranslationClientSecretCreateRequest/properties/expires_after/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranslationClientSecretCreateRequest/properties/expires_after/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranslationClientSecretCreateResponse/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RealtimeTranslationSession/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Response/allOf/2/properties/completed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Response/allOf/2/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/input_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/input_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/output_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/output_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/total_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ResponseUsageResource/properties/total_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/ResponsesClientEventResponseCreate/allOf/0/properties/stream_id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/cancelled_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/completed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/failed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunObject/properties/started_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunStepObject/properties/cancelled_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunStepObject/properties/completed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunStepObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunStepObject/properties/expired_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/RunStepObject/properties/failed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SafetyAlertResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SafetyCaseResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/ScoreProbabilityResource/properties/value",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ScoreProbabilityResource/properties/value/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ServiceAccountApiKeyBody/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ServiceAccountApiKeyBody/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionArtifactResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionArtifactResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionArtifactResource/properties/size_bytes",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionArtifactResource/properties/size_bytes/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentOutputCommandExecutionOutputDelta/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentOutputCommandExecutionOutputDelta/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionEnvironmentReset/properties/reset_count",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionEnvironmentReset/properties/reset_count/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartAdded/properties/content_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartAdded/properties/content_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartAdded/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartAdded/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartDone/properties/content_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartDone/properties/content_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartDone/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnContentPartDone/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnItemAdded/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnItemAdded/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnItemDone/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnItemDone/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDelta/properties/content_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDelta/properties/content_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDelta/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDelta/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDone/properties/content_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDone/properties/content_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDone/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnOutputTextDone/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartAdded/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartAdded/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartAdded/properties/summary_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartAdded/properties/summary_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartDone/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartDone/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartDone/properties/summary_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryPartDone/properties/summary_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDelta/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDelta/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDelta/properties/summary_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDelta/properties/summary_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDone/properties/output_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDone/properties/output_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDone/properties/summary_index",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionEventAgentSessionTurnReasoningSummaryTextDone/properties/summary_index/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionResource/properties/last_active_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionResource/properties/last_active_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SessionTurnTraceResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SessionTurnTraceResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SkillResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SkillVersionResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SubagentResource/properties/closed_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubagentResource/properties/closed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/SubagentResource/properties/opened_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/SubagentResource/properties/opened_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TaskGroupItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TaskItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/ThreadResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TokenUsageResource/properties/input_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TokenUsageResource/properties/input_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TokenUsageResource/properties/output_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TokenUsageResource/properties/output_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TokenUsageResource/properties/total_tokens",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TokenUsageResource/properties/total_tokens/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/ToolSearchOutputFunctionToolParam/properties/name/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptTextSegmentEvent/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptTextSegmentEvent/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptTextUsageDuration/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionDiarizedSegment/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionDiarizedSegment/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/avg_logprob/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/compression_ratio/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/no_speech_prob/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionSegment/properties/temperature/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionWord/properties/end/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TranscriptionWord/properties/start/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TurnResource/properties/completed_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TurnResource/properties/completed_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TurnResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TurnResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/TurnResource/properties/started_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/TurnResource/properties/started_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/UpdateAutomationParams/properties/run_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UpdateAutomationParams/properties/run_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCO-09/union-not-asserted",
+      "pointer": "/components/schemas/UpdateProjectServiceTierSettingsBody/anyOf",
+      "row": "SCO-09"
+    },
+    {
+      "code": "SCH-62/nullable-no-effect",
+      "pointer": "/components/schemas/UpdateVectorStoreRequest/properties/expires_after/allOf/1/nullable",
+      "row": "SCH-62"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Upload/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/Upload/properties/expires_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UploadPart/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UrlAnnotationSource/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UrlCitationBody/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UrlCitationParam/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/UsageAudioTranscriptionsResult/properties/seconds",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UsageAudioTranscriptionsResult/properties/seconds/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/User/properties/added_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/User/properties/api_key_last_used_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/User/properties/created/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/User/properties/user/properties/banned_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/UserMessageItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/VaultCredentialResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VaultCredentialResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/VaultCredentialResource/properties/updated_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VaultCredentialResource/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/components/schemas/VaultResource/properties/created_at",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VaultResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VectorStoreFileBatchObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VectorStoreFileObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VectorStoreObject/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VectorStoreObject/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VectorStoreObject/properties/last_active_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VideoCharacterResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VideoResource/properties/completed_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VideoResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VideoResource/properties/expires_at/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceConsentResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/VoiceResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebSearchActionFind/properties/url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebSearchActionOpenPage/properties/url/anyOf/0/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebSearchActionSearch/properties/sources/items/properties/url/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookAgentSessionEnvelope/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookBatchCancelled/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookBatchCompleted/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookBatchExpired/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookBatchFailed/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEndpointBody/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEndpointBody/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEndpointWithSecretResource/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEndpointWithSecretResource/properties/updated_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEvalRunCanceled/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEvalRunFailed/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookEvalRunSucceeded/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookFineTuningJobCancelled/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookFineTuningJobFailed/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookFineTuningJobSucceeded/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookLiveCallIncoming/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookLiveTransportIncoming/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookRealtimeCallIncoming/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookResponseCancelled/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookResponseCompleted/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookResponseFailed/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookResponseIncomplete/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyAlertCreated/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyAlertCreated/properties/data/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyDeactivationIssued/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyOrgAlertCreated/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyOrgAlertCreated/properties/data/properties/id/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WebhookSafetyWarningIssued/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/components/schemas/WidgetMessageItem/properties/created_at/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1automations/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1automations/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1automations~1{automation_id}~1invocations/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1automations~1{automation_id}~1invocations/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1environments/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1environments/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "PRM-02/folded",
+      "pointer": "/paths/~1agents~1environments/get/parameters/3",
+      "row": "PRM-02"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1environments~1templates/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1environments~1templates/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1environments~1{environment_id}~1files/get/parameters/2/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1environments~1{environment_id}~1files/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1artifacts/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1artifacts/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1items/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1items/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1items/get/parameters/2/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1items/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1turns/get/parameters/2/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1turns/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1turns~1{turn_id}~1items/get/parameters/3/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1subagents~1{subagent_id}~1turns~1{turn_id}~1items/get/parameters/3/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1traces/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1traces/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1turns/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1turns/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1turns~1{turn_id}~1items/get/parameters/2/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1agents~1sessions~1{session_id}~1turns~1{turn_id}~1items/get/parameters/2/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1audio~1transcriptions/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1audio~1translations/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1audio~1voices/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1images~1edits/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1images~1variations/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "SCH-37/not-asserted",
+      "pointer": "/paths/~1live~1sessions~1{session_id}~1content/get/parameters/0/schema/pattern",
+      "row": "SCH-37"
+    },
+    {
+      "code": "TAG-02/renamed",
+      "pointer": "/paths/~1organization~1groups/get/tags/0",
+      "row": "TAG-02"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1organization~1workload_identity_providers/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1realtime~1calls~1{call_id}~1accept/post/requestBody/content/application~1json",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1skills/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/folded",
+      "pointer": "/paths/~1skills~1{skill_id}~1versions/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1skills~1{skill_id}~1versions/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1vaults/get/parameters/0/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1vaults/get/parameters/0/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "FMT-02/int64-range",
+      "pointer": "/paths/~1vaults~1{vault_id}~1credentials/get/parameters/1/schema",
+      "row": "FMT-02"
+    },
+    {
+      "code": "SCH-54/not-asserted",
+      "pointer": "/paths/~1vaults~1{vault_id}~1credentials/get/parameters/1/schema/format",
+      "row": "SCH-54"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1videos/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1videos~1edits/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    },
+    {
+      "code": "RQB-03/unnamed-property",
+      "pointer": "/paths/~1videos~1extensions/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03"
+    }
+  ],
+  "refusals": [
+    {
+      "code": "DSC-05/no-composition",
+      "pointer": "/components/schemas/BetaCodeInterpreterToolCall/properties/outputs/anyOf/0/discriminator",
+      "row": "DSC-05",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/BetaInputItem/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/BetaItem/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-05/no-composition",
+      "pointer": "/components/schemas/CodeInterpreterToolCall/properties/outputs/anyOf/0/discriminator",
+      "row": "DSC-05",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/CreateVoiceRequest/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/DecisionInput/oneOf/1/items/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/InputItem/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/Item/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/LiveDecisionInputItemParam/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/LiveDecisionStoredInputItemParam/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "DSC-09/property-not-required",
+      "pointer": "/components/schemas/LiveInitialAssistantMessageItemParam/properties/content/items/discriminator/propertyName",
+      "row": "DSC-09",
+      "scope": "element"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1audio~1transcriptions/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1audio~1translations/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    },
+    {
+      "code": "TAG-02/reserved-name",
+      "pointer": "/paths/~1completions/post/tags/0",
+      "row": "TAG-02",
+      "scope": "operation"
+    },
+    {
+      "code": "RQB-03/flag-collision",
+      "pointer": "/paths/~1containers~1{container_id}~1files/post/requestBody/content/multipart~1form-data",
+      "row": "RQB-03",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1fine_tuning~1jobs/get/parameters/2",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "RQB-03/flag-collision",
+      "pointer": "/paths/~1images~1edits/post/requestBody/content/application~1json",
+      "row": "RQB-03",
+      "scope": "operation"
+    },
+    {
+      "code": "OPR-06/reserved-name",
+      "pointer": "/paths/~1organization~1usage~1completions/get",
+      "row": "OPR-06",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses?beta=true/post",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1compact?beta=true/post",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1input_tokens?beta=true/post",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1{response_id}?beta=true/delete",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1{response_id}?beta=true/get",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1{response_id}~1cancel?beta=true/post",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "PTH-07/invalid-path-key",
+      "pointer": "/paths/~1responses~1{response_id}~1input_items?beta=true/get",
+      "row": "PTH-07",
+      "scope": "operation"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1skills/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1skills~1{skill_id}~1versions/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1videos~1edits/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    },
+    {
+      "code": "EMT-1/unsupported-body",
+      "pointer": "/paths/~1videos~1extensions/post",
+      "row": "EMT-1",
+      "scope": "operation"
+    }
+  ],
+  "spec": {
+    "id": "openai",
+    "openapi": "3.1.0",
+    "sha256": "529e2175e6ec7d49cb02ca69aeb67f40ef34de2547a6acb91f42c5105c10f5bb"
+  },
+  "twinEquality": {
+    "checked": true,
+    "equal": true
+  },
+  "verdict": "partly-refused"
+}

@@ -8,7 +8,7 @@ import hostileSeeds from "../fixtures/seeds/hostile.json" with { type: "json" };
 import { DocumentUri, SafeText } from "../../src/model/brands.ts";
 import { Diagnostic } from "../../src/model/diagnostic.ts";
 import { Operation, SecurityScheme } from "../../src/model/entities.ts";
-import type { HelpInput } from "../../src/emit/help.ts";
+import type { HelpBodyField, HelpInput } from "../../src/emit/help.ts";
 import { operationHelp, sanitizeProse } from "../../src/emit/help.ts";
 
 const root = nodePath.resolve(import.meta.dir, "../..");
@@ -34,6 +34,7 @@ const serialization = (style: string) => ({
   allowReserved: false,
   explode: false,
   kind: "style",
+  objectValued: false,
   origin,
   rows,
   rules: "rfc3986-3.1+",
@@ -83,6 +84,7 @@ const schemePlain = {
   name: "bearerAuth",
   origin,
   rows,
+  source: "spec",
 };
 
 const scheme = Schema.decodeUnknownSync(SecurityScheme)(schemePlain);
@@ -260,6 +262,12 @@ const timeAlternative = (count: number) => {
   return elapsed;
 };
 
+// A body field flag at `/<name>` with the given annotations.
+const body = (name: string, field: HelpBodyField) => ({
+  name,
+  source: { _tag: "Body", field, pointer: `/${name}` } as const,
+});
+
 describe("operationHelp", () => {
   test("description is the source description, else the summary, an empty one staying empty", () => {
     expect<string>(withDocs({ description: "Update a user." })).toBe("Update a user.");
@@ -300,6 +308,30 @@ describe("operationHelp", () => {
       "if-match": goldenNote("--if-match"),
       name: goldenNote("--name"),
       notify: goldenNote("--notify"),
+    });
+  });
+
+  test("SCH-29 SCH-49 SCH-50 SCH-51 a body field's note lists its values, default and marks", () => {
+    const help = operationHelp({
+      ...input,
+      flags: [
+        body("kind", {
+          default: undefined,
+          deprecated: false,
+          enum: ["a", 1, null],
+          readOnly: false,
+        }),
+        body("meta", { default: { x: [1] }, deprecated: true, enum: undefined, readOnly: true }),
+        body("plain", { default: undefined, deprecated: false, enum: undefined, readOnly: false }),
+        { name: "bare", source: { _tag: "Body", pointer: "/bare" } },
+      ],
+    });
+
+    expect(help.flags).toEqual({
+      bare: "body /bare",
+      kind: "body /kind; choices: a, 1, null",
+      meta: 'body /meta; default: {"x":[1]}; read-only; deprecated',
+      plain: "body /plain",
     });
   });
 
@@ -353,16 +385,18 @@ describe("operationHelp", () => {
     ]);
   });
 
-  test("two refused cookie parameters from normalizeParameter are each listed by wire name", () => {
+  test("two refused cookie parameters (form, explode false) from normalizeParameter are each listed by wire name", () => {
     const parameters = ["session", "csrf"].map((name) => ({
+      explode: false,
       in: "cookie",
       name,
       schema: { type: "string" },
+      style: "form",
     }));
     const value = {
       components: {},
       info: { title: "t", version: "1" },
-      openapi: "3.1.1",
+      openapi: "3.2.0",
       paths: {
         "/users/{id}": {
           patch: { parameters, responses: { "200": { description: "ok" } } },
@@ -372,14 +406,14 @@ describe("operationHelp", () => {
     const resolution = Effect.runSync(
       resolve({
         document: Schema.decodeUnknownSync(DocumentUri)(origin.document),
-        line: "3.1",
+        line: "3.2",
         value,
       }),
     );
     const diagnostics = parameters.flatMap((_, index) => {
       const outcome = Effect.runSync(
         normalizeParameter(resolution, {
-          openapi: "3.1.1",
+          openapi: "3.2.0",
           operation: { method: "PATCH", path: "/users/{id}" },
           pointer: `/paths/~1users~1{id}/patch/parameters/${index}`,
         }),
@@ -423,7 +457,7 @@ describe("operationHelp", () => {
     expect(sectionText(help, "REFUSED")).toBeUndefined();
   });
 
-  test("an optional body, no body and an unauthenticated operation shorten the lines", () => {
+  test("an optional body, no body and an explicit `security: []` shorten the lines", () => {
     const { operationId: _operationId, ...unnamed } = operationPlain;
     const plain = {
       ...unnamed,
@@ -436,7 +470,7 @@ describe("operationHelp", () => {
     });
 
     expect(sectionText(optional, "REQUEST")).toBe("PATCH /users/{id}, body application/json");
-    expect(sectionText(optional, "AUTH")).toBeUndefined();
+    expect(sectionText(optional, "AUTH")).toBe("no authentication");
 
     const { body: _body, ...bodiless } = plain;
     const none = operationHelp({
@@ -478,5 +512,108 @@ describe("several media types", () => {
     expect(sectionText(help, "RESPONSES")).toBe(
       "200 application/json or image/png. Non-2xx exits 1 (401/403 exit 3)",
     );
+  });
+});
+
+// The golden operation with these response headers on its first two cases.
+const withResponseHeaders = (headers: readonly (readonly Schema.Json[])[]) =>
+  operationHelp({
+    ...input,
+    operation: Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      responses: operationPlain.responses.map((plain, index) => ({
+        ...plain,
+        headers: headers[index] ?? [],
+      })),
+    }),
+  });
+
+const header = (name: string, required = false, deprecated = false) => ({
+  deprecated,
+  name,
+  required,
+});
+
+describe("HDR-04 RESPONSE HEADERS", () => {
+  test("each case lists its headers in document order with required and deprecated marks", () => {
+    const help = withResponseHeaders([
+      [
+        header("X-Color"),
+        header("X-Required", true),
+        header("X-Deprecated", false, true),
+        header("X-Both", true, true),
+      ],
+      [header("X-Request-Id")],
+    ]);
+
+    expect(help.sections.map(([title]) => title)).toEqual([
+      "REQUEST",
+      "AUTH",
+      "RESPONSES",
+      "RESPONSE HEADERS",
+    ]);
+    expect(sectionText(help, "RESPONSE HEADERS")).toBe(
+      "200: X-Color, X-Required (required), X-Deprecated (deprecated), X-Both (required, deprecated); 404: X-Request-Id",
+    );
+  });
+
+  test("an operation whose cases declare no headers has no section", () => {
+    const help = withResponseHeaders([]);
+
+    expect(help.sections.map(([title]) => title)).toEqual(["REQUEST", "AUTH", "RESPONSES"]);
+  });
+});
+
+const hint = (keyword: string, branches: readonly Schema.Json[]) => ({
+  branches,
+  keyword,
+  propertyName: "petType",
+});
+
+// The help of the golden operation with the given body alternatives.
+const withAlternatives = (alternatives: readonly Schema.Json[]) =>
+  operationHelp({
+    ...input,
+    operation: Schema.decodeUnknownSync(Operation)({
+      ...operationPlain,
+      body: { ...operationPlain.body, alternatives },
+    }),
+  });
+
+const titles = (help: ReturnType<typeof operationHelp>) => help.sections.map(([title]) => title);
+
+describe("DSC-01 DSC-02 DSC-07 VARIANTS", () => {
+  const mixed = hint("oneOf", [
+    { component: "Cat", index: 0, labels: ["cat"] },
+    { component: "Dog", index: 1, labels: ["Dog"] },
+    { index: 2, labels: [] },
+  ]);
+
+  test("a hinted alternative prints one VARIANTS line directly after REQUEST", () => {
+    const help = withAlternatives([{ ...media("application/json"), discriminator: mixed }]);
+
+    expect(titles(help)).toEqual(["REQUEST", "VARIANTS", "AUTH", "RESPONSES"]);
+    expect(sectionText(help, "VARIANTS")).toBe(
+      'application/json oneOf by petType: "cat" (Cat), "Dog" (Dog), oneOf/2 (inline, no petType value)',
+    );
+  });
+
+  test("two hinted alternatives join with '; ' and an unhinted one adds nothing", () => {
+    const help = withAlternatives([
+      { ...media("application/json"), discriminator: mixed },
+      media("text/plain"),
+      {
+        ...media("application/vnd.pet+json"),
+        discriminator: hint("anyOf", [{ component: "Cat", index: 0, labels: ["a", "b"] }]),
+      },
+    ]);
+
+    expect(sectionText(help, "VARIANTS")).toBe(
+      'application/json oneOf by petType: "cat" (Cat), "Dog" (Dog), oneOf/2 (inline, no petType value); application/vnd.pet+json anyOf by petType: "a" | "b" (Cat)',
+    );
+  });
+
+  test("no hinted alternative prints no VARIANTS section", () => {
+    expect(titles(operationHelp(input))).not.toContain("VARIANTS");
   });
 });

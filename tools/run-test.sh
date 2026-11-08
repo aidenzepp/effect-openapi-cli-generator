@@ -3,6 +3,7 @@
 set -u
 [ "$#" -ge 1 ] || { echo "usage: tools/run-test.sh <test-file...>" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd); cd "$root" || exit 2
+for f in "$@"; do [ -f "$f" ] || { echo "run-test: missing test file: $f" >&2; exit 2; }; done
 bun tools/check-bun.ts || exit $?
 bun run --if-present prepare:runtime || exit $?
 files=(); for f in "$@"; do case "$f" in /*|./*) files+=("$f");; *) files+=("./$f");; esac; done

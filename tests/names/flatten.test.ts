@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { flattenBody } from "../../src/names/flatten.ts";
+import { EncodingRule } from "../../src/model/entities.ts";
 import type { MediaAlternative } from "../../src/model/entities.ts";
 
 type Defs = Readonly<Record<string, Schema.Json>>;
+
+// The line these tests flatten on unless one names its own: 3.1, where a read-only property keeps
+// its flag and `format: byte` is text.
+const defaultLine = "3.1";
 
 type Alternative = Pick<MediaAlternative, "codec" | "schema">;
 
@@ -11,7 +16,7 @@ const alternative = (codec: Alternative["codec"], key: string | undefined): Alte
   key === undefined ? { codec } : { codec, schema: { key } };
 
 const run = (defs: Defs, codec: Alternative["codec"] = "json", key: string | null = "Root") => {
-  const result = flattenBody(defs, alternative(codec, key ?? undefined));
+  const result = flattenBody(defs, alternative(codec, key ?? undefined), defaultLine);
   if (Result.isFailure(result)) {
     throw new Error(`flattenBody failed with ${result.failure._tag}`);
   }
@@ -168,6 +173,7 @@ describe("flattenBody", () => {
     const result = flattenBody(
       { Root: object({ x: { $ref: "#/$defs/Nope" } }) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("UnresolvedBodyRef");
   });
@@ -212,6 +218,7 @@ describe("flattenBody", () => {
     const cycle = flattenBody(
       { A: { $ref: "#/$defs/A" }, Root: object({ x: { $ref: "#/$defs/A" } }) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(cycle) && cycle.failure._tag).toBe("UnresolvedBodyRef");
   });
@@ -221,9 +228,11 @@ describe("flattenBody", () => {
   }, 5000);
 
   test("a diamond fan-out resolves at depth 30 and is a cheap typed failure past the 64-hop cap", () => {
-    expect(Result.isSuccess(flattenBody(fanOut(30), alternative("json", "Root")))).toBe(true);
+    expect(
+      Result.isSuccess(flattenBody(fanOut(30), alternative("json", "Root"), defaultLine)),
+    ).toBe(true);
 
-    const deep = flattenBody(fanOut(64), alternative("json", "Root"));
+    const deep = flattenBody(fanOut(64), alternative("json", "Root"), defaultLine);
     expect(Result.isFailure(deep) && deep.failure._tag).toBe("UnresolvedBodyRef");
   }, 5000);
 
@@ -286,6 +295,7 @@ describe("flattenBody", () => {
         Root: { allOf: members.map(([key]) => ({ $ref: `#/$defs/${key}` })) },
       },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
 
@@ -296,13 +306,18 @@ describe("flattenBody", () => {
         Root: { allOf: [{ $ref: "#/$defs/M0" }, { $ref: "#/$defs/M1" }] },
       },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isSuccess(small)).toBe(true);
   }, 5000);
 
   test("a body that exceeds the shared visit budget is a typed BodyBudgetExceeded", () => {
     const members = Array.from({ length: 20_000 }, () => ({ type: "string" }));
-    const result = flattenBody({ Root: { allOf: members } }, alternative("json", "Root"));
+    const result = flattenBody(
+      { Root: { allOf: members } },
+      alternative("json", "Root"),
+      defaultLine,
+    );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
 
@@ -322,10 +337,22 @@ describe("flattenBody", () => {
     const result = flattenBody(
       { Root: object(uses), Shared: object(empties) },
       alternative("json", "Root"),
+      defaultLine,
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("BodyBudgetExceeded");
   }, 5000);
 });
+
+// A part's Encoding rule as normalize builds it, with a base64 transfer encoding.
+const base64Rule = (name: string) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentEncoding: "base64",
+    contentType: ["application/octet-stream"],
+    headers: [],
+    origin: { document: "file:///spec.json", pointer: `/properties/${name}` },
+    rows: [],
+    target: { kind: "property", name },
+  });
 
 describe("flattenBody: multipart and xml", () => {
   const parts = {
@@ -339,27 +366,45 @@ describe("flattenBody: multipart and xml", () => {
     }),
   } satisfies Defs;
 
-  test("a multipart body gets one flag per part and no whole-body flag", () => {
+  test("a multipart body gets one flag per part, an object part a JSON flag, and no whole-body flag", () => {
     const flattened = run(parts, "multipart");
     expect(
       flattened.flags.map(({ kind, name, pointer, repeated }) => [name, kind, pointer, repeated]),
     ).toEqual([
       ["avatar", "file", "/avatar", false],
       ["count", "integer", "/count", false],
+      ["meta", "json", "/meta", false],
       ["name", "string", "/name", false],
       ["photos", "file", "/photos", true],
       ["tags", "string", "/tags", true],
     ]);
-    expect(flattened.skipped).toEqual([{ pointer: "/meta", reason: "UnsupportedPart" }]);
+    expect(flattened.skipped).toEqual([]);
   });
 
-  test("3.1 binary: contentMediaType and a schemaless part are files, base64 text is not", () => {
+  test("a oneOf, map or array-of-objects part has no flag and is skipped as UnsupportedPart", () => {
+    const flattened = run(
+      {
+        Root: object({
+          choice: { oneOf: [{ type: "string" }, { type: "integer" }] },
+          map: { additionalProperties: { type: "string" }, type: "object" },
+          rows: { items: object({ a: { type: "string" } }), type: "array" },
+        }),
+      },
+      "multipart",
+    );
+    expect(flattened.flags).toEqual([]);
+    expect(flattened.skipped).toEqual([
+      { pointer: "/choice", reason: "UnsupportedPart" },
+      { pointer: "/map", reason: "UnsupportedPart" },
+      { pointer: "/rows", reason: "UnsupportedPart" },
+    ]);
+  });
+
+  test("3.1 binary: contentMediaType and a schemaless part are files", () => {
     const flattened = run(
       {
         Root: object({
           any: {},
-          b64: { contentEncoding: "base64", type: "string" },
-          bytes: { format: "byte", type: "string" },
           png: { contentMediaType: "image/png", type: "string" },
         }),
       },
@@ -367,9 +412,56 @@ describe("flattenBody: multipart and xml", () => {
     );
     expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([
       ["any", "file"],
-      ["b64", "string"],
-      ["bytes", "string"],
       ["png", "file"],
+    ]);
+  });
+
+  test.each(["binary", "7bit", "8bit", "BINARY", "7Bit", "8BIT"])(
+    "a string part with identity contentEncoding %s is a file part sent as raw bytes",
+    (contentEncoding) => {
+      const flattened = run(
+        { Root: object({ doc: { contentEncoding, type: "string" } }) },
+        "multipart",
+      );
+      expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "file"]]);
+    },
+  );
+
+  test("a part with any other contentEncoding stays text", () => {
+    const flattened = run(
+      { Root: object({ doc: { contentEncoding: "quoted-printable", type: "string" } }) },
+      "multipart",
+    );
+    expect(flattened.flags.map(({ kind, name }) => [name, kind])).toEqual([["doc", "string"]]);
+  });
+
+  test("a part whose Encoding rule is base64 is a file part; the rule decides, not the schema", () => {
+    const defs = {
+      Root: object({
+        b64: { contentEncoding: "base64", type: "string" },
+        bytes: { format: "byte", type: "string" },
+        many: { items: { format: "byte", type: "string" }, type: "array" },
+        text: { contentEncoding: "base64", type: "string" },
+      }),
+    } satisfies Defs;
+    const result = flattenBody(
+      defs,
+      {
+        codec: "multipart",
+        encoding: ["b64", "bytes", "many"].map(base64Rule),
+        schema: { key: "Root" },
+      },
+      defaultLine,
+    );
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    expect(result.success.flags.map(({ kind, name, repeated }) => [name, kind, repeated])).toEqual([
+      ["b64", "file", false],
+      ["bytes", "file", false],
+      ["many", "file", true],
+      ["text", "string", false],
     ]);
   });
 
@@ -402,5 +494,46 @@ describe("flattenBody: multipart and xml", () => {
     expect(run({ Root: object({ a: { type: "string" } }) }, "xml").flags).toEqual([
       expect.objectContaining({ kind: "body-file", name: "body-file" }),
     ]);
+  });
+});
+
+describe("flattenBody: 3.0 readOnly (S30-31, D-SCH2)", () => {
+  const defs = {
+    Id: { readOnly: true, type: "string" },
+    Root: object({
+      id: { readOnly: true, type: "string" },
+      meta: object({ stamp: { readOnly: true, type: "string" }, tag: { type: "string" } }),
+      name: { type: "string" },
+      ref: { $ref: "#/$defs/Id" },
+    }),
+  } satisfies Defs;
+
+  const names = (line: "3.0" | "3.1" | "3.2", codec: Alternative["codec"] = "json") => {
+    const result = flattenBody(defs, alternative(codec, "Root"), line);
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return {
+      flags: result.success.flags.map((flag) => flag.name),
+      skipped: result.success.skipped,
+    };
+  };
+
+  test("a 3.0 read-only property, directly or through one $ref, gets no flag and no skip notice", () => {
+    expect(names("3.0")).toEqual({
+      flags: ["body", "body-file", "meta.tag", "name"],
+      skipped: [],
+    });
+  });
+
+  test("a 3.0 read-only multipart part gets no flag and no skip notice", () => {
+    expect(names("3.0", "multipart")).toEqual({ flags: ["meta", "name"], skipped: [] });
+  });
+
+  test("3.1 and 3.2 keep the flag of a read-only property (SCH-51)", () => {
+    const kept = ["body", "body-file", "id", "meta.stamp", "meta.tag", "name", "ref"];
+    expect(names("3.1").flags).toEqual(kept);
+    expect(names("3.2").flags).toEqual(kept);
   });
 });

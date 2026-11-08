@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "enc",
+  "envPrefix": "ENC",
+  "package": {
+    "name": "enc-rules-witness-cli",
+    "version": "0.1.0"
+  }
+}

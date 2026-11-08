@@ -1,10 +1,11 @@
 import { Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
-import { resolveUri, stripFragment } from "../resolve/base-uri.ts";
-import { defaultLimits, implicitComponent, referenceAt } from "../resolve/index.ts";
+import { keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { escapeToken, formatPointer, parseFragment, childPointer } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
@@ -38,6 +39,15 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
+  "DSC-05/no-composition": {
+    anchor: "discriminator-object",
+    element: "Discriminator",
+    hint: "Put the discriminator beside oneOf or anyOf, or on a base schema that allOf children reference.",
+    message:
+      "A discriminator is legal only with oneOf, anyOf or allOf, and this schema uses none. The discriminator is not used.",
+    scope: "element",
+    severity: "refusal",
+  },
   "DSC-09/property-not-required": {
     anchor: "discriminator-object",
     element: "Discriminator propertyName",
@@ -61,6 +71,14 @@ const rules = {
     hint: "Name the header with an RFC 9110 token.",
     message: "An encoding header name is not an RFC 9110 token.",
     scope: "element",
+    severity: "refusal",
+  },
+  "HDR-13/parameter-only-field": {
+    anchor: "header-object",
+    element: "Header Object field",
+    hint: "Remove allowEmptyValue and allowReserved from the Header Object.",
+    message: "A Header Object uses allowEmptyValue or allowReserved, which the text forbids.",
+    scope: "document",
     severity: "refusal",
   },
   "MED-24/invalid-media-type": {
@@ -93,6 +111,14 @@ const rules = {
     hint: "Name the header with an RFC 9110 token.",
     message: "A response header name is not an RFC 9110 token.",
     scope: "element",
+    severity: "refusal",
+  },
+  "RSS-04/no-response-code": {
+    anchor: "responses-object",
+    element: "Responses Object",
+    hint: "Add a status code, a status range or default.",
+    message: "A Responses Object has only x- keys, so it holds no response code.",
+    scope: "document",
     severity: "refusal",
   },
   "RSS-10/invalid-status": {
@@ -160,6 +186,14 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
+  "SRV-04/duplicate-name": {
+    anchor: "server-name",
+    element: "Server name",
+    hint: "Give each server in a list its own name.",
+    message: "A server name is used by an earlier server in the same list.",
+    scope: "operation",
+    severity: "refusal",
+  },
   "SRV-12/default-not-in-enum": {
     anchor: "server-variable-default",
     element: "Server variable default",
@@ -211,7 +245,9 @@ interface Operation {
   readonly pointer: string;
 }
 
+// An object and where it sits: the document of the set that holds it, and its pointer there.
 interface Place {
+  readonly document: CanonicalKey["document"];
   readonly node: JsonObject;
   readonly pointer: string;
 }
@@ -262,20 +298,28 @@ const listOf = (value: Json | undefined): readonly Json[] => (isArray(value) ? v
 
 const isReference = (node: JsonObject): boolean => Predicate.isString(node.$ref);
 
-// An object at a use site, followed through its Reference Object to the end of the chain.
+// An object at a use site, followed through its Reference Object to the end of the chain, which
+// is read from the document of the set that holds it.
 const locate = (
   resolution: Resolution,
-  pointer: string,
+  site: CanonicalKey,
   node: Json | undefined,
 ): Place | undefined => {
-  const reference = referenceAt(resolution, pointer);
-  const target =
-    reference === undefined ? node : nodeAt(resolution.value, reference.target.pointer);
+  const at = resolution.references.get(keyOf(site))?.target ?? site;
+  const document = resolution.documents.get(at.document);
+  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
+  const target = at === site ? node : read;
 
   return isObject(target)
-    ? { node: target, pointer: reference === undefined ? pointer : reference.target.pointer }
+    ? { document: at.document, node: target, pointer: at.pointer }
     : undefined;
 };
+
+// The site at `pointer` in the entry document.
+const entrySite = (resolution: Resolution, pointer: string): CanonicalKey => ({
+  document: resolution.document,
+  pointer,
+});
 
 const isToken = (name: string): boolean =>
   Option.isSome(Schema.decodeUnknownOption(HeaderName)(name));
@@ -286,34 +330,17 @@ const isMediaRange = (name: string): boolean =>
 const compilesWithU = (source: string): boolean =>
   Exit.isSuccess(Effect.runSyncExit(Effect.try(() => new RegExp(source, "u"))));
 
-const fragmentPointer = (fragment: string): string | undefined => {
-  const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
-
-  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
-};
-
 const at =
   (code: Code, pointer: string) =>
   (extra: Partial<Finding> = {}): Finding => ({ code, pointer, ...extra });
 
-// A discriminator mapping value: a component schema name first, else a reference into the set.
-const mappingResolves = (resolution: Resolution, value: string): boolean => {
-  if (isObject(nodeAt(resolution.value, `/components/schemas/${escapeToken(value)}`))) {
-    return true;
-  }
-
-  const resolved = resolveUri(value, resolution.base);
-  const hash = resolved?.indexOf("#") ?? -1;
-  const resource = resolved === undefined ? undefined : stripFragment(resolved);
-  const retrieval = stripFragment(resolveUri(resolution.document, resolution.document) ?? "");
-  const inSet = resource === resolution.base || resource === retrieval;
-  const pointer =
-    resolved === undefined || hash === -1 || !inSet
-      ? undefined
-      : fragmentPointer(resolved.slice(hash + 1));
-
-  return pointer !== undefined && isObject(nodeAt(resolution.value, pointer));
-};
+// A discriminator mapping value: a component schema name first, else a reference into the set
+// (`implicitComponent`); either way the target must be a Schema Object.
+const mappingResolves = (resolution: Resolution, value: string): boolean =>
+  Option.match(implicitComponent(resolution, "schemas", value), {
+    onNone: () => false,
+    onSome: (key) => isObject(nodeAt(resolution.value, key.pointer)),
+  });
 
 // One checkGrammar call's walk through allOf, oneOf and anyOf: answers already settled, the
 // schemas being walked (by depth) and the steps left. Reuse across members is a DAG, so each
@@ -356,7 +383,7 @@ const requiresAt = (
   name: string,
   depth: number,
 ): Answer => {
-  const key = `${place.pointer}\u0000${name}`;
+  const key = `${place.document}#${place.pointer}\u0000${name}`;
   const known = search.memo.get(key);
   const walking = search.active.get(key);
   search.steps += 1;
@@ -381,7 +408,10 @@ const requiresAt = (
     listOf(place.node[keyword]).flatMap((member, index) => {
       const located = locate(
         resolution,
-        childPointer(childPointer(place.pointer, keyword), String(index)),
+        {
+          document: place.document,
+          pointer: childPointer(childPointer(place.pointer, keyword), String(index)),
+        },
         member,
       );
 
@@ -436,12 +466,21 @@ const requiresAt = (
 const requires = (resolution: Resolution, place: Place, name: string): boolean =>
   requiresAt(resolution, searchOf(resolution), place, name, 0).found;
 
+const composes = (node: JsonObject): boolean =>
+  ["allOf", "anyOf", "oneOf"].some((keyword) => listOf(node[keyword]).length > 0);
+
 const discriminatorFindings = (
   resolution: Resolution,
   place: Place,
   discriminator: JsonObject,
 ): readonly Finding[] => {
   const base = childPointer(place.pointer, "discriminator");
+  const self = keyOf({ document: place.document, pointer: place.pointer });
+  // An allOf base: the discriminator sits on the base and the children reference it (DSC-11).
+  if (!composes(place.node) && !allOfReferrers(resolution).has(self)) {
+    return [at("DSC-05/no-composition", base)()];
+  }
+
   const name = stringMember(discriminator, "propertyName");
   const required = name !== undefined && requires(resolution, place, name);
   const defaultMapping = stringMember(discriminator, "defaultMapping");
@@ -504,7 +543,7 @@ const schemaFindings = (
     schemaFindings(resolution, value, childPointer(pointer, token));
 
   return [
-    ...ownSchemaFindings(resolution, { node, pointer }),
+    ...ownSchemaFindings(resolution, { document: resolution.document, node, pointer }),
     ...schemaMembers.flatMap((keyword) => below(keyword, node[keyword])),
     ...schemaLists.flatMap((keyword) =>
       listOf(node[keyword]).flatMap((member, index) =>
@@ -524,6 +563,18 @@ const schemaFindings = (
 };
 
 type HeaderCode = "HDR-01/invalid-header-name" | "RSP-09/invalid-header-name";
+
+// The 3.1 and 3.2 schemas reject both fields on a Header Object; the 3.0 schema permits them.
+const headerFieldFindings = (
+  resolution: Resolution,
+  node: Json | undefined,
+  pointer: string,
+): readonly Finding[] =>
+  resolution.line === "3.0" && isObject(node) && !isReference(node)
+    ? (["allowEmptyValue", "allowReserved"] as const)
+        .filter((field) => node[field] !== undefined)
+        .map((field) => at("HDR-13/parameter-only-field", childPointer(pointer, field))())
+    : [];
 
 // Header, Content, Media Type and Encoding objects refer to each other, so they share one record.
 interface Media {
@@ -582,6 +633,7 @@ const media: Media = {
   headers: (resolution, headers, pointer, code) =>
     entriesOf(headers).flatMap(([name, header]) => [
       ...(isToken(name) ? [] : [at(code, childPointer(pointer, name))()]),
+      ...headerFieldFindings(resolution, header, childPointer(pointer, name)),
       ...media.header(resolution, header, childPointer(pointer, name)),
     ]),
   mediaType: (resolution, node, pointer) => {
@@ -651,12 +703,23 @@ const responseFindings = (
       ]
     : [];
 
+// The 3.1 and 3.2 schemas refuse a Responses Object of `x-` keys alone; the 3.0 schema counts an
+// `x-` key toward its one required member (D-OC3).
+const extensionsOnly = (resolution: Resolution, responses: Json | undefined): boolean => {
+  const keys = entriesOf(responses).map(([code]) => code);
+
+  return (
+    resolution.line === "3.0" && keys.length > 0 && keys.every((code) => code.startsWith("x-"))
+  );
+};
+
 const responsesFindings = (
   resolution: Resolution,
   responses: Json | undefined,
   pointer: string,
-): readonly Finding[] =>
-  entriesOf(responses).flatMap(([code, response]) =>
+): readonly Finding[] => [
+  ...(extensionsOnly(resolution, responses) ? [at("RSS-04/no-response-code", pointer)()] : []),
+  ...entriesOf(responses).flatMap(([code, response]) =>
     code.startsWith("x-")
       ? []
       : [
@@ -665,7 +728,8 @@ const responsesFindings = (
             : [at("RSS-10/invalid-status", childPointer(pointer, code))()]),
           ...responseFindings(resolution, response, childPointer(pointer, code)),
         ],
-  );
+  ),
+];
 
 const requestBodyFindings = (
   resolution: Resolution,
@@ -775,7 +839,10 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
     ...each("responses", (node, pointer) => responseFindings(resolution, node, pointer)),
     ...each("parameters", (node, pointer) => parameterFindings(resolution, node, pointer)),
     ...each("requestBodies", (node, pointer) => requestBodyFindings(resolution, node, pointer)),
-    ...each("headers", (node, pointer) => media.header(resolution, node, pointer)),
+    ...each("headers", (node, pointer) => [
+      ...headerFieldFindings(resolution, node, pointer),
+      ...media.header(resolution, node, pointer),
+    ]),
     ...each("pathItems", (node, pointer) => items.pathItem(resolution, node, pointer)),
     ...each("callbacks", (node, pointer) => items.callback(resolution, node, pointer)),
     ...each("mediaTypes", (node, pointer) => media.mediaType(resolution, node, pointer)),
@@ -800,9 +867,10 @@ const pathItems = (resolution: Resolution): readonly PathItem[] =>
   entriesOf(isObject(resolution.value) ? resolution.value.paths : undefined).flatMap(
     ([key, value]) => {
       const use = childPointer("/paths", key);
-      const located = locate(resolution, use, value);
+      const located = locate(resolution, entrySite(resolution, use), value);
 
-      return located === undefined
+      // A path item in another document of the set is not walked: the checks read entry sites.
+      return located === undefined || located.document !== resolution.document
         ? []
         : [{ key, node: located.node, pointer: located.pointer, use }];
     },
@@ -907,13 +975,44 @@ const effectiveServers = (
   );
 };
 
+// A 3.2 server name is unique within its list (D-OC3); no schema enforces it.
+const duplicateNameFindings = (
+  resolution: Resolution,
+  servers: readonly (readonly [Json, string])[],
+): readonly Finding[] => {
+  if (resolution.line !== "3.2") {
+    return [];
+  }
+
+  const seen = new Set<string>();
+
+  return servers.flatMap(([server, pointer]) => {
+    const name = isObject(server) ? stringMember(server, "name") : undefined;
+    if (name === undefined) {
+      return [];
+    }
+
+    if (seen.has(name)) {
+      return [at("SRV-04/duplicate-name", childPointer(pointer, "name"))()];
+    }
+
+    seen.add(name);
+
+    return [];
+  });
+};
+
 const operationServerFindings = (
   resolution: Resolution,
   operation: Operation,
-): readonly Finding[] =>
-  effectiveServers(resolution, operation).flatMap(([server, pointer]) =>
-    serverFindings(resolution, server, pointer).map((finding) => ({ ...finding, operation })),
-  );
+): readonly Finding[] => {
+  const servers = effectiveServers(resolution, operation);
+
+  return [
+    ...servers.flatMap(([server, pointer]) => serverFindings(resolution, server, pointer)),
+    ...duplicateNameFindings(resolution, servers),
+  ].map((finding) => ({ ...finding, operation }));
+};
 
 const schemeNode = (resolution: Resolution, name: string): JsonObject | undefined => {
   const key = implicitComponent(resolution, "securitySchemes", name);
@@ -921,7 +1020,10 @@ const schemeNode = (resolution: Resolution, name: string): JsonObject | undefine
     return undefined;
   }
 
-  return locate(resolution, key.value.pointer, nodeAt(resolution.value, key.value.pointer))?.node;
+  const document = resolution.documents.get(key.value.document);
+  const node = document === undefined ? undefined : nodeAt(document, key.value.pointer);
+
+  return locate(resolution, key.value, node)?.node;
 };
 
 interface Requirement {
@@ -1087,10 +1189,12 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
 };
 
 /**
- * The spec-text checks on values and grammars (design 3.4 rows 10 to 17): server variables and
- * URLs, security requirement names, media type keys, header-name tokens, discriminators, status
- * keys and patterns, and the 3.0 rows on `items`, `readOnly` and `writeOnly`. Pure over the
- * resolved document; findings are refusals except the 3.0 server default and the pattern notices.
+ * The spec-text checks on values and grammars (design 3.4 rows 10 to 17): server variables, URLs
+ * and 3.2 names, security requirement names, media type keys, header-name tokens, discriminators,
+ * status keys and patterns, and the 3.0 rows the 3.0 schema leaves open: `items`, `readOnly` and
+ * `writeOnly`, a Responses Object of `x-` keys alone and Header `allowEmptyValue` or
+ * `allowReserved`. Pure over the resolved document; findings are refusals except the 3.0 server
+ * default and the pattern notices.
  * Walking allOf, oneOf and anyOf is bounded by `limits.maxNodes` steps; past it the only finding
  * is a document-scope refusal (design 9 I5).
  */

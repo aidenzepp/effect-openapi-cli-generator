@@ -1,0 +1,9 @@
+{
+  "allowInsecure": true,
+  "binName": "encf",
+  "envPrefix": "ENCF",
+  "package": {
+    "name": "enc-fields-witness-cli",
+    "version": "0.1.0"
+  }
+}

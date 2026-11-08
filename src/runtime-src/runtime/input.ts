@@ -10,7 +10,7 @@ import {
   Stdio,
   Stream,
 } from "effect";
-import { CliError, Flag } from "effect/cli";
+import { Argument, CliError, Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
@@ -85,9 +85,14 @@ export const stdinClaimLayer: Layer.Layer<StdinClaim> = Layer.effect(
 const usage = (flag: string, cause: string): UsageError =>
   new UsageError({ flag, message: `--${flag}: ${cause}` });
 
-const cannotRead = (): UsageError => usage(bodyFileName, "cannot read the file or stdin");
+const cannotReadIn = (flag: string): UsageError => usage(flag, "cannot read the file or stdin");
 
-const overLimit = (): UsageError => usage(bodyFileName, `the body is over ${maxBodyBytes} bytes`);
+const overLimitIn = (flag: string, limit: number = maxBodyBytes): UsageError =>
+  usage(flag, `the body is over ${limit} bytes`);
+
+const cannotRead = (): UsageError => cannotReadIn(bodyFileName);
+
+const overLimit = (limit: number): UsageError => overLimitIn(bodyFileName, limit);
 
 const notAFile = (): UsageError =>
   usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
@@ -118,21 +123,45 @@ const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
 
 const bounded = (
   source: Stream.Stream<Uint8Array, unknown>,
+  limit: number = maxBodyBytes,
 ): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
   source.pipe(
     Stream.mapError((): OverLimit | ReadFailed => new ReadFailed()),
-    Stream.limitBytes(maxBodyBytes, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
+    Stream.limitBytes(limit, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
       Stream.fail(new OverLimit()),
     ),
   );
 
-const toUsage = (cause: OverLimit | ReadFailed): UsageError =>
-  cause instanceof OverLimit ? overLimit() : cannotRead();
+const toUsage = (
+  cause: OverLimit | ReadFailed,
+  flag: string = bodyFileName,
+  limit: number = maxBodyBytes,
+): UsageError => (cause instanceof OverLimit ? overLimitIn(flag, limit) : cannotReadIn(flag));
 
 const collect = (
   source: Stream.Stream<Uint8Array, unknown>,
+  flag: string = bodyFileName,
 ): Effect.Effect<Uint8Array, UsageError> =>
-  bounded(source).pipe(Stream.runCollect, Effect.map(concat), Effect.mapError(toUsage));
+  bounded(source).pipe(
+    Stream.runCollect,
+    Effect.map(concat),
+    Effect.mapError((cause) => toUsage(cause, flag)),
+  );
+
+// A bounded read of a path, or of stdin for `-` under the one stdin claim, failing in `flag`.
+const readFlagFile = (
+  path: string,
+  flag: string,
+): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(flag)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.flatMap((stdio) => collect(stdio.stdin, flag)),
+      )
+    : Effect.service(FileSystem.FileSystem).pipe(
+        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }), flag)),
+      );
 
 /**
  * Reads `--body-file` into memory, bounded: a file by path, or stdin for `-` (which takes the one
@@ -141,28 +170,25 @@ const collect = (
 export const readBodyFile = (
   path: string,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(bodyFileName)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => collect(stdio.stdin)),
-      )
-    : Effect.service(FileSystem.FileSystem).pipe(
-        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }))),
-      );
+  readFlagFile(path, bodyFileName);
 
 // A body stream that counts the bytes it yields, so a file that grows past its stat size, or a
 // `FileBody` that under-declares, still stops at the limit; the send step sees a `UsageError`.
-const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, UsageError> => {
+const limited = (
+  body: HttpBody.HttpBody,
+  limit: number,
+): Effect.Effect<HttpBody.HttpBody, UsageError> => {
   if (body._tag !== "Stream") {
     return Effect.succeed(body);
   }
 
-  return (body.contentLength ?? 0) > maxBodyBytes
-    ? Effect.fail(overLimit())
+  return (body.contentLength ?? 0) > limit
+    ? Effect.fail(overLimit(limit))
     : Effect.succeed(
         HttpBody.stream(
-          bounded(body.stream).pipe(Stream.mapError(toUsage)),
+          bounded(body.stream, limit).pipe(
+            Stream.mapError((cause) => toUsage(cause, bodyFileName, limit)),
+          ),
           body.contentType,
           body.contentLength,
         ),
@@ -172,9 +198,11 @@ const limited = (body: HttpBody.HttpBody): Effect.Effect<HttpBody.HttpBody, Usag
 // Only a regular file is accepted. It is opened once here, so a missing read permission fails at
 // flag time, then streamed through `FileBody` with its size. A directory is refused, and so is a
 // pipe or device (a FIFO, `<(cmd)`): it has no size to trust, and the platform file system reads
-// by position, which a pipe refuses. Such input goes through `-` instead.
+// by position, which a pipe refuses. Such input goes through `-` instead. `limit` is the in-memory
+// ceiling the file is counted against; `undefined` streams it unguarded.
 const openFile = (
   path: string,
+  limit?: number,
 ): Effect.Effect<HttpBody.HttpBody, UsageError, FileBody | FileSystem.FileSystem> =>
   Effect.gen(function* open() {
     const fs = yield* FileSystem.FileSystem;
@@ -184,28 +212,45 @@ const openFile = (
       return yield* Effect.fail(notAFile());
     }
 
-    if (info.size > BigInt(maxBodyBytes)) {
-      return yield* Effect.fail(overLimit());
+    if (limit !== undefined && info.size > BigInt(limit)) {
+      return yield* Effect.fail(overLimit(limit));
     }
 
     yield* fs.open(path, { flag: "r" }).pipe(Effect.scoped, Effect.mapError(cannotRead));
 
     const fileBody = yield* FileBody;
 
-    return yield* fileBody.open(path).pipe(Effect.mapError(cannotRead), Effect.flatMap(limited));
+    const opened = fileBody.open(path).pipe(Effect.mapError(cannotRead));
+
+    return yield* limit === undefined
+      ? opened
+      : opened.pipe(Effect.flatMap((body) => limited(body, limit)));
   });
 
+// `--body-file -` as a chunked body with no length: stdin under the one stdin claim, streamed as
+// it arrives and never collected. A read failure is a `UsageError` naming the flag.
+const stdinBody: Effect.Effect<HttpBody.HttpBody, UsageError, Stdio.Stdio | StdinClaim> =
+  Effect.service(StdinClaim).pipe(
+    Effect.flatMap((claim) => claim.claim(bodyFileName)),
+    Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+    Effect.map((stdio) => HttpBody.stream(stdio.stdin.pipe(Stream.mapError(cannotRead)))),
+  );
+
 /**
- * A binary request body from `--body-file` only. A regular file streams through `FileBody` with its
- * size, its bytes counted against the limit; stdin (`-`) is read into memory, bounded, so an
- * over-limit or unreadable input is a `UsageError` before any request. `--body` is refused, and so
- * is `--body` together with `--body-file`. With neither flag a required body is a `UsageError`
- * naming `--body-file` and an optional one is empty.
+ * A binary request body from `--body-file` only (design 6.3 Binary). A regular file streams through
+ * `FileBody` with its size; stdin (`-`) streams chunked under the one stdin claim, with no
+ * `Content-Length`. Both count their bytes against the limit as they stream, so an over-limit or
+ * unreadable stdin fails the send with a `UsageError` naming `--body-file`. `--body` is refused,
+ * and so is `--body` together with `--body-file`. With neither flag a required body is a
+ * `UsageError` naming `--body-file` and an optional one is empty. `maxBytes`, the body schema's
+ * `maxLength` (MED-21), lowers the limit and never raises it; the failure names the limit, never
+ * the content or the path.
  */
 export const binaryBody = (options: {
   readonly body: Option.Option<string>;
   readonly bodyFile: Option.Option<string>;
   readonly required: boolean;
+  readonly maxBytes?: number;
 }): Effect.Effect<
   HttpBody.HttpBody,
   UsageError,
@@ -228,15 +273,53 @@ export const binaryBody = (options: {
       : Effect.succeed(HttpBody.empty);
   }
 
+  const limit = Math.min(options.maxBytes ?? maxBodyBytes, maxBodyBytes);
+
   return options.bodyFile.value === "-"
-    ? readBodyFile("-").pipe(Effect.map((read) => HttpBody.uint8Array(read)))
-    : openFile(options.bodyFile.value);
+    ? stdinBody.pipe(Effect.flatMap((body) => limited(body, limit)))
+    : openFile(options.bodyFile.value, limit);
 };
 
 /**
- * A JSON number kept as its source text. A field flag for an `int64` property passes its digit
- * string this way; a merged body marks any number whose text `JSON.parse` would change (digits
- * past 2^53, `1.50`, `1e2`). `mergeBody` writes it with `JSON.rawJSON` at serialization only.
+ * A sequential request body (NDJSON, JSON Lines, JSON-seq; design 6.3 Sequential uploads) or a text
+ * body, exactly as the operator gives it: `--body` is the text as given; a `--body-file` regular
+ * file streams through `FileBody` with its size; `-` streams stdin chunked under the one stdin
+ * claim. The bytes are never parsed, re-framed, buffered whole, asserted against a schema or
+ * counted against the in-memory read limit, which bounds only reads into memory (design I5). The
+ * caller sets the declared media type as `Content-Type`. `--body` together with `--body-file` is
+ * refused. With neither flag a required body is a `UsageError` and an optional one is empty.
+ */
+export const sequentialBody = (options: {
+  readonly body: Option.Option<string>;
+  readonly bodyFile: Option.Option<string>;
+  readonly required: boolean;
+}): Effect.Effect<
+  HttpBody.HttpBody,
+  UsageError,
+  FileBody | FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> => {
+  if (Option.isSome(options.body)) {
+    return Option.isSome(options.bodyFile)
+      ? Effect.fail(usage("body", `cannot be used with --${bodyFileName}`))
+      : Effect.succeed(HttpBody.text(options.body.value));
+  }
+
+  if (Option.isNone(options.bodyFile)) {
+    return options.required
+      ? Effect.fail(usage(bodyFileName, `this request needs a body; use --${bodyFileName}`))
+      : Effect.succeed(HttpBody.empty);
+  }
+
+  const path = options.bodyFile.value;
+
+  return path === "-" ? stdinBody : openFile(path);
+};
+
+/**
+ * A JSON number kept as its source text. A field flag for an `integer` or `number` property passes
+ * the operator's text this way; a merged body marks any number whose text `JSON.parse` would
+ * change (digits past 2^53, `1.50`, `1e2`). `mergeBody` writes it with `JSON.rawJSON` at
+ * serialization only.
  */
 export class JsonNumber {
   readonly text: string;
@@ -246,8 +329,16 @@ export class JsonNumber {
   }
 }
 
+const jsonNumberGrammar = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
 /**
- * A field flag's value: a scalar, an `int64` digit string as a `JsonNumber`, or a decoded JSON
+ * Whether `text` is a JSON number (RFC 8259 section 6). A `JsonNumber` is sent as its text, so a
+ * text outside this grammar is refused before it reaches the wire.
+ */
+export const isJsonNumberText = (text: string): boolean => jsonNumberGrammar.test(text);
+
+/**
+ * A field flag's value: a scalar, a number field's text as a `JsonNumber`, or a decoded JSON
  * value (an object, an array, `null`) for a property that is not flattened (design 4.5).
  */
 export type FieldValue =
@@ -259,7 +350,34 @@ export type FieldValue =
   | readonly FieldValue[]
   | { readonly [key: string]: FieldValue };
 
-export type Fields = Readonly<Record<string, Option.Option<FieldValue> | readonly FieldValue[]>>;
+/**
+ * Text encodings a base64 body property takes (RFC 4648 section 4 and 5), padding kept for both.
+ */
+export type FieldEncoding = "base64" | "base64url";
+
+/**
+ * A field flag whose value is a path, or `-` for stdin, to a file the runtime reads and encodes
+ * into the property at its pointer. `flag` is the flag's name, the only thing a failure names.
+ */
+export class FileField {
+  readonly encoding: FieldEncoding;
+  readonly flag: string;
+  readonly path: string;
+
+  constructor(options: {
+    readonly encoding: FieldEncoding;
+    readonly flag: string;
+    readonly path: string;
+  }) {
+    this.encoding = options.encoding;
+    this.flag = options.flag;
+    this.path = options.path;
+  }
+}
+
+export type Fields = Readonly<
+  Record<string, Option.Option<FieldValue | FileField> | readonly FieldValue[]>
+>;
 
 export type JsonNode =
   | null
@@ -274,7 +392,10 @@ export interface JsonObject {
   [key: string]: JsonNode;
 }
 
-interface RawJson {
+/**
+ * What `JSON.rawJSON` returns: a value `JSON.stringify` writes as its text, unchanged.
+ */
+export interface RawJson {
   readonly rawJSON: string;
 }
 
@@ -290,6 +411,12 @@ const bunJson: {
   readonly rawJSON: (text: string) => RawJson;
   // oxlint-disable-next-line anti-slop/no-reflect-get, typescript/no-unsafe-assignment -- the one way to type Bun's JSON without a global augmentation
 } = Reflect.get(globalThis, jsonGlobal);
+
+/**
+ * `text` as raw JSON for a `JSON.stringify` replacer, written unchanged. Throws `SyntaxError` when
+ * `text` is not a JSON primitive.
+ */
+export const rawJson = (text: string): RawJson => bunJson.rawJSON(text);
 
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
@@ -347,13 +474,104 @@ const asCliError = (error: UsageError): CliError.CliError =>
 
 /**
  * The flag for an `int64` field: its digit string parsed to a `JsonNumber`, so a later merge writes
- * the digits unchanged. A non-digit value fails the flag with an error that names `--name` and
- * never the value.
+ * the digits unchanged. Help labels it `integer`. A non-digit value fails the flag with an error
+ * that names `--name` and never the value.
  */
 export const int64Flag = (name: string) =>
   Flag.String(name).pipe(
+    Flag.withMetavar("integer"),
     Flag.mapEffect((raw) => jsonNumber(raw, name).pipe(Effect.mapError(asCliError))),
   );
+
+/**
+ * The scalar type an `integer` or `number` parameter's text is checked against (design 6.1).
+ */
+export type NumericKind = "integer" | "number";
+
+const numericGrammar = {
+  integer: (text: string) => int64Digits.test(text),
+  number: isJsonNumberText,
+} satisfies Record<NumericKind, (text: string) => boolean>;
+
+const numericCause = {
+  integer: "is not an integer",
+  number: "is not a JSON number",
+} satisfies Record<NumericKind, string>;
+
+// The one check behind `numericFlag` and `numericArgument`: the text unchanged, or a value-free
+// error built by `refuse` from the cause.
+const numericText =
+  (kind: NumericKind, refuse: (cause: string) => UsageError) =>
+  (text: string): Effect.Effect<string, CliError.CliError> =>
+    numericGrammar[kind](text)
+      ? Effect.succeed(text)
+      : Effect.fail(asCliError(refuse(numericCause[kind])));
+
+/**
+ * The flag for an `integer` or `number` parameter or field: its text checked against the JSON
+ * integer or number grammar and returned unchanged, so `9007199254740993` and `1.50` reach the wire
+ * as given. Help labels it with its `kind`. A text outside the grammar fails the flag with an error
+ * that names `--name` and never the text.
+ */
+export const numericFlag = (name: string, kind: NumericKind) =>
+  Flag.String(name).pipe(
+    Flag.withMetavar(kind),
+    Flag.mapEffect(numericText(kind, (cause) => usage(name, cause))),
+  );
+
+/**
+ * The positional argument for an `integer` or `number` path parameter, checked and labelled as
+ * `numericFlag` is. A text outside the grammar fails with an error that names `<name>` and never
+ * the text.
+ */
+export const numericArgument = (name: string, kind: NumericKind) =>
+  Argument.String(name).pipe(
+    Argument.withMetavar(kind),
+    Argument.mapEffect(
+      numericText(kind, (cause) => new UsageError({ message: `<${name}>: ${cause}` })),
+    ),
+  );
+
+// The one stderr notice for a given deprecated parameter: it names the flag or argument, never a
+// value, and passes the value on unchanged. An absent optional flag is `None` and an absent
+// repeated one is empty; neither prints.
+const noticeDeprecated =
+  (label: string) =>
+  <A>(value: A): Effect.Effect<A, never, Stdio.Stdio> => {
+    const absent =
+      (Option.isOption(value) && Option.isNone(value)) ||
+      (Array.isArray(value) && value.length === 0);
+
+    return absent
+      ? Effect.succeed(value)
+      : Effect.gen(function* notify() {
+          const stdio = yield* Stdio.Stdio;
+          yield* Stream.run(
+            Stream.make(`Notice: the parameter ${label} is deprecated\n`),
+            stdio.stderr(),
+          );
+        }).pipe(Effect.ignore, Effect.as(value));
+  };
+
+/**
+ * A deprecated parameter's flag (PRM-07): one stderr notice naming `--name` when the operator gives
+ * the flag, however often, and none when it is absent; the value is unchanged. It applies outside
+ * the `Flag.optional` or `Flag.atLeast` wrapper, which only then has settled whether a value was
+ * given.
+ */
+export const deprecated =
+  (name: string) =>
+  <A>(self: Flag.Flag<A>): Flag.Flag<A> =>
+    self.pipe(Flag.mapEffect(noticeDeprecated(`--${name}`)));
+
+/**
+ * The positional argument twin of `deprecated` for a deprecated path parameter: the notice names
+ * `<name>`, never the value.
+ */
+export const deprecatedArgument =
+  (name: string) =>
+  <A>(self: Argument.Argument<A>): Argument.Argument<A> =>
+    self.pipe(Argument.mapEffect(noticeDeprecated(`<${name}>`)));
 
 const isObject = (value: JsonNode | undefined): value is JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value) && !(value instanceof JsonNumber);
@@ -371,8 +589,8 @@ const revive: Reviver = (_key, value, context) => {
   return isObject(value) ? bare(value) : value;
 };
 
-// A field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2` decode
-// to the same number, and a `JsonNumber` in a field must be a digit string.
+// A JSON field value keeps only integers whose digits `JSON.parse` would change; `1.50` and `1e2`
+// decode to the same number.
 // A number that overflows (`1e400`) decodes to Infinity, which `JSON.stringify` would send as
 // `null`; it throws here, and the flag's catch turns that into a value-free failure.
 const reviveIntegers: Reviver = (key, value, context) => {
@@ -387,6 +605,22 @@ const reviveIntegers: Reviver = (key, value, context) => {
     : revive(key, value, context);
 };
 
+// The one parse behind `jsonFlag` and `jsonArgument`: the decoded value, or the value-free error
+// `failure` builds.
+const parsedJson =
+  (failure: () => CliError.CliError) =>
+  (raw: string): Effect.Effect<JsonNode, CliError.CliError> =>
+    Effect.try({
+      catch: failure,
+      try: () => {
+        if (nestsTooDeep(raw)) {
+          throw new RangeError("JSON nesting is too deep");
+        }
+
+        return bunJson.parse(raw, reviveIntegers);
+      },
+    });
+
 /**
  * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
  * uses (digits past 2^53 stay a `JsonNumber`, objects have no prototype). A text that is not JSON,
@@ -395,22 +629,33 @@ const reviveIntegers: Reviver = (key, value, context) => {
  */
 export const jsonFlag = (name: string) =>
   Flag.String(name).pipe(
-    Flag.mapEffect((raw) =>
-      Effect.try({
-        catch: () => asCliError(usage(name, "is not valid JSON")),
-        try: () => {
-          if (nestsTooDeep(raw)) {
-            throw new RangeError("JSON nesting is too deep");
-          }
+    Flag.mapEffect(parsedJson(() => asCliError(usage(name, "is not valid JSON")))),
+  );
 
-          return bunJson.parse(raw, reviveIntegers);
-        },
-      }),
+/**
+ * The positional argument twin of `jsonFlag` for an object-schema path parameter: its text parsed
+ * the same way. A text that is not JSON fails with an error that names `<name>` and never the text.
+ */
+export const jsonArgument = (name: string) =>
+  Argument.String(name).pipe(
+    Argument.mapEffect(
+      parsedJson(() => asCliError(new UsageError({ message: `<${name}>: is not valid JSON` }))),
     ),
   );
 
-const replace = (_key: string, value: JsonNode): JsonNode | RawJson =>
-  value instanceof JsonNumber ? bunJson.rawJSON(value.text) : value;
+// A `JsonNumber` whose text is not a JSON number throws here, before `JSON.rawJSON` could write it
+// as some other JSON primitive; the merge's catch turns that into a value-free failure.
+const replace = (_key: string, value: JsonNode): JsonNode | RawJson => {
+  if (!(value instanceof JsonNumber)) {
+    return value;
+  }
+
+  if (!isJsonNumberText(value.text)) {
+    throw new SyntaxError("a JSON number has no JSON text form");
+  }
+
+  return bunJson.rawJSON(value.text);
+};
 
 const segmentsOf = (pointer: string): readonly string[] | undefined =>
   pointer.startsWith("/")
@@ -451,7 +696,7 @@ const setAt = (
   return Effect.void;
 };
 
-const supplied = (value: Fields[string]): FieldValue | undefined => {
+const supplied = (value: Fields[string]): FieldValue | FileField | undefined => {
   if (Option.isOption(value)) {
     return Option.getOrUndefined(value);
   }
@@ -459,8 +704,10 @@ const supplied = (value: Fields[string]): FieldValue | undefined => {
   return value.length === 0 ? undefined : value;
 };
 
-// Walks a field value with an explicit stack, so a deep value cannot overflow it. After a
-// "fine" verdict `toNode` recurses at most `maxJsonDepth` levels.
+// Walks a field value with an explicit stack, so a deep value cannot overflow it. A `JsonNumber` is
+// checked against the JSON number grammar only: whether it is an integer is the flag's check
+// (`int64Flag`, `numericFlag`). After a "fine" verdict `toNode` recurses at most `maxJsonDepth`
+// levels.
 const inspectField = (root: FieldValue): "badNumber" | "fine" | "tooDeep" => {
   const pending: { readonly depth: number; readonly value: FieldValue }[] = [
     { depth: 0, value: root },
@@ -470,7 +717,7 @@ const inspectField = (root: FieldValue): "badNumber" | "fine" | "tooDeep" => {
     const { depth, value } = item;
 
     if (value instanceof JsonNumber) {
-      if (!int64Digits.test(value.text)) {
+      if (!isJsonNumberText(value.text)) {
         return "badNumber";
       }
     } else if (Array.isArray(value) || Predicate.isObject(value)) {
@@ -506,6 +753,25 @@ const toNode = (value: FieldValue): JsonNode => {
   return copy;
 };
 
+const base64Chunk = 0x80_00;
+
+// btoa over binary-string chunks, so a large file never spreads into one call's arguments.
+const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string => {
+  let text = "";
+  for (let offset = 0; offset < bytes.length; offset += base64Chunk) {
+    text += btoa(String.fromCodePoint(...bytes.subarray(offset, offset + base64Chunk)));
+  }
+
+  return encoding === "base64url" ? text.replaceAll("+", "-").replaceAll("/", "_") : text;
+};
+
+const readEncoded = (
+  field: FileField,
+): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  readFlagFile(field.path, field.flag).pipe(
+    Effect.map((bytes) => encodeBytes(bytes, field.encoding)),
+  );
+
 const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
   Effect.try({
     catch: () => usage(flag, "is not valid UTF-8"),
@@ -533,23 +799,30 @@ const sourceOf = (options: {
     : Effect.succeed(Option.none());
 };
 
-/**
- * The JSON request body from `--body` or `--body-file` and the field flags (design 4.5). Field
- * flags are keyed by RFC 6901 pointer from the body root and override the body; the objects they
- * touch have no prototype, so `__proto__`, `constructor` and `prototype` are ordinary own keys.
- * The merged value is asserted against `schema`, never decoded, and the merged value is what is
- * sent. Without a field flag the operator's bytes are sent verbatim. With no input at all a
- * required body is `{}` (still asserted) and an optional one is empty. Failures name a flag and
- * never a value or a path.
- */
-export const mergeBody = (options: {
+interface BodyOptions {
   readonly body: Option.Option<string>;
   readonly bodyFile: Option.Option<string>;
   readonly fields: Fields;
   readonly required: boolean;
   readonly schema: Schema.Top;
-}): Effect.Effect<
-  HttpBody.HttpBody,
+}
+
+// What the merge of the body sources settled on: no body, the operator's bytes as given, or the
+// merged value with its text. Every variant that carries text was asserted against the schema.
+type Merged =
+  | { readonly _tag: "Empty" }
+  | { readonly _tag: "Verbatim"; readonly bytes: Uint8Array; readonly text: string }
+  | { readonly _tag: "Merged"; readonly text: string; readonly value: JsonNode };
+
+// The merge `mergeBody` and `structuredBody` share; `flag` names the source a failure blames, and
+// `parse` is the bounded, number-preserving parse that blames it.
+const mergeSources = (
+  options: BodyOptions,
+): Effect.Effect<
+  {
+    readonly merged: Merged;
+    readonly parse: (text: string) => Effect.Effect<JsonNode, UsageError>;
+  },
   UsageError,
   FileSystem.FileSystem | Stdio.Stdio | StdinClaim
 > =>
@@ -568,6 +841,10 @@ export const mergeBody = (options: {
             catch: () => usage(flag, "is not valid JSON"),
             try: () => bunJson.parse(text, reviver),
           });
+    const settled = (merged: Merged) => ({
+      merged,
+      parse: (text: string) => parse(text, revive),
+    });
     const assert = (text: string) =>
       parse(text).pipe(
         Effect.filterOrFail(Schema.is(options.schema), () =>
@@ -577,18 +854,20 @@ export const mergeBody = (options: {
 
     if (Option.isNone(source) && overrides.length === 0) {
       if (!options.required) {
-        return HttpBody.empty;
+        return settled({ _tag: "Empty" });
       }
 
       yield* assert("{}");
 
-      return HttpBody.uint8Array(encoder.encode("{}"));
+      return settled({ _tag: "Merged", text: "{}", value: bare() });
     }
 
     if (Option.isSome(source) && overrides.length === 0) {
-      yield* assert(yield* decodeText(source.value.bytes, flag));
+      const text = yield* decodeText(source.value.bytes, flag);
 
-      return HttpBody.uint8Array(source.value.bytes);
+      yield* assert(text);
+
+      return settled({ _tag: "Verbatim", bytes: source.value.bytes, text });
     }
 
     const base = Option.isSome(source)
@@ -601,11 +880,12 @@ export const mergeBody = (options: {
       return yield* Effect.fail(usage(flag, "must be a JSON object to take field flags"));
     }
 
-    for (const [pointer, value] of overrides) {
+    for (const [pointer, given] of overrides) {
+      const value = given instanceof FileField ? yield* readEncoded(given) : given;
       const verdict = inspectField(value);
 
       if (verdict === "badNumber") {
-        return yield* Effect.fail(usage(flag, "an integer field is not a digit string"));
+        return yield* Effect.fail(usage(flag, "a number field is not a JSON number"));
       }
 
       if (verdict === "tooDeep") {
@@ -624,44 +904,173 @@ export const mergeBody = (options: {
 
     yield* assert(text);
 
-    return HttpBody.uint8Array(encoder.encode(text));
+    return settled({ _tag: "Merged", text, value: base });
   });
 
 /**
- * The `Content-Type` a declared key sends: the key itself, or any concrete string when the key is a
- * range (`image/*`), where the operator names the type.
+ * The JSON request body from `--body` or `--body-file` and the field flags (design 4.5). Field
+ * flags are keyed by RFC 6901 pointer from the body root and override the body; the objects they
+ * touch have no prototype, so `__proto__`, `constructor` and `prototype` are ordinary own keys.
+ * The merged value is asserted against `schema`, never decoded, and the merged value is what is
+ * sent. Without a field flag the operator's bytes are sent verbatim. With no input at all a
+ * required body is `{}` (still asserted) and an optional one is empty. Failures name a flag and
+ * never a value or a path.
  */
-type SentType<K extends string> = K extends `${string}*${string}` ? string : K;
+export const mergeBody = (
+  options: BodyOptions,
+): Effect.Effect<HttpBody.HttpBody, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  mergeSources(options).pipe(
+    Effect.map(({ merged }) => {
+      if (merged._tag === "Empty") {
+        return HttpBody.empty;
+      }
+
+      return HttpBody.uint8Array(
+        merged._tag === "Verbatim" ? merged.bytes : encoder.encode(merged.text),
+      );
+    }),
+  );
+
+/**
+ * A structured request body (`application/x-www-form-urlencoded`) as the JSON value its encoder
+ * takes, merged from the same sources by the same rules and failures as `mergeBody`. Numbers whose
+ * text `JSON.parse` would change stay a `JsonNumber`, and objects have no prototype. With no input
+ * an optional body is `undefined` and a required one is `{}`.
+ */
+export const structuredBody = (
+  options: BodyOptions,
+): Effect.Effect<
+  JsonNode | undefined,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  mergeSources(options).pipe(
+    Effect.flatMap(({ merged, parse }) => {
+      if (merged._tag === "Empty") {
+        return Effect.undefined;
+      }
+
+      return merged._tag === "Merged" ? Effect.succeed(merged.value) : parse(merged.text);
+    }),
+  );
+
+/**
+ * The `Content-Type` a declared request media key sends: the key itself, or any concrete string
+ * when the key is a range (`image/*`), where the operator names the type.
+ */
+export type SentType<K> = K extends `${string}*${string}` ? string : K;
+
+/**
+ * The request body alternative `--content-type` chose (design 6.6): the declared key, the
+ * `Content-Type` it sends, and the body value for that key. A union over the keys of `V`, so the
+ * key narrows the body.
+ */
+export type Chosen<V> = {
+  readonly [P in keyof V & string]: {
+    readonly body: V[P];
+    readonly contentType: SentType<P>;
+    readonly key: P;
+  };
+}[keyof V & string];
+
+/**
+ * The body flags of one request media key that do not apply to it, each mapped to whether the
+ * operator supplied it.
+ */
+export type ForeignFlags = Readonly<Record<string, boolean>>;
+
+/**
+ * The unevaluated body effect of each declared request media key.
+ */
+interface BodyAlternatives {
+  readonly [key: string]: Effect.Effect<unknown, unknown, unknown>;
+}
 
 /**
  * The request body for the media key `--content-type` selects (design 6.6). `alternatives` maps
- * each declared request media key to its unevaluated body effect; only the chosen one is run, so
- * the others' flag refusals never fire and stdin is read at most once. Returns the body and the
- * `Content-Type` to send. A key the media declaration lists without an alternative is a defect of
- * the generated code, not of the operator.
+ * each declared request media key to its unevaluated body effect, whose value type is that key's
+ * own; only the chosen one is run, so the others' flag refusals never fire and stdin is read at
+ * most once. `foreign` lists, per key, the body flags that do not apply to it: one the operator
+ * supplied is a `UsageError` (exit 2) before any alternative runs, so no input is dropped silently.
+ * Returns the chosen key, the `Content-Type` to send, and the body. A key the media declaration
+ * lists without an alternative is a defect of the generated code, not of the operator.
  */
-export const selectBody = <K extends string, E, R>(options: {
-  readonly alternatives: { readonly [P in K]: Effect.Effect<HttpBody.HttpBody, E, R> };
+export const selectBody = <A extends BodyAlternatives>(options: {
+  readonly alternatives: A;
   readonly chosen: Option.Option<string>;
+  readonly foreign?: { readonly [P in keyof A & string]?: ForeignFlags };
   readonly media: MediaDeclaration;
 }): Effect.Effect<
-  { readonly body: HttpBody.HttpBody; readonly contentType: SentType<K> },
-  UsageError | E,
-  R
+  Chosen<{ readonly [P in keyof A]: Effect.Success<A[P]> }>,
+  UsageError | Effect.Error<A[keyof A]>,
+  Effect.Services<A[keyof A]>
 > =>
   Effect.gen(function* select() {
     const picked = yield* Negotiate.selectRequestMedia(options.media, options.chosen);
-    const declared: { readonly [key: string]: Effect.Effect<HttpBody.HttpBody, E, R> } =
-      options.alternatives;
-    const alternative = Object.hasOwn(declared, picked.key) ? declared[picked.key] : undefined;
+    const declared: BodyAlternatives = options.alternatives;
+    const entry = Object.hasOwn(declared, picked.key) ? declared[picked.key] : undefined;
 
-    if (alternative === undefined) {
+    if (entry === undefined) {
       return yield* Effect.die(
         new Error("selectBody: a declared request media key has no body alternative"),
       );
     }
 
-    // SAFETY: selectRequestMedia returns the declared key itself, or a concrete type inside a declared range.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- selectRequestMedia returns the declared key's own type, or a concrete type inside a declared range
-    return { body: yield* alternative, contentType: picked.contentType as SentType<K> };
+    // SAFETY: `entry` is one of the values of `A`, so its failures and services are among theirs.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an entry of `A` fails and requires within the union over `A`'s values
+    const alternative = entry as Effect.Effect<
+      unknown,
+      Effect.Error<A[keyof A]>,
+      Effect.Services<A[keyof A]>
+    >;
+
+    const foreign: { readonly [key: string]: ForeignFlags | undefined } = options.foreign ?? {};
+    const flags = Object.hasOwn(foreign, picked.key) ? foreign[picked.key] : undefined;
+    const misplaced = Object.entries(flags ?? {}).find(([, given]) => given)?.[0];
+
+    if (misplaced !== undefined) {
+      return yield* Effect.fail(
+        new UsageError({
+          flag: misplaced,
+          message: `--${misplaced}: does not apply to --content-type ${picked.key}`,
+        }),
+      );
+    }
+
+    const chosen = { body: yield* alternative, contentType: picked.contentType, key: picked.key };
+
+    // SAFETY: selectRequestMedia returns a declared key of `A` and its own content type (the key, or
+    // a concrete type inside a declared range), and `alternative` is that key's entry.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the picked key, its content type and its entry's value form one member of `Chosen`
+    return chosen as Chosen<{ readonly [P in keyof A]: Effect.Success<A[P]> }>;
   });
+
+/**
+ * One option flag of a multipart part (design 6.3): its name, whether the operator gave it, and
+ * whether a sent part needs it. `--<part>-content-type` is required when its part lists several
+ * types (ENC-10).
+ */
+export type PartOption = readonly [flag: string, given: boolean, required: boolean];
+
+/**
+ * Checks a multipart part's option flags against whether the part is sent, before any request: an
+ * option given without its part, and a required one missing while the part is sent, are each a
+ * `UsageError` naming the option. A given option is never dropped silently.
+ */
+export const partOptions = (
+  part: string,
+  sent: boolean,
+  options: readonly PartOption[],
+): Effect.Effect<void, UsageError> => {
+  for (const [flag, given, required] of options) {
+    if (given && !sent) {
+      return Effect.fail(usage(flag, `applies only with --${part}`));
+    }
+
+    if (required && sent && !given) {
+      return Effect.fail(usage(flag, `this request needs it when --${part} is given`));
+    }
+  }
+
+  return Effect.void;
+};

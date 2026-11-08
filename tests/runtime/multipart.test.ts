@@ -107,7 +107,7 @@ describe("formData bytes", () => {
         "Content-Transfer-Encoding: base64",
         "Content-Type: image/png, image/jpeg",
         "",
-        "x",
+        "eA==",
         "--testboundary--",
         "",
       ].join("\r\n"),
@@ -203,11 +203,10 @@ describe("refusals", () => {
     });
   }
 
-  test("a header name, content type or content encoding with CR, LF or NUL is refused", async () => {
+  test("a header name or content type with CR, LF or NUL is refused", async () => {
     const parts: readonly Part[] = [
       { body: empty, headers: [["X-A\nB", "v"]], name: "p" },
       { body: empty, contentType: "text/plain\r\nX: y", name: "p" },
-      { body: empty, contentEncoding: "b\u0000", name: "p" },
     ];
 
     const errors = await Promise.all(parts.map((part) => refusal(formData([part], { boundary }))));

@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import type { Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type { NamingAlias, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
 import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
@@ -14,7 +14,8 @@ import type {
 } from "./fold.ts";
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { escapeToken, formatPointer } from "../model/pointer.ts";
+import type { SpecLine } from "../model/spec-section.ts";
 
 /**
  * A path parameter as a positional argument; `name` is its metavar.
@@ -27,11 +28,22 @@ export interface PlannedPositional {
 }
 
 /**
- * Where a flag's value goes: a parameter by location and wire name, or a body field by its RFC 6901
- * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media.
- * `pointer` is what `--describe` reports: the parameter's source pointer, a body field's declaring
- * property schema (`BodyFlag.schemaPointer`, from the first media alternative that has the flag),
- * or the request body for `--body` and `--body-file`.
+ * What a multipart part option flag sets on its part: the part's `Content-Type`, one of `choices`,
+ * the media types its Encoding `contentType` lists (design 6.3, ENC-10), or the value of its
+ * Encoding header `name` (ENC-03).
+ */
+export type PartOptionKind =
+  | { readonly choices: readonly string[]; readonly kind: "content-type" }
+  | { readonly kind: "header"; readonly name: string };
+
+/**
+ * Where a flag's value goes: a parameter by location and wire name, a body field by its RFC 6901
+ * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media, or
+ * an option of the multipart part at `part` (the part flag's body pointer). `pointer` is what
+ * `--describe` reports: the parameter's source pointer, a body field's declaring property schema
+ * (`BodyFlag.schemaPointer`, from the first media alternative that has the flag), the request body
+ * for `--body` and `--body-file`, or a part option's Encoding Object (a header option's Encoding
+ * header).
  */
 export type FlagSource =
   | {
@@ -47,6 +59,13 @@ export type FlagSource =
       readonly pointer: string;
       readonly repeated: boolean;
       readonly wireName: string;
+    }
+  | {
+      readonly _tag: "PartOption";
+      readonly media: readonly string[];
+      readonly option: PartOptionKind;
+      readonly part: string;
+      readonly pointer: string;
     };
 
 /**
@@ -61,20 +80,49 @@ export interface PlannedFlag {
 }
 
 /**
- * One generated command; `configKey` is the author-config key that renames it.
+ * Where a command name came from (design 8.1 `commandNames`, D-NAME4).
+ */
+export type CommandNameSource = "config" | "operationId" | "route" | "x-fern" | "x-forge";
+
+/**
+ * Where a command's group name came from (design 8.1 `commandNames`): the first tag, or `none` for
+ * a root command.
+ */
+export type GroupNameSource = "config" | "none" | "tag" | "x-fern" | "x-forge";
+
+/**
+ * The sources of one command's group and command name.
+ */
+export interface NameSources {
+  readonly command: CommandNameSource;
+  readonly group: GroupNameSource;
+}
+
+/**
+ * One generated command; `configKey` is the author-config key that renames the operation's
+ * primary command. `alias` is an alias command's index in the author-config `aliases`, when given,
+ * else in `x-forge-aliases`; an operation's commands are its primary followed by its aliases, each
+ * sending the same request (design 4.4).
  */
 export interface PlannedCommand {
+  readonly alias?: number;
   readonly configKey: string;
   readonly flags: readonly PlannedFlag[];
   readonly identifier: SafeIdentifierValue;
   readonly name: string;
   readonly operation: Operation;
   readonly positionals: readonly PlannedPositional[];
+  readonly sources: NameSources;
 }
 
 /**
+ * The api namespace alias of `api/root.ts`; no group's planned `namespace` takes it.
+ */
+export const rootNamespace = "Root";
+
+/**
  * One command group from a tag; `parent` is the parent tag of a 3.2 chain and `namespace` the api
- * namespace alias the group's `cli/` module imports.
+ * namespace alias the group's `cli/` modules import, planned once and unique across api modules.
  */
 export interface PlannedGroup {
   readonly commands: readonly PlannedCommand[];
@@ -94,7 +142,7 @@ export interface PlannedCredential {
   readonly scheme: string;
 }
 
-type OperationOverride = NonNullable<
+export type OperationOverride = NonNullable<
   NonNullable<NonNullable<AuthorConfig["naming"]>["operations"]>[string]
 >;
 
@@ -138,36 +186,110 @@ export const overrideSite = (config: AuthorConfig, operation: Operation): Overri
 
 const templateExpression = /\{(?<name>[^{}]+)\}/gu;
 
+export type ConfigAlias = NonNullable<OperationOverride["aliases"]>[number];
+
 /**
- * The command name before collision checks (design 4.4): the override, else the `operationId` fold
- * with a leading word run equal to the group's words dropped, else `<method>` and the path's
- * literal words with `by-<param>` for each template expression, in template order. The route form
- * applies only without an `operationId`, never when its fold is empty. A drop that would leave
- * nothing is not made.
+ * Who names one planned command: the operation itself, through the author config and its own
+ * extensions, one of its `x-forge-aliases` entries, through that entry's keys only, or one of its
+ * author-config `aliases`, which replace the extension's.
  */
-export const commandName = (
-  operation: Operation,
-  override: OperationOverride | undefined,
-  groupTag: string | undefined,
+export type Namer =
+  | { readonly _tag: "Primary"; readonly override: OperationOverride | undefined }
+  | { readonly _tag: "Alias"; readonly alias: typeof NamingAlias.Type }
+  | { readonly _tag: "ConfigAlias"; readonly alias: ConfigAlias };
+
+export interface SourcedName {
+  readonly folded: Folded<string>;
+  readonly source: CommandNameSource;
+}
+
+const sourced = (
+  folded: Result.Result<Folded<string>, EmptyFold>,
+  source: CommandNameSource,
+): Result.Result<SourcedName, EmptyFold> =>
+  Result.isFailure(folded)
+    ? Result.fail(folded.failure)
+    : Result.succeed({ folded: folded.success, source });
+
+// The `operationId` fold: a leading word run equal to the group's words is dropped, unless the
+// drop would leave nothing.
+const foldOperationId = (
+  operationId: string,
+  groupLabel: string | undefined,
 ): Result.Result<Folded<string>, EmptyFold> => {
-  if (override?.command !== undefined) {
-    return foldKebab(override.command);
-  }
-
-  if (operation.operationId === undefined) {
-    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
-
-    return foldKebab(`${operation.key.method} ${route}`);
-  }
-
-  const idWords = words(operation.operationId);
-  const group = groupTag === undefined ? [] : words(groupTag).map((word) => word.toLowerCase());
+  const idWords = words(operationId);
+  const group = groupLabel === undefined ? [] : words(groupLabel).map((word) => word.toLowerCase());
   const leads =
     group.length > 0 &&
     idWords.length > group.length &&
     group.every((word, index) => idWords[index]?.toLowerCase() === word);
 
-  return foldKebab(leads ? idWords.slice(group.length).join(" ") : operation.operationId);
+  return foldKebab(leads ? idWords.slice(group.length).join(" ") : operationId);
+};
+
+// The name without a naming key: the `operationId` fold, else the route form.
+const foldedDefault = (
+  operation: Operation,
+  groupLabel: string | undefined,
+): Result.Result<SourcedName, EmptyFold> => {
+  if (operation.operationId === undefined) {
+    const route = operation.key.path.replaceAll(templateExpression, " by $<name> ");
+
+    return sourced(foldKebab(`${operation.key.method} ${route}`), "route");
+  }
+
+  return sourced(foldOperationId(operation.operationId, groupLabel), "operationId");
+};
+
+/**
+ * The command name before collision checks (design 4.4), per source: for the primary, the author
+ * config, else `x-forge-method-name`, else `x-fern-sdk-method-name`, else the `operationId` fold
+ * with the group-word drop, else `<method>` and the path's literal words with `by-<param>` for each
+ * template expression, in template order. An alias takes its own Forge, else Fern, method name,
+ * else the fold of its own `operationId`, never the operation's. An author-config alias takes its
+ * own method, else the operation's `operationId` fold or route form. An extension or config name
+ * folds without the drop. The route form applies only without an `operationId`, never when its fold
+ * is empty. `groupLabel` is the unfolded name of the command's innermost group.
+ */
+export const commandName = (
+  operation: Operation,
+  namer: Namer,
+  groupLabel: string | undefined,
+): Result.Result<SourcedName, EmptyFold> => {
+  if (namer._tag === "Alias") {
+    const { alias } = namer;
+    const method = alias.forge?.method ?? alias.fern?.method;
+    if (method !== undefined) {
+      return sourced(foldKebab(method), alias.forge?.method === undefined ? "x-fern" : "x-forge");
+    }
+
+    // A usable alias has a method name or its own operationId (m2-nmx1); an empty input refuses.
+    return sourced(foldOperationId(alias.operationId ?? "", groupLabel), "operationId");
+  }
+
+  if (namer._tag === "ConfigAlias") {
+    const { method } = namer.alias;
+
+    return method === undefined
+      ? foldedDefault(operation, groupLabel)
+      : sourced(foldKebab(method), "config");
+  }
+
+  const { override } = namer;
+  if (override?.command !== undefined) {
+    return sourced(foldKebab(override.command), "config");
+  }
+
+  const { naming } = operation;
+  if (naming?.forge?.method !== undefined) {
+    return sourced(foldKebab(naming.forge.method), "x-forge");
+  }
+
+  if (naming?.fern?.method !== undefined) {
+    return sourced(foldKebab(naming.fern.method), "x-fern");
+  }
+
+  return foldedDefault(operation, groupLabel);
 };
 
 /**
@@ -295,7 +417,11 @@ export const credentialNames = (
   envPrefix: string,
   scheme: SecurityScheme,
 ): Option.Option<{ readonly env: string; readonly flag: string; readonly slug: string }> => {
-  const definition = runtimeScheme(scheme, own(config.security, scheme.name)?.env);
+  const configured = own(config.security, scheme.name);
+  const definition = runtimeScheme(
+    scheme,
+    configured !== undefined && "env" in configured ? configured.env : undefined,
+  );
   if (definition === undefined) {
     return Option.none();
   }
@@ -525,14 +651,16 @@ export interface Draft {
 }
 
 /**
- * What flag drafting reads: the store's `$defs`, the boolean memo shared across the plan, and the
- * credential flags every command must avoid.
+ * What flag drafting reads: the store's `$defs`, the boolean memo shared across the plan, the
+ * credential flags every command must avoid, and the OpenAPI line, which decides whether a
+ * read-only body property is offered (S30-31).
  */
 export interface DraftContext {
   readonly booleans: Map<string, boolean>;
   readonly collector: Collector;
   readonly credentialFlags: ReadonlySet<string>;
   readonly defs: Readonly<Record<string, Schema.Json>>;
+  readonly line: SpecLine;
 }
 
 export interface Subject {
@@ -541,11 +669,14 @@ export interface Subject {
 }
 
 // `pointer` is the parameter or media alternative; `field` is a body flag's RFC 6901 pointer
-// relative to the body root.
+// relative to the body root. A positional owns its metavar: `--describe` keys positionals and flags
+// in one object, so a metavar equal to a flag name collides (design 4.4, FU:CF).
 interface Owner {
   readonly field?: string;
   readonly hint: string;
-  readonly kind: "body" | "parameter";
+  // Why no field rename can resolve this owner's collision; the refusal then hints only a skip.
+  readonly split?: string;
+  readonly kind: "body" | "parameter" | "positional";
   readonly pointer: string;
 }
 
@@ -644,18 +775,20 @@ const draftParameters = (
       }
 
       const drafted = found.value;
+      const hint = parameterHint(site, keys[0] ?? `${parameter.location}:${parameter.wireName}`);
       if (isPositional(drafted)) {
+        // Two positionals sharing a metavar are `orderPositionals`' refusal; only the first owns it.
+        if (!positionals.some((known) => known.name === drafted.name)) {
+          addOwner(owners, drafted.name, { hint, kind: "positional", pointer: drafted.pointer });
+        }
+
         positionals.push(drafted);
         continue;
       }
 
       flags.push(drafted);
 
-      const owner: Owner = {
-        hint: parameterHint(site, keys[0] ?? `${parameter.location}:${parameter.wireName}`),
-        kind: "parameter",
-        pointer: drafted.pointer,
-      };
+      const owner: Owner = { hint, kind: "parameter", pointer: drafted.pointer };
       addOwner(owners, drafted.name, owner);
       if (drafted.boolean) {
         addOwner(owners, `no-${drafted.name}`, owner);
@@ -697,6 +830,208 @@ const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => 
     : `The property at ${skipped.pointer} has no flag; --body and --body-file reach it.`;
 };
 
+// A body field flag collision is resolved by renaming the field's flag, or by skipping the operation.
+const fieldHint = (site: OverrideSite, field: string): string =>
+  `Rename the flag with ${site.configKey}.fields[${JSON.stringify(field)}].flag, or skip the operation with ${site.configKey}.skip.`;
+
+const kindOf = (flag: BodyFlag): string => (flag.repeated ? `repeated ${flag.kind}` : flag.kind);
+
+// One body field that is a different kind of flag in two media alternatives (a plain value in one,
+// a file part in another) keeps one name: fields[...].flag renames it in every alternative.
+const splitReason = (field: string, left: Merged, right: BodyFlag, media: string): string =>
+  ` The body field ${field} is a ${kindOf(left.flag)} flag in ${left.media.join(", ")} and a ${kindOf(right)} flag in ${media}. A rename cannot separate them: fields[...].flag renames the field in every media type.`;
+
+const skipHint = (site: OverrideSite): string => `Skip the operation with ${site.configKey}.skip.`;
+
+// A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
+// names. The config is never inferred.
+const renamed = (site: OverrideSite, flag: BodyFlag): BodyFlag => {
+  const configured = isWholeBody(flag.kind) ? undefined : own(site.override?.fields, flag.pointer);
+
+  return configured === undefined ? flag : { ...flag, name: configured.flag, notes: [] };
+};
+
+interface DraftedOption {
+  readonly choices: readonly string[];
+  readonly media: string[];
+  readonly part: string;
+  readonly pointer: string;
+  readonly rule: string;
+}
+
+const sameChoices = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((choice, index) => choice === right[index]);
+
+// The `--<part>-content-type` choice flag of each multipart part whose Encoding `contentType`
+// lists several concrete media types (design 6.3, ENC-10): named after the part flag, so renaming
+// the part flag renames it, and offered over the listed types with no default. Alternatives that
+// list the same types share it; a part listing other types elsewhere collides on the name.
+const draftContentTypes = (
+  subject: Subject,
+  parts: readonly Merged[],
+  owners: Owners,
+): readonly DraftFlag[] => {
+  const { operation, site } = subject;
+  const drafted = new Map<string, DraftedOption>();
+  for (const { flag, media } of parts) {
+    for (const alternative of operation.body?.alternatives ?? []) {
+      if (alternative.codec !== "multipart" || !media.includes(alternative.mediaType)) {
+        continue;
+      }
+
+      const rule = alternative.encoding.find(
+        (candidate) =>
+          candidate.target.kind === "property" &&
+          formatPointer([candidate.target.name]) === flag.pointer,
+      );
+      const choices = rule?.contentType ?? [];
+      if (
+        rule === undefined ||
+        rule.nested !== undefined ||
+        choices.length < 2 ||
+        choices.some((choice) => choice.includes("*"))
+      ) {
+        continue;
+      }
+
+      const name = `${flag.name}-content-type`;
+      const { pointer } = alternative.origin;
+      const known = drafted.get(name);
+      if (known === undefined) {
+        const hint = fieldHint(site, flag.pointer);
+        addOwner(owners, name, { field: flag.pointer, hint, kind: "body", pointer });
+        drafted.set(name, {
+          choices,
+          media: [alternative.mediaType],
+          part: flag.pointer,
+          pointer,
+          rule: rule.origin.pointer,
+        });
+      } else if (known.part === flag.pointer && sameChoices(known.choices, choices)) {
+        known.media.push(alternative.mediaType);
+      } else {
+        const hint = fieldHint(site, flag.pointer);
+        addOwner(owners, name, { field: flag.pointer, hint, kind: "body", pointer });
+      }
+    }
+  }
+
+  return [...drafted].map(([name, option]): DraftFlag => ({
+    boolean: false,
+    name,
+    notes: [],
+    pointer: option.pointer,
+    source: {
+      _tag: "PartOption",
+      media: option.media,
+      option: { choices: option.choices, kind: "content-type" },
+      part: option.part,
+      pointer: option.rule,
+    },
+  }));
+};
+
+interface DraftedHeader {
+  readonly boolean: boolean;
+  readonly header: string;
+  readonly media: string[];
+  readonly part: string;
+  readonly pointer: string;
+  readonly rule: string;
+}
+
+// A part header flag collision: the part flag's rename renames it. The config key for the Encoding
+// header itself is not settled yet, so the hint names the header's pointer.
+const headerHint = (site: OverrideSite, part: string, header: string): string =>
+  `Rename the part flag with ${site.configKey}.fields[${JSON.stringify(part)}].flag (no config key renames the Encoding header at ${header} yet), or skip the operation with ${site.configKey}.skip.`;
+
+// One `--<part>-<header>` flag per declared header of each multipart part's Encoding rule (design
+// 6.3, ENC-03): named after the part flag and the header name folded, typed as a header parameter
+// is, so a boolean header is negatable. Alternatives that declare the same header on the same part
+// share it; any other owner of the name collides.
+const draftPartHeaders = (
+  subject: Subject,
+  context: DraftContext,
+  parts: readonly Merged[],
+  owners: Owners,
+): Effect.Effect<readonly DraftFlag[]> =>
+  Effect.gen(function* draft() {
+    const { operation, site } = subject;
+    const drafted = new Map<string, DraftedHeader>();
+    for (const { flag, media } of parts) {
+      for (const alternative of operation.body?.alternatives ?? []) {
+        if (alternative.codec !== "multipart" || !media.includes(alternative.mediaType)) {
+          continue;
+        }
+
+        const rule = alternative.encoding.find(
+          (candidate) =>
+            candidate.target.kind === "property" &&
+            formatPointer([candidate.target.name]) === flag.pointer,
+        );
+        for (const header of rule === undefined || rule.nested !== undefined ? [] : rule.headers) {
+          const folded = foldKebab(header.name);
+          if (Result.isFailure(folded)) {
+            continue;
+          }
+
+          const name = `${flag.name}-${folded.success.name}`;
+          const at = `${rule?.origin.pointer ?? ""}/headers/${escapeToken(header.name)}`;
+          const { pointer } = alternative.origin;
+          const owner: Owner = {
+            field: flag.pointer,
+            hint: headerHint(site, flag.pointer, at),
+            kind: "body",
+            pointer,
+          };
+          const known = drafted.get(name);
+          if (known !== undefined && known.part === flag.pointer && known.header === header.name) {
+            known.media.push(alternative.mediaType);
+            continue;
+          }
+
+          addOwner(owners, name, owner);
+          if (known !== undefined) {
+            continue;
+          }
+
+          const boolean =
+            header.serialization.kind === "style" &&
+            !header.serialization.objectValued &&
+            (yield* Effect.fromResult(
+              isBooleanSchema(context.defs, context.booleans, header.schema.key),
+            ).pipe(Effect.orDie));
+          if (boolean) {
+            addOwner(owners, `no-${name}`, owner);
+          }
+
+          drafted.set(name, {
+            boolean,
+            header: header.name,
+            media: [alternative.mediaType],
+            part: flag.pointer,
+            pointer,
+            rule: at,
+          });
+        }
+      }
+    }
+
+    return [...drafted].map(([name, option]): DraftFlag => ({
+      boolean: option.boolean,
+      name,
+      notes: [],
+      pointer: option.pointer,
+      source: {
+        _tag: "PartOption",
+        media: option.media,
+        option: { kind: "header", name: option.header },
+        part: option.part,
+        pointer: option.rule,
+      },
+    }));
+  });
+
 const draftBody = (
   subject: Subject,
   context: DraftContext,
@@ -705,11 +1040,12 @@ const draftBody = (
   Effect.gen(function* draft() {
     const { operation, site } = subject;
     const { collector } = context;
-    const hint = `${site.configKey}.skip`;
     const merged = new Map<string, Merged>();
+    const fields = new Set<string>();
+    let flattenedAll = true;
     for (const alternative of operation.body?.alternatives ?? []) {
       const { pointer } = alternative.origin;
-      const flattened = flattenBody(context.defs, alternative);
+      const flattened = flattenBody(context.defs, alternative, context.line);
       if (Result.isFailure(flattened)) {
         if (flattened.failure._tag === "UnresolvedBodyRef") {
           return yield* Effect.die(flattened.failure);
@@ -722,6 +1058,7 @@ const draftBody = (
           "The body schema exceeds the node budget.",
           { pointer },
         );
+        flattenedAll = false;
         continue;
       }
 
@@ -735,22 +1072,46 @@ const draftBody = (
         );
       }
 
-      for (const flag of flattened.success.flags) {
+      for (const flag of flattened.success.flags.map((found) => renamed(site, found))) {
+        fields.add(flag.pointer);
+
         const known = merged.get(flag.name);
         if (known === undefined) {
           merged.set(flag.name, { flag, media: [alternative.mediaType], pointer });
         } else if (sameFlag(known.flag, flag)) {
           known.media.push(alternative.mediaType);
+        } else if (known.flag.pointer === flag.pointer) {
+          const split = splitReason(flag.pointer, known, flag, alternative.mediaType);
+          const hint = skipHint(site);
+          addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer, split });
         } else {
+          const hint = fieldHint(site, flag.pointer);
           addOwner(owners, flag.name, { field: flag.pointer, hint, kind: "body", pointer });
         }
       }
     }
 
-    return [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
+    // A refused alternative's fields are unknown, so its operation's keys are not judged.
+    for (const field of flattenedAll ? Object.keys(site.override?.fields ?? {}) : []) {
+      if (!fields.has(field)) {
+        collector.unmatched(
+          `${site.configPointer}/fields/${escapeToken(field)}`,
+          "The operation's request body has no field flag at this pointer.",
+        );
+      }
+    }
+
+    const options = draftContentTypes(subject, [...merged.values()], owners);
+    const headers = yield* draftPartHeaders(subject, context, [...merged.values()], owners);
+    const fieldFlags = [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
       if (!isWholeBody(flag.kind)) {
-        const owner: Owner = { field: flag.pointer, hint, kind: "body", pointer };
+        const owner: Owner = {
+          field: flag.pointer,
+          hint: fieldHint(site, flag.pointer),
+          kind: "body",
+          pointer,
+        };
         addOwner(owners, flag.name, owner);
         if (boolean) {
           addOwner(owners, `no-${flag.name}`, owner);
@@ -770,22 +1131,31 @@ const draftBody = (
 
       return { boolean, name: flag.name, notes: flag.notes, pointer, source };
     });
+
+    return [...fieldFlags, ...options, ...headers];
   });
 
-const parameterFirst = Order.mapInput(Order.Number, (owner: Owner) =>
-  owner.kind === "parameter" ? 0 : 1,
-);
+const ownerRank: Record<Owner["kind"], number> = { body: 2, parameter: 1, positional: 0 };
+
+const positionalFirst = Order.mapInput(Order.Number, (owner: Owner) => ownerRank[owner.kind]);
 
 const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): void => {
   const { operation } = subject;
   for (const [name, list] of owners) {
-    const reserved = reservedCliNames.has(name) || context.credentialFlags.has(name);
-    const [primary, ...rest] = Arr.sort(list, parameterFirst);
+    // Reserved and credential names are flags; a positional alone may use one as its metavar.
+    const reserved =
+      list.some((owner) => owner.kind !== "positional") &&
+      (reservedCliNames.has(name) || context.credentialFlags.has(name));
+    const [primary, ...rest] = Arr.sort(list, positionalFirst);
     if (primary === undefined || (rest.length === 0 && !reserved)) {
       continue;
     }
 
-    const isParameter = primary.kind === "parameter";
+    const isParameter = primary.kind !== "body";
+    const summary =
+      primary.kind === "positional"
+        ? `The positional ${name} collides with the flag --${name}.`
+        : `The flag --${name} collides with another flag or a reserved name.`;
     const related = [...new Set(rest.map((owner) => owner.pointer))]
       .filter((pointer) => pointer !== primary.pointer)
       .map((pointer) => siteOf(operation, pointer));
@@ -793,12 +1163,13 @@ const checkFlags = (subject: Subject, context: DraftContext, owners: Owners): vo
       ...new Set(list.flatMap((owner) => (owner.field === undefined ? [] : [owner.field]))),
     ];
     const named = fields.length === 0 ? "" : ` Body fields: ${fields.join(", ")}.`;
+    const split = list.find((owner) => owner.split !== undefined);
     context.collector.report(
       operation,
       `${isParameter ? "PRM-02" : "RQB-03"}/flag-collision`,
       isParameter ? "Parameter" : "Request body",
-      `The flag --${name} collides with another flag or a reserved name.${named}`,
-      { hint: primary.hint, pointer: primary.pointer, related },
+      `${summary}${named}${split?.split ?? ""}`,
+      { hint: (split ?? primary).hint, pointer: primary.pointer, related },
     );
   }
 };
@@ -843,8 +1214,9 @@ const orderPositionals = (
 /**
  * Drafts one operation's positionals (template order) and flags (parameters, then every media
  * alternative's body flags merged by name), refusing at `operation` scope any two flags that share
- * a name or a boolean's `no-` negation, and any flag equal to a reserved or credential flag name
- * (design 4.4 first collision row). A property whose name folds to nothing is a notice.
+ * a name or a boolean's `no-` negation, any flag equal to a reserved or credential flag name
+ * (design 4.4 first collision row), and any positional whose metavar equals a flag name. A property
+ * whose name folds to nothing is a notice.
  */
 export const draftFlags = (subject: Subject, context: DraftContext): Effect.Effect<Draft> =>
   Effect.gen(function* draft() {

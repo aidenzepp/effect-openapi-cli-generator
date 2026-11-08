@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
-import { queryWireForm, scrub } from "../../src/runtime-src/runtime/redact.ts";
+import {
+  dropTrailingFragment,
+  queryWireForm,
+  scrub,
+} from "../../src/runtime-src/runtime/redact.ts";
 
 // Audit M F1 probe values: each is sent percent-encoded with no `+` for a space, and the URL parser
 // encodes a `'` in a special-scheme query, so the wire form differs from the URLSearchParams form.
@@ -32,4 +36,36 @@ describe("every echoed form of a query credential is scrubbed (audit M F1)", () 
       });
     }
   }
+});
+
+const bearerOf = (value: string): Credential => ({
+  definition: { kind: "http", scheme: "bearer" },
+  scheme: "bearer",
+  value: Redacted.make(value),
+});
+
+const stripControls = (text: string): string =>
+  text.replaceAll("\u00AD", "").replaceAll("\u0085", "").replaceAll("\u0001", "");
+
+// Audit S2 residual: a read cut inside a credential that stripped characters also split.
+describe("a trailing fragment split by stripped characters is dropped (audit S2)", () => {
+  for (const split of ["\u00AD", "\u0085", "\u0001"]) {
+    test(`split by ${JSON.stringify(split)}`, () => {
+      const text = `kept SEC${split}RETTO${split}`;
+
+      expect(dropTrailingFragment(text, [bearerOf("SECRETTOKEN")], stripControls)).toBe("kept ");
+    });
+  }
+
+  test("a fragment as sent is still dropped", () => {
+    expect(dropTrailingFragment("kept SECRET", [bearerOf("SECRETTOKEN")], stripControls)).toBe(
+      "kept ",
+    );
+  });
+
+  test("text with no fragment is unchanged", () => {
+    expect(dropTrailingFragment("kept S\u00ADX", [bearerOf("SECRETTOKEN")], stripControls)).toBe(
+      "kept S\u00ADX",
+    );
+  });
 });

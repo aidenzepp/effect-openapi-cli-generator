@@ -1,0 +1,305 @@
+{
+  "info": {
+    "title": "Format value rows witness (FMT-01 to FMT-28)",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.2",
+  "paths": {
+    "/annotated": {
+      "post": {
+        "operationId": "annotated",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "blob": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "encoded": {
+                    "format": "byte",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/count": {
+      "post": {
+        "operationId": "count",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "count": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "ratio": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/numbers": {
+      "get": {
+        "operationId": "numbers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "i32",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "i64",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "float",
+            "schema": {
+              "format": "float",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "double",
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/registry": {
+      "get": {
+        "operationId": "registry",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "format": "x-color",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "small",
+            "schema": {
+              "format": "uint8",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/strings": {
+      "get": {
+        "operationId": "strings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date-time",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "time",
+            "schema": {
+              "format": "time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "duration",
+            "schema": {
+              "format": "duration",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "email",
+            "schema": {
+              "format": "email",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idn-email",
+            "schema": {
+              "format": "idn-email",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hostname",
+            "schema": {
+              "format": "hostname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "idn-hostname",
+            "schema": {
+              "format": "idn-hostname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ipv4",
+            "schema": {
+              "format": "ipv4",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ipv6",
+            "schema": {
+              "format": "ipv6",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uri",
+            "schema": {
+              "format": "uri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uri-reference",
+            "schema": {
+              "format": "uri-reference",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iri",
+            "schema": {
+              "format": "iri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iri-reference",
+            "schema": {
+              "format": "iri-reference",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uuid",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uri-template",
+            "schema": {
+              "format": "uri-template",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "json-pointer",
+            "schema": {
+              "format": "json-pointer",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relative-json-pointer",
+            "schema": {
+              "format": "relative-json-pointer",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "regex",
+            "schema": {
+              "format": "regex",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,14 @@
 {
+  "commandSources": {
+    "config": 0,
+    "fern": 0,
+    "fold": 142,
+    "forge": 0
+  },
   "corpusVersion": 1,
   "counts": {
     "informational": 58,
+    "nonStandard": 0,
     "notices": 251,
     "operations": {
       "generated": 142,
@@ -15,7 +22,9 @@
     }
   },
   "coverage": {
+    "byNotice": [],
     "checked": true,
+    "invented": [],
     "missing": []
   },
   "generator": {
@@ -23,6 +32,7 @@
     "configSha256": "e337f170369f516b7d9494f3b6ff0705ca061f5be0ee857fdc1d57f3672b3edc",
     "version": "0.0.0"
   },
+  "nonStandard": [],
   "notices": [
     {
       "code": "SCH-54/not-asserted",

@@ -1,11 +1,13 @@
 import { Data, Effect, FileSystem, Option, Path, Runtime, Schema, Stdio, Stream } from "effect";
 import { Argument, CliError, Command, Flag } from "effect/cli";
 import { checkSpecText } from "./check/index.ts";
-import { generate } from "./generate.ts";
+import { generate, otherDocumentPathItems, setMembers, versionRefused } from "./generate.ts";
 import type { GenerateError, GenerateInput, GenerateResult, SpecSource } from "./generate.ts";
 import { defaultLimits, loadBytes } from "./load/index.ts";
 import type { LoadRefusal } from "./load/index.ts";
 import { readFileBounded, readStreamBounded } from "./load/budget.ts";
+import { makeDocumentSet, parseDocumentPair } from "./load/document-set.ts";
+import type { DocumentSet } from "./load/document-set.ts";
 import { DocumentUri } from "./model/brands.ts";
 import { sortDiagnostics } from "./model/diagnostic.ts";
 import type { Diagnostic } from "./model/diagnostic.ts";
@@ -32,6 +34,10 @@ export class GeneratorExit extends Data.TaggedError("GeneratorExit") {
 const stdinDocument = "stdin:";
 
 const GeneratorPackage = Schema.Struct({ version: Schema.String });
+
+const FailureReason = Schema.Struct({ reason: Schema.String });
+
+const FailureSubject = Schema.Struct({ subject: Schema.String });
 
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
@@ -76,11 +82,14 @@ interface Spec {
   readonly source: SpecSource;
 }
 
-// `-` is stdin; anything else is a path whose retrieval URI is its absolute `file:` URL.
+// `-` is stdin; anything else is a path whose retrieval URI is the `file:` URL of its real path,
+// so the entry and a `--ref-root` copy of the same file are one document (design 3.3). A path
+// that has no real path keeps its absolute path; the loader then refuses it as unreadable.
 const specOf = (argument: string) =>
   Effect.gen(function* spec() {
     const stdio = yield* Stdio.Stdio;
     const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
 
     if (argument === "-") {
       const stdin: Spec = {
@@ -91,7 +100,9 @@ const specOf = (argument: string) =>
       return stdin;
     }
 
-    const url = yield* path.toFileUrl(path.resolve(argument));
+    const absolute = path.resolve(argument);
+    const real = yield* fs.realPath(absolute).pipe(Effect.orElseSucceed(() => absolute));
+    const url = yield* path.toFileUrl(real);
     const file: Spec = {
       document: yield* decodeDocument(url.href),
       source: { _tag: "File", path: argument },
@@ -108,21 +119,28 @@ const configOf = (configPath: string) =>
     return { document: yield* decodeDocument(url.href), path: configPath };
   });
 
-// One line for a failure that is not a diagnostic (design 8.1).
-const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
+/**
+ * One line for a failure that is not a diagnostic (design 8.1).
+ */
+export const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
   if (error._tag === "RunLockHeld") {
     return "error: another run holds the output directory's lock";
   }
 
-  if (error._tag === "UnsupportedOpenApiVersion") {
-    return error.openapi === undefined
-      ? "refused: the document declares no openapi version"
-      : `refused: unsupported openapi version ${sanitizeField(JSON.stringify(error.openapi))}`;
+  if (error._tag === "WriteRefused") {
+    return `error: the output was not written (${error.reason})`;
   }
 
-  return error._tag === "WriteRefused"
-    ? `error: the output was not written (${error.reason})`
-    : `error: generation failed (${error._tag})`;
+  const reason = Option.match(Schema.decodeUnknownOption(FailureReason)(error), {
+    onNone: () => "",
+    onSome: (found) => ` reason ${sanitizeField(found.reason)}`,
+  });
+  const subject = Option.match(Schema.decodeUnknownOption(FailureSubject)(error), {
+    onNone: () => "",
+    onSome: (found) => ` subject ${sanitizeField(JSON.stringify(found.subject))}`,
+  });
+
+  return `error: generation failed (${error._tag})${reason}${subject}`;
 };
 
 // Every failure prints and exits 1: a refusal as its diagnostic lines, anything else as one line.
@@ -155,6 +173,39 @@ const specArgument = Argument.String("spec").pipe(
 
 const configFlag = Flag.String("config").pipe(Flag.withDescription("The author config's path."));
 
+const documentFlag = Flag.String("document").pipe(
+  Flag.withMetavar("uri=path"),
+  Flag.atLeast(0),
+  Flag.withDescription(
+    "Add a document to the set $ref may resolve over: its absolute retrieval URI, then =, then its path. Repeatable. The value splits at the first =, so the URI cannot contain one.",
+  ),
+);
+
+const refRootFlag = Flag.String("ref-root").pipe(
+  Flag.withMetavar("dir"),
+  Flag.optional,
+  Flag.withDescription(
+    "Add every .json, .yaml and .yml file under this directory to the document set, each under the file: URL of its real path. Links out of the directory are refused.",
+  ),
+);
+
+const loadRefused = (refusal: LoadRefusal) => exit([humanLine(refusal.diagnostic)]);
+
+// The document set the flags name (design 3.3). The entry holds one slot of the budget, and a
+// member spelling its retrieval URI differently is refused at load.
+const documentSetOf = (
+  entry: Document,
+  documents: readonly string[],
+  refRoot: Option.Option<string>,
+) =>
+  makeDocumentSet(
+    documents.map(parseDocumentPair),
+    Option.match(refRoot, {
+      onNone: () => ({ entry }),
+      onSome: (dir) => ({ entry, refRoot: dir }),
+    }),
+  );
+
 const runGenerate = (
   input: Omit<GenerateInput, "generator">,
   config: { readonly document: Document; readonly path: string },
@@ -175,7 +226,9 @@ export const generateCommand = Command.make(
   "generate",
   {
     config: configFlag,
+    document: documentFlag,
     out: Flag.String("out").pipe(Flag.withDescription("The output directory.")),
+    refRoot: refRootFlag,
     report: Flag.Literals("report", ["json"]).pipe(
       Flag.optional,
       Flag.withDescription("Print the generation report on stdout."),
@@ -194,8 +247,11 @@ export const generateCommand = Command.make(
       const config = yield* configOf(flags.config).pipe(
         Effect.catch(setupFailed("the author config path has no file URL")),
       );
+      const documents = yield* documentSetOf(spec.document, flags.document, flags.refRoot).pipe(
+        Effect.catch(loadRefused),
+      );
       const result: GenerateResult = yield* runGenerate(
-        { ...spec, outDir: flags.out, strict: flags.strict },
+        { ...spec, documents, outDir: flags.out, strict: flags.strict },
         config,
       ).pipe(Effect.catch(reportFailure));
 
@@ -220,22 +276,27 @@ export const generateCommand = Command.make(
 const isDocumentRefusal = (diagnostic: Diagnostic): boolean =>
   diagnostic.severity === "refusal" && diagnostic.scope === "document";
 
-const loadRefused = (refusal: LoadRefusal) => exit([humanLine(refusal.diagnostic)]);
-
-// The load, validate, resolve and check stages (design 3); nothing is written.
-const check = (spec: Spec) =>
+// The load, validate, resolve and check stages (design 3) over the document set; nothing is
+// written.
+const check = (spec: Spec, documents: DocumentSet) =>
   Effect.gen(function* checkGen() {
     const { document } = spec;
+    const members = yield* setMembers(spec, documents).pipe(Effect.catch(loadRefused));
     const order = (diagnostics: readonly Diagnostic[]) =>
-      sortDiagnostics([document], distinctDiagnostics(diagnostics));
+      sortDiagnostics(
+        [document, ...members.map((member) => member.document)],
+        distinctDiagnostics(diagnostics),
+      );
     const bytes = yield* (
       spec.source._tag === "File"
         ? readFileBounded(spec.source.path, defaultLimits, document)
         : readStreamBounded(spec.source.stream, defaultLimits, document)
     ).pipe(Effect.catch(loadRefused));
     const loaded = yield* loadBytes(bytes, { document }).pipe(Effect.catch(loadRefused));
-    const line = yield* lineOf(loaded.value);
-    const diagnosis = yield* diagnoseDocument(loaded.value, document);
+    const { diagnosis, line } = yield* Effect.all({
+      diagnosis: diagnoseDocument(loaded.value, document),
+      line: lineOf(loaded.value),
+    }).pipe(Effect.catchTag("UnsupportedOpenApiVersion", versionRefused(document)));
     const validated = [
       ...diagnosis.notices,
       ...diagnosis.refusals.map((entry) => entry.diagnostic),
@@ -244,33 +305,42 @@ const check = (spec: Spec) =>
       return order(validated);
     }
 
-    const resolved = yield* Effect.result(resolve({ document, line, value: loaded.value }));
+    const resolved = yield* Effect.result(
+      resolve({ document, line, members, value: loaded.value }),
+    );
     if (resolved._tag === "Failure") {
       return order([...validated, resolved.failure.diagnostic]);
     }
 
     const checked = yield* checkSpecText(resolved.success);
+    const outside = yield* otherDocumentPathItems(resolved.success);
 
-    return order([...validated, ...resolved.success.diagnostics, ...checked]);
+    return order([...validated, ...resolved.success.diagnostics, ...checked, ...outside]);
   });
 
 /**
- * `validate <spec|->`: load, validate, resolve and check, and write nothing. stderr gets one line
- * per diagnostic; a document refusal exits 1.
+ * `validate <spec|->`: load, validate, resolve and check over the document set, and write nothing.
+ * stderr gets one line per diagnostic; a document refusal exits 1.
  */
-export const validateCommand = Command.make("validate", { spec: specArgument }, (flags) =>
-  Effect.gen(function* validateRun() {
-    const spec = yield* specOf(flags.spec).pipe(
-      Effect.catch(setupFailed("the specification path has no file URL")),
-    );
-    const diagnostics = yield* check(spec).pipe(Effect.catch(reportFailure));
+export const validateCommand = Command.make(
+  "validate",
+  { document: documentFlag, refRoot: refRootFlag, spec: specArgument },
+  (flags) =>
+    Effect.gen(function* validateRun() {
+      const spec = yield* specOf(flags.spec).pipe(
+        Effect.catch(setupFailed("the specification path has no file URL")),
+      );
+      const documents = yield* documentSetOf(spec.document, flags.document, flags.refRoot).pipe(
+        Effect.catch(loadRefused),
+      );
+      const diagnostics = yield* check(spec, documents).pipe(Effect.catch(reportFailure));
 
-    yield* printDiagnostics(diagnostics);
+      yield* printDiagnostics(diagnostics);
 
-    return diagnostics.some(isDocumentRefusal)
-      ? yield* Effect.fail(new GeneratorExit())
-      : undefined;
-  }),
+      return diagnostics.some(isDocumentRefusal)
+        ? yield* Effect.fail(new GeneratorExit())
+        : undefined;
+    }),
 ).pipe(Command.withDescription("Check an OpenAPI document without writing anything."));
 
 /**

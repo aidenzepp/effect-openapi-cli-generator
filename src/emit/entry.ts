@@ -63,17 +63,18 @@ const constant = (name: string, value: Expr, exported = false): Statement => ({
 });
 
 /**
- * `main.ts` (design 4.1, 14 D5): `Command.run` with `renderErrors: false` (the final catch is the
- * only renderer), provided with the root's `services` and
- * `CliOutput.layer(Output.formatter(root))`, then `Output.exitForHelp` (help with parse errors
- * exits 2) inside `Output.finalCatch`. The credentials the handler evaluated reach the catch
- * through `RunCredentials`, so its own list is empty. M1 carries no runtime defaults, so there is
- * no `ConfigProvider` fallback.
+ * `main.ts` (design 4.1 Lazy root, 14 D5): reads the arguments from `Stdio`, builds the root with
+ * `cli/root.ts` `root` (which loads only the groups the arguments select), then `Command.run` over
+ * that root with `renderErrors: false` (the final catch is the only renderer), provided with the
+ * root's `services` and `CliOutput.layer(Output.formatter(root))`, then `Output.exitForHelp` (help
+ * with parse errors exits 2) inside `Output.finalCatch`. The credentials the handler evaluated
+ * reach the catch through `RunCredentials`, so its own list is empty. M1 carries no runtime
+ * defaults, so there is no `ConfigProvider` fallback.
  */
 const mainModule = (config: AuthorConfig): Module => {
   const runRoot = fn(
     "Command.run",
-    path("root"),
+    path("command"),
     obj([
       ["renderErrors", bool(false)],
       ["version", str(config.package.version)],
@@ -82,12 +83,13 @@ const mainModule = (config: AuthorConfig): Module => {
   const layers = fn(
     "Layer.mergeAll",
     path("services"),
-    fn("CliOutput.layer", fn("Output.formatter", path("root"))),
+    fn("CliOutput.layer", fn("Output.formatter", path("command"))),
   );
+  const args = fn("Stdio.Stdio.use", arrow([{ name: I("stdio") }], path("stdio.args")));
 
   return {
     imports: [
-      named("effect", ["Effect", "Layer"]),
+      named("effect", ["Effect", "Layer", "Stdio"]),
       named("effect/cli", ["CliOutput", "Command"]),
       named("./cli/root.ts", ["root", "services"]),
       namespace("./runtime/output.ts", "Output"),
@@ -95,8 +97,15 @@ const mainModule = (config: AuthorConfig): Module => {
     statements: [
       constant(
         "run",
-        call(member(runRoot, M("pipe")), [
-          fn("Effect.provide", layers),
+        call(member(args, M("pipe")), [
+          fn("Effect.flatMap", path("root")),
+          fn(
+            "Effect.flatMap",
+            arrow(
+              [{ name: I("command") }],
+              call(member(runRoot, M("pipe")), [fn("Effect.provide", layers)]),
+            ),
+          ),
           path("Output.exitForHelp"),
           fn("Output.finalCatch", arr([])),
         ]),
@@ -107,18 +116,14 @@ const mainModule = (config: AuthorConfig): Module => {
 };
 
 /**
- * Built-in global flags the generated CLI keeps (design 4.3): every default but `--wizard`.
- */
-const builtIns = ["Help", "Version", "Completions", "LogLevel"];
-
-/**
  * `bin.ts` (design 4.1, 4.3): the only emitted module that names Bun. It composes the platform:
  * Bun services, the Bun HTTP client with manual redirects and no client timeout or `proxy` key,
  * the `FileBody` layer over `Bun.file` (spike S3), the client policy (the method allowlist of
  * design 6.7, the runtime's `Client.directRoute` for loopback hops of design 6.5, the
  * `User-Agent` name and version), `RunCredentials` outside the final catch, the
- * runtime presenter with no second formatter, the built-in flags, logs to stderr and no trace
- * propagation. `runMain` reports no error: the final catch already rendered it.
+ * runtime presenter with no second formatter, the runtime's built-in flags (`Output.builtIns`:
+ * every effect default but `--wizard`, help and version without `-h`/`-v`), logs to stderr and
+ * no trace propagation. `runMain` reports no error: the final catch already rendered it.
  */
 const binModule = (config: AuthorConfig): Module => {
   const fileBody = fn(
@@ -159,10 +164,7 @@ const binModule = (config: AuthorConfig): Module => {
     path("fileBody"),
     path("Output.runCredentialsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
-    fn(
-      "CliConfig.layer",
-      obj([["builtIns", arr(builtIns.map((name) => path(`GlobalFlag.${name}`)))]]),
-    ),
+    fn("CliConfig.layer", obj([["builtIns", path("Output.builtIns")]])),
     fn("Layer.succeed", path("References.LogToStderr"), bool(true)),
     fn("Layer.succeed", path("HttpClient.TracerPropagationEnabled"), bool(false)),
   );
@@ -171,7 +173,7 @@ const binModule = (config: AuthorConfig): Module => {
     imports: [
       named("@effect/platform-bun", ["BunHttpClient", "BunRuntime", "BunServices"]),
       named("effect", ["Effect", "Layer", "References"]),
-      named("effect/cli", ["CliConfig", "CliOutput", "GlobalFlag"]),
+      named("effect/cli", ["CliConfig", "CliOutput"]),
       named("effect/http", ["HttpBody", "HttpClient"]),
       named("./main.ts", ["run"]),
       namespace("./runtime/client.ts", "Client"),

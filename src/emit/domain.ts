@@ -13,7 +13,7 @@ import {
 import { constVoid } from "effect/Function";
 import type { JsonSchema } from "effect";
 import type { SafeIdentifierValue } from "../names/fold.ts";
-import { codeGenerationCopy } from "../normalize/schemas.ts";
+import { codeGenerationCopy, importSchemas } from "../normalize/schemas.ts";
 import type { SchemaBudgetExceeded, SchemaLimits } from "../normalize/schemas.ts";
 import type { Json } from "../model/pointer.ts";
 import { guardTemplateCurly, stringLiteral, lineWidth, keyText, numberText } from "./escape.ts";
@@ -23,7 +23,9 @@ import { textWidth } from "./printer.ts";
 /**
  * The code-generation copy cannot become `domain/schemas.ts`. `identifier-mismatch`: a copy key
  * has no name in the identifier map, two keys share one, or Effect exported a name the map does not
- * give (the module would not export what cli modules import).
+ * give (the module would not export what cli modules import). `import-failed`: the copy, which
+ * normalize already imported through the same `importSchemas`, does not import again, or names a
+ * definition outside itself (a defect, never a property of the document).
  */
 export class DomainEmitError extends Data.TaggedError("DomainEmitError")<{
   readonly reason:
@@ -1454,7 +1456,7 @@ const importCode = (
   Effect.try({
     catch: () => new DomainEmitError({ reason: "import-failed" }),
     try: () => {
-      const [first, ...rest] = SchemaRepresentation.fromJsonSchemaMultiDocument(multi);
+      const [first, ...rest] = importSchemas(multi);
 
       return SchemaRepresentation.toCodeDocument(
         SchemaRepresentation.toRepresentations([first.ast, ...rest.map((schema) => schema.ast)]),
@@ -1485,6 +1487,66 @@ const subschemaMap: ReadonlySet<string> = new Set([
   "properties",
 ]);
 
+interface JsonNode {
+  readonly [key: string]: Json;
+}
+
+const isNode = (json: Json): json is JsonNode => Predicate.isObject(json) && !Array.isArray(json);
+
+// Rebuilds a schema: each node's subschemas first, then `visit` rewrites the node.
+const mapSchema = (node: Json, visit: (node: JsonNode) => JsonNode): Json => {
+  if (!isNode(node)) {
+    return node;
+  }
+
+  const child = (value: Json): Json => mapSchema(value, visit);
+  const entries = Object.entries(node).map(([key, value]): [string, Json] => {
+    if (subschemaOne.has(key)) {
+      return [key, child(value)];
+    }
+
+    if (subschemaList.has(key) && Array.isArray(value)) {
+      return [key, value.map(child)];
+    }
+
+    if (subschemaMap.has(key) && isNode(value)) {
+      return [
+        key,
+        Object.fromEntries(Object.entries(value).map(([name, item]) => [name, child(item)])),
+      ];
+    }
+
+    return [key, value];
+  });
+
+  return visit(Object.fromEntries(entries));
+};
+
+// `additionalProperties: false` beside declared properties closes an object, but Effect's importer
+// reads it as a struct whose decoder strips an undeclared key under the default parse options the
+// runtime checks with. The same closure as a `propertyNames` naming the declared properties
+// imports as an open struct checked by `Schema.isPropertyNames`, which rejects the key (SCH-13).
+// An existing `propertyNames` stays beside the names in an `allOf`. A closed object with no
+// declared property already imports as a record of `Never`; beside `patternProperties` the
+// validation copy has opened the object (SCH-15).
+const closedNode = (node: JsonNode): JsonNode => {
+  const { additionalProperties, patternProperties, properties, propertyNames: existing } = node;
+  const names = properties !== undefined && isNode(properties) ? Object.keys(properties) : [];
+  if (additionalProperties !== false || names.length === 0 || patternProperties !== undefined) {
+    return node;
+  }
+
+  const declared: Json = { enum: names };
+  const propertyNames = existing === undefined ? declared : { allOf: [existing, declared] };
+
+  return Object.fromEntries([
+    ...Object.entries(node).filter(
+      ([key]) => key !== "additionalProperties" && key !== "propertyNames",
+    ),
+    ["propertyNames", propertyNames],
+  ]);
+};
+
 // The node with every `#/$defs/<key>` reference renamed to `#/$defs/<identifier>`; `undefined`
 // when a reference names a key outside the copy (the importer would have failed on it).
 const rekeyedNode = (node: Json, identifiers: ReadonlyMap<string, string>): Json | undefined => {
@@ -1504,39 +1566,11 @@ const rekeyedNode = (node: Json, identifiers: ReadonlyMap<string, string>): Json
 
     return JsonPointer.formatUriFragment(["$defs", identifier]);
   };
-  const walk = (current: Json): Json => {
-    if (!Predicate.isObject(current) || Array.isArray(current)) {
-      return current;
-    }
+  const rekeyed = mapSchema(node, (current) => {
+    const { $ref: ref } = current;
 
-    return Object.fromEntries(
-      Object.entries(current).map(([key, value]): [string, Json] => {
-        if (key === "$ref" && Predicate.isString(value)) {
-          return [key, ofRef(value)];
-        }
-
-        if (subschemaOne.has(key)) {
-          return [key, walk(value)];
-        }
-
-        if (subschemaList.has(key) && Array.isArray(value)) {
-          return [key, value.map(walk)];
-        }
-
-        if (subschemaMap.has(key) && Predicate.isObject(value) && !Array.isArray(value)) {
-          return [
-            key,
-            Object.fromEntries(
-              Object.entries(value).map(([name, item]): [string, Json] => [name, walk(item)]),
-            ),
-          ];
-        }
-
-        return [key, value];
-      }),
-    );
-  };
-  const rekeyed = walk(node);
+    return Predicate.isString(ref) ? { ...current, $ref: ofRef(ref) } : current;
+  });
 
   return dangling ? undefined : rekeyed;
 };
@@ -1598,7 +1632,8 @@ const emptyModule = "export {};\n";
 
 /**
  * Emits `domain/schemas.ts` (design 3.5, 3.6, units EM-2, S1): the code-generation copy of
- * `roots` (examples and defaults removed, properties sorted) imported through
+ * `roots` (examples and defaults removed, properties sorted, every closed object's declared names
+ * as its `propertyNames`) imported through
  * `SchemaRepresentation.fromJsonSchemaMultiDocument` and printed from `toCodeDocument`, one
  * `export const` per definition after the names it reads, and one `export type` before each
  * definition a `Schema.Codec<T>` annotation of `Schema.suspend` names (every recursive one).
@@ -1619,7 +1654,10 @@ export const emitDomainSchemas = (
       return { content: emptyModule, path: modulePath };
     }
 
-    const rekeyed = yield* rekeyedCopy(copy, identifiers);
+    const closed = new Map(
+      [...copy].map(([key, node]): [string, Json] => [key, mapSchema(node, closedNode)]),
+    );
+    const rekeyed = yield* rekeyedCopy(closed, identifiers);
     const code = yield* importCode(yield* multiDocumentOf(rekeyed));
     if (code.artifacts.length > 0) {
       return yield* new DomainEmitError({ reason: "unsupported-artifact" });

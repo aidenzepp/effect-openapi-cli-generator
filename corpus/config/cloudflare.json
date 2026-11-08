@@ -1,0 +1,961 @@
+{
+  "binName": "cloudflare",
+  "envPrefix": "CLOUDFLARE",
+  "naming": {
+    "operations": {
+      "access-custom-pages-validate-a-custom-page-template": {
+        "fields": {
+          "/version": {
+            "flag": "body-version"
+          }
+        }
+      },
+      "account-load-balancer-monitors-create-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "account-load-balancer-monitors-patch-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "account-load-balancer-monitors-preview-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "account-load-balancer-monitors-update-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "account-load-balancer-pools-preview-pool": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "ai-search-create-instance": {
+        "command": "create-instance"
+      },
+      "ai-search-delete-instance": {
+        "command": "delete-instance"
+      },
+      "ai-search-fetch-instance": {
+        "command": "fetch-instance"
+      },
+      "ai-search-instance-change-job-status": {
+        "command": "ai-search-instance-change-job-status"
+      },
+      "ai-search-instance-chat-completion": {
+        "command": "instance-chat-completion"
+      },
+      "ai-search-instance-create-job": {
+        "command": "ai-search-instance-create-job"
+      },
+      "ai-search-instance-get-job": {
+        "command": "ai-search-instance-get-job"
+      },
+      "ai-search-instance-list-job-logs": {
+        "command": "ai-search-instance-list-job-logs"
+      },
+      "ai-search-instance-list-jobs": {
+        "command": "ai-search-instance-list-jobs"
+      },
+      "ai-search-instance-search": {
+        "command": "instance-search"
+      },
+      "ai-search-list-instances": {
+        "command": "list-instances"
+      },
+      "ai-search-namespace-create-instance": {
+        "command": "namespace-create-instance"
+      },
+      "ai-search-namespace-delete-instance": {
+        "command": "namespace-delete-instance"
+      },
+      "ai-search-namespace-fetch-instance": {
+        "command": "namespace-fetch-instance"
+      },
+      "ai-search-namespace-instance-change-job-status": {
+        "command": "ai-search-namespace-instance-change-job-status"
+      },
+      "ai-search-namespace-instance-chat-completion": {
+        "command": "namespace-instance-chat-completion"
+      },
+      "ai-search-namespace-instance-create-job": {
+        "command": "ai-search-namespace-instance-create-job"
+      },
+      "ai-search-namespace-instance-get-job": {
+        "command": "ai-search-namespace-instance-get-job"
+      },
+      "ai-search-namespace-instance-list-job-logs": {
+        "command": "ai-search-namespace-instance-list-job-logs"
+      },
+      "ai-search-namespace-instance-list-jobs": {
+        "command": "ai-search-namespace-instance-list-jobs"
+      },
+      "ai-search-namespace-instance-search": {
+        "command": "namespace-instance-search"
+      },
+      "ai-search-namespace-list-instances": {
+        "command": "namespace-list-instances"
+      },
+      "ai-search-namespace-stats": {
+        "command": "namespace-stats"
+      },
+      "ai-search-namespace-update-instance": {
+        "command": "namespace-update-instance"
+      },
+      "ai-search-stats": {
+        "command": "stats"
+      },
+      "ai-search-update-instance": {
+        "command": "update-instance"
+      },
+      "aig-config-create-account-provider": {
+        "fields": {
+          "/base_url": {
+            "flag": "body-base-url"
+          }
+        }
+      },
+      "aig-config-update-account-provider": {
+        "fields": {
+          "/base_url": {
+            "flag": "body-base-url"
+          }
+        }
+      },
+      "artifacts_repos_fork": {
+        "parameters": {
+          "path:name": {
+            "flag": "path-name"
+          }
+        }
+      },
+      "artifacts_repos_raw_get": {
+        "group": "artifacts-namespaces-repos-raw"
+      },
+      "basin-delete-catalog": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "brapi-get_DevtoolsJsonVersion": {
+        "command": "brapi-get-devtools-json-version"
+      },
+      "cloudforce-one-request-constants": {
+        "command": "cloudforce-one-request-constants"
+      },
+      "cloudforce-one-request-get": {
+        "command": "cloudforce-one-request-get"
+      },
+      "cloudforce-one-request-list": {
+        "command": "cloudforce-one-request-list"
+      },
+      "cloudforce-one-request-new": {
+        "command": "cloudforce-one-request-new"
+      },
+      "cloudforce-one-request-quota": {
+        "command": "cloudforce-one-request-quota"
+      },
+      "cloudforce-one-request-types": {
+        "command": "cloudforce-one-request-types"
+      },
+      "cloudforce-one-request-update": {
+        "command": "cloudforce-one-request-update"
+      },
+      "createAccountRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "createAccountRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "createDnsProtectionRule": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "createSynProtectionFilter": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "createSynProtectionRule": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "createTcpFlowProtectionFilter": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "createTcpFlowProtectionRule": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "createZoneRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "createZoneRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "custom-indicator-feeds-create-provider": {
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "d1-raw-database-query": {
+        "command": "raw-database-query"
+      },
+      "delete-catalog": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "deleteAccountRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "deleteAccountRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "deleteAccountRulesetVersion": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "deleteAccountsAccountIdBrandProtectionBrands": {
+        "command": "delete-accounts-account-id-brand-protection-brands"
+      },
+      "deleteAccountsAccountIdBrandProtectionBrandsPatterns": {
+        "command": "delete-accounts-account-id-brand-protection-brands-patterns"
+      },
+      "deleteAccountsAccountIdBrandProtectionLogosLogoId": {
+        "command": "delete-accounts-account-id-brand-protection-logos-logo-id"
+      },
+      "deleteDnsProtectionRule": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "deleteDnsProtectionRulesForAccount": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "deleteSynProtectionFilter": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "deleteSynProtectionFiltersForAccount": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "deleteSynProtectionRule": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "deleteSynProtectionRulesForAccount": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "deleteTcpFlowProtectionFilter": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "deleteTcpFlowProtectionFiltersForAccount": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "deleteTcpFlowProtectionRule": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "deleteTcpFlowProtectionRulesForAccount": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "deleteWorker": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "deleteZoneRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "deleteZoneRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "deleteZoneRulesetVersion": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "delete_DeleteLogoQuery": {
+        "command": "delete-delete-logo-query"
+      },
+      "delete_publicDeleteSuppressionRouting": {
+        "command": "delete-public-delete-suppression-routing"
+      },
+      "delete_publicDeleteSuppressionSending": {
+        "command": "delete-public-delete-suppression-sending"
+      },
+      "delete_publicDeleteSuppressionZoneRouting": {
+        "command": "delete-public-delete-suppression-zone-routing"
+      },
+      "delete_publicDeleteSuppressionZoneSending": {
+        "command": "delete-public-delete-suppression-zone-sending"
+      },
+      "dex-fleet-status-devices": {
+        "parameters": {
+          "query:version": {
+            "flag": "query-version"
+          }
+        }
+      },
+      "dns-firewall-create-dns-firewall-cluster": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          }
+        }
+      },
+      "dns-firewall-update-dns-firewall-cluster": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          }
+        }
+      },
+      "email-routing-settings-disable-email-routing": {
+        "command": "settings-disable-email-routing"
+      },
+      "email-routing-settings-disable-email-routing-dns": {
+        "command": "settings-disable-email-routing-dns"
+      },
+      "email-routing-settings-enable-email-routing": {
+        "command": "settings-enable-email-routing"
+      },
+      "email-routing-settings-enable-email-routing-dns": {
+        "command": "settings-enable-email-routing-dns"
+      },
+      "email_security_get_message_raw": {
+        "group": "email-security-investigate-raw"
+      },
+      "email_security_post_bulk_move": {
+        "command": "email-security-post-bulk-move"
+      },
+      "getAccountsAccountIdBrandProtectionBrands": {
+        "command": "get-accounts-account-id-brand-protection-brands"
+      },
+      "getAccountsAccountIdBrandProtectionBrandsPatterns": {
+        "command": "get-accounts-account-id-brand-protection-brands-patterns"
+      },
+      "getAccountsAccountIdBrandProtectionLogoMatches": {
+        "command": "get-accounts-account-id-brand-protection-logo-matches"
+      },
+      "getAccountsAccountIdBrandProtectionLogoMatchesDownload": {
+        "command": "get-accounts-account-id-brand-protection-logo-matches-download"
+      },
+      "getAccountsAccountIdBrandProtectionLogosLogoId": {
+        "command": "get-accounts-account-id-brand-protection-logos-logo-id"
+      },
+      "getAccountsAccountIdBrandProtectionMatches": {
+        "command": "get-accounts-account-id-brand-protection-matches"
+      },
+      "getAccountsAccountIdBrandProtectionMatchesDownload": {
+        "command": "get-accounts-account-id-brand-protection-matches-download"
+      },
+      "getAccountsAccountIdBrandProtectionQueries": {
+        "command": "get-accounts-account-id-brand-protection-queries"
+      },
+      "getDnsProtectionRule": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "getProtectionStatus": {
+        "group": "magic-transit-tcp-protection-status"
+      },
+      "getSynProtectionFilter": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "getSynProtectionRule": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "getTcpFlowProtectionFilter": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "getTcpFlowProtectionRule": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "get_DomainMatchList": {
+        "command": "get-domain-match-list"
+      },
+      "get_EventRawRead": {
+        "group": "cloudforce-one-threat-intel-events-legacy-raw"
+      },
+      "get_EventRawReadDS": {
+        "group": "cloudforce-one-threat-intel-events-raw"
+      },
+      "get_GetDomainQueries": {
+        "command": "get-get-domain-queries"
+      },
+      "get_GetLogoQueries": {
+        "command": "get-get-logo-queries"
+      },
+      "get_LegacyEventRawReadDS": {
+        "group": "cloudforce-one-threat-intel-events-legacy-raw"
+      },
+      "get_LogoMatchList": {
+        "command": "get-logo-match-list"
+      },
+      "get_RequestList": {
+        "command": "get-request-list",
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "get_RequestRead": {
+        "command": "get-request-read"
+      },
+      "get_TotalQueries": {
+        "command": "get-total-queries"
+      },
+      "get_publicGetSuppressionRouting": {
+        "command": "get-public-get-suppression-routing"
+      },
+      "get_publicGetSuppressionSending": {
+        "command": "get-public-get-suppression-sending"
+      },
+      "get_publicGetSuppressionZoneRouting": {
+        "command": "get-public-get-suppression-zone-routing"
+      },
+      "get_publicGetSuppressionZoneSending": {
+        "command": "get-public-get-suppression-zone-sending"
+      },
+      "get_publicListSuppressionRouting": {
+        "command": "get-public-list-suppression-routing"
+      },
+      "get_publicListSuppressionSending": {
+        "command": "get-public-list-suppression-sending"
+      },
+      "get_publicListSuppressionZoneRouting": {
+        "command": "get-public-list-suppression-zone-routing"
+      },
+      "get_publicListSuppressionZoneSending": {
+        "command": "get-public-list-suppression-zone-sending"
+      },
+      "health-checks-create-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "health-checks-create-preview-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "health-checks-patch-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "health-checks-update-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "listDnsProtectionRulesForAccount": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "listSynProtectionFiltersForAccount": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "listSynProtectionRulesForAccount": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "listTcpFlowProtectionFiltersForAccount": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "listTcpFlowProtectionRulesForAccount": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "load-balancer-monitors-create-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "load-balancer-monitors-patch-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "load-balancer-monitors-preview-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "load-balancer-monitors-update-monitor": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "load-balancer-pools-preview-pool": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "namespace-worker-script-delete-worker": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "origin-cloud-regions-v2-upsert": {
+        "parameters": {
+          "path:origin_ip": {
+            "flag": "path-origin-ip"
+          }
+        }
+      },
+      "pages-deployment-delete-deployment": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "patchAccountsAccountIdBrandProtectionAlerts": {
+        "command": "patch-accounts-account-id-brand-protection-alerts"
+      },
+      "patchAccountsAccountIdBrandProtectionAlertsClear": {
+        "command": "patch-accounts-account-id-brand-protection-alerts-clear"
+      },
+      "patchAccountsAccountIdBrandProtectionAlertsRefute": {
+        "command": "patch-accounts-account-id-brand-protection-alerts-refute"
+      },
+      "patchAccountsAccountIdBrandProtectionAlertsVerify": {
+        "command": "patch-accounts-account-id-brand-protection-alerts-verify"
+      },
+      "patch_EventRawUpdate": {
+        "group": "cloudforce-one-threat-intel-events-legacy-raw"
+      },
+      "postAccountsAccountIdBrandProtectionBrands": {
+        "command": "post-accounts-account-id-brand-protection-brands"
+      },
+      "postAccountsAccountIdBrandProtectionBrandsPatterns": {
+        "command": "post-accounts-account-id-brand-protection-brands-patterns"
+      },
+      "postAccountsAccountIdBrandProtectionLogos": {
+        "command": "post-accounts-account-id-brand-protection-logos"
+      },
+      "postAccountsAccountIdBrandProtectionQueries": {
+        "command": "post-accounts-account-id-brand-protection-queries",
+        "parameters": {
+          "query:scan": {
+            "flag": "query-scan"
+          },
+          "query:tag": {
+            "flag": "query-tag"
+          }
+        }
+      },
+      "postAccountsAccountIdBrandProtectionQueriesBulk": {
+        "command": "post-accounts-account-id-brand-protection-queries-bulk"
+      },
+      "postAccountsAccountIdBrandProtectionQueriesQueryIdMatchesDomainIdDismiss": {
+        "command": "post-accounts-account-id-brand-protection-queries-query-id-matches-domain-id-dismiss"
+      },
+      "postAccountsAccountIdBrandProtectionQueriesQueryIdMatchesDomainIdUndismiss": {
+        "command": "post-accounts-account-id-brand-protection-queries-query-id-matches-domain-id-undismiss"
+      },
+      "post_DismissMatch": {
+        "command": "post-dismiss-match"
+      },
+      "post_EventCreate": {
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "post_EventRawUpdate": {
+        "group": "cloudforce-one-threat-intel-events-legacy-raw"
+      },
+      "post_GroupMemberCreate": {
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "post_InsertLogoQuery": {
+        "command": "post-insert-logo-query"
+      },
+      "post_LetterTemplateCreate": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "post_RequestCreate": {
+        "command": "post-request-create"
+      },
+      "post_SearchLogoSimilarity": {
+        "command": "post-search-logo-similarity"
+      },
+      "post_UndismissMatch": {
+        "command": "post-undismiss-match"
+      },
+      "post_publicNewSuppressionRouting": {
+        "command": "post-public-new-suppression-routing"
+      },
+      "post_publicNewSuppressionSending": {
+        "command": "post-public-new-suppression-sending"
+      },
+      "post_publicNewSuppressionZoneRouting": {
+        "command": "post-public-new-suppression-zone-routing"
+      },
+      "post_publicNewSuppressionZoneSending": {
+        "command": "post-public-new-suppression-zone-sending"
+      },
+      "put_FlowsUpdate": {
+        "fields": {
+          "/version": {
+            "flag": "body-version"
+          }
+        }
+      },
+      "put_LetterTemplateUpdate": {
+        "fields": {
+          "/body": {
+            "flag": "body-text"
+          }
+        }
+      },
+      "put_RequestUpdate": {
+        "command": "put-request-update"
+      },
+      "queues-ack-messages": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          }
+        }
+      },
+      "queues-ack-preview-messages": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          }
+        }
+      },
+      "radar-get-ai-bots-summary": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "radar-get-ai-bots-timeseries": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "radar-get-ai-bots-timeseries-group": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "radar-get-http-summary": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "radar-get-http-timeseries": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "radar-get-http-timeseries-group": {
+        "parameters": {
+          "query:contentType": {
+            "flag": "query-content-type"
+          }
+        }
+      },
+      "secrets-store-delete-by-id": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "share-excluded-recipient-create": {
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "share-recipient-create": {
+        "parameters": {
+          "path:account_id": {
+            "flag": "path-account-id"
+          }
+        }
+      },
+      "smart-shield-create-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "smart-shield-patch-health-check": {
+        "fields": {
+          "/retries": {
+            "flag": "body-retries"
+          },
+          "/timeout": {
+            "flag": "body-timeout"
+          }
+        }
+      },
+      "tunnel-route-create-a-tunnel-route": {
+        "command": "tunnel-route-create-a-tunnel-route"
+      },
+      "tunnel-route-create-a-tunnel-route-with-cidr": {
+        "command": "tunnel-route-create-a-tunnel-route-with-cidr"
+      },
+      "tunnel-route-delete-a-tunnel-route": {
+        "command": "tunnel-route-delete-a-tunnel-route"
+      },
+      "tunnel-route-delete-a-tunnel-route-with-cidr": {
+        "command": "tunnel-route-delete-a-tunnel-route-with-cidr"
+      },
+      "tunnel-route-update-a-tunnel-route": {
+        "command": "tunnel-route-update-a-tunnel-route"
+      },
+      "tunnel-route-update-a-tunnel-route-with-cidr": {
+        "command": "tunnel-route-update-a-tunnel-route-with-cidr"
+      },
+      "updateAccountEntrypointRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "updateAccountRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "updateAccountRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "updateDnsProtectionRule": {
+        "group": "magic-transit-dns-protection-rules"
+      },
+      "updateProtectionStatus": {
+        "group": "magic-transit-tcp-protection-status"
+      },
+      "updateSynProtectionFilter": {
+        "group": "magic-transit-syn-protection-filters"
+      },
+      "updateSynProtectionRule": {
+        "group": "magic-transit-syn-protection-rules"
+      },
+      "updateTcpFlowProtectionFilter": {
+        "group": "magic-transit-tcp-flow-protection-filters"
+      },
+      "updateTcpFlowProtectionRule": {
+        "group": "magic-transit-tcp-flow-protection-rules"
+      },
+      "updateZoneEntrypointRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "updateZoneRuleset": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "updateZoneRulesetRule": {
+        "parameters": {
+          "query:dry_run": {
+            "flag": "query-dry-run"
+          }
+        }
+      },
+      "usage-analytics-get-account-media-usage": {
+        "command": "analytics-get-account-media-usage"
+      },
+      "usage-analytics-get-account-stream-usage": {
+        "command": "analytics-get-account-stream-usage"
+      },
+      "usage-analytics-get-zone-media-usage": {
+        "command": "analytics-get-zone-media-usage"
+      },
+      "usage-analytics-get-zone-stream-usage": {
+        "command": "analytics-get-zone-stream-usage"
+      },
+      "worker-deployments-create-deployment": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "worker-script-delete-worker": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "workers.previews.delete": {
+        "parameters": {
+          "query:force": {
+            "flag": "query-force"
+          }
+        }
+      },
+      "zero-trust-organization-revoke-all-access-tokens-for-a-user": {
+        "parameters": {
+          "query:devices": {
+            "flag": "query-devices"
+          }
+        }
+      }
+    }
+  },
+  "package": {
+    "name": "cloudflare-cli",
+    "version": "0.1.0"
+  },
+  "servers": {
+    "accepted": ["https://api.cloudflare.com/client/v4"]
+  }
+}

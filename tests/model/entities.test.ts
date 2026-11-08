@@ -30,15 +30,24 @@ const serialization = {
   allowReserved: false,
   explode: true,
   kind: "style",
+  objectValued: false,
   origin,
   rows,
   rules: "rfc3986-3.1+",
   style: "form",
 };
 
+const partHeader = {
+  deprecated: false,
+  name: "X-Rate",
+  required: false,
+  schema: schemaRef,
+  serialization: { ...serialization, explode: false, style: "simple" },
+};
+
 const encodingRule = {
   contentType: ["application/json"],
-  headers: [{ name: "X-Rate", required: false }],
+  headers: [partHeader],
   origin,
   rows,
   target: { kind: "property", name: "file" },
@@ -71,7 +80,7 @@ const parameter = {
 const responseCase = {
   alternatives: [mediaAlternative],
   docs,
-  headers: [{ name: "Retry-After" }],
+  headers: [{ deprecated: false, name: "Retry-After", required: false }],
   key: { code: 200 },
   origin,
   rows,
@@ -94,6 +103,7 @@ const securityScheme = {
   name: "bearerAuth",
   origin,
   rows,
+  source: "spec",
 };
 
 const securityPolicy = {
@@ -230,7 +240,38 @@ describe("model entities", () => {
       decodes(Body, { ...body, alternatives: [{ ...mediaAlternative, mediaType: "json" }] }),
     ).toBe(false);
     expect(
-      decodes(EncodingRule, { ...encodingRule, headers: [{ name: "Bad Name", required: false }] }),
+      decodes(EncodingRule, { ...encodingRule, headers: [{ ...partHeader, name: "Bad Name" }] }),
+    ).toBe(false);
+  });
+
+  test("an encoding rule's transfer encoding is base64 or absent", () => {
+    expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64" })).toBe(true);
+    expect(decodes(EncodingRule, { ...encodingRule, contentEncoding: "base64url" })).toBe(false);
+  });
+
+  test("a content serialization carries its querystring form rules, and states none explicitly", () => {
+    const content = {
+      kind: "content",
+      mediaType: "application/x-www-form-urlencoded",
+      origin,
+      rows,
+      rules: "oas-3.2",
+      schema: schemaRef,
+    };
+    const formRule = {
+      contentType: [],
+      headers: [],
+      origin,
+      rows,
+      serialization: { explode: false, style: "pipeDelimited" },
+      target: { kind: "property", name: "ids" },
+    };
+
+    expect(decodes(Serialization, { ...content, encoding: [formRule] })).toBe(true);
+    expect(decodes(Serialization, { ...content, encoding: [] })).toBe(true);
+    expect(decodes(Serialization, content)).toBe(false);
+    expect(
+      decodes(Serialization, { ...content, encoding: [{ ...formRule, target: { kind: "x" } }] }),
     ).toBe(false);
   });
 

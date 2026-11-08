@@ -57,9 +57,71 @@ const styleName = Schema.Literals([
   "spaceDelimited",
 ]);
 
-const nameList = Schema.Array(Schema.Struct({ name: HeaderName }));
+// A response Header Object by name, with its `required` and `deprecated` marks (HDR-03, HDR-04);
+// absent in the document, each is false.
+const responseHeaders = Schema.Array(
+  Schema.Struct({ deprecated: Schema.Boolean, name: HeaderName, required: Schema.Boolean }),
+);
 
-const requestHeaders = Schema.Array(Schema.Struct({ name: HeaderName, required: Schema.Boolean }));
+// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
+// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
+// convention. Set only from the author config, never defaulted or inferred; absent is strict.
+const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
+
+/**
+ * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
+ * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
+ * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
+ * by its style.
+ */
+export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
+  allowReserved: Schema.Boolean,
+  explode: Schema.Boolean,
+  kind: Schema.Literal("style"),
+  nonStandard,
+  objectValued: Schema.Boolean,
+  origin: Origin,
+  rows,
+  rules,
+  style: styleName,
+}) {}
+
+/**
+ * A parameter written in `content` form. `encoding` holds the rules of a 3.2 `querystring`
+ * parameter's form-urlencoded content, one per declared property in document order, decided as a
+ * form body alternative's are (design 6.1, 6.3); it is empty for any other content.
+ */
+export class ContentSerialization extends Schema.Class<ContentSerialization>(
+  "ContentSerialization",
+)({
+  // An `EncodingRule`'s part headers carry a `Serialization`, so the reference is suspended and its
+  // type stated: inferring it would be circular.
+  // oxlint-disable-next-line eslint/no-use-before-define -- read lazily, after both classes exist
+  encoding: Schema.Array(Schema.suspend((): Schema.Codec<EncodingRule, unknown> => EncodingRule)),
+  kind: Schema.Literal("content"),
+  mediaType: MediaType,
+  origin: Origin,
+  rows,
+  rules,
+  schema: SchemaRef,
+}) {}
+
+/**
+ * How a parameter value reaches the wire: by style or by content.
+ */
+export const Serialization = Schema.Union([StyleSerialization, ContentSerialization]);
+
+// A part header of an Encoding Object: a Header Object by name, typed and serialized as a header
+// parameter is (HDR-01, ENC-03), with its `required` and `deprecated` marks.
+const partHeaders = Schema.Array(
+  Schema.Struct({
+    deprecated: Schema.Boolean,
+    name: HeaderName,
+    required: Schema.Boolean,
+    schema: SchemaRef,
+    serialization: Serialization,
+  }),
+);
 
 const encodingTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("property"), name: WireName }),
@@ -74,18 +136,23 @@ const explicitStyle = Schema.Struct({
 
 const nestedEncodingRule = Schema.Struct({
   contentType: Schema.Array(MediaRange),
-  headers: requestHeaders,
+  headers: partHeaders,
   serialization: Schema.optionalKey(explicitStyle),
   target: encodingTarget,
 });
 
 /**
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
+ * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
+ * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
+ * `nonStandard` marks a form property the author config sends in the bracket convention.
  */
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
+  contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
-  headers: requestHeaders,
+  headers: partHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
+  nonStandard,
   origin: Origin,
   rows,
   serialization: Schema.optionalKey(explicitStyle),
@@ -93,7 +160,29 @@ export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
 }) {}
 
 /**
+ * One branch of a discriminated body: its composition `index`, the entry component it names when
+ * its `$ref` chain ends at one, and the discriminator values that select it, in mapping order.
+ */
+export const DiscriminatorBranch = Schema.Struct({
+  component: Schema.optionalKey(Schema.NonEmptyString),
+  index: Schema.Int,
+  labels: Schema.Array(Schema.String),
+});
+
+/**
+ * The usable discriminator of a request body's root schema, a hint that never changes validation
+ * (design D-OQ9, DSC-06). `keyword` is the composition its branches come from; for `allOf`, the
+ * branches are the entry components whose own `allOf` references the schema (DSC-11).
+ */
+export const DiscriminatorHint = Schema.Struct({
+  branches: Schema.Array(DiscriminatorBranch),
+  keyword: Schema.Literals(["allOf", "anyOf", "oneOf"]),
+  propertyName: Schema.NonEmptyString,
+});
+
+/**
  * One media type a body or response offers; `codec` is derived from the media type.
+ * `discriminator` is set on a request body alternative only.
  */
 export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlternative")({
   codec: Schema.Literals([
@@ -107,6 +196,7 @@ export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlter
     "text",
     "xml",
   ]),
+  discriminator: Schema.optionalKey(DiscriminatorHint),
   encoding: Schema.Array(EncodingRule),
   itemEncoding: Schema.optionalKey(EncodingRule),
   itemSchema: Schema.optionalKey(SchemaRef),
@@ -129,38 +219,6 @@ export class Body extends Schema.Class<Body>("Body")({
 }) {}
 
 /**
- * A parameter written in `style` form.
- */
-export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleSerialization")({
-  allowReserved: Schema.Boolean,
-  explode: Schema.Boolean,
-  kind: Schema.Literal("style"),
-  origin: Origin,
-  rows,
-  rules,
-  style: styleName,
-}) {}
-
-/**
- * A parameter written in `content` form.
- */
-export class ContentSerialization extends Schema.Class<ContentSerialization>(
-  "ContentSerialization",
-)({
-  kind: Schema.Literal("content"),
-  mediaType: MediaType,
-  origin: Origin,
-  rows,
-  rules,
-  schema: SchemaRef,
-}) {}
-
-/**
- * How a parameter value reaches the wire: by style or by content.
- */
-export const Serialization = Schema.Union([StyleSerialization, ContentSerialization]);
-
-/**
  * An operation parameter after path-item merge.
  */
 export class Parameter extends Schema.Class<Parameter>("Parameter")({
@@ -181,7 +239,7 @@ export class Parameter extends Schema.Class<Parameter>("Parameter")({
 export class ResponseCase extends Schema.Class<ResponseCase>("ResponseCase")({
   alternatives: Schema.Array(MediaAlternative),
   docs: Docs,
-  headers: nameList,
+  headers: responseHeaders,
   key: Schema.Union([
     Schema.Struct({ code: Schema.Int.check(Schema.isBetween({ maximum: 599, minimum: 100 })) }),
     Schema.Struct({ range: Schema.Int.check(Schema.isBetween({ maximum: 5, minimum: 1 })) }),
@@ -243,6 +301,8 @@ export class SecurityScheme extends Schema.Class<SecurityScheme>("SecurityScheme
   name: Schema.NonEmptyString,
   origin: Origin,
   rows,
+  // Where the scheme came from; an author-supplied one must not reach help or the report unmarked.
+  source: Schema.Literals(["spec", "author-supplied"]),
 }) {}
 
 /**
@@ -280,6 +340,51 @@ export class Informational extends Schema.Class<Informational>("Informational")(
 }) {}
 
 /**
+ * One naming extension source of an operation or alias (design 4.4): a group as its segments, top
+ * level first, and a method name, both unfolded. `pointer` is the object that holds the keys, so a
+ * key's own pointer is `pointer` plus the key. At least one of `group` and `method` is present.
+ */
+export const NamingHint = Schema.Struct({
+  group: Schema.optionalKey(Schema.NonEmptyArray(Schema.NonEmptyString)),
+  method: Schema.optionalKey(Schema.NonEmptyString),
+  pointer: JsonPointer,
+}).check(
+  Schema.makeFilter(
+    (hint) => hint.group !== undefined || hint.method !== undefined || "a hint names something",
+  ),
+);
+
+/**
+ * One usable entry of `x-forge-aliases`: its own Forge and Fern hints, never the operation's, its
+ * own `operationId` (never the operation's), and its index in the array.
+ */
+export const NamingAlias = Schema.Struct({
+  fern: Schema.optionalKey(NamingHint),
+  forge: Schema.optionalKey(NamingHint),
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  operationId: Schema.optionalKey(Schema.NonEmptyString),
+});
+
+/**
+ * The naming extensions an operation carries (design 4.4, D-NAME4): its own Forge and Fern hints
+ * name its primary command, and each alias names one more command for it. Absent when the
+ * operation has no usable naming extension.
+ */
+export const Naming = Schema.Struct({
+  aliases: Schema.optionalKey(Schema.NonEmptyArray(NamingAlias)),
+  fern: Schema.optionalKey(NamingHint),
+  forge: Schema.optionalKey(NamingHint),
+}).check(
+  Schema.makeFilter(
+    (naming) =>
+      naming.aliases !== undefined ||
+      naming.fern !== undefined ||
+      naming.forge !== undefined ||
+      "naming carries a hint or an alias",
+  ),
+);
+
+/**
  * One operation, keyed by method token and path template.
  */
 export class Operation extends Schema.Class<Operation>("Operation")({
@@ -287,9 +392,7 @@ export class Operation extends Schema.Class<Operation>("Operation")({
   deprecated: Schema.Boolean,
   docs: Docs,
   key: Schema.Struct({ method: MethodToken, path: PathTemplate }),
-  naming: Schema.optionalKey(
-    Schema.Struct({ command: Schema.NonEmptyString, group: Schema.NonEmptyString }),
-  ),
+  naming: Schema.optionalKey(Naming),
   operationId: Schema.optionalKey(Schema.NonEmptyString),
   origin: Origin,
   parameters: Schema.Array(Parameter),

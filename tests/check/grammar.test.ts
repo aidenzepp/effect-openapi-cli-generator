@@ -190,6 +190,45 @@ describe("SRV server rules, at operation scope for the operations that use the s
     expect(pointers(found)).toEqual(["/paths/~1a/get/servers/0/url"]);
   });
 
+  test("SRV-04: a 3.2 server name used twice in one list is refused at the later name", () => {
+    const found = check("3.2", {
+      ...paths({
+        "/a": {
+          get: op({
+            servers: [
+              { name: "prod", url: "https://a.example.com" },
+              { name: "stage", url: "https://b.example.com" },
+              { name: "prod", url: "https://c.example.com" },
+            ],
+          }),
+        },
+      }),
+    });
+
+    expect(
+      found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+    ).toEqual([["SRV-04/duplicate-name", "refusal", "operation"]]);
+    expect(pointers(found)).toEqual(["/paths/~1a/get/servers/2/name"]);
+    expect(found[0]?.operation).toEqual({ method: "GET", path: "/a" });
+  });
+
+  test("SRV-04: distinct names, or names in different lists, raise nothing", () => {
+    expect(
+      check("3.2", {
+        ...paths({
+          "/a": {
+            get: op({ servers: [{ name: "prod", url: "https://a.example.com" }] }),
+            put: op(),
+          },
+        }),
+        servers: [
+          { name: "prod", url: "https://a.example.com" },
+          { name: "stage", url: "https://b.example.com" },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   test("SRV-18: a query or fragment in a server URL is refused in every line", () => {
     for (const line of ["3.0", "3.1", "3.2"] as const) {
       for (const url of ["https://example.com/v1?x=1", "https://example.com/v1#top"]) {
@@ -499,6 +538,90 @@ describe("DSC discriminator rules", () => {
     expect(pointers(found)).toEqual(["/components/schemas/Pet/discriminator/defaultMapping"]);
   });
 
+  test("DSC-05: a discriminator with no oneOf, anyOf or allOf is refused at the discriminator", () => {
+    const loose = {
+      components: {
+        schemas: {
+          Pet: {
+            discriminator: { propertyName: "kind" },
+            properties: { kind: { type: "string" } },
+            required: ["kind"],
+            type: "object",
+          },
+        },
+      },
+    };
+
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      const found = check(line, loose);
+
+      expect(
+        found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+      ).toEqual([["DSC-05/no-composition", "refusal", "element"]]);
+      expect(pointers(found)).toEqual(["/components/schemas/Pet/discriminator"]);
+    }
+  });
+
+  test("DSC-05: the base schema an allOf child references is the allOf use and is not refused", () => {
+    const members = {
+      components: {
+        schemas: {
+          Cat: { allOf: [{ $ref: "#/components/schemas/Pet" }, { type: "object" }] },
+          Pet: {
+            discriminator: { mapping: { cat: "Cat" }, propertyName: "kind" },
+            properties: { kind: { type: "string" } },
+            required: ["kind"],
+            type: "object",
+          },
+        },
+      },
+    };
+
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      expect(check(line, members)).toEqual([]);
+    }
+  });
+
+  test("DSC-05: a partial mapping is valid; an unmapped branch keeps its implicit name", () => {
+    const dog: Json = {
+      properties: { kind: { type: "string" } },
+      required: ["kind"],
+      type: "object",
+    };
+    const partial = (keyword: "anyOf" | "oneOf"): Members => ({
+      components: {
+        schemas: {
+          Cat: cat,
+          Dog: dog,
+          Pet: {
+            discriminator: { mapping: { cat: "Cat" }, propertyName: "kind" },
+            [keyword]: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],
+          },
+        },
+      },
+    });
+
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      for (const keyword of ["oneOf", "anyOf"] as const) {
+        expect(check(line, partial(keyword))).toEqual([]);
+      }
+    }
+  });
+
+  test("DSC-05: an inline branch beside an explicit mapping is not refused", () => {
+    const inline = {
+      ...schemaAt({
+        discriminator: { mapping: { cat: "#/components/schemas/Cat" }, propertyName: "kind" },
+        oneOf: [{ $ref: "#/components/schemas/Cat" }, cat],
+      }),
+      components: { schemas: { Cat: cat } },
+    };
+
+    for (const line of ["3.0", "3.1", "3.2"] as const) {
+      expect(check(line, inline)).toEqual([]);
+    }
+  });
+
   test("an inline schema in a request body is checked too", () => {
     const found = check(
       "3.1",
@@ -544,6 +667,96 @@ describe("RSS-10 status keys", () => {
       "/paths/~1a/get/responses/6XX",
       "/paths/~1a/get/responses/ok",
     ]);
+  });
+});
+
+describe("RSS-04 response codes", () => {
+  test("a 3.0 Responses Object of x- keys alone is a document refusal at the Responses Object", () => {
+    const found = check("3.0", {
+      ...paths({ "/a": { get: { responses: { "x-note": "only an extension" } } } }),
+    });
+
+    expect(
+      found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+    ).toEqual([["RSS-04/no-response-code", "refusal", "document"]]);
+    expect(pointers(found)).toEqual(["/paths/~1a/get/responses"]);
+  });
+
+  test("default beside an x- key is a response code; the 3.1 and 3.2 schemas own the rule", () => {
+    const extensionOnly = { ...paths({ "/a": { get: { responses: { "x-note": "x" } } } }) };
+
+    expect(
+      check("3.0", {
+        ...paths({
+          "/a": { get: { responses: { default: { description: "x" }, "x-note": "x" } } },
+        }),
+      }),
+    ).toEqual([]);
+    expect([check("3.1", extensionOnly), check("3.2", extensionOnly)]).toEqual([[], []]);
+  });
+});
+
+const header = (fields: Members): Members => ({
+  ...paths({
+    "/a": {
+      get: op({
+        responses: {
+          "200": { description: "ok", headers: { "X-Rate": { schema: {}, ...fields } } },
+        },
+      }),
+    },
+  }),
+});
+
+describe("HDR-13 Header Object fields", () => {
+  test("allowEmptyValue or allowReserved on a 3.0 Header Object is a document refusal at the field", () => {
+    const found = check("3.0", header({ allowEmptyValue: true, allowReserved: false }));
+
+    expect(
+      found.map((diagnostic) => [diagnostic.code, diagnostic.severity, diagnostic.scope]),
+    ).toEqual([
+      ["HDR-13/parameter-only-field", "refusal", "document"],
+      ["HDR-13/parameter-only-field", "refusal", "document"],
+    ]);
+    expect(pointers(found)).toEqual([
+      "/paths/~1a/get/responses/200/headers/X-Rate/allowEmptyValue",
+      "/paths/~1a/get/responses/200/headers/X-Rate/allowReserved",
+    ]);
+  });
+
+  test("a component header and an encoding header are checked; a parameter keeps both fields", () => {
+    const found = check("3.0", {
+      components: { headers: { Rate: { allowReserved: true, schema: {} } } },
+      ...paths({
+        "/a": {
+          post: op({
+            parameters: [{ allowEmptyValue: true, in: "query", name: "q", schema: {} }],
+            requestBody: {
+              content: {
+                "multipart/form-data": {
+                  encoding: {
+                    file: { headers: { "X-Part": { allowEmptyValue: true, schema: {} } } },
+                  },
+                  schema: {},
+                },
+              },
+            },
+          }),
+        },
+      }),
+    });
+
+    expect(sorted(pointers(found))).toEqual([
+      "/components/headers/Rate/allowReserved",
+      "/paths/~1a/post/requestBody/content/multipart~1form-data/encoding/file/headers/X-Part/allowEmptyValue",
+    ]);
+  });
+
+  test("the 3.1 and 3.2 schemas own the rule", () => {
+    expect([
+      check("3.1", header({ allowEmptyValue: true })),
+      check("3.2", header({ allowReserved: true })),
+    ]).toEqual([[], []]);
   });
 });
 

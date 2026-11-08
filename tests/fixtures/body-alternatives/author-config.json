@@ -1,0 +1,6 @@
+{
+  "package": { "name": "body-alternatives-cli", "version": "0.1.0" },
+  "binName": "alts",
+  "envPrefix": "ALTS",
+  "servers": { "accepted": ["https://api.example.com"] }
+}

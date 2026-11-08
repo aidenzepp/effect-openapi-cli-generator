@@ -76,7 +76,16 @@ const styled = (line: Line, parameter: Json) => {
 
 const string: Json = { type: "string" };
 
+const list: Json = { items: string, type: "array" };
+
 const query = (members: Members): Json => ({ in: "query", name: "q", schema: string, ...members });
+
+// An object with one scalar member: the schema deepObject is defined for.
+const flat: Json = { properties: { a: string }, type: "object" };
+
+const deep = (members: Members): Json => query({ schema: flat, style: "deepObject", ...members });
+
+const ref = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
 
 const path = (members: Members): Json => ({
   in: "path",
@@ -165,10 +174,18 @@ describe("PRM-11 PRM-12 PRM-13 defaults come from the text of each location", ()
     ["STY-14", query({ explode: false }), "form"],
     ["STY-15", query({ allowReserved: true }), "form"],
     ["STY-16", query({ allowReserved: true, explode: false }), "form"],
-    ["STY-17", query({ style: "spaceDelimited" }), "spaceDelimited"],
-    ["STY-19", query({ allowReserved: true, style: "spaceDelimited" }), "spaceDelimited"],
-    ["STY-21", query({ style: "pipeDelimited" }), "pipeDelimited"],
-    ["STY-23", query({ allowReserved: true, style: "pipeDelimited" }), "pipeDelimited"],
+    ["STY-17", query({ schema: list, style: "spaceDelimited" }), "spaceDelimited"],
+    [
+      "STY-19",
+      query({ allowReserved: true, schema: list, style: "spaceDelimited" }),
+      "spaceDelimited",
+    ],
+    ["STY-21", query({ schema: list, style: "pipeDelimited" }), "pipeDelimited"],
+    [
+      "STY-23",
+      query({ allowReserved: true, schema: list, style: "pipeDelimited" }),
+      "pipeDelimited",
+    ],
     ["STY-01", path({ style: "matrix" }), "matrix"],
     ["STY-02", path({ explode: true, style: "matrix" }), "matrix"],
     ["STY-03", path({ style: "label" }), "label"],
@@ -230,15 +247,15 @@ describe("rules tag", () => {
 
 describe("STY-26 deepObject explode is a later-line correction", () => {
   test("STY-25 an exploded deepObject needs no notice", () => {
-    const outcome = implemented("3.1", query({ explode: true, style: "deepObject" }));
+    const outcome = implemented("3.1", deep({ explode: true }));
 
     expect(codes(outcome)).toEqual([]);
-    expect(styled("3.1", query({ explode: true, style: "deepObject" })).rows).toEqual(["STY-25"]);
+    expect(styled("3.1", deep({ explode: true })).rows).toEqual(["STY-25"]);
   });
 
   for (const line of ["3.0", "3.1"] as const) {
     test(`STY-26 ${line} deepObject without explode is exploded, with a notice`, () => {
-      const parameter = query({ style: "deepObject" });
+      const parameter = deep({});
       const outcome = implemented(line, parameter);
 
       expect(styled(line, parameter)).toEqual({
@@ -256,24 +273,22 @@ describe("STY-26 deepObject explode is a later-line correction", () => {
   }
 
   test("STY-26 explode false is corrected the same way", () => {
-    expect(codes(implemented("3.1", query({ explode: false, style: "deepObject" })))).toEqual([
+    expect(codes(implemented("3.1", deep({ explode: false })))).toEqual([
       "STY-26/explode-no-effect",
     ]);
   });
 
   test("STY-29 the allowReserved variant has its own row", () => {
-    const parameter = query({ allowReserved: true, style: "deepObject" });
+    const parameter = deep({ allowReserved: true });
 
     expect(codes(implemented("3.0", parameter))).toEqual(["STY-29/explode-no-effect"]);
     expect(styled("3.0", parameter).rows).toEqual(["STY-29"]);
-    expect(
-      styled("3.0", query({ allowReserved: true, explode: true, style: "deepObject" })).rows,
-    ).toEqual(["STY-28"]);
+    expect(styled("3.0", deep({ allowReserved: true, explode: true })).rows).toEqual(["STY-28"]);
   });
 
   test("STY-27 3.2 says explode has no effect, so there is nothing to correct", () => {
     for (const explode of [true, false]) {
-      const parameter = query({ explode, style: "deepObject" });
+      const parameter = deep({ explode });
 
       expect(codes(implemented("3.2", parameter))).toEqual([]);
       expect(styled("3.2", parameter)).toEqual({
@@ -284,9 +299,7 @@ describe("STY-26 deepObject explode is a later-line correction", () => {
       });
     }
 
-    expect(styled("3.2", query({ allowReserved: true, style: "deepObject" })).rows).toEqual([
-      "STY-30",
-    ]);
+    expect(styled("3.2", deep({ allowReserved: true })).rows).toEqual(["STY-30"]);
   });
 });
 
@@ -532,9 +545,9 @@ describe("the entity", () => {
 
 describe("diagnostic wire name", () => {
   test("a refused cookie parameter carries its own name as wire", () => {
-    expect(refused("3.1", cookie({ name: "session" })).diagnostics.map((d) => d.wire)).toEqual([
-      "session",
-    ]);
+    expect(
+      refused("3.2", cookie({ explode: false, name: "session" })).diagnostics.map((d) => d.wire),
+    ).toEqual(["session"]);
   });
 
   test("the Cookie header refusal carries the name as written", () => {
@@ -553,54 +566,47 @@ describe("diagnostic wire name", () => {
   });
 });
 
-describe("STY-33 in: cookie is refused until Milestone 2", () => {
-  const staged: readonly (readonly [string, Line, Json])[] = [
-    ["STY-33", "3.0", cookie({})],
-    ["STY-33", "3.1", cookie({ explode: true })],
-    ["STY-33", "3.2", cookie({})],
-    ["STY-34", "3.0", cookie({ explode: false })],
-    ["STY-34", "3.1", cookie({ explode: false })],
-    ["STY-36", "3.2", cookie({ allowReserved: true })],
-    ["STY-38", "3.2", cookie({ style: "cookie" })],
-    ["STY-38", "3.2", cookie({ allowReserved: true, style: "cookie" })],
-  ];
+describe("STY-33 in: cookie generates a style serialization", () => {
+  const generated: readonly (readonly [string, Line, Json, "cookie" | "form", boolean, boolean])[] =
+    [
+      ["STY-33", "3.0", cookie({}), "form", true, false],
+      ["STY-33", "3.1", cookie({ explode: true }), "form", true, false],
+      ["STY-33", "3.2", cookie({}), "form", true, false],
+      ["STY-34", "3.0", cookie({ explode: false }), "form", false, false],
+      ["STY-34", "3.1", cookie({ explode: false }), "form", false, false],
+      ["STY-36", "3.2", cookie({ allowReserved: true }), "form", true, true],
+      ["STY-38", "3.2", cookie({ style: "cookie" }), "cookie", true, false],
+      ["STY-38", "3.2", cookie({ allowReserved: true, style: "cookie" }), "cookie", true, false],
+    ];
 
-  for (const [row, line, parameter] of staged) {
-    test(`${row} ${line} is not-implemented at element scope with a Milestone 2 hint`, () => {
-      const outcome = refused(line, parameter);
-      const [diagnostic] = outcome.diagnostics;
-
-      expect(codes(outcome)).toEqual([`${row}/not-implemented`]);
-      expect(diagnostic?.row).toBe(row);
-      expect(diagnostic?.scope).toBe("element");
-      expect(diagnostic?.severity).toBe("refusal");
-      expect(diagnostic?.hint).toContain("Milestone 2");
-      expect(diagnostic?.specSection).toMatch(
-        new RegExp(`^https://spec.openapis.org/oas/v${specVersion[line]}.html#.+`, "u"),
-      );
+  for (const [row, line, parameter, style, explode, allowReserved] of generated) {
+    test(`${row} ${line} is a ${style} Serialization entry`, () => {
+      expect(styled(line, parameter)).toEqual({ allowReserved, explode, rows: [row], style });
+      expect(implemented(line, parameter).parameter.location).toBe("cookie");
     });
   }
 
   test("STY-33 3.0 and 3.1 ignore allowReserved on a cookie, so the row stays STY-33", () => {
-    expect(codes(refused("3.1", cookie({ allowReserved: true })))).toEqual([
-      "STY-33/not-implemented",
-    ]);
+    const outcome = implemented("3.1", cookie({ allowReserved: true }));
+
+    expect(codes(outcome)).toEqual(["PRM-35/allow-reserved-ignored"]);
+    expect(styled("3.1", cookie({ allowReserved: true })).rows).toEqual(["STY-33"]);
   });
 
-  test("PRM-24 a content-based cookie is not implemented either", () => {
-    const outcome = refused("3.1", {
+  test("PRM-24 a content-based cookie is a content Serialization entry", () => {
+    const { serialization } = implemented("3.1", {
       content: { "text/plain": { schema: string } },
       in: "cookie",
       name: "c",
-    });
+    }).parameter;
 
-    expect(codes(outcome)).toEqual(["PRM-24/not-implemented"]);
-    expect(outcome.diagnostics[0]?.hint).toContain("Milestone 2");
+    expect(serialization.kind).toBe("content");
+    expect(texts(serialization.rows)).toEqual(["PRM-15", "PRM-24"]);
   });
 
-  test("STY-33 a required cookie parameter reports it for the operation-scope raise", () => {
-    expect(refused("3.1", cookie({ required: true })).required).toBe(true);
-    expect(refused("3.1", cookie({})).required).toBe(false);
+  test("STY-33 a required cookie parameter keeps required", () => {
+    expect(implemented("3.1", cookie({ required: true })).parameter.required).toBe(true);
+    expect(implemented("3.1", cookie({})).parameter.required).toBe(false);
   });
 });
 
@@ -629,29 +635,41 @@ describe("STY-35 cookie explode false is refused for good in 3.2", () => {
   }
 });
 
-describe("STY-42 in: querystring is refused until Milestone 2", () => {
-  test("STY-42 a JSON querystring is not-implemented at element scope", () => {
-    const outcome = refused("3.2", querystring("application/json"));
-    const [diagnostic] = outcome.diagnostics;
+const querystringContent = (media: string) => {
+  const { parameter } = implemented("3.2", querystring(media));
+  if (parameter.serialization.kind !== "content") {
+    throw new Error("expected a content serialization");
+  }
 
-    expect(codes(outcome)).toEqual(["STY-42/not-implemented"]);
-    expect(diagnostic?.scope).toBe("element");
-    expect(diagnostic?.hint).toContain("Milestone 2");
-    expect(diagnostic?.specSection).toMatch(
-      /^https:\/\/spec\.openapis\.org\/oas\/v3\.2\.1\.html#.+/u,
-    );
-    expect(outcome.required).toBe(true);
+  return {
+    location: parameter.location,
+    mediaType: String(parameter.serialization.mediaType),
+    required: parameter.required,
+    rows: texts(parameter.serialization.rows),
+  };
+};
+
+describe("STY-42 in: querystring generates a content Serialization entry", () => {
+  test("STY-42 a JSON querystring is one content value", () => {
+    expect(querystringContent("application/json")).toEqual({
+      location: "querystring",
+      mediaType: "application/json",
+      required: true,
+      rows: ["PRM-15", "STY-42", "STY-43"],
+    });
   });
 
-  test("STY-43 a form-urlencoded querystring is not-implemented under its own row", () => {
+  test("STY-43 a form-urlencoded querystring is one content value", () => {
     for (const media of [
       "application/x-www-form-urlencoded",
       "Application/X-WWW-Form-Urlencoded; charset=utf-8",
     ]) {
-      const outcome = refused("3.2", querystring(media));
-
-      expect(codes(outcome)).toEqual(["STY-43/not-implemented"]);
-      expect(outcome.diagnostics[0]?.hint).toContain("Milestone 2");
+      expect(querystringContent(media)).toEqual({
+        location: "querystring",
+        mediaType: media,
+        required: true,
+        rows: ["PRM-15", "STY-42", "STY-43"],
+      });
     }
   });
 });
@@ -684,6 +702,42 @@ describe("STY-40 STY-18 combinations outside the style table", () => {
       expect(outcome.diagnostics[0]?.scope).toBe("element");
     });
   }
+});
+
+describe("STY-17 STY-21 spaceDelimited and pipeDelimited take an array or object", () => {
+  const primitive: readonly (readonly [string, Json])[] = [
+    ["STY-17", query({ style: "spaceDelimited" })],
+    ["STY-19", query({ allowReserved: true, style: "spaceDelimited" })],
+    ["STY-21", query({ schema: { type: "integer" }, style: "pipeDelimited" })],
+    ["STY-23", query({ allowReserved: true, schema: { type: "boolean" }, style: "pipeDelimited" })],
+  ];
+
+  for (const [row, parameter] of primitive) {
+    test(`${row} over a primitive schema is refused at element scope`, () => {
+      for (const line of lines) {
+        const outcome = refused(line, parameter);
+
+        expect(codes(outcome)).toEqual([`${row}/primitive-not-applicable`]);
+        expect(outcome.diagnostics[0]?.scope).toBe("element");
+      }
+    });
+  }
+
+  test("STY-17 a primitive behind $ref is refused; an object or an untyped schema builds", () => {
+    const components = { schemas: { Flat: string } };
+    const outcome = normalize(
+      "3.1",
+      query({ schema: { $ref: "#/components/schemas/Flat" }, style: "spaceDelimited" }),
+      components,
+    );
+    const object = { properties: { R: { type: "integer" } }, type: "object" };
+
+    expect(codes(outcome)).toEqual(["STY-17/primitive-not-applicable"]);
+    expect(styled("3.1", query({ schema: object, style: "spaceDelimited" })).rows).toEqual([
+      "STY-17",
+    ]);
+    expect(styled("3.1", query({ schema: {}, style: "pipeDelimited" })).rows).toEqual(["STY-21"]);
+  });
 });
 
 describe("ParameterNotReadable is what the earlier stages should have stopped", () => {
@@ -732,5 +786,201 @@ describe("ParameterNotReadable is what the earlier stages should have stopped", 
     expect(reasonOf("3.1", { in: "elsewhere", name: "q", schema: string })).toBe(
       "ParameterNotReadable:not-a-parameter",
     );
+  });
+});
+
+describe("PRM-27 deepObject is defined only for an object schema", () => {
+  // Each schema admits a value that is not an object, so every flag value would be refused.
+  const nonObject: readonly (readonly [string, Json])[] = [
+    ["anyOf with an integer member", { anyOf: [flat, { type: "integer" }] }],
+    ["oneOf with an untyped member", { oneOf: [flat, {}] }],
+    ["a primitive", string],
+    ["no type", {}],
+    ["a type list with null", { type: ["object", "null"] }],
+  ];
+
+  for (const [label, schema] of nonObject) {
+    test(`PRM-27 a deepObject over ${label} is refused at element scope`, () => {
+      const outcome = refused("3.1", deep({ schema }));
+
+      expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+      expect(outcome.diagnostics[0]?.severity).toBe("refusal");
+      expect(outcome.diagnostics[0]?.scope).toBe("element");
+      expect(outcome.required).toBe(false);
+    });
+  }
+
+  test("PRM-27 a required one keeps required, so its operation is raised", () => {
+    const outcome = refused("3.0", deep({ required: true, schema: { anyOf: [flat, string] } }));
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+    expect(outcome.required).toBe(true);
+  });
+
+  test("PRM-27 an anyOf or oneOf whose members are all objects is built", () => {
+    const other: Json = { properties: { b: string }, type: "object" };
+    for (const keyword of ["anyOf", "oneOf"]) {
+      for (const line of lines) {
+        expect(codes(implemented(line, deep({ schema: { [keyword]: [flat, other] } })))).toEqual(
+          line === "3.2" ? [] : ["STY-26/explode-no-effect"],
+        );
+      }
+    }
+  });
+
+  test("PRM-27 members are read through $ref, and an untyped member with properties is an object", () => {
+    const schema: Json = {
+      anyOf: [{ $ref: "#/components/schemas/Flat" }, { properties: { b: string } }],
+    };
+    const components = { schemas: { Flat: flat } };
+
+    expect(codes(implemented("3.2", deep({ schema }), components))).toEqual([]);
+    expect(
+      codes(
+        normalize("3.2", deep({ schema: { $ref: "#/components/schemas/Mixed" } }), {
+          schemas: { Mixed: { anyOf: [flat, string] } },
+        }),
+      ),
+    ).toEqual(["PRM-27/non-object-schema"]);
+  });
+
+  test("PRM-27 an array is still PRM-27/compound-nested", () => {
+    expect(codes(refused("3.2", deep({ schema: list })))).toEqual(["PRM-27/compound-nested"]);
+  });
+});
+
+// One normalization with its wall time in milliseconds.
+const timed = (run: () => ParameterOutcome) => {
+  const start = performance.now();
+  const outcome = run();
+
+  return { elapsed: performance.now() - start, outcome };
+};
+
+describe("PRM-27 the object test's schema walk is bounded", () => {
+  const depth = 30;
+
+  // A_i and B_i each hold anyOf [A_{i+1}, B_{i+1}]: 2^30 paths to the bottom, 62 distinct schemas.
+  const fanOut = (bottom: Json): Members => ({
+    schemas: Object.fromEntries([
+      ["A30", bottom],
+      ["B30", bottom],
+      ...Array.from({ length: depth }, (_, level): readonly (readonly [string, Json])[] => {
+        const next = { anyOf: [ref(`A${level + 1}`), ref(`B${level + 1}`)] };
+
+        return [
+          [`A${level}`, next],
+          [`B${level}`, next],
+        ];
+      }).flat(),
+    ]),
+  });
+
+  const top = deep({ schema: ref("A0") });
+
+  test("PRM-27 a fan-out of depth 30 over objects is decided once per schema and built", () => {
+    const { elapsed, outcome } = timed(() => normalize("3.2", top, fanOut(flat)));
+
+    expect(outcome._tag).toBe("Implemented");
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a fan-out of depth 30 that cycles back to its top fails closed, fast", () => {
+    const { elapsed, outcome } = timed(() =>
+      normalize("3.2", top, fanOut({ anyOf: [ref("A0"), flat] })),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("PRM-27 a spent node budget fails closed", () => {
+    const value: Json = {
+      components: fanOut(flat),
+      info: { title: "t", version: "1" },
+      openapi: openapi["3.2"],
+      paths: { "/a": { get: { parameters: [top], responses: { "200": { description: "ok" } } } } },
+    };
+    const resolution = Effect.runSync(resolve({ document: entry, line: "3.2", value }));
+    const outcome = Effect.runSync(
+      normalizeParameter(resolution, { openapi: openapi["3.2"], pointer: site }, { maxNodes: 5 }),
+    );
+
+    expect(codes(outcome)).toEqual(["PRM-27/non-object-schema"]);
+  });
+});
+
+const objectValued = (parameter: Json, components: Members = {}) => {
+  const { serialization } = implemented("3.1", parameter, components).parameter;
+  if (serialization.kind !== "style") {
+    throw new Error("expected a style serialization");
+  }
+
+  return serialization.objectValued;
+};
+
+describe("objectValued: a styled parameter whose schema admits only objects takes JSON", () => {
+  const other: Json = { properties: { b: string }, type: "object" };
+
+  const cases: readonly (readonly [string, Json, boolean])[] = [
+    ["a form query over type object", query({ schema: flat }), true],
+    [
+      "a form query over properties with no type",
+      query({ schema: { properties: { a: string } } }),
+      true,
+    ],
+    ["a deepObject over anyOf of objects", deep({ schema: { anyOf: [flat, other] } }), true],
+    ["a deepObject over oneOf of objects", deep({ schema: { oneOf: [flat, other] } }), true],
+    ["a simple path over type object", path({ schema: flat }), true],
+    ["a form query over a string", query({}), false],
+    ["a form query over an array", query({ schema: list }), false],
+    ["a form query over anyOf with a string", query({ schema: { anyOf: [flat, string] } }), false],
+    [
+      "a form query over a type list with null",
+      query({ schema: { type: ["object", "null"] } }),
+      false,
+    ],
+  ];
+
+  for (const [label, parameter, expected] of cases) {
+    test(`${label} is ${expected ? "" : "not "}object-valued`, () => {
+      expect(objectValued(parameter)).toBe(expected);
+    });
+  }
+
+  test("a $ref to an object component is object-valued", () => {
+    expect(objectValued(query({ schema: ref("O") }), { schemas: { O: flat } })).toBe(true);
+  });
+});
+
+const formQuerystring = (encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding,
+      schema: { properties: { ids: { items: string, type: "array" } }, type: "object" },
+    },
+  },
+  in: "querystring",
+  name: "qs",
+  required: true,
+});
+
+// The body form rules decide the Encoding Objects in the operation assembly (design 6.1; witness
+// tests/emit/querystring-encoding.test.ts), so the parameter rules neither refuse nor ignore them.
+describe("STY-43 querystring form content with Encoding Objects reaches the body form rules", () => {
+  test("STY-43 an encoding entry no longer refuses the parameter, which starts with no rules", () => {
+    const outcome = implemented(
+      "3.2",
+      formQuerystring({ ids: { explode: false, style: "pipeDelimited" } }),
+    );
+
+    expect(codes(outcome)).toEqual([]);
+    expect(outcome.parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
+  });
+
+  test("STY-43 every content serialization starts with an empty rule list", () => {
+    const { parameter } = implemented("3.2", formQuerystring({}));
+
+    expect(parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
   });
 });

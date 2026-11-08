@@ -42,10 +42,11 @@ const prepared = (
   Effect.gen(function* generate() {
     const config = yield* decodeAuthorConfig(configValue, { document: configDocument });
     const resolution = yield* resolve({ document, line, value });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
-    return { api, config, plan };
+    // Every spec here is 3.1 or 3.2, where no `default` is refused (S30-27 is 3.0 only).
+    return { api, config, plan, validationEdits: [] };
   });
 
 const emitted = (value: Schema.Json, configValue?: Schema.Json) =>
@@ -174,7 +175,8 @@ describe("emitCli: the golden users-update fixture", () => {
     expect(content).toContain('BaseUrl.layer(servers, "EXAMPLE")');
     expect(content).toContain('Auth.layer(security, "EXAMPLE")');
     expect(content).toContain('import { login } from "../../custom/commands.ts";');
-    expect(content).toContain("Command.withSubcommands([UsersCli.group, login])");
+    expect(content).toContain('{ load: () => import("./users.ts"), name: "users" }');
+    expect(content).toContain("Command.withSubcommands(Arr.appendAll(groups, [login]))");
     for (const setting of [
       "BaseUrl.baseUrlSetting",
       "BaseUrl.serverSetting",
@@ -264,7 +266,7 @@ describe("emitCli: shapes beyond the fixture", () => {
     const content = contentOf(output, "src/cli/root.ts") ?? "";
     expect(content).toContain('import * as Root from "../api/root.ts";');
     expect(content).toContain('export const health = Command.make("health", {}, () =>');
-    expect(content).toContain("Command.withSubcommands([UsersCli.group, health, login])");
+    expect(content).toContain("Command.withSubcommands(Arr.appendAll(groups, [health, login]))");
   });
 
   test("a 3.2 child group is listed in its parent's module, not in root", async () => {
@@ -296,7 +298,9 @@ describe("emitCli: shapes beyond the fixture", () => {
     expect(users).toContain("AdminsCli.group]");
 
     const rootModule = contentOf(output, "src/cli/root.ts") ?? "";
-    expect(rootModule).toContain("Command.withSubcommands([UsersCli.group, login])");
+    expect(rootModule).toContain('{ load: () => import("./users.ts"), name: "users" }');
+    expect(rootModule).not.toContain("./admins.ts");
+    expect(rootModule).toContain("Command.withSubcommands(Arr.appendAll(groups, [login]))");
     expect(rootModule).not.toContain("AdminsCli");
   });
 
@@ -349,14 +353,14 @@ describe("emitCli: shapes beyond the fixture", () => {
 });
 
 describe("emitCli: operation-scope refusals", () => {
-  test("a text request body refuses its operation and the rest of the package emits", async () => {
+  test("an SSE request body refuses its operation and the rest of the package emits", async () => {
     const output = await emit(
       withPaths({
         ...paths,
         "/notes": {
           post: {
             operationId: "notes-create",
-            requestBody: { content: { "text/plain": { schema: { type: "string" } } } },
+            requestBody: { content: { "text/event-stream": { schema: { type: "string" } } } },
             responses: ok,
             tags: ["notes"],
           },
@@ -379,7 +383,7 @@ describe("emitCli: operation-scope refusals", () => {
           post: {
             operationId: "users-note",
             parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
-            requestBody: { content: { "text/plain": { schema: { type: "string" } } } },
+            requestBody: { content: { "text/event-stream": { schema: { type: "string" } } } },
             responses: ok,
             tags: ["users"],
           },
@@ -475,7 +479,9 @@ describe("emitCli: operation-scope refusals", () => {
         },
       });
       expect(output.refusals).toEqual([]);
-      expect(contentOf(output, "src/cli/counters.ts")).toContain(expected);
+      expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
+        expected,
+      );
       expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
     });
   }
@@ -496,7 +502,7 @@ describe("emitCli: operation-scope refusals", () => {
     expect(text).not.toContain("Schema.fromJsonString");
   });
 
-  test("an array of safe integers is a repeated Flag.Int", async () => {
+  test("an array of safe integers is a repeated integer numeric flag, each a JsonNumber", async () => {
     const output = await emit(
       withPaths({
         "/counters": bodyOperation("counters-create", "counters", {
@@ -506,8 +512,8 @@ describe("emitCli: operation-scope refusals", () => {
       }),
     );
     expect(output.refusals).toEqual([]);
-    expect(contentOf(output, "src/cli/counters.ts")).toContain(
-      'Flag.Int("totals").pipe(Flag.atLeast(0))',
+    expect(contentOf(output, "src/cli/counters.ts")?.replaceAll(/\s+/gu, " ")).toContain(
+      'Input.numericFlag("totals", "integer").pipe( Flag.map((text) => new Input.JsonNumber(text)), Flag.atLeast(0), )',
     );
   });
 });
@@ -536,7 +542,7 @@ describe("emitCli: XML request bodies", () => {
 });
 
 describe("emitCli: the body field walk", () => {
-  test("an integer field whose $ref chain is a cycle is refused, not emitted as Flag.Int", async () => {
+  test("an integer field whose $ref chain is a cycle is refused, not emitted with a guessed width", async () => {
     const base = await counters({ total: { type: "integer" } });
     const doctored = withBodyDefs(
       base,
@@ -550,7 +556,7 @@ describe("emitCli: the body field walk", () => {
     ]);
   });
 
-  test("an integer field past the visit cap is refused, not emitted as Flag.Int", async () => {
+  test("an integer field past the visit cap is refused, not emitted with a guessed width", async () => {
     const base = await counters({ total: { type: "integer" } });
     const hops = 10_050;
     const chain = Object.fromEntries<Schema.Json>([
@@ -698,7 +704,7 @@ describe("emitCli: array parameters", () => {
 
     const text = contentOf(output, "src/cli/users.ts") ?? "";
     expect(text).toContain('metrics: Flag.String("metrics").pipe(Flag.atLeast(0))');
-    expect(text).toContain('tag: Flag.String("tag").pipe(Flag.atLeast(1))');
+    expect(text).toContain('tag: Input.numericFlag("tag", "integer").pipe(Flag.atLeast(1))');
     expect(text).toContain('xTrace: Flag.String("x-trace").pipe(Flag.atLeast(0))');
     expect(text).toContain("metrics: flags.metrics,");
     expect(text).toContain("tag: flags.tag,");
@@ -813,20 +819,18 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/users.ts")).toBe(read("expected/src/cli/users.ts"));
   });
 
-  test("a multipart alternative beside other request media refuses its operation", async () => {
+  test("a multipart range alternative beside other request media refuses its operation", async () => {
     expect(
       await multipartRefusals({
         "application/json": { schema: { properties: { url: { type: "string" } }, type: "object" } },
-        ...multipart(importSchema),
+        "multipart/*": { schema: importSchema },
       }),
-    ).toEqual([
-      { reason: "unsupported-body", subject: "multipart/form-data beside other request media" },
-    ]);
+    ).toEqual([{ reason: "unsupported-body", subject: "a multipart/* request body" }]);
   });
 
   test("a required part the names plan skipped refuses its operation", async () => {
     const schema = {
-      properties: { meta: { properties: { a: { type: "string" } }, type: "object" } },
+      properties: { meta: { oneOf: [{ type: "string" }, { type: "integer" }] } },
       required: ["meta"],
       type: "object",
     };
@@ -841,7 +845,7 @@ describe("emitCli: multipart request bodies", () => {
       ...importSchema,
       properties: {
         ...importSchema.properties,
-        meta: { properties: { a: { type: "string" } }, type: "object" },
+        meta: { oneOf: [{ type: "string" }, { type: "integer" }] },
       },
     };
     const output = await emit(
@@ -852,32 +856,98 @@ describe("emitCli: multipart request bodies", () => {
     expect(contentOf(output, "src/cli/imports.ts")).not.toContain("meta");
   });
 
-  test("part headers, contentEncoding and several part content types are refused, not guessed", async () => {
+  test("a part header is a --<part>-<header> flag typed as a header parameter (ENC-03)", async () => {
     const headers = {
       file: { headers: { "X-Rate": { schema: { type: "integer" } } } },
     };
-    const encoded = {
-      ...importSchema,
-      properties: {
-        ...importSchema.properties,
-        title: { contentEncoding: "base64", type: "string" },
-      },
-    };
-    const types = { file: { contentType: "text/csv, application/json" } };
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(importSchema, headers)) }),
+    );
+    const text = contentOf(output, "src/cli/imports.ts") ?? "";
 
-    expect(await multipartRefusals(multipart(importSchema, headers))).toEqual([
-      { reason: "unsupported-body", subject: "part headers for multipart part /file" },
-    ]);
-    expect(await multipartRefusals(multipart(encoded))).toEqual([
-      { reason: "unsupported-body", subject: "the contentEncoding of multipart part /title" },
-    ]);
-    expect(await multipartRefusals(multipart(importSchema, types))).toEqual([
-      { reason: "unsupported-body", subject: "one content type for multipart part /file" },
+    expect(output.refusals).toEqual([]);
+    expect(text).toContain(
+      'fileXRate: Input.numericFlag("file-x-rate", "integer").pipe(Flag.optional),',
+    );
+    expect(text).toContain(
+      [
+        '    Input.partOptions("file", Option.isSome(flags.file), [',
+        '      ["file-x-rate", Option.isSome(flags.fileXRate), false],',
+        "    ]).pipe(",
+      ].join("\n"),
+    );
+    expect(text).toContain('Serialize.header("X-Rate", Option.getOrUndefined(flags.fileXRate), {');
+    expect(text).toContain('"file-x-rate": "header X-Rate of multipart part file",');
+  });
+
+  test("several part content types are the operator's --<part>-content-type choice", async () => {
+    const types = { file: { contentType: "text/csv, application/json" } };
+    const output = await emit(
+      withPaths({ ...paths, "/imports": importsOperation(multipart(importSchema, types)) }),
+    );
+    const text = contentOf(output, "src/cli/imports.ts") ?? "";
+
+    expect(output.refusals).toEqual([]);
+    expect(text).toContain('Flag.Literals("file-content-type", ["text/csv", "application/json"])');
+    expect(text).toContain('["file-content-type", Option.isSome(flags.fileContentType), true]');
+    expect(text).toContain(
+      'Effect.flatMap(Serialize.chooseParts({ file: ["file", flags.fileContentType] })),',
+    );
+    expect(text).toContain("Effect.flatMap((parts) => Imports.create({ body: parts })),");
+  });
+
+  // ENC-08 is deferred (M3-MP3): a nested prefixEncoding fails closed whether the part schema
+  // lists `items` (a part flag) or `prefixItems` (no part flag, an RQB-03 notice).
+  test.each([
+    ["items", { items: { type: "string" }, type: "array" }],
+    ["prefixItems", { prefixItems: [{ type: "string" }], type: "array" }],
+  ])("a nested prefixEncoding over %s refuses its operation", async (_, parts) => {
+    const output = await Effect.runPromise(
+      emitCli(
+        await input(
+          {
+            ...spec,
+            openapi: "3.2.0",
+            paths: {
+              ...paths,
+              "/imports": importsOperation(
+                multipart(
+                  { properties: { parts }, type: "object" },
+                  {
+                    parts: {
+                      contentType: "multipart/mixed",
+                      prefixEncoding: [{ contentType: "text/plain" }],
+                    },
+                  },
+                ),
+              ),
+            },
+          },
+          configJson,
+          "3.2",
+        ),
+      ),
+    );
+
+    expect(contentOf(output, "src/cli/imports.ts")).toBeUndefined();
+    expect(
+      output.refusals.map((refusal) => ({
+        reason: refusal.reason,
+        scope: refusal.scope,
+        subject: refusal.subject,
+      })),
+    ).toEqual([
+      {
+        reason: "unsupported-body",
+        scope: "operation",
+        subject: "nested parts in multipart part /parts",
+      },
     ]);
   });
 
   test("a multipart/mixed body is refused", async () => {
-    expect(await multipartRefusals({ "multipart/mixed": { schema: importSchema } })).toEqual([
+    // Untyped: normalization refuses an object schema on multipart/mixed first (MED-25).
+    expect(await multipartRefusals({ "multipart/mixed": { schema: {} } })).toEqual([
       { reason: "unsupported-body", subject: "a multipart/mixed request body" },
     ]);
   });

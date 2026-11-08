@@ -1,20 +1,37 @@
 import { Effect, Option, Schema } from "effect";
+import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
+import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
-import { implicitComponent, referenceAt } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer, unescapeToken, formatPointer } from "../model/pointer.ts";
+import { implicitComponent } from "../resolve/index.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { escapeToken, unescapeToken, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { follow, nodeIn } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
- * an alternative naming one is refused with it rather than treated as undeclared.
+ * an alternative naming one is refused with it rather than treated as undeclared. `checkRefused`
+ * holds the pointers of the requirement names check refused as unresolved. `added` names the
+ * schemes `security.add` supplies that no declared scheme shares; only the author requirement
+ * reaches them, so a spec requirement naming one stays undeclared (AS-1).
  */
 export interface SchemeNormalization {
+  readonly added: ReadonlySet<string>;
+  readonly checkRefused: ReadonlySet<string>;
   readonly diagnostics: readonly Diagnostic[];
   readonly schemes: readonly SecurityScheme[];
+  // The author-supplied requirement (D-OQ3 (b)), carried here so every policy built from these
+  // schemes applies it where the spec declares no security.
+  readonly supplied:
+    | {
+        readonly document: typeof DocumentUri.Type;
+        readonly requirement: readonly Readonly<Record<string, readonly string[]>>[];
+      }
+    | undefined;
   readonly unusable: readonly string[];
 }
 
@@ -31,11 +48,15 @@ export interface PolicyNormalization {
 interface Finding {
   readonly anchor: string;
   readonly code: string;
+  // The document the finding points into when it is not the spec (an author config finding).
+  readonly document?: typeof DocumentUri.Type;
   readonly element: string;
   readonly hint?: string;
   readonly message: string;
   readonly pointer: string;
   readonly related?: string;
+  // Element scope unless the finding refuses the whole document.
+  readonly scope?: "document";
 }
 
 interface Built {
@@ -100,13 +121,13 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
   );
   const base = {
     code: finding.code,
-    document: resolution.document,
+    document: finding.document ?? resolution.document,
     element: finding.element,
     message: finding.message,
     openapi,
     pointer: finding.pointer,
     row,
-    scope: "element",
+    scope: finding.scope ?? "element",
     severity: "refusal",
     specSection: specSectionUrl(resolution.line, finding.anchor),
   };
@@ -117,9 +138,9 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
   return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
 };
 
-const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
+const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
   Effect.runSync(
-    evaluatePointer(resolution.value, pointer).pipe(
+    nodeIn(resolution, at).pipe(
       Effect.map(Option.some),
       Effect.orElseSucceed(() => Option.none<Json>()),
     ),
@@ -205,11 +226,18 @@ const kindOf = (
     : undefined;
 };
 
-const buildScheme = (resolution: Resolution, name: string, pointer: string): Built => {
-  const target = referenceAt(resolution, pointer)?.target.pointer ?? pointer;
-  const fields = nodeAt(resolution, target).pipe(
-    Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
-  );
+/**
+ * Where a scheme is declared: its pointer, the document that holds it and whether the spec or the
+ * author config declares it. A finding about an author-supplied scheme points into the config.
+ */
+interface Site {
+  readonly document: typeof DocumentUri.Type;
+  readonly pointer: string;
+  readonly source: SecurityScheme["source"];
+}
+
+const modelFields = (name: string, site: Site, fields: Option.Option<SchemeFields>): Built => {
+  const { pointer } = site;
   if (Option.isNone(fields)) {
     return invalidScheme(pointer);
   }
@@ -280,8 +308,9 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
           deprecated: node.deprecated ?? false,
           kind: modelled.kind,
           name,
-          origin: { document: resolution.document, pointer },
+          origin: { document: site.document, pointer },
           rows: ["SSC-01", modelled.row],
+          source: site.source,
         });
 
   return Option.isNone(decoded)
@@ -289,18 +318,108 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
     : { findings: acquisitionFindings(node, pointer), scheme: decoded.value };
 };
 
+// Models one scheme node. An author-supplied scheme is judged by the same rules as a declared one;
+// only the document its findings and origin name differs.
+const modelScheme = (name: string, site: Site, fields: Option.Option<SchemeFields>): Built => {
+  const built = modelFields(name, site, fields);
+
+  return site.source === "spec"
+    ? built
+    : {
+        ...built,
+        findings: built.findings.map((finding) => ({ ...finding, document: site.document })),
+      };
+};
+
+const buildScheme = (resolution: Resolution, name: string, pointer: string): Built => {
+  const target = follow(resolution, { document: resolution.document, pointer });
+
+  return modelScheme(
+    name,
+    { document: resolution.document, pointer, source: "spec" },
+    nodeAt(resolution, target).pipe(
+      Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
+    ),
+  );
+};
+
+/**
+ * What author-supplied security needs: the author config and the document it was read from
+ * (D-OQ3 (b)).
+ */
+export interface AuthorSecurity {
+  readonly config: AuthorConfig;
+  readonly configDocument: typeof DocumentUri.Type;
+}
+
+const addRequirementPointer = "/security/add/requirement";
+
+const collision = (author: AuthorSecurity, name: string): Finding => ({
+  anchor: "security-scheme-object",
+  code: "CFG-1/scheme-name-collision",
+  document: author.configDocument,
+  element: "Author config",
+  hint: "Rename the added scheme; the spec already declares a security scheme with this name.",
+  message: "An added security scheme has the name of a declared one.",
+  pointer: formatPointer(["security", "add", "schemes", name]),
+  scope: "document",
+});
+
+interface Added {
+  readonly built: readonly Built[];
+  readonly names: readonly string[];
+}
+
+// The schemes `security.add` contributes, in config order. A collision with a declared name is a
+// document-scope refusal and the added scheme is dropped.
+const addedSchemes = (declared: ReadonlySet<string>, author: AuthorSecurity | undefined): Added => {
+  const entries = Object.entries(author?.config.security?.add?.schemes ?? {});
+  const built = entries.map(([name, node]): Built => {
+    if (author === undefined) {
+      return { findings: [] };
+    }
+
+    return declared.has(name)
+      ? { findings: [collision(author, name)] }
+      : modelScheme(
+          name,
+          {
+            document: author.configDocument,
+            pointer: formatPointer(["security", "add", "schemes", name]),
+            source: "author-supplied",
+          },
+          Schema.decodeUnknownOption(SchemeNode)(node),
+        );
+  });
+
+  return { built, names: entries.map(([name]) => name) };
+};
+
+// The codes check raises at a requirement name that reaches no scheme (src/check/grammar.ts).
+const unresolvedCodes: ReadonlySet<string> = new Set([
+  "SEC-09/unresolved-scheme",
+  "SEC-10/unresolved-scheme",
+]);
+
 /**
  * Normalizes `components.securitySchemes` into scheme entities (design 6.5). A scheme that cannot
  * be modelled is refused at element scope and listed in `unusable`. An `oauth2` or `openIdConnect`
- * scheme stays modelled and its token acquisition is refused at element scope (D-SEC1).
+ * scheme stays modelled and its token acquisition is refused at element scope (D-SEC1). With
+ * `author`, the schemes of `security.add` follow the declared ones, marked `author-supplied`; a
+ * name that is also declared is refused at document scope and the declared scheme stays.
+ * `checkFindings` are the spec-text check findings of the run; a requirement name they refuse as
+ * unresolved gets no second diagnostic from `normalizeSecurityPolicy`.
  */
 export const normalizeSecuritySchemes = (
   resolution: Resolution,
+  author: AuthorSecurity | undefined,
+  checkFindings: readonly Diagnostic[],
 ): Effect.Effect<SchemeNormalization> =>
   Effect.gen(function* normalize() {
-    const names = nodeAt(resolution, "/components/securitySchemes").pipe(
+    const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
+    const names = nodeAt(resolution, schemes).pipe(
       Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
-      Option.match({ onNone: () => [], onSome: (map) => Object.keys(map) }),
+      Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
     );
     const refused = new Set<string>(
       resolution.diagnostics
@@ -313,20 +432,50 @@ export const normalizeSecuritySchemes = (
       // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
       return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
     });
+    const extra = addedSchemes(new Set(names), author);
+    const all = [...built, ...extra.built];
     const diagnostics = yield* Effect.all(
-      built.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
+      all.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
     );
 
+    const requirement = author?.config.security?.add?.requirement;
+    const supplied =
+      author === undefined || requirement === undefined
+        ? undefined
+        : { document: author.configDocument, requirement };
+
     return {
+      added: new Set(extra.names.filter((name) => !names.includes(name))),
+      checkRefused: new Set(
+        checkFindings
+          .filter(
+            (finding) =>
+              finding.document === resolution.document && unresolvedCodes.has(finding.code),
+          )
+          .map((finding) => finding.pointer),
+      ),
       diagnostics,
-      schemes: built.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
-      unusable: names.filter((_, index) => built[index]?.scheme === undefined),
+      schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
+      supplied,
+      unusable: [
+        ...names.filter((_, index) => built[index]?.scheme === undefined),
+        // An added name that collides keeps meaning the declared scheme, so it is never unusable.
+        ...extra.names.filter(
+          (name, index) => !names.includes(name) && extra.built[index]?.scheme === undefined,
+        ),
+      ],
     };
   });
 
-interface Lookup {
+interface Scope {
   readonly declared: ReadonlyMap<string, SecurityScheme>;
   readonly unusable: ReadonlySet<string>;
+}
+
+// The author requirement reaches every scheme; a spec requirement reaches only the spec's (AS-1).
+interface Lookup {
+  readonly author: Scope;
+  readonly spec: Scope;
 }
 
 // Built once per SchemeNormalization, so a requirement entry costs one map probe.
@@ -339,8 +488,18 @@ const lookupOf = (schemes: SchemeNormalization): Lookup => {
   }
 
   const built = {
-    declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
-    unusable: new Set(schemes.unusable),
+    author: {
+      declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
+      unusable: new Set(schemes.unusable),
+    },
+    spec: {
+      declared: new Map(
+        schemes.schemes
+          .filter((scheme) => scheme.source === "spec")
+          .map((scheme) => [scheme.name, scheme]),
+      ),
+      unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
+    },
   };
   lookups.set(schemes, built);
 
@@ -385,9 +544,10 @@ const effectiveList = (
     { pointer: "/security", rows: ["SEC-01", "SEC-03"] },
   ];
   for (const source of candidates) {
-    const list = nodeAt(resolution, source.pointer).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)),
-    );
+    const list = nodeAt(resolution, {
+      document: resolution.document,
+      pointer: source.pointer,
+    }).pipe(Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)));
     if (Option.isSome(list)) {
       return { list: list.value, source };
     }
@@ -401,15 +561,59 @@ interface Judged {
   readonly use?: readonly { readonly scheme: string; readonly scopes: readonly string[] }[];
 }
 
+interface Named {
+  readonly checkRefused: ReadonlySet<string>;
+  readonly name: string;
+  readonly pointer: string;
+  readonly resolved: string;
+  // The entries come from the author config, which check never reads.
+  readonly supplied: boolean;
+  readonly unusable: ReadonlySet<string>;
+}
+
+// The refusal of a requirement name that names no usable scheme, or `checked` when check already
+// raised the one diagnostic for it; either way its alternative is dropped.
+const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
+  const { name, resolved } = named;
+  const pointer = `${named.pointer}/${escapeToken(name)}`;
+  if (named.unusable.has(resolved)) {
+    return {
+      anchor: "security-requirements-name",
+      code: "SEC-02/unusable-scheme",
+      element: "Security Requirement Object",
+      message: "The requirement names a security scheme that is refused.",
+      pointer,
+      related: formatPointer(["components", "securitySchemes", resolved]),
+    };
+  }
+
+  if (!named.supplied && named.checkRefused.has(pointer)) {
+    return "checked";
+  }
+
+  return {
+    anchor: "security-requirements-name",
+    code: `${resolution.line === "3.2" ? "SEC-10" : "SEC-09"}/undeclared-scheme`,
+    element: "Security Requirement Object",
+    message: "The requirement names a security scheme that is not declared.",
+    pointer,
+  };
+};
+
+// `supplied`: the entries come from the author config, so they alone reach the added schemes and
+// normalize reports their undeclared names itself.
 const judge = (
   resolution: Resolution,
   schemes: SchemeNormalization,
   entries: readonly (readonly [string, readonly string[]])[],
   pointer: string,
+  supplied: boolean,
 ): Judged => {
   const findings: Finding[] = [];
+  let refused = false;
   const staged = new Set<string>();
-  const { declared: byName, unusable } = lookupOf(schemes);
+  const lookup = lookupOf(schemes);
+  const { declared: byName, unusable } = supplied ? lookup.author : lookup.spec;
   const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
   for (const [name, scopes] of entries) {
     const exact = byName.has(name) || unusable.has(name);
@@ -422,24 +626,19 @@ const judge = (
     if (declared !== undefined && stagedRules.has(declared.kind.type)) {
       staged.add(declared.kind.type);
     } else if (declared === undefined) {
-      findings.push(
-        unusable.has(resolved)
-          ? {
-              anchor: "security-requirements-name",
-              code: "SEC-02/unusable-scheme",
-              element: "Security Requirement Object",
-              message: "The requirement names a security scheme that is refused.",
-              pointer: `${pointer}/${escapeToken(name)}`,
-              related: formatPointer(["components", "securitySchemes", resolved]),
-            }
-          : {
-              anchor: "security-requirements-name",
-              code: "SEC-09/undeclared-scheme",
-              element: "Security Requirement Object",
-              message: "The requirement names a security scheme that is not declared.",
-              pointer: `${pointer}/${escapeToken(name)}`,
-            },
-      );
+      const refusal = nameRefusal(resolution, {
+        checkRefused: schemes.checkRefused,
+        name,
+        pointer,
+        resolved,
+        supplied,
+        unusable,
+      });
+      if (refusal === "checked") {
+        refused = true;
+      } else {
+        findings.push(refusal);
+      }
     }
   }
 
@@ -455,7 +654,7 @@ const judge = (
     });
   }
 
-  return findings.length > 0 ? { findings } : { findings, use: used };
+  return findings.length > 0 || refused ? { findings } : { findings, use: used };
 };
 
 /**
@@ -463,7 +662,8 @@ const judge = (
  * omitted (design 6.5). `operation` is the pointer of the operation object. An alternative that
  * names an undeclared or refused scheme, or an `oauth2`, `openIdConnect` or `mutualTLS` scheme
  * (staged, SSC-18 to SSC-20), is removed whole with element-scope refusals and never dropped
- * silently. Raising an operation with no alternative left is the caller's job (`listed`).
+ * silently. A spec name check already refused as unresolved keeps that one diagnostic and gets no
+ * second here. Raising an operation with no alternative left is the caller's job (`listed`).
  */
 export const normalizeSecurityPolicy = (
   resolution: Resolution,
@@ -471,7 +671,18 @@ export const normalizeSecurityPolicy = (
   operation?: string,
 ): Effect.Effect<PolicyNormalization> =>
   Effect.gen(function* normalize() {
-    const effective = effectiveList(resolution, operation);
+    const spec = effectiveList(resolution, operation);
+    // `security.add` applies as if declared, only where the spec declares no security (D-OQ10).
+    const supplied =
+      spec === undefined && schemes.supplied !== undefined
+        ? {
+            document: schemes.supplied.document,
+            list: schemes.supplied.requirement,
+            source: { pointer: addRequirementPointer, rows: ["CFG-1", "SEC-01", "SEC-08"] },
+          }
+        : undefined;
+    const effective =
+      supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
     const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
     const judged = (effective?.list ?? []).map((json, index) => {
       const pointer = `${source.pointer}/${index}`;
@@ -491,15 +702,22 @@ export const normalizeSecurityPolicy = (
               },
             ],
           }
-        : judge(resolution, schemes, entries.value, pointer);
+        : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
     });
     const diagnostics = yield* Effect.all(
-      judged.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
+      judged
+        .flatMap((one) => one.findings)
+        .map((finding) =>
+          toDiagnostic(
+            resolution,
+            supplied === undefined ? finding : { ...finding, document: supplied.document },
+          ),
+        ),
     );
     const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
       alternatives: judged.flatMap((one) => (one.use === undefined ? [] : [{ uses: one.use }])),
       declared: effective !== undefined,
-      origin: { document: resolution.document, pointer: source.pointer },
+      origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
       rows: source.rows,
     }).pipe(Effect.orDie);
 

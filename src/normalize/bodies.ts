@@ -1,21 +1,32 @@
-import { Array as Arr, Data, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
-import { Body } from "../model/entities.ts";
-import { defsKey } from "../resolve/canonical.ts";
-import { defaultLimits, referenceAt } from "../resolve/index.ts";
+import { Body, EncodingRule } from "../model/entities.ts";
+import type { DiscriminatorHint } from "../model/entities.ts";
+import { nodeAt as jsonAt } from "../model/json-tree.ts";
+import { childPointer, formatPointer } from "../model/pointer.ts";
+import type { Json } from "../model/pointer.ts";
+import { keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
+import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
-import { escapeToken, evaluatePointer } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
+import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { headerMarks } from "./header-object.ts";
+import { deepObjectExplodeText, formStyleRefusal, partHeader } from "./parameters.ts";
+import type { PartHeaderOutcome } from "./parameters.ts";
+import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
- * when known, and the document's full `openapi` value.
+ * when known, and the document's full `openapi` value. `nonStandard` carries the author config's
+ * opt-in switches of the same name; absent is strict (design 6.1, D-OQ1).
  */
 export interface BodySite {
+  readonly nonStandard?: { readonly deepObjectBrackets?: boolean };
   readonly openapi: string;
   readonly operation?: typeof DiagnosticOperation.Type;
   readonly pointer: string;
@@ -110,6 +121,7 @@ const RequestBodyObject = Schema.Struct({
 });
 
 const MediaTypeObject = Schema.Struct({
+  description: Schema.optionalKey(Schema.String),
   encoding: Schema.optionalKey(Schema.Record(Schema.String, EncodingObject)),
   itemEncoding: Schema.optionalKey(EncodingObject),
   itemSchema: Schema.optionalKey(Schema.Unknown),
@@ -199,10 +211,15 @@ const codecOf = (base: string): Codec => {
 interface Finding {
   readonly anchor: string;
   readonly code: string;
+  /**
+   * The refusal drops its whole media alternative; `anchorDrops` moves it to the media type.
+   */
+  readonly drops?: true;
   readonly element: string;
   readonly hint?: string;
   readonly message: string;
-  readonly pointer: string;
+  readonly at: CanonicalKey;
+  readonly related?: readonly CanonicalKey[];
   readonly severity: "notice" | "refusal";
 }
 
@@ -211,10 +228,10 @@ const refusal = (
   anchor: string,
   element: string,
   message: string,
-  pointer: string,
+  at: CanonicalKey,
   hint?: string,
 ): Finding => {
-  const base: Finding = { anchor, code, element, message, pointer, severity: "refusal" };
+  const base: Finding = { anchor, at, code, element, message, severity: "refusal" };
 
   return hint === undefined ? base : { ...base, hint };
 };
@@ -224,8 +241,20 @@ const notice = (
   anchor: string,
   element: string,
   message: string,
-  pointer: string,
-): Finding => ({ anchor, code, element, message, pointer, severity: "notice" });
+  at: CanonicalKey,
+): Finding => ({ anchor, at, code, element, message, severity: "notice" });
+
+// A refusal whose part, rule or key leaves its media alternative with nothing to send.
+const dropping = (finding: Finding): Finding => ({ ...finding, drops: true });
+
+// A refusal that drops a whole alternative is reported at that media type, its own keyword first
+// in `related`, so the report names what was dropped and coverage credits it.
+const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly Finding[] =>
+  findings.map((finding) =>
+    finding.drops === true
+      ? { ...finding, at: home, related: [finding.at, ...(finding.related ?? [])] }
+      : finding,
+  );
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -233,30 +262,27 @@ const sorted = (rows: readonly string[]): readonly string[] =>
 // --- Schema inspection (design 6.3, MED-27: only `$ref` and `allOf` are followed) ---
 
 interface Located {
+  readonly at: CanonicalKey;
   readonly node: SchemaNodeValue;
-  readonly pointer: string;
 }
 
-const settle = (resolution: Resolution, start: string): string => {
+// Follows schema references to the schema they end at, in whichever document of the set holds it.
+const settle = (resolution: Resolution, start: CanonicalKey): CanonicalKey => {
   let current = start;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const reference = referenceAt(resolution, current);
-    if (
-      reference === undefined ||
-      reference.kind !== "schema" ||
-      reference.target.document !== resolution.document
-    ) {
+    const reference = referenceIn(resolution, current);
+    if (reference === undefined || reference.kind !== "schema") {
       return current;
     }
 
-    current = reference.target.pointer;
+    current = reference.target;
   }
 
   return current;
 };
 
-const nodeAt = (resolution: Resolution, pointer: string): Effect.Effect<SchemaNodeValue> =>
-  evaluatePointer(resolution.value, pointer).pipe(
+const nodeAt = (resolution: Resolution, at: CanonicalKey): Effect.Effect<SchemaNodeValue> =>
+  nodeIn(resolution, at).pipe(
     Effect.map((json) => Schema.decodeUnknownOption(SchemaNode)(json)),
     Effect.map(Option.getOrElse((): SchemaNodeValue => ({}))),
     Effect.orElseSucceed((): SchemaNodeValue => ({})),
@@ -290,26 +316,29 @@ const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
 
 // The schema and its `allOf` members in document order, each distinct schema once, so a graph
 // that reuses members costs its size and a cycle ends at the first repeat.
-const flatten = (walk: Walk, start: string): Effect.Effect<readonly Located[], BodyNodeBudget> =>
+const flatten = (
+  walk: Walk,
+  start: CanonicalKey,
+): Effect.Effect<readonly Located[], BodyNodeBudget> =>
   Effect.gen(function* walkMembers() {
     const seen = new Set<string>();
     const found: Located[] = [];
     const pending = [start];
     let next = pending.pop();
     while (next !== undefined) {
-      const pointer = settle(walk.resolution, next);
+      const at = settle(walk.resolution, next);
       walk.spent += 1;
       if (walk.spent > walk.maxNodes) {
         return yield* budgetFailure(walk);
       }
 
-      if (!seen.has(pointer)) {
-        seen.add(pointer);
+      if (!seen.has(keyOf(at))) {
+        seen.add(keyOf(at));
 
-        const node = yield* nodeAt(walk.resolution, pointer);
-        found.push({ node, pointer });
+        const node = yield* nodeAt(walk.resolution, at);
+        found.push({ at, node });
 
-        const members = (node.allOf ?? []).map((_, index) => `${pointer}/allOf/${index}`);
+        const members = (node.allOf ?? []).map((_, index) => childKey(at, "allOf", String(index)));
         pending.push(...Arr.reverse(members));
       }
 
@@ -322,11 +351,11 @@ const flatten = (walk: Walk, start: string): Effect.Effect<readonly Located[], B
 const firstLocated = <T>(
   nodes: readonly Located[],
   read: (node: SchemaNodeValue) => T | undefined,
-): { readonly pointer: string; readonly value: T } | undefined => {
+): { readonly at: CanonicalKey; readonly value: T } | undefined => {
   for (const located of nodes) {
     const value = read(located.node);
     if (value !== undefined) {
-      return { pointer: located.pointer, value };
+      return { at: located.at, value };
     }
   }
 
@@ -334,24 +363,24 @@ const firstLocated = <T>(
 };
 
 interface Members {
-  readonly items: string | undefined;
-  readonly prefixItems: readonly string[];
-  readonly properties: readonly (readonly [string, string])[];
+  readonly items: CanonicalKey | undefined;
+  readonly prefixItems: readonly CanonicalKey[];
+  readonly properties: readonly (readonly [string, CanonicalKey])[];
 }
 
 const noMembers: Members = { items: undefined, prefixItems: [], properties: [] };
 
 // The declared properties (document order, first definition wins) and item schemas of a schema.
-const membersOf = (walk: Walk, pointer: string): Effect.Effect<Members, BodyNodeBudget> =>
+const membersOf = (walk: Walk, schema: CanonicalKey): Effect.Effect<Members, BodyNodeBudget> =>
   Effect.gen(function* members() {
-    const nodes = yield* flatten(walk, pointer);
+    const nodes = yield* flatten(walk, schema);
     const seen = new Set<string>();
-    const properties: (readonly [string, string])[] = [];
+    const properties: (readonly [string, CanonicalKey])[] = [];
     for (const located of nodes) {
       for (const name of Object.keys(located.node.properties ?? {})) {
         if (!seen.has(name)) {
           seen.add(name);
-          properties.push([name, `${located.pointer}/properties/${escapeToken(name)}`]);
+          properties.push([name, childKey(located.at, "properties", name)]);
         }
       }
     }
@@ -360,22 +389,22 @@ const membersOf = (walk: Walk, pointer: string): Effect.Effect<Members, BodyNode
     const items = firstLocated(nodes, (node) => node.items);
 
     return {
-      items: items === undefined ? undefined : `${items.pointer}/items`,
+      items: items === undefined ? undefined : childKey(items.at, "items"),
       prefixItems:
         prefix === undefined
           ? []
-          : prefix.value.map((_, index) => `${prefix.pointer}/prefixItems/${index}`),
+          : prefix.value.map((_, index) => childKey(prefix.at, "prefixItems", String(index))),
       properties,
     };
   });
 
-const memberSchema = (members: Members, target: Target): string | undefined =>
+const memberSchema = (members: Members, target: Target): CanonicalKey | undefined =>
   target.kind === "property"
     ? members.properties.find(([name]) => name === target.name)?.[1]
     : members.prefixItems[target.index];
 
 interface Facts {
-  readonly contentEncoding: string | undefined;
+  readonly contentEncoding: { readonly at: CanonicalKey; readonly value: string } | undefined;
   readonly format: string | undefined;
   readonly items: Facts | undefined;
   readonly type: readonly string[];
@@ -390,24 +419,24 @@ const noFacts: Facts = {
 
 const factsOf = (
   walk: Walk,
-  pointer: string | undefined,
+  schema: CanonicalKey | undefined,
   depth = 0,
 ): Effect.Effect<Facts, BodyNodeBudget> =>
   Effect.gen(function* facts() {
-    if (pointer === undefined) {
+    if (schema === undefined) {
       return noFacts;
     }
 
-    const nodes = yield* flatten(walk, pointer);
+    const nodes = yield* flatten(walk, schema);
     const items = firstLocated(nodes, (node) => node.items);
     const itemFacts =
       items === undefined || depth > 0
         ? undefined
-        : yield* factsOf(walk, `${items.pointer}/items`, depth + 1);
+        : yield* factsOf(walk, childKey(items.at, "items"), depth + 1);
     const type = firstLocated(nodes, (node) => node.type)?.value;
 
     return {
-      contentEncoding: firstLocated(nodes, (node) => node.contentEncoding)?.value,
+      contentEncoding: firstLocated(nodes, (node) => node.contentEncoding),
       format: firstLocated(nodes, (node) => node.format)?.value,
       items: itemFacts,
       type: type === undefined ? [] : Arr.ensure(type),
@@ -478,16 +507,22 @@ const defaultOfTypes = (line: Line, facts: Facts, arrayDefault: ArrayDefault): D
 
 const nestedArrayDefault: ArrayDefault = () => ({ row: "ENC-23", type: "application/json" });
 
-const arrayDefault: ArrayDefault = (line, facts) =>
-  line === "3.2"
-    ? { row: "ENC-24", type: "application/json" }
-    : {
-        row: "ENC-23",
-        type: defaultOfTypes(line, facts.items ?? noFacts, nestedArrayDefault).type,
-      };
+// An array is typed by its items (ENC-23), except in 3.2, where an array is `application/json`
+// unless it is a top-level property under encoding by name, which is encoded per item (ENC-24).
+const arrayDefault =
+  (byName: boolean): ArrayDefault =>
+  (line, facts) => {
+    const items = defaultOfTypes(line, facts.items ?? noFacts, nestedArrayDefault).type;
+    if (line !== "3.2") {
+      return { row: "ENC-23", type: items };
+    }
+
+    return { row: "ENC-24", type: byName ? items : "application/json" };
+  };
 
 // ENC-17 to ENC-26: the default contentType of a part from the schema of its value.
-const defaultFor = (line: Line, facts: Facts): Default => defaultOfTypes(line, facts, arrayDefault);
+const defaultFor = (line: Line, facts: Facts, input: RuleInput): Default =>
+  defaultOfTypes(line, facts, arrayDefault(input.target.kind === "property" && input.depth === 0));
 
 // --- Encoding rules ---
 
@@ -502,8 +537,11 @@ interface PlainSerialization {
 }
 
 interface PlainHeader {
+  readonly deprecated: boolean;
   readonly name: string;
   readonly required: boolean;
+  readonly schema: { readonly key: string };
+  readonly serialization: Extract<PartHeaderOutcome, { readonly _tag: "Typed" }>["serialization"];
 }
 
 interface PlainNested {
@@ -514,7 +552,9 @@ interface PlainNested {
 }
 
 interface PlainRule extends PlainNested {
+  contentEncoding?: Transfer;
   nested?: readonly PlainNested[];
+  nonStandard?: "deepObjectBrackets";
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
 }
@@ -525,11 +565,16 @@ interface RuleResult {
 }
 
 interface RuleInput {
-  readonly actual: string;
+  readonly actual: CanonicalKey;
   readonly depth: 0 | 1;
+  /**
+   * The part is a top-level part of a `multipart/form-data` body, whose `Content-Disposition` the
+   * writer writes.
+   */
+  readonly formData: boolean;
   readonly honorsStyle: boolean;
   readonly node: EncodingNode | undefined;
-  readonly schemaPointer: string | undefined;
+  readonly schema: CanonicalKey | undefined;
   readonly target: Target;
 }
 
@@ -575,7 +620,33 @@ const styleRows = (style: PlainSerialization): readonly string[] => [
   "ENC-13",
 ];
 
-const styleIgnored = (actual: string): Finding =>
+/**
+ * Whether a style-based `multipart/form-data` part is sent the way the multipart writer sends it
+ * (ENC-40, Appendix C): `form` with `explode` gives one name and raw value per value, which is one
+ * part per value, under no contentType (RFC 7578: `text/plain`). `allowReserved` has no effect on
+ * multipart. Other styles and an unexploded `form` join values into one part, which the writer has
+ * no input for.
+ */
+export const sendsFormPairs = (serialization: {
+  readonly explode?: boolean | undefined;
+  readonly style?: string | undefined;
+}): boolean =>
+  (serialization.style === undefined || serialization.style === "form") &&
+  serialization.explode !== false;
+
+const formPairsType = "text/plain";
+
+const unsupportedPartStyle = (input: RuleInput): Finding =>
+  refusal(
+    "ENC-40/unsupported-part-style",
+    "appendix-c-using-rfc6570-based-serialization",
+    "Encoding style, explode or allowReserved",
+    `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
+    input.actual,
+    "Use style form with explode true, or remove the style fields",
+  );
+
+const styleIgnored = (actual: CanonicalKey): Finding =>
   notice(
     "ENC-12/style-ignored",
     "encoding-style",
@@ -584,7 +655,7 @@ const styleIgnored = (actual: string): Finding =>
     actual,
   );
 
-const contentTypeIgnored = (actual: string): Finding =>
+const contentTypeIgnored = (actual: CanonicalKey): Finding =>
   notice(
     "ENC-13/content-type-ignored",
     "fixed-fields-for-rfc6570-style-serialization",
@@ -594,13 +665,50 @@ const contentTypeIgnored = (actual: string): Finding =>
   );
 
 const invalidContentType = (input: RuleInput): Finding =>
-  refusal(
-    "ENC-02/invalid-content-type",
-    "encoding-content-type",
-    "Encoding contentType",
-    `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
-    `${input.actual}/contentType`,
+  dropping(
+    refusal(
+      "ENC-02/invalid-content-type",
+      "encoding-content-type",
+      "Encoding contentType",
+      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
+      childKey(input.actual, "contentType"),
+    ),
   );
+
+// D-SCH3: an object part typed as XML would need serialization from its schema and XML Object,
+// which is refused. A scalar part typed as XML is the operator's own text, sent as given.
+const schemaDrivenXml = (input: RuleInput): Finding =>
+  dropping(
+    refusal(
+      "XML-01/schema-driven",
+      "xml-object",
+      "Multipart part contentType",
+      `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
+      childKey(input.actual, "contentType"),
+      "Type the part application/json, or make the whole body an XML media type sent from --body-file",
+    ),
+  );
+
+const isXmlType = (range: string): boolean => codecOf(baseType(range)) === "xml";
+
+// Whether the part's schema is an object: typed `object`, or untyped with declared properties,
+// found through `$ref` and `allOf`.
+const isObjectPart = (
+  walk: Walk,
+  schema: CanonicalKey | undefined,
+  facts: Facts,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* objectPart() {
+    if (schema === undefined) {
+      return false;
+    }
+
+    if (facts.type.includes("object")) {
+      return true;
+    }
+
+    return facts.type.length === 0 && (yield* membersOf(walk, schema)).properties.length > 0;
+  });
 
 interface Typing {
   readonly contentType: readonly string[];
@@ -615,6 +723,7 @@ const typingOf = (
   ctx: Context,
   input: RuleInput,
   node: EncodingNode,
+  facts: Effect.Effect<Facts, BodyNodeBudget>,
 ): Effect.Effect<Typing, BodyNodeBudget> =>
   Effect.gen(function* typing() {
     const given = explicitStyle(node);
@@ -639,7 +748,7 @@ const typingOf = (
     }
 
     if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schemaPointer));
+      const fallback = defaultFor(ctx.line, yield* facts, input);
 
       return {
         contentType: [fallback.type],
@@ -670,37 +779,59 @@ const typingOf = (
     };
   });
 
-const headerRequired = (
-  resolution: Resolution,
-  actual: string,
-  name: string,
-): Effect.Effect<boolean> => {
-  const pointer = `${actual}/headers/${escapeToken(name)}`;
-  const home = referenceAt(resolution, pointer)?.target.pointer ?? pointer;
+// A multipart part's typing: as `typingOf`, and an object part typed as XML is refused (XML-01).
+const partTypingOf = (
+  ctx: Context,
+  input: RuleInput,
+  node: EncodingNode,
+  facts: Facts,
+): Effect.Effect<Typing, BodyNodeBudget> =>
+  Effect.gen(function* partTyping() {
+    const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
+    const xml = typing.contentType.some(isXmlType);
+    if (typing.refused || !xml || !(yield* isObjectPart(ctx.walk, input.schema, facts))) {
+      return typing;
+    }
 
-  return evaluatePointer(resolution.value, home).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
-    Effect.map((header) => header.required ?? false),
-    Effect.orElseSucceed(() => false),
-  );
-};
+    return {
+      ...typing,
+      contentType: [],
+      findings: [...typing.findings, schemaDrivenXml(input)],
+      refused: true,
+      rows: [],
+    };
+  });
 
 interface Headers {
   readonly findings: readonly Finding[];
   readonly headers: readonly PlainHeader[] | undefined;
+  /**
+   * Whether the rule declares a header besides an ignored `Content-Type` (row ENC-03).
+   */
+  readonly declares: boolean;
 }
 
-// ENC-03, ENC-11: part headers; a `Content-Type` entry is ignored, a bad name refuses the part.
-const headersOf = (
-  resolution: Resolution,
-  actual: string,
-  node: EncodingNode,
-): Effect.Effect<Headers> =>
+const writerOwnedCode = "ENC-03/writer-owned-header";
+
+// Headers the multipart writer writes itself (design 6.3): `Content-Transfer-Encoding` always, and
+// `Content-Disposition`, with the part name RFC 7578 requires, under `multipart/form-data`.
+const writerOwned = (name: string, formData: boolean): boolean => {
+  const folded = name.toLowerCase();
+
+  return folded === "content-transfer-encoding" || (formData && folded === "content-disposition");
+};
+
+// ENC-03, ENC-11: part headers, each typed and serialized as a header parameter (HDR-01). A
+// `Content-Type` entry is ignored, a header the writer owns gets no flag, and a bad name or a header
+// the header parameter path cannot carry refuses the part.
+const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.Effect<Headers> =>
   Effect.gen(function* headers() {
+    const { resolution } = ctx;
     const findings: Finding[] = [];
     const kept: PlainHeader[] = [];
+    let declares = false;
     for (const name of Object.keys(node.headers ?? {})) {
-      const pointer = `${actual}/headers/${escapeToken(name)}`;
+      const at = childKey(input.actual, "headers", name);
       if (name.toLowerCase() === "content-type") {
         findings.push(
           notice(
@@ -708,43 +839,87 @@ const headersOf = (
             "encoding-headers",
             "Encoding header Content-Type",
             "The specification says a Content-Type entry in headers SHALL be ignored; the part type comes from contentType.",
-            pointer,
+            at,
           ),
         );
-      } else if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
+        continue;
+      }
+
+      declares = true;
+      if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
         findings.push(
-          refusal(
-            "ENC-03/invalid-header-name",
-            "encoding-headers",
-            "Encoding header name",
-            `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
-            pointer,
+          dropping(
+            refusal(
+              "ENC-03/invalid-header-name",
+              "encoding-headers",
+              "Encoding header name",
+              `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
+              at,
+            ),
           ),
         );
 
-        return { findings, headers: undefined };
-      } else {
-        kept.push({ name, required: yield* headerRequired(resolution, actual, name) });
+        return { declares, findings, headers: undefined };
       }
+
+      if (writerOwned(name, input.formData)) {
+        findings.push(
+          notice(
+            writerOwnedCode,
+            "encoding-headers",
+            `Encoding header ${name}`,
+            `The multipart writer writes ${name} itself, so the declared header gets no flag and is not sent as declared.`,
+            at,
+          ),
+        );
+        continue;
+      }
+
+      const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.maxNodes });
+      if (typed._tag === "Unsupported") {
+        findings.push(
+          dropping(
+            refusal(
+              "ENC-03/unsupported-part-header",
+              "encoding-headers",
+              `Encoding header ${name}`,
+              `The part header ${name} cannot be sent as a header parameter: ${typed.reason}`,
+              at,
+              "Describe the header with a schema the header parameter rules accept, or remove it",
+            ),
+          ),
+        );
+
+        return { declares, findings, headers: undefined };
+      }
+
+      const marks = yield* headerMarks(resolution, at);
+      kept.push({
+        deprecated: marks.deprecated,
+        name,
+        required: marks.required,
+        schema: typed.schema,
+        serialization: typed.serialization,
+      });
     }
 
-    return { findings, headers: kept };
+    return { declares, findings, headers: kept };
   });
 
 interface NestedEntry {
-  readonly actual: string;
+  readonly actual: CanonicalKey;
   readonly node: EncodingNode;
   readonly target: Target;
 }
 
-const nestedEntries = (node: EncodingNode, actual: string): readonly NestedEntry[] => [
+const nestedEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] => [
   ...Object.entries(node.encoding ?? {}).map(([name, child]): NestedEntry => ({
-    actual: `${actual}/encoding/${escapeToken(name)}`,
+    actual: childKey(actual, "encoding", name),
     node: child,
     target: { kind: "property", name },
   })),
   ...(node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
-    actual: `${actual}/prefixEncoding/${index}`,
+    actual: childKey(actual, "prefixEncoding", String(index)),
     node: child,
     target: { index, kind: "position" },
   })),
@@ -763,8 +938,12 @@ const toNested = (rule: PlainRule): PlainNested => {
   return nested;
 };
 
-const nestingRefusal = (code: string, element: string, message: string, actual: string): Finding =>
-  refusal(code, "nested-encoding", element, message, actual);
+const nestingRefusal = (
+  code: string,
+  element: string,
+  message: string,
+  actual: CanonicalKey,
+): Finding => dropping(refusal(code, "nested-encoding", element, message, actual));
 
 interface Nesting {
   readonly findings: readonly Finding[];
@@ -823,23 +1002,24 @@ const nestingOf = (
           "ENC-09/nested-item-encoding",
           "Nested itemEncoding",
           "A nested itemEncoding has no place in the model.",
-          `${input.actual}/itemEncoding`,
+          childKey(input.actual, "itemEncoding"),
         ),
       );
     }
 
     const children =
-      entries.length === 0 || input.schemaPointer === undefined
+      entries.length === 0 || input.schema === undefined
         ? noMembers
-        : yield* membersOf(ctx.walk, input.schemaPointer);
+        : yield* membersOf(ctx.walk, input.schema);
     const built = yield* buildAll(
       ctx,
       entries.map((entry): RuleInput => ({
         actual: entry.actual,
         depth: 1,
+        formData: false,
         honorsStyle: false,
         node: entry.node,
-        schemaPointer: memberSchema(children, entry.target),
+        schema: memberSchema(children, entry.target),
         target: entry.target,
       })),
     );
@@ -852,6 +1032,145 @@ const nestingOf = (
     };
   });
 
+// --- Transfer encoding (design 6.3: ENC-37 to ENC-39) ---
+
+type Transfer = "base64";
+
+interface TransferResult {
+  readonly encoding: Transfer | undefined;
+  readonly finding: Finding | undefined;
+  readonly row: string | undefined;
+}
+
+const noTransfer: TransferResult = { encoding: undefined, finding: undefined, row: undefined };
+
+const base64Transfer = (row: string): TransferResult => ({
+  encoding: "base64",
+  finding: undefined,
+  row,
+});
+
+const transferAnchor = (line: Line): string =>
+  line === "3.2"
+    ? "content-transfer-encoding-and-contentencoding"
+    : "encoding-multipart-media-types";
+
+// Transfer encodings are case-insensitive tokens (RFC 2045 6.1).
+const isBase64 = (value: string): boolean => value.toLowerCase() === "base64";
+
+// The identity encodings of RFC 2045 6.2: the part is not transformed.
+const identityEncodings: ReadonlySet<string> = new Set(["7bit", "8bit", "binary"]);
+
+const isIdentity = (value: string): boolean => identityEncodings.has(value.toLowerCase());
+
+// What one schema declares: 3.0 `format: byte` (ENC-38), 3.1+ `contentEncoding` (ENC-37). base64
+// has a writer; an identity encoding sends the part raw, as a 3.0 `format: binary` part is, with no
+// Content-Transfer-Encoding line of its own. Any other `contentEncoding` refuses the part.
+const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResult | undefined => {
+  if (line === "3.0") {
+    return facts.format === "byte" ? base64Transfer("ENC-38") : undefined;
+  }
+
+  const declared = facts.contentEncoding;
+  if (declared === undefined) {
+    return undefined;
+  }
+
+  if (isBase64(declared.value)) {
+    return base64Transfer("ENC-37");
+  }
+
+  return isIdentity(declared.value)
+    ? { ...noTransfer, row: "ENC-37" }
+    : {
+        ...noTransfer,
+        finding: dropping(
+          refusal(
+            "ENC-37/unsupported-content-encoding",
+            transferAnchor(line),
+            "Multipart part contentEncoding",
+            `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
+            childKey(declared.at, "contentEncoding"),
+            "Use contentEncoding base64 or binary, or remove it to send the part as is",
+          ),
+        ),
+      };
+};
+
+// A part's transfer encoding, from its schema or, for a repeated part, its items. A nested part
+// has no field to hold one, so it is refused rather than sent unencoded.
+const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResult => {
+  const label = targetLabel(input.target);
+  const found =
+    declaredTransfer(ctx.line, label, facts) ??
+    (facts.items === undefined ? undefined : declaredTransfer(ctx.line, label, facts.items)) ??
+    noTransfer;
+  if (input.depth === 0 || found.encoding === undefined) {
+    return found;
+  }
+
+  return {
+    ...noTransfer,
+    finding: dropping(
+      refusal(
+        `${found.row}/nested-transfer-encoding`,
+        transferAnchor(ctx.line),
+        "Transfer encoding of a nested part",
+        `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
+        input.actual,
+      ),
+    ),
+  };
+};
+
+const TransferHeaderSchema = Schema.Struct({
+  const: Schema.optionalKey(Schema.Unknown),
+  enum: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+});
+
+const transferHeaderOf = (node: EncodingNode): string | undefined =>
+  Object.keys(node.headers ?? {}).find(
+    (name) => name.toLowerCase() === "content-transfer-encoding",
+  );
+
+// A header schema keyword admits base64 when it is absent or lists it among its string values.
+const admitsBase64 = (values: readonly string[] | undefined): boolean =>
+  values === undefined || values.some(isBase64);
+
+// ENC-39: a declared Content-Transfer-Encoding header whose schema rules out the part's base64.
+const transferConflict = (
+  ctx: Context,
+  input: RuleInput,
+  name: string,
+): Effect.Effect<Finding | undefined> =>
+  Effect.gen(function* conflict() {
+    const header = follow(ctx.resolution, childKey(input.actual, "headers", name));
+    const at = follow(ctx.resolution, childKey(header, "schema"));
+    const schema = yield* nodeIn(ctx.resolution, at).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(TransferHeaderSchema)),
+      Effect.orElseSucceed((): typeof TransferHeaderSchema.Type => ({})),
+    );
+    const isString = Schema.is(Schema.String);
+    const declared = {
+      const: schema.const === undefined ? undefined : [schema.const].filter(isString),
+      enum: schema.enum?.filter(isString),
+    };
+    const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
+
+    return keyword === undefined
+      ? undefined
+      : dropping(
+          refusal(
+            "ENC-39/conflicting-transfer-encoding",
+            transferAnchor(ctx.line),
+            "Encoding header Content-Transfer-Encoding",
+            `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
+            childKey(at, keyword),
+            "Remove the header, or let its schema admit base64",
+          ),
+        );
+  });
+
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
 const buildRule = (
   ctx: Context,
@@ -860,29 +1179,64 @@ const buildRule = (
 ): Effect.Effect<RuleResult, BodyNodeBudget> =>
   Effect.gen(function* build() {
     const node: EncodingNode = input.node ?? {};
-    const typing = yield* typingOf(ctx, input, node);
+    const facts = yield* factsOf(ctx.walk, input.schema);
+    const typing = yield* partTypingOf(ctx, input, node, facts);
     if (typing.refused) {
       return { findings: typing.findings, rule: undefined };
     }
 
-    const headers = yield* headersOf(ctx.resolution, input.actual, node);
+    const transfer = transferOf(ctx, input, facts);
+    if (transfer.finding !== undefined) {
+      return { findings: [...typing.findings, transfer.finding], rule: undefined };
+    }
+
+    const headers = yield* headersOf(ctx, input, node);
+    const transferHeader = transferHeaderOf(node);
+    const conflict =
+      transfer.encoding === undefined ||
+      headers.headers === undefined ||
+      transferHeader === undefined
+        ? undefined
+        : yield* transferConflict(ctx, input, transferHeader);
+    // A conflict refuses the part, so it sends no header and the writer-owned notices are moot.
+    if (conflict !== undefined) {
+      const kept = headers.findings.filter(({ code }) => code !== writerOwnedCode);
+
+      return { findings: [...typing.findings, ...kept, conflict], rule: undefined };
+    }
+
     const nesting = yield* nestingOf(ctx, input, node, buildAll);
-    const findings = [...typing.findings, ...headers.findings, ...nesting.findings];
+    // ENC-40: a style the writer sends is name and raw value under `text/plain`; any other style
+    // refuses the part alone, and the rule keeps its style so the names plan gives it no flag.
+    const styled = typing.serialization;
+    const pairs = styled !== undefined && sendsFormPairs(styled);
+    const findings = [
+      ...typing.findings,
+      ...headers.findings,
+      ...nesting.findings,
+      ...(styled === undefined || pairs ? [] : [unsupportedPartStyle(input)]),
+    ];
     if (headers.headers === undefined || nesting.refused) {
       return { findings, rule: undefined };
     }
 
     const rule: PlainRule = {
-      contentType: typing.contentType,
+      contentType: pairs ? [formPairsType] : typing.contentType,
       headers: headers.headers,
-      origin: { document: ctx.resolution.document, pointer: input.actual },
+      origin: input.actual,
       rows: sorted([
         ...typing.rows,
         ...nesting.rows,
-        ...(headers.headers.length === 0 ? [] : ["ENC-03"]),
+        ...(headers.declares ? ["ENC-03"] : []),
+        ...(transfer.row === undefined ? [] : [transfer.row]),
+        ...(styled === undefined ? [] : ["ENC-40"]),
       ]),
       target: input.target,
     };
+    if (transfer.encoding !== undefined) {
+      rule.contentEncoding = transfer.encoding;
+    }
+
     if (nesting.nested.length > 0) {
       rule.nested = nesting.nested;
     }
@@ -936,70 +1290,88 @@ const stopAlternative = (...findings: readonly Finding[]): AlternativeResult => 
   findings,
 });
 
-const schemaKeyAt = (resolution: Resolution, pointer: string): string =>
-  referenceAt(resolution, pointer)?.defsKey ??
-  defsKey(resolution.document, { document: resolution.document, pointer });
-
-const formRefusal = (line: Line, pointer: string): Finding =>
-  refusal(
-    line === "3.2" ? "ENC-28/not-implemented" : "ENC-27/not-implemented",
-    "encoding-the-x-www-form-urlencoded-media-type",
-    "Request body application/x-www-form-urlencoded",
-    "This construct is read but not implemented in Milestone 1.",
-    pointer,
-    "Milestone 2 implements this",
-  );
-
-// The slice names `S30-24/multipart-extra-fields` for 3.0, but the Diagnostic codec's row pattern
-// (`^[A-Z]+-[0-9]+$`, src/model/diagnostic.ts) rejects the digits in `S30`, so 3.0 reports SCH-13
-// too until that pattern admits them; then restore the 3.0 code here and in the test.
-const extraFieldsRefusal = (pointer: string): Finding =>
+// Every line reports `SCH-13`. The slice named `S30-24/multipart-extra-fields` for 3.0; the
+// Diagnostic row pattern (src/model/diagnostic.ts) now admits `S30-24`, but moving 3.0 to that code
+// changes its diagnostics, so it is not done here.
+const extraFieldsRefusal = (at: CanonicalKey): Finding =>
   refusal(
     "SCH-13/multipart-extra-fields",
     "json-schema-keywords",
     "Multipart schema additionalProperties",
     "A schema-valued additionalProperties on a multipart body root would add parts the declared properties do not name.",
-    pointer,
+    at,
     "D-ENC1 decides extra multipart fields; until then this map is refused and the declared parts stay",
   );
 
-const encodingIgnored = (line: Line, pointer: string): Finding =>
+const encodingIgnored = (line: Line, at: CanonicalKey): Finding =>
   line === "3.2"
     ? notice(
         "MED-14/encoding-ignored",
         "encoding-usage-and-restrictions",
         "Media type encoding fields",
         "Encoding fields SHALL be ignored for media types other than multipart and form-urlencoded.",
-        pointer,
+        at,
       )
     : notice(
         "MED-10/encoding-ignored",
         "media-type-encoding",
         "Media type encoding",
         "The encoding field applies to multipart and form-urlencoded request bodies only, so it is ignored here.",
-        pointer,
+        at,
       );
 
+// D-OC5: a Media Type description has no use in a generated CLI, so it is ignored.
+const descriptionIgnored = (at: CanonicalKey): Finding =>
+  notice(
+    "MED-09/description-ignored",
+    "media-type-object",
+    "Media type description",
+    "The description of a media type is not used, so it is ignored here.",
+    at,
+  );
+
+// MED-26: a form-data body is a set of named parts, so an array of name/value objects has no part
+// flags to fill and every run would fail.
+const arrayFormData = (at: CanonicalKey): Finding =>
+  refusal(
+    "MED-26/array-form-data",
+    "encoding-multipart-media-types",
+    "Multipart form-data array body",
+    "A multipart/form-data body whose schema is an array has no named parts to send, so the media type is refused.",
+    at,
+    "Describe the body as an object whose properties are the parts",
+  );
+
+// MED-25: a multipart type other than form-data sends unnamed ordered parts, and correlating them
+// with an object's properties by a Content-Disposition name is a MAY this generator does not offer.
+const unnamedParts = (line: Line, at: CanonicalKey): Finding =>
+  refusal(
+    "MED-25/unnamed-parts",
+    line === "3.2" ? "additional-encoding-approaches" : "encoding-multipart-media-types",
+    "Multipart object body other than form-data",
+    "This multipart type sends unnamed parts in order, which the object schema's named properties do not map to, so the media type is refused.",
+    at,
+    line === "3.2"
+      ? "Use multipart/form-data, or describe the parts in order with an array schema"
+      : "Use multipart/form-data",
+  );
+
 interface Media {
-  readonly home: string;
+  readonly home: CanonicalKey;
   readonly node: MediaNode;
 }
 
 const readMedia = (
   resolution: Resolution,
-  mediaPointer: string,
+  mediaSite: CanonicalKey,
 ): Effect.Effect<Media, BodyNotReadable> => {
   const unreadable = new BodyNotReadable({
-    pointer: mediaPointer,
+    pointer: mediaSite.pointer,
     reason: "media-type-not-an-object",
   });
-  const reference = referenceAt(resolution, mediaPointer);
-  const home = reference?.target.pointer ?? mediaPointer;
-  if (reference !== undefined && reference.target.document !== resolution.document) {
-    return Effect.fail(unreadable);
-  }
+  const home = follow(resolution, mediaSite);
 
-  return evaluatePointer(resolution.value, home).pipe(
+  return nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(MediaTypeObject)),
     Effect.mapError(() => unreadable),
     Effect.map((node) => ({ home, node })),
@@ -1008,6 +1380,7 @@ const readMedia = (
 
 const alternativeRows = (
   line: Line,
+  codec: Codec,
   node: MediaNode,
   schema: boolean,
   itemSchema: boolean,
@@ -1020,6 +1393,7 @@ const alternativeRows = (
     ...(node.prefixEncoding === undefined ? [] : ["MED-07"]),
     ...(node.itemEncoding === undefined ? [] : ["MED-08"]),
     ...(schema || itemSchema ? [] : [line === "3.0" ? "RQB-10" : "RQB-09"]),
+    ...(codec === "form" ? [line === "3.2" ? "ENC-28" : "ENC-27", "ENC-29"] : []),
   ]);
 
 interface Parts {
@@ -1047,9 +1421,9 @@ const refusedParts = (findings: readonly Finding[]): Parts => ({
 // The schema-valued additionalProperties of a multipart root, found through `$ref` and `allOf`.
 const extraFields = (
   ctx: Context,
-  schemaPointer: string,
+  schema: CanonicalKey,
 ): Effect.Effect<readonly Finding[], BodyNodeBudget> =>
-  flatten(ctx.walk, schemaPointer).pipe(
+  flatten(ctx.walk, schema).pipe(
     Effect.map((nodes) => {
       const found = firstLocated(nodes, (node) =>
         Schema.is(ObjectValue)(node.additionalProperties) ? true : undefined,
@@ -1057,7 +1431,7 @@ const extraFields = (
 
       return found === undefined
         ? []
-        : [extraFieldsRefusal(`${found.pointer}/additionalProperties`)];
+        : [extraFieldsRefusal(childKey(found.at, "additionalProperties"))];
     }),
   );
 
@@ -1096,16 +1470,18 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
   const declared = new Set(members.properties.map(([name]) => name));
   const findings: Finding[] = [];
   for (const name of Object.keys(media.node.encoding ?? {})) {
-    const actual = `${media.home}/encoding/${escapeToken(name)}`;
+    const actual = childKey(media.home, "encoding", name);
     if (!declared.has(name) && line !== "3.2") {
       return {
         findings: [
-          refusal(
-            "MED-11/unknown-property",
-            "media-type-encoding",
-            "Media type encoding key",
-            `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
-            actual,
+          dropping(
+            refusal(
+              "MED-11/unknown-property",
+              "media-type-encoding",
+              "Media type encoding key",
+              `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
+              actual,
+            ),
           ),
         ],
         refused: true,
@@ -1128,35 +1504,49 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
   return { findings, refused: false };
 };
 
+// One input per declared property in document order, with its Encoding Object when it has one.
+const propertyInputs = (
+  media: Media,
+  members: Members,
+  honorsStyle: boolean,
+  formData: boolean,
+): readonly RuleInput[] => {
+  const byName = media.node.encoding ?? {};
+
+  return members.properties.map(([name, schema]): RuleInput => {
+    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+
+    return {
+      actual: explicit === undefined ? schema : childKey(media.home, "encoding", name),
+      depth: 0,
+      formData,
+      honorsStyle,
+      node: explicit,
+      schema,
+      target: { kind: "property", name },
+    };
+  });
+};
+
 // One input per declared property, then per prefixEncoding entry, then the itemEncoding rule.
 const partInputs = (
   line: Line,
   media: Media,
   members: Members,
   honorsStyle: boolean,
+  formData: boolean,
 ): readonly RuleInput[] => {
   const { home, node } = media;
-  const byName = node.encoding ?? {};
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
-  const properties = members.properties.map(([name, schemaPointer]): RuleInput => {
-    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
-
-    return {
-      actual: explicit === undefined ? schemaPointer : `${home}/encoding/${escapeToken(name)}`,
-      depth: 0,
-      honorsStyle,
-      node: explicit,
-      schemaPointer,
-      target: { kind: "property", name },
-    };
-  });
+  const properties = propertyInputs(media, members, honorsStyle, formData);
   const positions = prefix.map((entry, index): RuleInput => ({
-    actual: `${home}/prefixEncoding/${index}`,
+    actual: childKey(home, "prefixEncoding", String(index)),
     depth: 0,
+    formData,
     honorsStyle,
     node: entry,
-    schemaPointer: members.prefixItems[index],
+    schema: members.prefixItems[index],
     target: { index, kind: "position" },
   }));
   const remaining: RuleInput[] =
@@ -1164,11 +1554,12 @@ const partInputs = (
       ? []
       : [
           {
-            actual: `${home}/itemEncoding`,
+            actual: childKey(home, "itemEncoding"),
             depth: 0,
+            formData,
             honorsStyle,
             node: item,
-            schemaPointer: node.itemSchema === undefined ? members.items : `${home}/itemSchema`,
+            schema: node.itemSchema === undefined ? members.items : childKey(home, "itemSchema"),
             target: { index: prefix.length, kind: "position" },
           },
         ];
@@ -1177,6 +1568,45 @@ const partInputs = (
 };
 
 // Multipart part rules: the declared properties by name, then 3.2 positions (design 6.3).
+const typesOf = (nodes: readonly Located[]): readonly string[] => {
+  const type = firstLocated(nodes, (node) => node.type)?.value;
+
+  return type === undefined ? [] : Arr.ensure(type);
+};
+
+// An array root: typed array, or item schemas with no declared properties.
+const isArrayBody = (
+  walk: Walk,
+  schema: CanonicalKey,
+  members: Members,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* arrayBody() {
+    if (
+      members.properties.length === 0 &&
+      (members.items !== undefined || members.prefixItems.length > 0)
+    ) {
+      return true;
+    }
+
+    return typesOf(yield* flatten(walk, schema)).includes("array");
+  });
+
+// An object root: not an array body, and typed object or with declared properties.
+const isObjectBody = (
+  walk: Walk,
+  schema: CanonicalKey,
+  members: Members,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* objectBody() {
+    if (yield* isArrayBody(walk, schema, members)) {
+      return false;
+    }
+
+    return (
+      members.properties.length > 0 || typesOf(yield* flatten(walk, schema)).includes("object")
+    );
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1189,17 +1619,34 @@ const multipartParts = (
       return refusedParts([blocker]);
     }
 
-    const schemaPointer = media.node.schema === undefined ? undefined : `${media.home}/schema`;
-    const members =
-      schemaPointer === undefined ? noMembers : yield* membersOf(ctx.walk, schemaPointer);
-    const extra = schemaPointer === undefined ? [] : yield* extraFields(ctx, schemaPointer);
+    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+    if (
+      schema !== undefined &&
+      base === "multipart/form-data" &&
+      (yield* isArrayBody(ctx.walk, schema, members))
+    ) {
+      return refusedParts([arrayFormData(media.home)]);
+    }
+
+    // A range such as `multipart/*` is not a concrete type, so it is left to the emitter.
+    if (
+      schema !== undefined &&
+      base !== "multipart/form-data" &&
+      !base.endsWith("/*") &&
+      (yield* isObjectBody(ctx.walk, schema, members))
+    ) {
+      return refusedParts([dropping(unnamedParts(line, schema))]);
+    }
+
+    const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
     const keys = unknownKeys(line, media, members);
     if (keys.refused) {
       return refusedParts([...extra, ...keys.findings]);
     }
 
     const honorsStyle = base === "multipart/form-data" && line !== "3.0";
-    const inputs = partInputs(line, media, members, honorsStyle);
+    const inputs = partInputs(line, media, members, honorsStyle, base === "multipart/form-data");
     const built = yield* buildAll(ctx, inputs);
     const findings = [...extra, ...keys.findings, ...built.findings];
     if (built.refused) {
@@ -1219,6 +1666,317 @@ const multipartParts = (
     };
   });
 
+// --- Form-urlencoded (design 6.3) ---
+
+const multipartOnly = (code: string, anchor: string, field: string, at: CanonicalKey): Finding =>
+  notice(
+    code,
+    anchor,
+    `Encoding ${field} under form-urlencoded`,
+    `The ${field} field applies to multipart media types only, so it is ignored for form-urlencoded.`,
+    at,
+  );
+
+// Fields a form value has no use for, in pointer order: part headers (ENC-11) and nested encoding
+// (ENC-07 to ENC-09).
+const formIgnored = (node: EncodingNode, actual: CanonicalKey): readonly Finding[] => [
+  ...(node.encoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-07/nested-encoding-ignored",
+          "encoding-encoding",
+          "encoding",
+          childKey(actual, "encoding"),
+        ),
+      ]),
+  ...(node.headers === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-11/headers-ignored",
+          "encoding-headers",
+          "headers",
+          childKey(actual, "headers"),
+        ),
+      ]),
+  ...(node.itemEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-09/item-encoding-ignored",
+          "encoding-item-encoding",
+          "itemEncoding",
+          childKey(actual, "itemEncoding"),
+        ),
+      ]),
+  ...(node.prefixEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "ENC-08/prefix-encoding-ignored",
+          "encoding-prefix-encoding",
+          "prefixEncoding",
+          childKey(actual, "prefixEncoding"),
+        ),
+      ]),
+];
+
+const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
+  dropping(
+    refusal(
+      "ENC-02/form-content-type",
+      "encoding-content-type",
+      "Encoding contentType under form-urlencoded",
+      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
+      childKey(input.actual, "contentType"),
+      `Remove contentType, or set it to ${expected}`,
+    ),
+  );
+
+const isCompound = (types: readonly string[]): boolean =>
+  types.some((name) => name === "object" || name === "array");
+
+// PRM-27 (design 6.1): a deepObject value is nested when its schema is an array, or declares a
+// property or additionalProperties schema whose type is or includes object or array. An untyped
+// member is not nested.
+const isNested = (
+  walk: Walk,
+  schema: CanonicalKey | undefined,
+): Effect.Effect<boolean, BodyNodeBudget> =>
+  Effect.gen(function* nested() {
+    if (schema === undefined) {
+      return false;
+    }
+
+    const nodes = yield* flatten(walk, schema);
+    if (typesOf(nodes).includes("array")) {
+      return true;
+    }
+
+    const members = nodes.flatMap(({ at, node }) => [
+      ...Object.keys(node.properties ?? {}).map((name) => childKey(at, "properties", name)),
+      ...(Schema.is(ObjectValue)(node.additionalProperties)
+        ? [childKey(at, "additionalProperties")]
+        : []),
+    ]);
+    for (const member of members) {
+      if (isCompound(typesOf(yield* flatten(walk, member)))) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+const compoundNested = (input: RuleInput): Finding =>
+  dropping(
+    refusal(
+      "PRM-27/compound-nested",
+      "style-values",
+      "Encoding style deepObject under form-urlencoded",
+      `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
+      input.actual,
+      "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
+    ),
+  );
+
+const bracketChoiceCode = "PRM-27/bracket-author-choice";
+
+const bracketChoice = (input: RuleInput): Finding =>
+  notice(
+    bracketChoiceCode,
+    "style-values",
+    "Encoding style deepObject under form-urlencoded",
+    `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
+    input.actual,
+  );
+
+// The query style table's refusal for a form property's explicit style fields (design 6.3, through
+// the parameter rule `formStyleRefusal`), placed at the Encoding entry; it drops the alternative.
+const styleRefusalOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<Option.Option<Finding>> =>
+  serialization === undefined
+    ? Effect.succeedNone
+    : formStyleRefusal(ctx.resolution, input.schema, serialization, {
+        maxNodes: ctx.walk.maxNodes,
+      }).pipe(
+        Effect.map(
+          Option.map((found) =>
+            dropping(
+              refusal(
+                found.code,
+                found.anchor,
+                "Encoding style under form-urlencoded",
+                found.message,
+                input.actual,
+                found.hint,
+              ),
+            ),
+          ),
+        ),
+      );
+
+// ENC-12 (design D-OC14): a 3.0 or 3.1 form deepObject with explode false or omitted is exploded,
+// as STY-26 is for a parameter, with that row's notice text.
+const deepObjectExplode = (
+  line: Line,
+  serialization: PlainSerialization | undefined,
+  actual: CanonicalKey,
+): readonly Finding[] =>
+  line !== "3.2" && serialization?.style === "deepObject" && serialization.explode !== true
+    ? [
+        notice(
+          "ENC-12/explode-no-effect",
+          "encoding-explode",
+          "Encoding deepObject explode",
+          deepObjectExplodeText,
+          actual,
+        ),
+      ]
+    : [];
+
+// What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
+// bracket convention (the author config's switch, never defaulted or inferred).
+const deepObjectOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> =>
+  Effect.gen(function* deepObject() {
+    if (serialization?.style !== "deepObject" || !(yield* isNested(ctx.walk, input.schema))) {
+      return "none";
+    }
+
+    return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
+  });
+
+// One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
+// them the value is sent by the default table, so an explicit contentType is kept only when it
+// names the table's type, which changes nothing on the wire. Style fields the query style table
+// marks not applicable refuse the alternative (STY-17 to STY-24, PRM-27), and a deepObject over a
+// nested value refuses it unless the author config opts into brackets (PRM-27).
+const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
+  Effect.gen(function* build() {
+    const node: EncodingNode = input.node ?? {};
+    const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
+    if (typing.refused) {
+      return { findings: typing.findings, rule: undefined };
+    }
+
+    const inapplicable = yield* styleRefusalOf(ctx, input, typing.serialization);
+    if (Option.isSome(inapplicable)) {
+      return { findings: [...typing.findings, inapplicable.value], rule: undefined };
+    }
+
+    const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);
+    if (deepObject === "refuse") {
+      return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
+    }
+
+    const explicit = typing.serialization === undefined && node.contentType !== undefined;
+    const fallback = explicit
+      ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema), input)
+      : undefined;
+    const [given] = typing.contentType;
+    if (
+      fallback !== undefined &&
+      (typing.contentType.length !== 1 || given?.toLowerCase() !== fallback.type)
+    ) {
+      return {
+        findings: [...typing.findings, formContentTypeRefusal(input, fallback.type)],
+        rule: undefined,
+      };
+    }
+
+    const rule: PlainRule = {
+      contentType: typing.contentType,
+      headers: [],
+      origin: input.actual,
+      rows: sorted([
+        ...typing.rows,
+        ...(fallback === undefined ? [] : [fallback.row]),
+        ...(typing.serialization === undefined ? [] : ["ENC-12"]),
+        ...(ctx.line === "3.0" ? ["ENC-14"] : []),
+      ]),
+      target: input.target,
+    };
+    if (typing.serialization !== undefined) {
+      rule.serialization = typing.serialization;
+    }
+
+    if (deepObject === "mark") {
+      rule.nonStandard = "deepObjectBrackets";
+    }
+
+    return {
+      findings: [
+        ...typing.findings,
+        ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
+        ...formIgnored(node, input.actual),
+      ],
+      rule,
+    };
+  });
+
+// Positional encoding applies to multipart only (MED-07, MED-08), so a form alternative ignores it.
+const formPositional = (media: Media): readonly Finding[] => [
+  ...(media.node.itemEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "MED-08/item-encoding-ignored",
+          "media-type-item-encoding",
+          "itemEncoding",
+          childKey(media.home, "itemEncoding"),
+        ),
+      ]),
+  ...(media.node.prefixEncoding === undefined
+    ? []
+    : [
+        multipartOnly(
+          "MED-07/prefix-encoding-ignored",
+          "media-type-prefix-encoding",
+          "prefixEncoding",
+          childKey(media.home, "prefixEncoding"),
+        ),
+      ]),
+];
+
+// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention:
+// its bracket notices go with it (design 8.4), whatever the order of its properties.
+const refusedFormParts = (findings: readonly Finding[]): Parts =>
+  refusedParts(findings.filter((finding) => finding.code !== bracketChoiceCode));
+
+// Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
+const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBudget> =>
+  Effect.gen(function* parts() {
+    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+    const keys = unknownKeys(ctx.line, media, members);
+    if (keys.refused) {
+      return refusedParts(keys.findings);
+    }
+
+    const findings: Finding[] = [...keys.findings, ...formPositional(media)];
+    const rules: PlainRule[] = [];
+    for (const input of propertyInputs(media, members, true, false)) {
+      const result = yield* formRule(ctx, input);
+      findings.push(...result.findings);
+      if (result.rule === undefined) {
+        return refusedFormParts(findings);
+      }
+
+      rules.push(result.rule);
+    }
+
+    return { ...noParts, encoding: rules, findings };
+  });
+
 const ignoredParts = (line: Line, media: Media): Parts => {
   const { home, node } = media;
   const present = [node.encoding, node.prefixEncoding, node.itemEncoding].some(
@@ -1228,68 +1986,90 @@ const ignoredParts = (line: Line, media: Media): Parts => {
   return present ? { ...noParts, findings: [encodingIgnored(line, home)] } : noParts;
 };
 
+// The part rules of an alternative: multipart and form-urlencoded read their encoding fields; any
+// other codec ignores them.
+const partsOf = (
+  ctx: Context,
+  media: Media,
+  base: string,
+  codec: Codec,
+): Effect.Effect<Parts, BodyNodeBudget> => {
+  if (codec === "multipart") {
+    return multipartParts(ctx, media, base);
+  }
+
+  return codec === "form" ? formParts(ctx, media) : Effect.succeed(ignoredParts(ctx.line, media));
+};
+
 const normalizeAlternative = (
   ctx: Context,
-  bodyPointer: string,
+  body: CanonicalKey,
   key: string,
 ): Effect.Effect<AlternativeResult, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* alternative() {
     const { line, resolution } = ctx;
-    const mediaPointer = `${bodyPointer}/content/${escapeToken(key)}`;
+    const mediaSite = childKey(body, "content", key);
     if (Option.isNone(Schema.decodeUnknownOption(MediaRange)(key))) {
-      return stopAlternative(
-        refusal(
-          "MED-24/invalid-media-type",
-          "media-types",
-          "Request body content key",
-          `The content key ${JSON.stringify(sanitize(key))} is not a media type or range.`,
-          mediaPointer,
-        ),
-      );
+      // The grammar check refuses the key (MED-24) before normalization, so it is not raised twice.
+      return stopAlternative();
     }
 
     const base = baseType(key);
     const codec = codecOf(base);
-    if (codec === "form") {
-      return stopAlternative(formRefusal(line, mediaPointer));
-    }
-
-    const media = yield* readMedia(resolution, mediaPointer);
+    const media = yield* readMedia(resolution, mediaSite);
     const { home, node } = media;
-    const parts =
-      codec === "multipart" ? yield* multipartParts(ctx, media, base) : ignoredParts(line, media);
+    const parts = yield* partsOf(ctx, media, base, codec);
     if (parts.refused) {
-      return stopAlternative(...parts.findings);
+      return stopAlternative(...anchorDrops(home, parts.findings));
     }
 
     // An XML body is opaque, so its schema is never consulted (design 6.3, D-SCH3).
     const opaque = codec === "xml";
+    const schemaSites = opaque
+      ? []
+      : (["schema", "itemSchema"] as const).flatMap((field) =>
+          node[field] === undefined ? [] : [childKey(home, field)],
+        );
+    const limits = { maxNodes: ctx.walk.maxNodes };
+    if (schemaSites.some((site) => appliesDynamicKeyword(resolution, site, limits))) {
+      // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
+      // the body cannot be checked without it, so the alternative is refused with no second
+      // diagnostic, and a required body left without one raises to operation scope.
+      return stopAlternative();
+    }
+
     const result: PlainAlternative = {
       codec,
       encoding: parts.encoding,
       mediaType: key,
-      origin: { document: resolution.document, pointer: home },
+      origin: home,
       prefixEncoding: parts.prefixEncoding,
       rows: alternativeRows(
         line,
+        codec,
         node,
         node.schema !== undefined && !opaque,
         node.itemSchema !== undefined && !opaque,
       ),
     };
     if (node.schema !== undefined && !opaque) {
-      result.schema = { key: schemaKeyAt(resolution, `${home}/schema`) };
+      result.schema = { key: schemaKeyAt(resolution, childKey(home, "schema")) };
     }
 
     if (node.itemSchema !== undefined && !opaque) {
-      result.itemSchema = { key: schemaKeyAt(resolution, `${home}/itemSchema`) };
+      result.itemSchema = { key: schemaKeyAt(resolution, childKey(home, "itemSchema")) };
     }
 
     if (parts.itemEncoding !== undefined) {
       result.itemEncoding = parts.itemEncoding;
     }
 
-    return { alternative: result, findings: parts.findings };
+    const described = line === "3.2" && node.description !== undefined;
+
+    return {
+      alternative: result,
+      findings: described ? [...parts.findings, descriptionIgnored(home)] : parts.findings,
+    };
   });
 
 // --- Diagnostics and the body ---
@@ -1311,7 +2091,8 @@ interface DiagnosticFields {
 }
 
 // The use site is the operation's request body; when it is a reference, the element's own
-// location in the target is `related[0]` (design 8.1).
+// location in the target is `related[0]` (design 8.1). Otherwise the element names its own
+// location, in whichever document of the set holds it.
 const toDiagnostics = (
   ctx: Context,
   findings: readonly Finding[],
@@ -1320,11 +2101,11 @@ const toDiagnostics = (
     findings.map((item) => {
       const fields: DiagnosticFields = {
         code: item.code,
-        document: ctx.resolution.document,
+        document: ctx.reference === undefined ? item.at.document : ctx.resolution.document,
         element: item.element,
         message: item.message,
         openapi: ctx.site.openapi,
-        pointer: ctx.reference === undefined ? item.pointer : ctx.site.pointer,
+        pointer: ctx.reference === undefined ? item.at.pointer : ctx.site.pointer,
         row: item.code.slice(0, item.code.indexOf("/")),
         scope: "element",
         severity: item.severity,
@@ -1338,29 +2119,202 @@ const toDiagnostics = (
         fields.operation = ctx.site.operation;
       }
 
-      if (ctx.reference !== undefined) {
-        fields.related = [{ document: ctx.resolution.document, pointer: item.pointer }];
+      const related = [...(ctx.reference === undefined ? [] : [item.at]), ...(item.related ?? [])];
+      if (related.length > 0) {
+        fields.related = related;
       }
 
       return Schema.decodeUnknownEffect(Diagnostic)(fields);
     }),
   ).pipe(Effect.orDie);
 
-const emptyContent = (line: Line, pointer: string): Finding =>
+const emptyContent = (line: Line, at: CanonicalKey): Finding =>
   refusal(
     "RQB-07/empty-content",
     line === "3.0" ? "request-body-object" : "request-body-content",
     "Request body content",
     "The request body declares no media type, so nothing can be sent.",
-    pointer,
+    at,
   );
+
+// --- The discriminator hint (design D-OQ9) ---
+
+const Discriminated = Schema.Struct({
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  discriminator: Schema.Struct({
+    mapping: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+    propertyName: Schema.NonEmptyString,
+  }),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+});
+
+const EntryComponents = Schema.Struct({
+  components: Schema.optionalKey(
+    Schema.Struct({ schemas: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)) }),
+  ),
+});
+
+type Hint = typeof DiscriminatorHint.Encoded;
+
+type Branch = Hint["branches"][number];
+
+const jsonIn = (resolution: Resolution, key: CanonicalKey): Json | undefined => {
+  const document = resolution.documents.get(key.document);
+
+  return document === undefined ? undefined : jsonAt(document, key.pointer);
+};
+
+// Whether an element-scope refusal of check names the Discriminator Object of `root`: DSC-03,
+// 04, 05, 09 and 10 all sit at or below it, so none is listed by code.
+const discriminatorRefused = (findings: readonly Diagnostic[], root: CanonicalKey): boolean => {
+  const at = childPointer(root.pointer, "discriminator");
+
+  return findings.some(
+    (finding) =>
+      finding.severity === "refusal" &&
+      finding.scope === "element" &&
+      finding.document === root.document &&
+      (finding.pointer === at || finding.pointer.startsWith(`${at}/`)),
+  );
+};
+
+interface Component {
+  readonly key: CanonicalKey;
+  readonly name: string;
+}
+
+// The entry's component schemas, in document key order.
+const entrySchemas = (resolution: Resolution): readonly Component[] => {
+  const names = Option.match(Schema.decodeUnknownOption(EntryComponents)(resolution.value), {
+    onNone: (): readonly string[] => [],
+    onSome: (root) => Object.keys(root.components?.schemas ?? {}),
+  });
+
+  return names.map((name) => ({
+    key: { document: resolution.document, pointer: formatPointer(["components", "schemas", name]) },
+    name,
+  }));
+};
+
+// The entry components whose own `allOf[<i>]` references `root` directly (DSC-11).
+const allOfChildren = (
+  resolution: Resolution,
+  components: readonly Component[],
+  root: CanonicalKey,
+): readonly CanonicalKey[] => {
+  const parents = new Set(
+    (allOfReferrers(resolution).get(keyOf(root)) ?? []).map((site) =>
+      keyOf({ document: site.document, pointer: site.pointer.replace(/\/allOf\/\d+$/u, "") }),
+    ),
+  );
+
+  return components.flatMap((component) =>
+    parents.has(keyOf(component.key)) ? [component.key] : [],
+  );
+};
+
+// The composition that lists the branches itself: `oneOf` wins over `anyOf`.
+const listedKeyword = (node: typeof Discriminated.Type): "anyOf" | "oneOf" | undefined => {
+  if ((node.oneOf ?? []).length > 0) {
+    return "oneOf";
+  }
+
+  return (node.anyOf ?? []).length > 0 ? "anyOf" : undefined;
+};
+
+// The usable discriminator of the schema at `site`, after its `$ref` chain; none when check
+// refused it or no branch is found.
+const hintAt = (
+  resolution: Resolution,
+  site: CanonicalKey,
+  checkFindings: readonly Diagnostic[],
+): Hint | undefined => {
+  const root = settle(resolution, site);
+  const node = Option.getOrUndefined(
+    Schema.decodeUnknownOption(Discriminated)(jsonIn(resolution, root)),
+  );
+  if (node === undefined || discriminatorRefused(checkFindings, root)) {
+    return undefined;
+  }
+
+  const components = entrySchemas(resolution);
+  const names = new Map(components.map((component) => [keyOf(component.key), component.name]));
+  const listed = listedKeyword(node);
+  const targets =
+    listed === undefined
+      ? allOfChildren(resolution, components, root)
+      : (node[listed] ?? []).map((_, index) =>
+          settle(resolution, childKey(root, listed, String(index))),
+        );
+  const mapped = Object.entries(node.discriminator.mapping ?? {}).flatMap(([label, value]) =>
+    Predicate.isString(value)
+      ? Option.match(implicitComponent(resolution, "schemas", value), {
+          onNone: () => [],
+          onSome: (key) => [[keyOf(key), label] as const],
+        })
+      : [],
+  );
+  const branches = targets.map((target, index): Branch => {
+    const key = keyOf(target);
+    const component = names.get(key);
+    const labels = mapped.flatMap(([at, label]) => (at === key ? [label] : []));
+
+    return component === undefined
+      ? { index, labels }
+      : { component, index, labels: labels.length === 0 ? [component] : labels };
+  });
+
+  return branches.length === 0
+    ? undefined
+    : {
+        branches,
+        keyword: listed ?? "allOf",
+        propertyName: node.discriminator.propertyName,
+      };
+};
+
+/**
+ * Adds the discriminator hint to each alternative of a request body whose root schema, after its
+ * `$ref` chain, has a usable discriminator (design D-OQ9): the composition keyword, the property,
+ * and the branches in composition order, each labeled by the mapping keys that target it, else by
+ * its entry component name (implicit mapping); an inline branch has no label. With no `oneOf` or
+ * `anyOf`, the branches are the entry components whose `allOf` references the schema (DSC-11). A
+ * discriminator any element-scope refusal in `checkFindings` names gets no hint. The hint never
+ * changes validation (DSC-06).
+ */
+export const hintDiscriminators = (
+  resolution: Resolution,
+  body: Body,
+  checkFindings: readonly Diagnostic[],
+): Effect.Effect<Body> =>
+  Effect.gen(function* hint() {
+    const hints = body.alternatives.map((alternative) =>
+      alternative.schema === undefined
+        ? undefined
+        : hintAt(resolution, childKey(alternative.origin, "schema"), checkFindings),
+    );
+    if (hints.every((found) => found === undefined)) {
+      return body;
+    }
+
+    const plain = yield* Schema.encodeEffect(Body)(body);
+
+    return yield* Schema.decodeUnknownEffect(Body)({
+      ...plain,
+      alternatives: plain.alternatives.map((alternative, index) => {
+        const found = hints[index];
+
+        return found === undefined ? alternative : { ...alternative, discriminator: found };
+      }),
+    });
+  }).pipe(Effect.orDie);
 
 /**
  * Normalizes one Request Body Object into a `Body` whose alternatives are the media types that
  * survive, with element-scope refusals and notices for the rest (design 2.2, 6.3, 6.6). Codecs
- * follow the media type; encoding defaults follow the line's table; XML stays opaque; staged and
- * undecided constructs are refused rather than dropped. A site the earlier stages should have
- * stopped fails with `BodyNotReadable`.
+ * follow the media type; encoding defaults follow the line's table; form-urlencoded and multipart
+ * bodies take a rule per property; XML stays opaque; undecided constructs are refused rather than
+ * dropped. A site the earlier stages should have stopped fails with `BodyNotReadable`.
  */
 export const normalizeBody = (
   resolution: Resolution,
@@ -1369,13 +2323,10 @@ export const normalizeBody = (
 ): Effect.Effect<BodyOutcome, BodyNodeBudget | BodyNotReadable> =>
   Effect.gen(function* normalize() {
     const unreadable = new BodyNotReadable({ pointer: site.pointer, reason: "not-a-request-body" });
-    const reference = referenceAt(resolution, site.pointer);
-    const target = reference?.target ?? { document: resolution.document, pointer: site.pointer };
-    if (target.document !== resolution.document) {
-      return yield* unreadable;
-    }
-
-    const node = yield* evaluatePointer(resolution.value, target.pointer).pipe(
+    const use = { document: resolution.document, pointer: site.pointer };
+    const reference = referenceIn(resolution, use);
+    const target = follow(resolution, use);
+    const node = yield* nodeIn(resolution, target).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
       Effect.mapError(() => unreadable),
     );
@@ -1384,14 +2335,12 @@ export const normalizeBody = (
     const required = node.required ?? false;
     const keys = Object.keys(node.content);
     if (keys.length === 0) {
-      const empty = emptyContent(resolution.line, `${target.pointer}/content`);
+      const empty = emptyContent(resolution.line, childKey(target, "content"));
 
       return { _tag: "Refused", diagnostics: yield* toDiagnostics(ctx, [empty]), required };
     }
 
-    const results = yield* Effect.all(
-      keys.map((key) => normalizeAlternative(ctx, target.pointer, key)),
-    );
+    const results = yield* Effect.all(keys.map((key) => normalizeAlternative(ctx, target, key)));
     const diagnostics = yield* toDiagnostics(
       ctx,
       results.flatMap((result) => result.findings),
@@ -1412,4 +2361,59 @@ export const normalizeBody = (
     }).pipe(Effect.orDie);
 
     return { _tag: "Implemented", body, diagnostics };
+  });
+
+/**
+ * What the form rules decided for one form-urlencoded content entry outside a request body.
+ * `Implemented` holds one rule per declared property in document order; `Refused` means a rule
+ * refused the entry, as it would drop a form body alternative.
+ */
+export type FormContentOutcome =
+  | {
+      readonly _tag: "Implemented";
+      readonly diagnostics: readonly Diagnostic[];
+      readonly encoding: readonly EncodingRule[];
+    }
+  | { readonly _tag: "Refused"; readonly diagnostics: readonly Diagnostic[] };
+
+/**
+ * The form-urlencoded rules of the content entry `mediaType` of the element at `site`, decided
+ * exactly as a form body alternative's are (design 6.1, 6.3), for a 3.2 `querystring` parameter
+ * whose form content takes Encoding Objects "as for bodies". Content of any other media type has
+ * no rules. Diagnostics are placed as a body's are, at `site` when the element is a reference.
+ */
+export const formContentRules = (
+  resolution: Resolution,
+  site: BodySite,
+  mediaType: string,
+  limits: ResolveLimits = defaultLimits,
+): Effect.Effect<FormContentOutcome, BodyNodeBudget | BodyNotReadable> =>
+  Effect.gen(function* rules() {
+    if (codecOf(baseType(mediaType)) !== "form") {
+      return { _tag: "Implemented", diagnostics: [], encoding: [] };
+    }
+
+    const use = { document: resolution.document, pointer: site.pointer };
+    const reference = referenceIn(resolution, use);
+    const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
+    const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
+    const media = yield* readMedia(
+      resolution,
+      childKey(follow(resolution, use), "content", mediaType),
+    );
+    const parts = yield* formParts(ctx, media);
+    if (parts.refused) {
+      return {
+        _tag: "Refused",
+        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings)),
+      };
+    }
+
+    return {
+      _tag: "Implemented",
+      diagnostics: yield* toDiagnostics(ctx, parts.findings),
+      encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
+        Effect.orDie,
+      ),
+    };
   });

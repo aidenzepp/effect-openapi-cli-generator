@@ -1,0 +1,29 @@
+USAGE
+  lazy <subcommand> [flags]
+
+GLOBAL FLAGS
+  --help                                                              Show help information
+  --version                                                           Show version information
+  --completions <bash|zsh|fish|powershell|sh|pwsh>                    Print shell completion script (choices: bash, zsh, fish, powershell, sh, pwsh)
+  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+  --base-url url                                                      Base URL of the API; overrides the spec's servers
+  --server name|index                                                 Server from the spec to use
+  --server-variable name=value                                        Server variable value; repeatable
+  --allow-credentials-for-base-url                                    Send credentials to an unbound --base-url or <PREFIX>_BASE_URL origin
+  --output string                                                     Write the response body to <path>, or to stdout when <path> is -
+  --force                                                             Replace an existing --output file
+  --max-error-bytes integer                                           Bytes of an error response body to print; 0 prints none
+  --describe                                                          Print the command tree and its operation bindings as JSON
+  --api-key-file path|-                                               
+
+SUBCOMMANDS
+  pets      
+  stores    
+  health    Check the service.
+  login
+
+FLAG VALUES
+  Write a flag value that starts with "-" as --flag=-value
+
+ERROR
+  Unknown subcommand "nosuch" for "lazy"

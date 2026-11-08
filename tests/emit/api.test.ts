@@ -4,6 +4,7 @@ import nodePath from "node:path";
 import { Effect, Schema } from "effect";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import type { Server } from "../../src/model/entities.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
 import { planNames } from "../../src/names/index.ts";
@@ -34,12 +35,10 @@ const pipeline = (value: Schema.Json) =>
   Effect.gen(function* generate() {
     const config = yield* decodeAuthorConfig(configJson, { document: configDocument });
     const resolution = yield* resolve({ document, line: "3.1", value });
-    const { api } = yield* normalize(resolution, { config, configDocument });
+    const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
-    const bound = boundOrigins(
-      [...api.servers, ...api.operations.flatMap((operation) => operation.servers)],
-      { config, configDocument, document, openapi: api.openapi },
-    );
+    const context = { config, configDocument, document, openapi: api.openapi };
+    const bound = (servers: readonly Server[]) => boundOrigins(servers, context).origins;
 
     return { api, bound, plan };
   });
@@ -47,7 +46,7 @@ const pipeline = (value: Schema.Json) =>
 const emit = (value: Schema.Json) =>
   Effect.runPromise(
     pipeline(value).pipe(
-      Effect.flatMap(({ api, bound, plan }) => emitApi({ api, boundOrigins: bound.origins, plan })),
+      Effect.flatMap(({ api, bound, plan }) => emitApi({ api, boundOrigins: bound, plan })),
     ),
   );
 
@@ -137,7 +136,7 @@ describe("emitApi: shapes beyond the fixture", () => {
       groups: plan.groups.map((group) => ({ ...group, segment: reserved })),
     };
     const error = await Effect.runPromise(
-      Effect.flip(emitApi({ api, boundOrigins: bound.origins, plan: forged })),
+      Effect.flip(emitApi({ api, boundOrigins: bound, plan: forged })),
     );
 
     expect(error._tag).toBe("ApiEmitError");
@@ -255,7 +254,7 @@ const emitFrom = (uri: string) =>
           Object.defineProperty(operation.origin, "document", { value: uri });
         }
 
-        return emitApi({ api, boundOrigins: bound.origins, plan });
+        return emitApi({ api, boundOrigins: bound, plan });
       }),
     ),
   );
@@ -435,14 +434,14 @@ describe("emitApi: multipart request bodies", () => {
     expect(content("src/api/imports.ts")).toContain("required: false,");
   });
 
-  test("a multipart alternative beside other request media keeps the generic body builder", async () => {
+  test("a multipart range alternative is left out of the builder's table, never sent as raw bytes", async () => {
     const content = contentOf(
       await emit(
         withPaths(
           importsPath(
             {
               "application/json": { schema: { type: "object" } },
-              "multipart/form-data": { schema: importSchema },
+              "multipart/*": { schema: importSchema },
             },
             true,
           ),
@@ -450,9 +449,131 @@ describe("emitApi: multipart request bodies", () => {
       ),
     );
 
-    expect(content("src/api/imports.ts")).toContain(
-      "Serialize.body(input.contentType, input.body)",
-    );
+    expect(content("src/api/imports.ts")).toContain("Serialize.alternatives(input.body, {");
+    expect(content("src/api/imports.ts")).not.toContain('multipart/*": (');
     expect(content("src/api/imports.ts")).not.toContain("formData");
+    expect(content("src/api/imports.ts")).not.toContain("input.contentType");
+  });
+
+  test("a part listing several types travels with its chosen type in the alternative's form", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "application/json": { schema: { type: "object" } },
+              "multipart/form-data": {
+                encoding: { file: { contentType: "text/csv, application/json" } },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain(
+      ['export type CreateFormFileContentType = "text/csv" | "application/json";', "", "/**"].join(
+        "\n",
+      ),
+    );
+    expect(api).toContain(
+      [
+        "export interface CreateForm {",
+        "  readonly fields: Serialize.FormFields;",
+        "  readonly file?: Serialize.ChosenPart<CreateFormFileContentType> | undefined;",
+        "}",
+      ].join("\n"),
+    );
+    expect(api).toContain('  readonly "multipart/form-data": CreateForm;');
+    expect(api).toContain(
+      [
+        "export interface CreateInput {",
+        "  readonly body: Serialize.Chosen<CreateBodies>;",
+        "}",
+      ].join("\n"),
+    );
+    expect(api).toContain(
+      [
+        '      "multipart/form-data": (body: CreateForm) =>',
+        "        Serialize.formData(body.fields, {",
+        "          parts: [",
+        '            ["title", "text/plain"],',
+        '            ["file", body.file],',
+        '            ["tags", "text/plain"],',
+        "          ],",
+      ].join("\n"),
+    );
+  });
+
+  test("a part listing ten types prints its union as a broken alias, not one long field", async () => {
+    const types = [
+      "application/json",
+      "application/pdf",
+      "application/zip",
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "text/csv",
+      "text/html",
+      "text/plain",
+    ];
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "multipart/form-data": {
+                encoding: { file: { contentType: types.join(", ") } },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain(
+      ["export type CreateFormFileContentType =", ...types.map((type) => `  | "${type}"`)].join(
+        "\n",
+      ),
+    );
+    expect(api).toContain(
+      "  readonly file?: Serialize.ChosenPart<CreateFormFileContentType> | undefined;",
+    );
+    expect(api.split("\n").every((line) => line.length <= 100)).toBe(true);
+  });
+
+  test("a part with a declared header travels keyed, typed by its one content type", async () => {
+    const content = contentOf(
+      await emit(
+        withPaths(
+          importsPath(
+            {
+              "multipart/form-data": {
+                encoding: {
+                  file: {
+                    contentType: "text/csv",
+                    headers: { "X-Checksum": { required: true, schema: { type: "string" } } },
+                  },
+                },
+                schema: importSchema,
+              },
+            },
+            true,
+          ),
+        ),
+      ),
+    );
+    const api = content("src/api/imports.ts") ?? "";
+
+    expect(api).toContain('  readonly file?: Serialize.ChosenPart<"text/csv"> | undefined;');
+    expect(api).toContain('["file", input.body.file],');
+    expect(api).not.toContain("ContentType =");
   });
 });

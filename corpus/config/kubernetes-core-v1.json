@@ -1,0 +1,944 @@
+{
+  "binName": "kubernetes-core",
+  "envPrefix": "KUBERNETES",
+  "naming": {
+    "operations": {
+      "connectCoreV1DeleteNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1DeleteNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1DeleteNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1GetNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1GetNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1GetNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1HeadNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1HeadNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1HeadNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1OptionsNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1OptionsNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1OptionsNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PatchNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PatchNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PatchNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PostNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PostNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PostNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PutNamespacedPodProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PutNamespacedServiceProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "connectCoreV1PutNodeProxyWithPath": {
+        "parameters": {
+          "path:path": {
+            "flag": "proxy-path"
+          }
+        }
+      },
+      "createCoreV1Namespace": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedBinding": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedConfigMap": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedEndpoints": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedEvent": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedLimitRange": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedPersistentVolumeClaim": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedPod": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedPodBinding": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedPodEviction": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedPodTemplate": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedReplicationController": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedResourceQuota": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedSecret": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedService": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedServiceAccount": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1NamespacedServiceAccountToken": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1Node": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "createCoreV1PersistentVolume": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedConfigMap": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedEndpoints": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedEvent": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedLimitRange": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedPersistentVolumeClaim": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedPod": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedPodTemplate": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedReplicationController": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedResourceQuota": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedSecret": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedService": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNamespacedServiceAccount": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionNode": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1CollectionPersistentVolume": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1Namespace": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedConfigMap": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedEndpoints": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedEvent": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedLimitRange": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedPersistentVolumeClaim": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedPod": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedPodTemplate": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedReplicationController": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedResourceQuota": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedSecret": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedService": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1NamespacedServiceAccount": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1Node": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "deleteCoreV1PersistentVolume": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "patchCoreV1Namespace": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespaceStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedConfigMap": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedEndpoints": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedEvent": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedLimitRange": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPersistentVolumeClaim": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPersistentVolumeClaimStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPod": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPodEphemeralcontainers": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPodResize": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPodStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedPodTemplate": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedReplicationController": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedReplicationControllerScale": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedReplicationControllerStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedResourceQuota": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedResourceQuotaStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedSecret": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedService": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedServiceAccount": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NamespacedServiceStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1Node": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1NodeStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1PersistentVolume": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "patchCoreV1PersistentVolumeStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          },
+          "query:force": {
+            "flag": "force-conflicts"
+          }
+        }
+      },
+      "replaceCoreV1Namespace": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespaceFinalize": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespaceStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedConfigMap": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedEndpoints": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedEvent": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedLimitRange": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPersistentVolumeClaim": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPersistentVolumeClaimStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPod": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPodEphemeralcontainers": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPodResize": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPodStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedPodTemplate": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedReplicationController": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedReplicationControllerScale": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedReplicationControllerStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedResourceQuota": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedResourceQuotaStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedSecret": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedService": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedServiceAccount": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NamespacedServiceStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1Node": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1NodeStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1PersistentVolume": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      },
+      "replaceCoreV1PersistentVolumeStatus": {
+        "parameters": {
+          "query:dryRun": {
+            "flag": "server-dry-run"
+          }
+        }
+      }
+    }
+  },
+  "package": {
+    "name": "kubernetes-core-cli",
+    "version": "0.1.0"
+  }
+}

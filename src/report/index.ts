@@ -1,9 +1,73 @@
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Order, Schema } from "effect";
+import type { Types } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
+import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
+import { nonStandardOrigins } from "../model/non-standard.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
+
+/**
+ * Where a command name came from (design 8.1, D-NAME4). `tag` and `none` name groups only, so a
+ * command never carries them.
+ */
+export const CommandNameSource = Schema.Literals([
+  "config",
+  "operationId",
+  "route",
+  "x-fern",
+  "x-forge",
+]);
+
+/**
+ * Where a command's group name came from (design 8.1, D-NAME4): the first tag, or `none` for a root
+ * command. `operationId` and `route` name commands only, so a group never carries them.
+ */
+export const GroupNameSource = Schema.Literals(["config", "none", "tag", "x-fern", "x-forge"]);
+
+/**
+ * One emitted command (design 8.1 `commandNames`): its visible path (group names, then the
+ * command), the operation's use site, the source of each name, and for an alias command its index
+ * in the author-config `aliases` or else in `x-forge-aliases`.
+ */
+export const CommandName = Schema.Struct({
+  alias: Schema.optionalKey(Schema.Int),
+  command: CommandNameSource,
+  document: DocumentUri,
+  group: GroupNameSource,
+  path: Schema.Array(Schema.String),
+  pointer: JsonPointer,
+});
+
+/**
+ * One element the author config made non-standard (design 8.1 `nonStandard`, 6.1): the choice and
+ * the config key that made it, the element's use site, and the row it departs from.
+ */
+export const NonStandardEntry = Schema.Struct({
+  choice: Schema.Literal("deepObjectBrackets"),
+  configKey: Schema.Literal("nonStandard.deepObjectBrackets"),
+  document: DocumentUri,
+  pointer: JsonPointer,
+  row: Schema.Literal("PRM-27"),
+});
+
+export type NonStandardEntryValue = typeof NonStandardEntry.Type;
+
+/**
+ * One operation the author config skipped (`naming.operations[<id>].skip`, or `naming.byPointer`
+ * for an operation with no operationId; design 8.2): a recorded choice, not a refusal, so it has no
+ * command and coverage counts it and its subtree as accounted for. `operationId` is absent for an
+ * operation keyed by pointer.
+ */
+export const SkippedOperation = Schema.Struct({
+  document: DocumentUri,
+  operationId: Schema.optionalKey(Schema.String),
+  pointer: JsonPointer,
+  reason: Schema.Literal("config-skip"),
+});
+
+export type SkippedOperationValue = typeof SkippedOperation.Type;
 
 /**
  * `generation-report.json` (design 8.1, 3.7): what one run refused, noticed, renamed and accepted,
@@ -12,26 +76,43 @@ const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/
  */
 export const GenerationReport = Schema.Struct({
   acceptedServers: Schema.Array(Schema.String),
+  // Present only when the author config added a scheme (D-OQ3 (b)): the scheme and the key that
+  // added it.
+  authorSuppliedSchemes: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ key: Schema.String, name: Schema.String })),
+  ),
+  commandNames: Schema.Array(CommandName),
   generator: Schema.Struct({ version: Schema.String }),
   inputs: Schema.Array(Schema.Struct({ document: DocumentUri, sha256: Sha256 })),
+  // Always present, empty unless the author config switched a non-standard choice on.
+  nonStandard: Schema.Array(NonStandardEntry),
   notices: Schema.Array(Diagnostic),
   refusals: Schema.Array(Diagnostic),
   renames: Schema.Array(
     Schema.Struct({ from: Schema.String, pointer: JsonPointer, to: Schema.String }),
   ),
+  // Always present, empty unless the author config skipped an operation.
+  skipped: Schema.Array(SkippedOperation),
 });
 
 export type GenerationReportValue = typeof GenerationReport.Type;
 
 /**
  * What one run knows. `diagnostics` arrive already in diagnostic order (design 3.7), `inputs` in
- * document order; the report keeps both orders.
+ * document order and `commandNames` in command order; the report keeps each order.
  */
 export interface GenerationReportInput {
   readonly acceptedServers: GenerationReportValue["acceptedServers"];
+  // The emitted commands in command order; absent, the run emitted none.
+  readonly commandNames?: GenerationReportValue["commandNames"];
   readonly diagnostics: readonly Diagnostic[];
   readonly inputs: GenerationReportValue["inputs"];
+  // The non-standard elements in diagnostic order; absent, none.
+  readonly nonStandard?: GenerationReportValue["nonStandard"];
   readonly renames: GenerationReportValue["renames"];
+  readonly schemes?: readonly SecurityScheme[];
+  // The author-skipped operations in diagnostic order; absent, none.
+  readonly skipped?: GenerationReportValue["skipped"];
   readonly version: string;
 }
 
@@ -47,17 +128,102 @@ export type GeneratorOutcome =
     }
   | { readonly _tag: "LockHeld" };
 
+// Diagnostic order (design 3.7) over use sites: document index, then pointer.
+interface UseSite {
+  readonly document: string;
+  readonly pointer: string;
+}
+
+const useSiteOrder = (documents: readonly string[]): Order.Order<UseSite> =>
+  Order.combine(
+    Order.mapInput(Order.Number, (entry: UseSite) => {
+      const index = documents.indexOf(entry.document);
+
+      return index === -1 ? documents.length : index;
+    }),
+    Order.mapInput(pointerOrder, (entry: UseSite) => entry.pointer),
+  );
+
+const entryAt = (origin: { readonly document: string; readonly pointer: string }) =>
+  Schema.decodeUnknownSync(NonStandardEntry)({
+    choice: "deepObjectBrackets",
+    configKey: "nonStandard.deepObjectBrackets",
+    document: origin.document,
+    pointer: origin.pointer,
+    row: "PRM-27",
+  });
+
+/**
+ * The elements of the normalized model that carry the non-standard marker (design 6.1): query
+ * parameters, and form Encoding entries of bodies and of `querystring` form content, that the
+ * author config sends in the bracket convention. The
+ * marker is read as the model holds it, never inferred; a model with none lists none. Entries are
+ * in diagnostic order over `documents`.
+ */
+export const nonStandardEntries = (
+  api: Api,
+  documents: readonly string[],
+): GenerationReportValue["nonStandard"] => {
+  const marked = api.operations.flatMap((operation) => [
+    ...operation.parameters.flatMap(({ serialization }) =>
+      nonStandardOrigins(serialization).map(entryAt),
+    ),
+    ...(operation.body?.alternatives ?? []).flatMap((alternative) =>
+      alternative.encoding.flatMap((rule) =>
+        rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
+      ),
+    ),
+  ]);
+
+  return Arr.sort(marked, useSiteOrder(documents));
+};
+
+/**
+ * The report entries for the operations the author config skipped, in diagnostic order over
+ * `documents`. Which operations are skipped is the names plan's rule; the caller passes them.
+ */
+export const skippedEntries = (
+  operations: readonly Operation[],
+  documents: readonly string[],
+): GenerationReportValue["skipped"] =>
+  Arr.sort(
+    operations.map(({ operationId, origin }) => {
+      const entry: Types.Mutable<SkippedOperationValue> = {
+        document: origin.document,
+        pointer: origin.pointer,
+        reason: "config-skip",
+      };
+      if (operationId !== undefined) {
+        entry.operationId = operationId;
+      }
+
+      return entry;
+    }),
+    useSiteOrder(documents),
+  );
+
 /**
  * Splits the diagnostics by severity into the report value, keeping their order.
  */
-export const makeGenerationReport = (input: GenerationReportInput): GenerationReportValue => ({
-  acceptedServers: input.acceptedServers,
-  generator: { version: input.version },
-  inputs: input.inputs,
-  notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
-  refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
-  renames: input.renames,
-});
+export const makeGenerationReport = (input: GenerationReportInput): GenerationReportValue => {
+  const added = (input.schemes ?? [])
+    .filter((scheme) => scheme.source === "author-supplied")
+    .map((scheme) => ({ key: `security.add.schemes.${scheme.name}`, name: scheme.name }));
+
+  const report: GenerationReportValue = {
+    acceptedServers: input.acceptedServers,
+    commandNames: input.commandNames ?? [],
+    generator: { version: input.version },
+    inputs: input.inputs,
+    nonStandard: input.nonStandard ?? [],
+    notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
+    refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
+    renames: input.renames,
+    skipped: input.skipped ?? [],
+  };
+
+  return added.length === 0 ? report : { ...report, authorSuppliedSchemes: added };
+};
 
 /**
  * Prints the report file: the value is encoded through `GenerationReport`, so a bad digest fails

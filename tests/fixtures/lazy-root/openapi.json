@@ -1,0 +1,66 @@
+{
+  "openapi": "3.2.1",
+  "info": { "title": "Lazy root", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [
+    { "name": "pets", "description": "Pets in the store." },
+    { "name": "toys", "parent": "pets", "description": "A pet's toys." },
+    { "name": "stores", "description": "Store locations." }
+  ],
+  "security": [{ "apiKey": [] }],
+  "components": {
+    "securitySchemes": {
+      "apiKey": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+    }
+  },
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "pets-list",
+        "summary": "List pets.",
+        "tags": ["pets"],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "format": "int32" } }
+        ],
+        "responses": { "200": { "description": "The pets." } }
+      }
+    },
+    "/pets/{petId}": {
+      "get": {
+        "operationId": "pets-get",
+        "summary": "Get a pet.",
+        "tags": ["pets"],
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "The pet." } }
+      }
+    },
+    "/pets/{petId}/toys": {
+      "get": {
+        "operationId": "toys-list",
+        "summary": "List a pet's toys.",
+        "tags": ["toys"],
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "The toys." } }
+      }
+    },
+    "/stores": {
+      "get": {
+        "operationId": "stores-list",
+        "summary": "List stores.",
+        "tags": ["stores"],
+        "responses": { "200": { "description": "The stores." } }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Check the service.",
+        "responses": { "200": { "description": "Healthy." } }
+      }
+    }
+  }
+}

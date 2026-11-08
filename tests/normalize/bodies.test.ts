@@ -2,8 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { EncodingRule, MediaAlternative } from "../../src/model/entities.ts";
-import { BodyNodeBudget, BodyNotReadable, normalizeBody } from "../../src/normalize/bodies.ts";
+import { checkSpecText } from "../../src/check/index.ts";
+import {
+  BodyNodeBudget,
+  BodyNotReadable,
+  hintDiscriminators,
+  normalizeBody,
+} from "../../src/normalize/bodies.ts";
 import type { BodyOutcome } from "../../src/normalize/bodies.ts";
+import { deepObjectExplodeText } from "../../src/normalize/parameters.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
@@ -122,7 +129,8 @@ describe("RQB-03 codec is derived from the media type, never from the schema", (
   for (const [mediaType, codec] of families) {
     test(`${mediaType} is ${codec} on every line`, () => {
       for (const line of lines) {
-        const media: Json = mediaType.startsWith("multipart/") ? { schema: object({}) } : {};
+        // An untyped schema: an object one would be refused on multipart/mixed (MED-25).
+        const media: Json = mediaType.startsWith("multipart/") ? { schema: {} } : {};
         expect(plain(alternativeOf(line, mediaType, media).codec)).toBe(codec);
       }
     });
@@ -199,7 +207,7 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
       {
         requestBodies: {
           Thing: {
-            content: { "application/json": {}, "application/x-www-form-urlencoded": {} },
+            content: { "application/json": {}, "multipart/form-data": {} },
             description: "Shared",
           },
         },
@@ -212,8 +220,9 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
     expect(String(outcome.body.origin.pointer)).toBe(site);
     expect(String(diagnostic.pointer)).toBe(site);
     expect(diagnostic.related?.map((related) => String(related.pointer))).toEqual([
-      "/components/requestBodies/Thing/content/application~1x-www-form-urlencoded",
+      "/components/requestBodies/Thing/content/multipart~1form-data",
     ]);
+    expect(diagnostic.code).toBe("ENC-33/missing-schema");
   });
 
   test("RQB-07 an empty content map leaves nothing to send and is refused", () => {
@@ -226,10 +235,10 @@ describe("RQB-01 RQB-04 body facts and schema references", () => {
     }
   });
 
-  test("MED-24 a key that is not a media range is refused and the others stay", () => {
+  test("MED-24 a key that is not a media range is dropped and the others stay; the grammar check reports it", () => {
     const outcome = implemented("3.1", { content: { "not a media type": {}, "text/plain": {} } });
 
-    expect(codes(outcome)).toEqual(["MED-24/invalid-media-type"]);
+    expect(codes(outcome)).toEqual([]);
     expect(outcome.body.alternatives.map((alternative) => String(alternative.mediaType))).toEqual([
       "text/plain",
     ]);
@@ -286,8 +295,8 @@ describe("ENC-17 to ENC-26 the default contentType table", () => {
     });
   });
 
-  test("3.2 types every array as application/json", () => {
-    expect(typesFor("3.2").list).toEqual(["application/json"]);
+  test("3.2 types a top-level array property by its items, encoded per item (ENC-24)", () => {
+    expect(typesFor("3.2").list).toEqual(["text/plain"]);
   });
 
   test("an array of binary items is octet-stream in 3.0 by format and in 3.1 by type absent", () => {
@@ -375,11 +384,18 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
 
     expect(rule.serialization).toEqual({ explode: false, style: "form" });
     expect(rule.contentType).toEqual([]);
-    expect(codes(outcome)).toEqual(["ENC-13/content-type-ignored"]);
-    expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13"]);
+    expect(codes(outcome)).toEqual([
+      "ENC-13/content-type-ignored",
+      "ENC-40/unsupported-part-style",
+    ]);
+    expect(outcome.diagnostics.map(({ scope, severity }) => [scope, severity])).toEqual([
+      ["element", "notice"],
+      ["element", "refusal"],
+    ]);
+    expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13", "ENC-40"]);
   });
 
-  test("allowReserved alone is explicit and keeps only the fields given", () => {
+  test("allowReserved alone is explicit, keeps only the fields given, and is sent as text/plain", () => {
     const outcome = implemented(
       "3.2",
       multipart(object({ q: string }), {
@@ -389,7 +405,7 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     const rule = only(only(outcome.body.alternatives).encoding);
 
     expect(rule.serialization).toEqual({ allowReserved: true });
-    expect(rule.contentType).toEqual([]);
+    expect(rule.contentType.map(String)).toEqual(["text/plain"]);
     expect(codes(outcome)).toEqual([]);
   });
 
@@ -407,15 +423,14 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     expect(codes(outcome)).toEqual(["ENC-12/style-ignored"]);
   });
 
-  test("ENC-12 style fields on multipart/mixed are ignored in every line", () => {
-    const outcome = implemented("3.1", {
-      content: {
-        "multipart/mixed": {
-          encoding: { q: { explode: true } },
-          schema: object({ q: string }),
-        },
-      },
-    });
+  test("ENC-12 style fields on a multipart/mixed position are ignored", () => {
+    const outcome = implemented(
+      "3.2",
+      mixed({
+        prefixEncoding: [{ explode: true }],
+        schema: { prefixItems: [string], type: "array" },
+      }),
+    );
 
     expect(codes(outcome)).toEqual(["ENC-12/style-ignored"]);
   });
@@ -454,6 +469,93 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     );
 
     expect(codes(outcome)).toEqual(["ENC-03/invalid-header-name"]);
+  });
+
+  test("HDR-01: a part header is typed and serialized as a header parameter, with its marks", () => {
+    const outcome = implemented(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: {
+          file: {
+            headers: {
+              "X-Meta": { content: { "application/json": { schema: object({ a: string }) } } },
+              "X-Tags": {
+                deprecated: true,
+                explode: true,
+                schema: { items: string, type: "array" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const [meta, tags] = only(only(outcome.body.alternatives).encoding).headers;
+    const at = `${site}/content/multipart~1form-data/encoding/file/headers`;
+
+    expect(meta?.serialization).toMatchObject({ kind: "content", mediaType: "application/json" });
+    expect(String(meta?.serialization.origin.pointer)).toBe(`${at}/X-Meta`);
+    expect(tags?.schema.key).toContain("X-Tags");
+    expect(tags).toMatchObject({ deprecated: true, required: false });
+    expect(tags?.serialization).toMatchObject({
+      explode: true,
+      kind: "style",
+      objectValued: false,
+      style: "simple",
+    });
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-03: headers the multipart writer owns get a notice and leave the rule", () => {
+    const outcome = implemented(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: {
+          file: {
+            headers: {
+              "Content-Disposition": { schema: string },
+              "Content-Transfer-Encoding": { schema: string },
+              "X-Rate": { schema: string },
+            },
+          },
+        },
+      }),
+    );
+    const rule = only(only(outcome.body.alternatives).encoding);
+
+    expect(rule.headers.map((header) => String(header.name))).toEqual(["X-Rate"]);
+    expect(rule.rows.map(String)).toContain("ENC-03");
+    expect(codes(outcome)).toEqual(["ENC-03/writer-owned-header", "ENC-03/writer-owned-header"]);
+    expect(outcome.diagnostics.map(({ pointer }) => String(pointer))).toEqual([
+      `${site}/content/multipart~1form-data/encoding/file/headers/Content-Disposition`,
+      `${site}/content/multipart~1form-data/encoding/file/headers/Content-Transfer-Encoding`,
+    ]);
+  });
+
+  test("ENC-03: Content-Disposition is the writer's only under multipart/form-data", () => {
+    const alternative = alternativeOf("3.2", "multipart/mixed", {
+      prefixEncoding: [{ headers: { "Content-Disposition": { schema: string } } }],
+      schema: { prefixItems: [string], type: "array" },
+    });
+
+    expect(
+      alternative.prefixEncoding.flatMap((rule) => rule.headers.map(({ name }) => String(name))),
+    ).toEqual(["Content-Disposition"]);
+  });
+
+  test("ENC-03: a part header the header parameter path cannot carry refuses the alternative", () => {
+    const outcome = refused(
+      "3.1",
+      multipart(object({ file: string }), {
+        encoding: { file: { headers: { "X-Pos": { schema: string, style: "matrix" } } } },
+      }),
+    );
+    const [diagnostic] = outcome.diagnostics;
+
+    expect(codes(outcome)).toEqual(["ENC-03/unsupported-part-header"]);
+    expect(String(diagnostic?.pointer)).toBe(`${site}/content/multipart~1form-data`);
+    expect(diagnostic?.related?.map(({ pointer }) => String(pointer))).toEqual([
+      `${site}/content/multipart~1form-data/encoding/file/headers/X-Pos`,
+    ]);
   });
 
   test("MED-11 3.0 and 3.1 refuse an encoding key with no schema property", () => {
@@ -647,58 +749,140 @@ describe("SCO-10 XML bodies are opaque", () => {
   });
 });
 
-describe("ENC-27 ENC-28 form-urlencoded request bodies are not implemented in Milestone 1", () => {
+// A multipart body whose `doc` part is an object typed by `contentType`, beside other media types.
+const xmlPart = (contentType: string, siblings: Members = {}): Members => ({
+  content: {
+    "multipart/form-data": {
+      encoding: { doc: { contentType } },
+      schema: object({
+        doc: object({ id: { type: "integer", xml: { attribute: true } } }),
+        name: string,
+      }),
+    },
+    ...siblings,
+  },
+});
+
+describe("XML-01 a multipart part typed as XML over an object schema is schema-driven XML, refused (D-SCH3)", () => {
+  const media = "/paths/~1a/post/requestBody/content/multipart~1form-data";
+
+  test("the part drops its alternative at element scope, naming the part and the XML Object section", () => {
+    for (const line of lines) {
+      for (const contentType of ["application/xml", "text/xml", "application/atom+xml"]) {
+        const outcome = refused(line, xmlPart(contentType));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(outcome).toMatchObject({ _tag: "Refused", required: false });
+        expect(diagnostic.code).toBe("XML-01/schema-driven");
+        expect(diagnostic.scope).toBe("element");
+        expect(diagnostic.severity).toBe("refusal");
+        expect(String(diagnostic.pointer)).toBe(media);
+        expect(diagnostic.related?.map((key) => String(key.pointer))).toEqual([
+          `${media}/encoding/doc/contentType`,
+        ]);
+        expect(plain(diagnostic.specSection)).toBe(
+          `https://spec.openapis.org/oas/v${specVersion[line]}.html#xml-object`,
+        );
+      }
+    }
+  });
+
+  test("a required body keeps required, so the operation assembly raises it", () => {
+    const outcome = refused("3.1", { ...xmlPart("application/xml"), required: true });
+
+    expect(outcome).toMatchObject({ _tag: "Refused", required: true });
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("a sibling alternative stays and the XML part's alternative is gone", () => {
+    const outcome = implemented(
+      "3.1",
+      xmlPart("application/xml", { "application/json": { schema: string } }),
+    );
+
+    expect(outcome.body.alternatives.map((alternative) => String(alternative.mediaType))).toEqual([
+      "application/json",
+    ]);
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("an object found through a reference or allOf is still an object", () => {
+    const outcome = normalize(
+      "3.1",
+      {
+        content: {
+          "multipart/form-data": {
+            encoding: { doc: { contentType: "application/xml" } },
+            schema: object({ doc: { allOf: [{ $ref: "#/components/schemas/Doc" }] } }),
+          },
+        },
+      },
+      { schemas: { Doc: { properties: { id: { type: "integer" } } } } },
+    );
+
+    expect(codes(outcome)).toEqual(["XML-01/schema-driven"]);
+  });
+
+  test("a string part typed as XML is the operator's text, and a JSON object part is unchanged", () => {
+    const alternative = alternativeOf("3.1", "multipart/form-data", {
+      encoding: {
+        doc: { contentType: "application/json" },
+        raw: { contentType: "application/xml" },
+      },
+      schema: object({ doc: object({ id: { type: "integer" } }), raw: string }),
+    });
+
+    expect(typesOf(alternative.encoding)).toEqual({
+      doc: ["application/json"],
+      raw: ["application/xml"],
+    });
+  });
+});
+
+describe("ENC-27 ENC-28 form-urlencoded request bodies are form alternatives with a rule per property", () => {
   const form: Json = {
     content: { "application/x-www-form-urlencoded": { schema: object({ a: string }) } },
   };
 
-  test("3.0 and 3.1 report ENC-27 and 3.2 reports ENC-28, at element scope with the line's section", () => {
-    const expected = {
-      "3.0": "ENC-27/not-implemented",
-      "3.1": "ENC-27/not-implemented",
-      "3.2": "ENC-28/not-implemented",
-    } as const;
+  test("3.0 and 3.1 name ENC-27 and 3.2 names ENC-28, with the schema and one rule per property", () => {
+    const expected = { "3.0": "ENC-27", "3.1": "ENC-27", "3.2": "ENC-28" } as const;
     for (const line of lines) {
-      const outcome = refused(line, { ...form, required: true });
-      const diagnostic = only(outcome.diagnostics);
+      const outcome = implemented(line, { ...form, required: true });
+      const alternative = only(outcome.body.alternatives);
+      const rule = only(alternative.encoding);
 
-      expect(diagnostic.code).toBe(expected[line]);
-      expect(plain(diagnostic.row)).toBe(expected[line].slice(0, 6));
-      expect(diagnostic.scope).toBe("element");
-      expect(diagnostic.severity).toBe("refusal");
-      expect(plain(diagnostic.specSection)).toBe(
-        `https://spec.openapis.org/oas/v${specVersion[line]}.html#encoding-the-x-www-form-urlencoded-media-type`,
-      );
-      expect(diagnostic.hint).toContain("Milestone 2");
-      expect(String(diagnostic.pointer)).toBe(
+      expect(outcome.diagnostics).toEqual([]);
+      expect(outcome.body.required).toBe(true);
+      expect(alternative.codec).toBe("form");
+      expect(alternative.schema).toBeDefined();
+      expect(alternative.rows.map(String)).toContain(expected[line]);
+      expect(String(alternative.origin.pointer)).toBe(
         "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded",
       );
-      expect(diagnostic.openapi).toBe(openapi[line]);
-      expect(outcome.required).toBe(true);
+      expect(targetOf(rule)).toBe("a");
+      expect(rule.contentType.map(String)).toEqual(["text/plain"]);
+      expect(rule.serialization).toBeUndefined();
+      expect(alternative.prefixEncoding).toEqual([]);
     }
   });
 
-  test("the code names no milestone", () => {
-    for (const line of lines) {
-      expect(only(refused(line, form).diagnostics).code).not.toMatch(/milestone|m[0-9]/iu);
-    }
+  test("a media type with parameters or another case is the same form alternative", () => {
+    const alternative = alternativeOf("3.1", "Application/X-WWW-Form-Urlencoded; charset=UTF-8");
+
+    expect(alternative.codec).toBe("form");
+    expect(String(alternative.mediaType)).toBe("Application/X-WWW-Form-Urlencoded; charset=UTF-8");
   });
 
-  test("a media type with parameters or another case is the same refusal", () => {
-    const outcome = refused("3.1", {
-      content: { "Application/X-WWW-Form-Urlencoded; charset=UTF-8": {} },
-    });
-
-    expect(codes(outcome)).toEqual(["ENC-27/not-implemented"]);
-  });
-
-  test("a sibling alternative keeps the body, which only loses the form", () => {
+  test("a sibling alternative stays beside the form", () => {
     const outcome = implemented("3.1", {
       content: { "application/json": {}, "application/x-www-form-urlencoded": {} },
     });
 
-    expect(codes(outcome)).toEqual(["ENC-27/not-implemented"]);
-    expect(outcome.body.alternatives.map((alternative) => alternative.codec)).toEqual(["json"]);
+    expect(codes(outcome)).toEqual([]);
+    expect(outcome.body.alternatives.map((alternative) => alternative.codec)).toEqual([
+      "json",
+      "form",
+    ]);
   });
 });
 
@@ -755,6 +939,57 @@ describe("SCH-13 S30-24 multipart-extra-fields: a schema-valued additionalProper
     };
 
     expect(codes(implemented("3.1", json))).toEqual([]);
+  });
+});
+
+describe("MED-25 an object schema on a multipart type other than form-data is refused", () => {
+  const media = "/paths/~1a/post/requestBody/content/multipart~1mixed";
+  const anchors: Record<Line, string> = {
+    "3.0": "encoding-multipart-media-types",
+    "3.1": "encoding-multipart-media-types",
+    "3.2": "additional-encoding-approaches",
+  };
+
+  for (const line of lines) {
+    test(`MED-25 ${line} the alternative is refused at the media type, the others stay`, () => {
+      const outcome = implemented(line, {
+        content: {
+          "application/json": { schema: object({ q: string }) },
+          "multipart/mixed": { schema: object({ q: string }) },
+        },
+      });
+      const diagnostic = only(outcome.diagnostics);
+
+      expect(diagnostic.code).toBe("MED-25/unnamed-parts");
+      expect(diagnostic.scope).toBe("element");
+      expect(diagnostic.severity).toBe("refusal");
+      expect(String(diagnostic.pointer)).toBe(media);
+      expect(diagnostic.related?.map((key) => String(key.pointer))).toEqual([`${media}/schema`]);
+      expect(plain(diagnostic.specSection)).toBe(
+        `https://spec.openapis.org/oas/v${specVersion[line]}.html#${anchors[line]}`,
+      );
+      expect(outcome.body.alternatives.map((alternative) => String(alternative.mediaType))).toEqual(
+        ["application/json"],
+      );
+    });
+  }
+
+  test("MED-25 an object found through a reference is refused on any non-form multipart type", () => {
+    const outcome = refused("3.1", {
+      content: { "multipart/related": { schema: { allOf: [object({ q: string })] } } },
+    });
+
+    expect(codes(outcome)).toEqual(["MED-25/unnamed-parts"]);
+  });
+
+  test("MED-25 form-data, a multipart range and a 3.2 positional array body are not refused", () => {
+    expect(codes(implemented("3.1", multipart(object({ q: string }))))).toEqual([]);
+    expect(
+      codes(implemented("3.1", { content: { "multipart/*": { schema: object({ q: string }) } } })),
+    ).toEqual([]);
+    expect(codes(implemented("3.2", mixed({ schema: { items: string, type: "array" } })))).toEqual(
+      [],
+    );
   });
 });
 
@@ -836,5 +1071,206 @@ describe("REF-18 node-budget: allOf members shared by many parents are expanded 
       expect(failure.diagnostic.code).toBe("REF-18/node-budget");
       expect(failure.diagnostic.scope).toBe("document");
     }
+  });
+});
+
+const schemaRef = (name: string): Json => ({ $ref: `#/components/schemas/${name}` });
+
+// A pet component that requires `petType` and its own boolean.
+const pet = (own: string): Json => ({
+  properties: { [own]: { type: "boolean" }, petType: { type: "string" } },
+  required: ["petType", own],
+  type: "object",
+});
+
+describe("DSC-01 DSC-07 DSC-09 DSC-11 the discriminator hint", () => {
+  const pets: Members = { Cat: pet("meow"), Dog: pet("bark") };
+
+  // The hint on the one alternative of a JSON body, after check's findings are read.
+  const hintOf = (line: Line, schema: Json, schemas: Members = pets) => {
+    const requestBody = { content: { "application/json": { schema } }, required: true };
+    const value = documentOf(line, requestBody, { schemas });
+    const resolution = Effect.runSync(resolve({ document: entry, line, value }));
+    const findings = Effect.runSync(checkSpecText(resolution));
+    const outcome = Effect.runSync(
+      normalizeBody(resolution, { openapi: openapi[line], pointer: site }),
+    );
+    if (outcome._tag !== "Implemented") {
+      throw new Error(`expected Implemented, got ${outcome._tag}`);
+    }
+
+    const body = Effect.runSync(hintDiscriminators(resolution, outcome.body, findings));
+
+    return {
+      codes: findings.map((finding) => finding.code),
+      hint: body.alternatives[0]?.discriminator,
+    };
+  };
+
+  test("DSC-09 a refused discriminator (the witness optional document, 3.1.2) yields no hint", () => {
+    const found = hintOf("3.1", {
+      discriminator: { propertyName: "petType" },
+      oneOf: [
+        { properties: { petType: { type: "string" }, purr: { type: "boolean" } }, type: "object" },
+        schemaRef("Dog"),
+      ],
+    });
+
+    expect(found).toEqual({ codes: ["DSC-09/property-not-required"], hint: undefined });
+  });
+
+  test("DSC-01 DSC-07 branches are labeled by mapping keys, else the component name; inline is unlabeled", () => {
+    for (const line of lines) {
+      const found = hintOf(line, {
+        discriminator: {
+          mapping: { cat: "Cat", kitty: "#/components/schemas/Cat" },
+          propertyName: "petType",
+        },
+        oneOf: [
+          schemaRef("Cat"),
+          schemaRef("Dog"),
+          { properties: { petType: { type: "string" } }, required: ["petType"], type: "object" },
+        ],
+      });
+
+      expect(found).toEqual({
+        codes: [],
+        hint: {
+          branches: [
+            { component: "Cat", index: 0, labels: ["cat", "kitty"] },
+            { component: "Dog", index: 1, labels: ["Dog"] },
+            { index: 2, labels: [] },
+          ],
+          keyword: "oneOf",
+          propertyName: "petType",
+        },
+      });
+    }
+  });
+
+  test("DSC-11 an allOf base lists the entry components whose allOf references it, in key order", () => {
+    const base: Json = {
+      discriminator: { propertyName: "petType" },
+      properties: { petType: { type: "string" } },
+      required: ["petType"],
+      type: "object",
+    };
+    const found = hintOf("3.0", schemaRef("Pet"), {
+      Hound: { allOf: [schemaRef("Pet"), { properties: { bark: { type: "boolean" } } }] },
+      Kitty: { allOf: [schemaRef("Pet"), { properties: { meow: { type: "boolean" } } }] },
+      Other: { oneOf: [schemaRef("Pet")] },
+      Pet: base,
+    });
+
+    expect(found).toEqual({
+      codes: [],
+      hint: {
+        branches: [
+          { component: "Hound", index: 0, labels: ["Hound"] },
+          { component: "Kitty", index: 1, labels: ["Kitty"] },
+        ],
+        keyword: "allOf",
+        propertyName: "petType",
+      },
+    });
+  });
+
+  test("a body with no discriminator has no hint", () => {
+    expect(hintOf("3.1", { oneOf: [schemaRef("Cat"), schemaRef("Dog")] }).hint).toBeUndefined();
+  });
+});
+
+const deepForm = (encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding: { a: encoding },
+      schema: object({ a: object({ x: string }) }),
+    },
+  },
+});
+
+describe("ENC-12 a form deepObject with explode false or omitted is exploded with the STY-26 notice", () => {
+  const encodingAt =
+    "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a";
+
+  for (const line of ["3.0", "3.1"] as const) {
+    for (const [label, encoding] of [
+      ["omitted", { style: "deepObject" }],
+      ["false", { explode: false, style: "deepObject" }],
+    ] as const) {
+      test(`ENC-12 ${line} explode ${label}: one notice at the Encoding entry, sharing the STY-26 text`, () => {
+        const outcome = implemented(line, deepForm(encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe("ENC-12/explode-no-effect");
+        expect(diagnostic.severity).toBe("notice");
+        expect(String(diagnostic.pointer)).toBe(encodingAt);
+        expect(diagnostic.message).toBe(deepObjectExplodeText);
+        expect(plain(diagnostic.specSection)).toBe(
+          `https://spec.openapis.org/oas/v${specVersion[line]}.html#encoding-explode`,
+        );
+        expect(only(only(outcome.body.alternatives).encoding).serialization).toEqual(encoding);
+      });
+    }
+  }
+
+  test("ENC-12 explode true on 3.0 and 3.1, and any explode on 3.2, raise no notice", () => {
+    expect(codes(implemented("3.0", deepForm({ explode: true, style: "deepObject" })))).toEqual([]);
+    expect(codes(implemented("3.1", deepForm({ explode: true, style: "deepObject" })))).toEqual([]);
+    expect(codes(implemented("3.2", deepForm({ style: "deepObject" })))).toEqual([]);
+  });
+});
+
+const styledForm = (property: Json, encoding: Json): Json => ({
+  content: {
+    "application/x-www-form-urlencoded": {
+      encoding: { a: encoding },
+      schema: object({ a: property }),
+    },
+  },
+});
+
+describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table's applicability checks", () => {
+  const array: Json = { items: string, type: "array" };
+  const cases: readonly (readonly [string, Json, Json])[] = [
+    ["STY-18/explode-not-applicable", array, { explode: true, style: "spaceDelimited" }],
+    [
+      "STY-20/explode-not-applicable",
+      array,
+      { allowReserved: true, explode: true, style: "spaceDelimited" },
+    ],
+    ["STY-22/explode-not-applicable", array, { explode: true, style: "pipeDelimited" }],
+    [
+      "STY-24/explode-not-applicable",
+      array,
+      { allowReserved: true, explode: true, style: "pipeDelimited" },
+    ],
+    ["STY-17/primitive-not-applicable", string, { style: "spaceDelimited" }],
+    ["STY-21/primitive-not-applicable", string, { style: "pipeDelimited" }],
+    ["PRM-27/non-object-schema", string, { style: "deepObject" }],
+  ];
+
+  for (const line of lines) {
+    for (const [code, property, encoding] of cases) {
+      test(`${code} ${line} refuses the form alternative at element scope`, () => {
+        const outcome = refused(line, styledForm(property, encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe(code);
+        expect(diagnostic.scope).toBe("element");
+        expect(diagnostic.severity).toBe("refusal");
+        expect(diagnostic.related?.map((at) => String(at.pointer))).toEqual([
+          "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
+        ]);
+      });
+    }
+  }
+
+  test("the style table's legal form encodings are kept", () => {
+    expect(codes(implemented("3.1", styledForm(array, { style: "pipeDelimited" })))).toEqual([]);
+    expect(codes(implemented("3.1", styledForm(array, { style: "spaceDelimited" })))).toEqual([]);
+    expect(
+      codes(implemented("3.2", styledForm(object({ x: string }), { style: "deepObject" }))),
+    ).toEqual([]);
   });
 });

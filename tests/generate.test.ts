@@ -141,7 +141,7 @@ const failureOf = (exit: Exit.Exit<GenerateResult, unknown>): typeof RunFailure.
 
 const paths = decodeRecord(goldenSpec.paths);
 
-// The golden spec plus one operation whose only request body is `text/plain`.
+// The golden spec plus one operation whose only request body is `text/event-stream`.
 const withTextBody: Schema.Json = {
   ...goldenSpec,
   paths: {
@@ -149,7 +149,10 @@ const withTextBody: Schema.Json = {
     "/notes": {
       post: {
         operationId: "notes-create",
-        requestBody: { content: { "text/plain": { schema: { type: "string" } } }, required: true },
+        requestBody: {
+          content: { "text/event-stream": { schema: { type: "string" } } },
+          required: true,
+        },
         responses: { "204": { description: "Stored." } },
         tags: ["notes"],
       },
@@ -282,6 +285,34 @@ describe("generate", () => {
     expect(observed.written).toBe(false);
   });
 
+  test("an unsupported or missing openapi version is a DOC-02 document refusal; nothing is written", async () => {
+    const { openapi: _openapi, ...unversioned } = goldenSpec;
+    const observed = await Effect.runPromise(
+      Effect.forEach(
+        [{ ...goldenSpec, openapi: "2.0" }, unversioned],
+        (spec) =>
+          Effect.promise(() =>
+            run({ spec }, (exit, { out }) =>
+              exists(out).pipe(Effect.map((written) => ({ error: failureOf(exit), written }))),
+            ),
+          ),
+        { concurrency: 1 },
+      ),
+    );
+
+    expect(
+      observed.map(({ error, written }) => [
+        error._tag,
+        error.reason,
+        error.diagnostics?.map((diagnostic) => diagnostic.code),
+        written,
+      ]),
+    ).toEqual([
+      ["GenerateRefused", "document", ["DOC-02/unsupported-version"], false],
+      ["GenerateRefused", "document", ["DOC-02/missing-version"], false],
+    ]);
+  });
+
   test("an operation-scope refusal writes the rest and reports it", async () => {
     const observed = await run({ spec: withMissingParameter }, (exit, { out }) =>
       Effect.all({
@@ -311,7 +342,7 @@ describe("generate", () => {
     ).toBe(0);
   });
 
-  test("a text/plain request body is refused as EMT-1/unsupported-body; the rest is written", async () => {
+  test("a text/event-stream request body is refused as EMT-1/unsupported-body; the rest is written", async () => {
     const observed = await run({ spec: withTextBody }, (exit, { out }) =>
       Effect.all({
         cliNotes: readOut(out, "src/cli/notes.ts"),

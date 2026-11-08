@@ -1,0 +1,107 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Server rows witness",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}/{tier}",
+      "variables": {
+        "port": {
+          "default": "80"
+        },
+        "tier": {
+          "default": "v1",
+          "enum": ["v1", "v2"]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:{port}/{legacy}",
+      "variables": {
+        "port": {
+          "default": "80"
+        },
+        "legacy": {
+          "default": "x",
+          "enum": ["a"]
+        }
+      }
+    },
+    {
+      "url": "/relative"
+    }
+  ],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "pets-list",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mixed": {
+      "servers": [
+        {
+          "url": "http://127.0.0.1:{port}/pathlevel",
+          "variables": {
+            "port": {
+              "default": "80"
+            }
+          }
+        }
+      ],
+      "get": {
+        "operationId": "mixed-get",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:{port}/oplevel",
+            "variables": {
+              "port": {
+                "default": "80"
+              }
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "mixed-put",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

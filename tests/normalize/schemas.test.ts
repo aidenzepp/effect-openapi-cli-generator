@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Array as Arr, Effect, Order, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import {
+  appliesDynamicKeyword,
   codeGenerationCopy,
   normalizeSchemas,
+  schemaKeyAt,
   storeSchemas,
   validationCopy,
 } from "../../src/normalize/schemas.ts";
@@ -161,7 +163,6 @@ describe("store", () => {
     expect(result.facts.get("Pet")).toEqual({
       contentEncoding: undefined,
       contentMediaType: undefined,
-      discriminator: "kind",
       format: undefined,
       items: false,
       properties: ["name", "kind"],
@@ -262,11 +263,52 @@ describe("validation copy", () => {
     });
   });
 
-  test("patterns are ignored by the importer, so patternProperties keys raise nothing", () => {
-    const result = one({ patternProperties: { "^x-": { type: "string" } }, type: "object" });
+  test("SCH-15 open patternProperties is removed with a notice; properties stay typed", () => {
+    const result = one({
+      patternProperties: { "^x-": { type: "string" } },
+      properties: { a: { type: "string" } },
+      type: "object",
+    });
 
-    expect(result.diagnostics).toEqual([]);
-    expect(copied(result, "S")).toEqual(stored(result, "S"));
+    expect(found(result)).toEqual(["SCH-15/not-asserted /components/schemas/S/patternProperties"]);
+    expect(scopes(result)).toEqual(["notice:element"]);
+    expect(copied(result, "S")).toEqual({ properties: { a: { type: "string" } }, type: "object" });
+  });
+
+  test("SCH-15 closed patternProperties leaves the object open, each removal with a notice", () => {
+    const result = one({
+      additionalProperties: false,
+      patternProperties: { "^x-": { type: "integer" } },
+      properties: { a: { type: "string" } },
+      type: "object",
+    });
+
+    expect(sorted(found(result))).toEqual([
+      "SCH-15/not-asserted /components/schemas/S/additionalProperties",
+      "SCH-15/not-asserted /components/schemas/S/patternProperties",
+    ]);
+    expect(copied(result, "S")).toEqual({ properties: { a: { type: "string" } }, type: "object" });
+  });
+
+  test("SCH-15 nested patternProperties is removed where it occurs; an open sibling stays", () => {
+    const result = one({
+      properties: {
+        m: {
+          additionalProperties: true,
+          patternProperties: { "^[a-z]+$": { type: "number" } },
+          type: "object",
+        },
+      },
+      type: "object",
+    });
+
+    expect(found(result)).toEqual([
+      "SCH-15/not-asserted /components/schemas/S/properties/m/patternProperties",
+    ]);
+    expect(copied(result, "S")).toEqual({
+      properties: { m: { additionalProperties: true, type: "object" } },
+      type: "object",
+    });
   });
 
   test("SCO-09 a union the importer cannot intersect becomes {} with a notice", () => {
@@ -702,4 +744,211 @@ describe("repair and cycle bounds", () => {
     },
     { timeout: 10_000 },
   );
+});
+
+const resolved = (line: Line, value: Json) =>
+  Effect.runSync(resolve({ document: entry, line, value }));
+
+const bodyPaths = (schema: Json): Members => ({
+  "/a": {
+    post: {
+      requestBody: { content: { "application/json": { schema } } },
+      responses: { "200": { description: "ok" } },
+    },
+  },
+});
+
+const bodySite = {
+  document: entry,
+  pointer: "/paths/~1a/post/requestBody/content/application~1json/schema",
+};
+
+const bodyKey = bodySite.pointer;
+
+const keyOf = (line: Line, schema: Json): string =>
+  schemaKeyAt(
+    resolved(line, spec(line, { Count: { type: "integer" } }, bodyPaths(schema))),
+    bodySite,
+  );
+
+const applies = (schema: Json, schemas: Members = {}): boolean =>
+  appliesDynamicKeyword(resolved("3.1", spec("3.1", schemas, bodyPaths(schema))), bodySite);
+
+describe("m2-schfx", () => {
+  test("SCH-03 a keyword that asserts beside $ref keeps the use site's key; annotations do not", () => {
+    const ref = "#/components/schemas/Count";
+
+    expect([
+      keyOf("3.1", { $ref: ref, maximum: 5 }),
+      keyOf("3.2", { $ref: ref, maximum: 5 }),
+      keyOf("3.1", { $ref: ref, description: "d", "x-a": 1 }),
+      keyOf("3.1", { $ref: ref }),
+      keyOf("3.0", { $ref: ref, maximum: 5 }),
+      keyOf("3.1", { maximum: 5 }),
+    ]).toEqual([bodyKey, bodyKey, "Count", "Count", "Count", bodyKey]);
+  });
+
+  test("SCH-07 SCH-64 $vocabulary and dependencies are refused at element scope in 3.1 and 3.2", () => {
+    const schema = {
+      $vocabulary: { "https://json-schema.org/draft/2020-12/vocab/core": true },
+      dependencies: { a: ["b"] },
+      type: "object",
+    };
+    for (const line of ["3.1", "3.2"] as const) {
+      const result = one(schema, line);
+
+      expect(found(result)).toEqual([
+        "SCH-07/vocabulary /components/schemas/S",
+        "SCH-64/dependencies /components/schemas/S",
+      ]);
+      expect(scopes(result)).toEqual(["refusal:element", "refusal:element"]);
+      expect(copied(result, "S")).toEqual({ type: "object" });
+    }
+
+    expect(found(one({ dependencies: { a: ["b"] }, type: "object" }, "3.0"))).toEqual([]);
+  });
+
+  test("SCH-06 SCH-65 an anchor is refused wherever it sits, referenced or not", () => {
+    const result = one({
+      $defs: {
+        Dynamic: { $dynamicAnchor: "node", type: "string" },
+        Recursive: { $recursiveAnchor: true, type: "object" },
+      },
+      $recursiveAnchor: true,
+      type: "object",
+    });
+
+    expect(found(result)).toEqual([
+      "SCH-65/recursive-anchor /components/schemas/S",
+      "SCH-06/dynamic-anchor /components/schemas/S/$defs/Dynamic",
+      "SCH-65/recursive-anchor /components/schemas/S/$defs/Recursive",
+    ]);
+    expect(scopes(result)).toEqual(["refusal:element", "refusal:element", "refusal:element"]);
+  });
+
+  test("SCH-05 SCH-06 SCH-65 SCH-66 a schema applies a dynamic keyword through $ref, not through an unreferenced $defs member", () => {
+    expect([
+      applies({ $dynamicRef: "#node" }),
+      applies({ $recursiveRef: "#" }),
+      applies(
+        { properties: { a: { $ref: "#/components/schemas/Node" } } },
+        {
+          Node: { $dynamicAnchor: "node", type: "object" },
+        },
+      ),
+      applies(
+        { $ref: "#/components/schemas/Node" },
+        {
+          Node: { $recursiveAnchor: true, type: "object" },
+        },
+      ),
+      applies({ $defs: { Unused: { $dynamicAnchor: "node" } }, type: "object" }),
+      applies({ type: "string" }, { Node: { $dynamicAnchor: "node" } }),
+    ]).toEqual([true, true, true, true, false, false]);
+  });
+
+  describe("SCH-45 a required read-only property is not asserted on a request", () => {
+    const direct = {
+      properties: { id: { readOnly: true, type: "string" }, name: { type: "string" } },
+      required: ["id", "name"],
+      type: "object",
+    };
+    const throughRef = {
+      properties: { id: { $ref: "#/components/schemas/Id" }, name: { type: "string" } },
+      required: ["id", "name"],
+      type: "object",
+    };
+    const id = { readOnly: true, type: "string" };
+    const lines: readonly Line[] = ["3.0", "3.1", "3.2"];
+
+    for (const line of lines) {
+      test(`directly and through one $ref (${line})`, () => {
+        const result = normalize(line, spec(line, { Direct: direct, Id: id, Ref: throughRef }));
+        const notices =
+          line === "3.0"
+            ? []
+            : [
+                "SCH-45/read-only-required /components/schemas/Direct/required",
+                "SCH-45/read-only-required /components/schemas/Ref/required",
+              ];
+
+        expect(copied(result, "Direct")).toMatchObject({ required: ["name"] });
+        expect(copied(result, "Ref")).toMatchObject({ required: ["name"] });
+        expect(found(result)).toEqual(notices);
+        expect(scopes(result)).toEqual(notices.map(() => "notice:element"));
+      });
+    }
+
+    test("one notice per required list; an emptied list is removed; a writable one is unchanged", () => {
+      const result = one({
+        properties: { a: { readOnly: true }, b: { readOnly: true } },
+        required: ["a", "b"],
+        type: "object",
+      });
+      const writable = one({ properties: { name: { type: "string" } }, required: ["name"] });
+
+      expect(found(result)).toEqual(["SCH-45/read-only-required /components/schemas/S/required"]);
+      expect(result.validation.edits.map((edit) => edit.path.join("/"))).toEqual([
+        "required/0",
+        "required/1",
+      ]);
+      expect(copied(result, "S")).toEqual({
+        properties: { a: { readOnly: true }, b: { readOnly: true } },
+        type: "object",
+      });
+      expect(writable.validation.edits).toEqual([]);
+      expect(copied(writable, "S")).toEqual({
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      });
+    });
+  });
+});
+
+describe("S30-27 a 3.0 default that does not conform to its type", () => {
+  const nonconforming = {
+    properties: {
+      count: { default: "x", type: "integer" },
+      flags: { default: { on: true }, items: { type: "string" }, type: "array" },
+      half: { default: 1.5, type: "integer" },
+      name: { default: null, type: "string" },
+    },
+    type: "object",
+  };
+  const conforming = {
+    properties: {
+      count: { default: 3, type: "integer" },
+      flags: { default: ["a"], items: { type: "string" }, type: "array" },
+      maybe: { default: null, nullable: true, type: "string" },
+      ratio: { default: 2, type: "number" },
+      untyped: { default: "x" },
+    },
+    type: "object",
+  };
+
+  test("is refused at element scope, at its schema, and left out of the validation copy", () => {
+    const result = one(nonconforming, "3.0");
+    const codes = ["count", "flags", "half", "name"].map(
+      (name) => `S30-27/nonconforming-default /components/schemas/S/properties/${name}`,
+    );
+
+    expect(found(result)).toEqual(codes);
+    expect(scopes(result)).toEqual(codes.map(() => "refusal:element"));
+    expect(copied(result, "S")).toMatchObject({
+      properties: { count: { type: "integer" }, name: { type: "string" } },
+    });
+    expect(copied(result, "S")).not.toMatchObject({ properties: { count: { default: "x" } } });
+  });
+
+  test("a conforming default, a nullable null and an untyped default are kept unreported", () => {
+    const result = one(conforming, "3.0");
+
+    expect(found(result)).toEqual([]);
+    expect(result.validation.edits).toEqual([]);
+  });
+
+  test("3.1 and 3.2 do not refuse it (SCH-49: the default is an annotation)", () => {
+    expect(found(one(nonconforming, "3.1"))).toEqual([]);
+    expect(found(one(nonconforming, "3.2"))).toEqual([]);
+  });
 });

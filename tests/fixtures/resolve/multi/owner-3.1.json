@@ -1,0 +1,6 @@
+{
+  "$defs": {
+    "Owner": { "type": "object", "properties": { "name": { "$ref": "#/$defs/Name" } } },
+    "Name": { "type": "string" }
+  }
+}

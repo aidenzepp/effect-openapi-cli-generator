@@ -238,6 +238,12 @@ describe("error grouping", () => {
     expect(groups[1]?.context).toHaveLength(0);
   });
 
+  test("a property-name location (#*) groups under the key's own pointer", async () => {
+    const groups = await Effect.runPromise(groupErrors([unit("#"), unit("#*/a/b")]));
+
+    expect(groups.map((group) => String(group.pointer))).toEqual(["/a/b"]);
+  });
+
   test("a location that is not a fragment fails", async () => {
     const failure = await Effect.runPromise(Effect.flip(groupErrors([unit("/a")])));
 
@@ -276,4 +282,22 @@ describe("lone surrogates in property names", () => {
   test("a valid surrogate pair is accepted", async () => {
     expect(await diagnose(withKey("\u{1F600}"))).toEqual({ notices: [], refusals: [] });
   });
+});
+
+describe("additionalOperations keys equal to a fixed method", () => {
+  test.each(["POST", "post", "Post"])(
+    "3.2: %s validates; the structure check refuses it (PTH-24)",
+    async (key) => {
+      const operationObject: Json = { responses: ok };
+      const result = await diagnose(
+        document("3.2.1", {
+          paths: {
+            "/a": { additionalOperations: { [key]: operationObject }, post: operationObject },
+          },
+        }),
+      );
+
+      expect(result).toEqual({ notices: [], refusals: [] });
+    },
+  );
 });

@@ -1,0 +1,229 @@
+{
+  "info": {
+    "title": "Encoding field rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.2.1",
+  "paths": {
+    "/form": {
+      "post": {
+        "operationId": "form-send",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "encoding": {
+                "deep": {
+                  "explode": true,
+                  "style": "deepObject"
+                },
+                "deepDefault": {
+                  "style": "deepObject"
+                },
+                "joined": {
+                  "explode": false
+                },
+                "listed": {
+                  "style": "form"
+                },
+                "pipes": {
+                  "explode": false,
+                  "style": "pipeDelimited"
+                },
+                "reserved": {
+                  "allowReserved": true
+                },
+                "reserving": {
+                  "allowReserved": true,
+                  "contentType": "application/json"
+                },
+                "spaced": {
+                  "explode": false,
+                  "style": "spaceDelimited"
+                },
+                "styled": {
+                  "contentType": "application/json",
+                  "style": "form"
+                },
+                "typed": {
+                  "contentType": "text/plain"
+                },
+                "unexploded": {
+                  "contentType": "application/json",
+                  "explode": false
+                }
+              },
+              "schema": {
+                "properties": {
+                  "deep": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "deepDefault": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "joined": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "listed": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "pipes": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "reserved": {
+                    "type": "string"
+                  },
+                  "reserving": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "spaced": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "styled": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "typed": {
+                    "type": "string"
+                  },
+                  "unexploded": {
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      },
+                      "b": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/parts": {
+      "post": {
+        "operationId": "parts-send",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "csv": {
+                  "contentType": "text/csv"
+                },
+                "img": {
+                  "contentType": "image/png"
+                },
+                "typed": {
+                  "contentType": "text/csv",
+                  "headers": {
+                    "Content-Type": {
+                      "schema": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "verbatim": {
+                  "allowReserved": true
+                }
+              },
+              "schema": {
+                "properties": {
+                  "csv": {
+                    "type": "string"
+                  },
+                  "img": {},
+                  "note": {
+                    "type": "string"
+                  },
+                  "typed": {
+                    "type": "string"
+                  },
+                  "verbatim": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}

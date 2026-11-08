@@ -6,6 +6,7 @@ import { Effect, Exit, Layer, Scope } from "effect";
 import generatorPackage from "../package.json" with { type: "json" };
 import { generateFixture, preparePackage, runBin } from "./support/generated-cli.ts";
 import type { AuthorFile, GeneratedPackage } from "./support/generated-cli.ts";
+import { setEnv } from "./support/env.ts";
 
 // Design 3.6 (format, lint, typecheck) and 9 I1, steelman E42: the emitted package is proved
 // against the generator's own toolchain, on the golden users-update spec and on a hostile-names
@@ -68,9 +69,7 @@ mkdirSync(scratch, { recursive: true });
 
 const work = mkdtempSync(nodePath.join(scratch, "emitted-proof-"));
 
-const priorTmpdir = process.env.TMPDIR;
-
-process.env.TMPDIR = work;
+const restoreTmpdir = setEnv("TMPDIR", work);
 
 const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
@@ -188,11 +187,7 @@ beforeAll(() => {
 afterAll(async () => {
   await Effect.runPromise(Scope.close(scope, Exit.void));
   rmSync(work, { force: true, recursive: true });
-  if (priorTmpdir === undefined) {
-    delete process.env.TMPDIR;
-  } else {
-    process.env.TMPDIR = priorTmpdir;
-  }
+  restoreTmpdir();
 });
 
 const outcomeOf = async (name: string) => {

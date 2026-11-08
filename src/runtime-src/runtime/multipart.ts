@@ -5,9 +5,10 @@ import { StdinClaim } from "./input.ts";
 
 /**
  * Per-part encoding facts from an OpenAPI Encoding Object, already resolved by the caller.
+ * `contentEncoding` is `base64` only (R34): the writer refuses any other value.
  */
 export interface PartEncoding {
-  readonly contentEncoding?: string;
+  readonly contentEncoding?: "base64";
   readonly contentType?: string;
   readonly headers?: readonly (readonly [name: string, value: string])[];
 }
@@ -80,8 +81,8 @@ const splitsHeader = (value: string): boolean =>
 
 /**
  * The first reason a part cannot be written, or null. Refuses CR, LF and NUL in every header
- * name and value, content type and content encoding (design 6.1) and an unnamed form-data part.
- * A reason never repeats a value.
+ * name and value and content type (design 6.1), a content encoding other than `base64` (R34) and
+ * an unnamed form-data part. A reason never repeats a value.
  */
 const encodingProblem = (encoding: PartEncoding): string | null => {
   for (const [name, value] of encoding.headers ?? []) {
@@ -94,9 +95,10 @@ const encodingProblem = (encoding: PartEncoding): string | null => {
     return "a multipart part content type contains a CR, LF or NUL character";
   }
 
-  return splitsHeader(encoding.contentEncoding ?? "")
-    ? "a multipart part content encoding contains a CR, LF or NUL character"
-    : null;
+  // The type admits only `base64`; an untyped caller is refused rather than sent unencoded.
+  return encoding.contentEncoding === undefined || encoding.contentEncoding === "base64"
+    ? null
+    : "a multipart part content encoding other than base64 is not supported";
 };
 
 const partsProblem = (kind: Kind, parts: readonly Part[]): string | null => {
@@ -158,6 +160,39 @@ const partHead = (
 const bodyStream = (body: LeafPart["body"]): Stream.Stream<Uint8Array, unknown> =>
   body instanceof Uint8Array ? Stream.succeed(body) : body;
 
+/**
+ * Streams `source` base64-encoded with padding and no line breaks. Only whole 3-byte groups are
+ * encoded per chunk, so no chunk boundary falls inside a quantum; the 0 to 2 leftover bytes are
+ * carried and encoded, padded, when the source ends.
+ */
+const base64Stream = (
+  source: Stream.Stream<Uint8Array, unknown>,
+): Stream.Stream<Uint8Array, unknown> =>
+  source.pipe(
+    Stream.mapAccum(
+      () => new Uint8Array(0),
+      (carry: Uint8Array, chunk: Uint8Array) => {
+        const joined = new Uint8Array(carry.length + chunk.length);
+
+        joined.set(carry);
+        joined.set(chunk, carry.length);
+
+        const whole = joined.length - (joined.length % 3);
+
+        return [
+          joined.slice(whole),
+          whole === 0 ? [] : [encoder.encode(joined.subarray(0, whole).toBase64())],
+        ] as const;
+      },
+      {
+        onHalt: (carry) => (carry.length === 0 ? [] : [encoder.encode(carry.toBase64())]),
+      },
+    ),
+  );
+
+const leafBody = (part: LeafPart): Stream.Stream<Uint8Array, unknown> =>
+  part.contentEncoding === "base64" ? base64Stream(bodyStream(part.body)) : bodyStream(part.body);
+
 const nestedBoundary = (injected: string | undefined, index: number): string =>
   injected === undefined ? randomBoundary() : `${injected}-${index}`;
 
@@ -186,7 +221,7 @@ const encode = (
       }
 
       return Stream.succeed(partHead(boundary, kind, part, null)).pipe(
-        Stream.concat(bodyStream(part.body)),
+        Stream.concat(leafBody(part)),
         Stream.concat(Stream.succeed(crlf)),
       );
     }),

@@ -10,6 +10,13 @@ const environmentNamePattern = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/u;
 
 const parameterKeyPattern = /^(?:cookie|header|path|query):.+$/u;
 
+// A body field's RFC 6901 pointer relative to the body root, as its flag carries it (`/meta/name`):
+// one or more `/`-led tokens, `~` only as `~0` or `~1`. The whole body (`""`) is not a field.
+const fieldPointerPattern = /^(?:\/(?:[^/~]|~[01])*)+$/u;
+
+// A flag name as the kebab fold writes one: dot-separated kebab segments, each led by a letter.
+const flagNamePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/u;
+
 const rowId = "CFG-1";
 
 // semver 2.0.0 (semver.org), whose grammar is visible ASCII with no whitespace, so the version is
@@ -38,10 +45,61 @@ const environmentName = Schema.String.pipe(Schema.check(Schema.isPattern(environ
 
 const nonNegative = Schema.Finite.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 
+// The Security Scheme Object subset an author may add (D-OQ3 (b)); normalization refuses a type or
+// scheme the runtime cannot send exactly as it does a declared one.
+const AddedScheme = Schema.Struct({
+  deprecated: Schema.optionalKey(Schema.Boolean),
+  flows: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+  in: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+  scheme: Schema.optionalKey(Schema.String),
+  type: Schema.String,
+});
+
+const AddedSecurity = Schema.Struct({
+  requirement: Schema.Array(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  schemes: Schema.Record(Schema.NonEmptyString, AddedScheme),
+});
+
 const ParameterOverride = Schema.Struct({ flag: Schema.optionalKey(Schema.NonEmptyString) });
 
+const FieldOverride = Schema.Struct({
+  flag: Schema.String.pipe(Schema.check(Schema.isPattern(flagNamePattern))),
+});
+
+// An alias group, like the naming extensions' group keys (design 4.4): a dotted string split at
+// `.`, or an array whose elements are kept whole; no segment is empty.
+const aliasGroup = Schema.Union([
+  Schema.NonEmptyString.pipe(
+    Schema.check(
+      Schema.makeFilter((group: string) => group.split(".").every((segment) => segment !== "")),
+    ),
+  ),
+  Schema.NonEmptyArray(Schema.NonEmptyString),
+]);
+
+// One alias command for an operation, named by a group and/or a method like the extension keys.
+const ConfigAlias = Schema.Struct({
+  group: Schema.optionalKey(aliasGroup),
+  method: Schema.optionalKey(Schema.NonEmptyString),
+}).check(
+  Schema.makeFilter(
+    (alias) =>
+      alias.group !== undefined || alias.method !== undefined || "an alias names something",
+  ),
+);
+
+// `aliases` replaces the operation's `x-forge-aliases`; an empty list drops them.
 const OperationOverride = Schema.Struct({
+  aliases: Schema.optionalKey(Schema.Array(ConfigAlias)),
   command: Schema.optionalKey(Schema.NonEmptyString),
+  // Renames a body field's flag, keyed by the field's pointer relative to the body root.
+  fields: Schema.optionalKey(
+    Schema.Record(
+      Schema.String.pipe(Schema.check(Schema.isPattern(fieldPointerPattern))),
+      FieldOverride,
+    ),
+  ),
   group: Schema.optionalKey(Schema.NonEmptyString),
   parameters: Schema.optionalKey(
     Schema.Record(
@@ -73,6 +131,11 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       operations: Schema.optionalKey(Schema.Record(Schema.NonEmptyString, OperationOverride)),
     }),
   ),
+  // Opt-in switches for behavior outside the OpenAPI specification (D-AD11, D-OQ1); absent and
+  // `false` both mean strict.
+  nonStandard: Schema.optionalKey(
+    Schema.Struct({ deepObjectBrackets: Schema.optionalKey(Schema.Boolean) }),
+  ),
   package: Schema.Struct({
     name: Schema.NonEmptyString,
     version: Schema.String.pipe(Schema.check(Schema.isPattern(semverPattern))),
@@ -85,8 +148,17 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       timeoutSeconds: Schema.optionalKey(nonNegative),
     }),
   ),
+  // `security.add` adds a scheme and requirement (D-OQ3 (b)); every other key is a scheme name with
+  // its credential environment variable (D-AD11), so a scheme cannot be named `add`.
   security: Schema.optionalKey(
-    Schema.Record(Schema.NonEmptyString, Schema.Struct({ env: environmentName })),
+    Schema.StructWithRest(Schema.Struct({ add: Schema.optionalKey(AddedSecurity) }), [
+      Schema.Record(
+        Schema.NonEmptyString.pipe(
+          Schema.check(Schema.makeFilter((name: string) => name !== "add")),
+        ),
+        Schema.Struct({ env: environmentName }),
+      ),
+    ]),
   ),
   servers: Schema.optionalKey(Schema.Struct({ accepted: Schema.Array(Schema.NonEmptyString) })),
 }) {}
@@ -111,6 +183,8 @@ type Kind = "invalid" | "missing" | "unknown";
 
 type Rule =
   | "invalid-bin-name"
+  | "invalid-field-flag"
+  | "invalid-field-pointer"
   | "invalid-version"
   | "invalid-value"
   | "missing-bin-name"
@@ -158,7 +232,16 @@ const isUnsupportedKey = (path: readonly string[]): boolean =>
 const isCommandsModule = (path: readonly string[]): boolean =>
   path.length === 2 && path[0] === "commands" && path[1] === "module";
 
+// `naming.<operations|byPointer>.<key>.fields.<pointer>`, then `.flag` for the value.
+const isField = (path: readonly string[], depth: number): boolean =>
+  path.length === depth && path[0] === "naming" && path[3] === "fields";
+
 const ruleOf = ({ kind, path }: Finding): Rule => {
+  // A record key that fails its pattern is an excess key to the decoder.
+  if (isField(path, 5) && kind === "unknown") {
+    return "invalid-field-pointer";
+  }
+
   if (kind === "unknown") {
     return isUnsupportedKey(path) ? "unsupported-key" : "unknown-key";
   }
@@ -171,6 +254,10 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
     return "unsafe-commands-module";
   }
 
+  if (isField(path, 6) && path[5] === "flag" && kind === "invalid") {
+    return "invalid-field-flag";
+  }
+
   if (isVersion(path) && kind === "invalid") {
     return "invalid-version";
   }
@@ -180,6 +267,10 @@ const ruleOf = ({ kind, path }: Finding): Rule => {
 
 const messages: Readonly<Record<Rule, string>> = {
   "invalid-bin-name": "binName must match ^[a-z][a-z0-9-]*$.",
+  "invalid-field-flag":
+    "A body field flag must be a kebab name such as foo-bar, with dots between nested segments.",
+  "invalid-field-pointer":
+    "A fields key must be the body field's RFC 6901 pointer from the body root, such as /meta/name.",
   "invalid-value": "An author config value is not valid.",
   "invalid-version": "package.version must be a semver 2.0.0 version such as 1.2.3.",
   "missing-bin-name": "The author config has no binName.",

@@ -3,7 +3,7 @@ import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
 import type { Credential } from "./auth.ts";
-import { scrub } from "./redact.ts";
+import { scrubAround } from "./redact.ts";
 
 /**
  * What the matcher needs of one operation: its display name, its declared response keys (an
@@ -42,6 +42,17 @@ export const matchResponse = (responses: ResponseTable["responses"], status: num
   return declares(responses, "default") ? "default" : "undeclared";
 };
 
+/**
+ * A response that by definition carries no body (RFC 9110 9.3.2, 15.2, 15.3.5, 15.4.5): the answer
+ * to a HEAD, any 1xx, a 204 or a 304. Its `Content-Length` describes another representation and is
+ * not enforced; nothing is read.
+ */
+export const isBodiless = (response: HttpClientResponse.HttpClientResponse): boolean =>
+  response.request.method === "HEAD" ||
+  (response.status >= 100 && response.status < 200) ||
+  response.status === 204 ||
+  response.status === 304;
+
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 
 const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | undefined =>
@@ -49,6 +60,13 @@ const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | 
     ?.split(";")[0]
     ?.trim()
     .toLowerCase();
+
+/**
+ * The characters `sanitize` in `output.ts` removes (C0 except LF and TAB, DEL, C1, format
+ * characters, U+2028, U+2029, lone surrogates). `output.ts` imports this module, so the set is
+ * restated here rather than imported.
+ */
+const unsafeText = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
 
 /**
  * The first `maxRequestIdLength` UTF-16 units of `text`, never ending in half a surrogate pair.
@@ -62,8 +80,9 @@ const boundRequestId = (text: string): string => {
 };
 
 /**
- * The declared request-id header, credentials scrubbed and then bounded (audit F6): bounding
- * first could cut a credential so that the remaining prefix no longer matches.
+ * The declared request-id header, credentials scrubbed, sanitized and scrubbed again (design 7.1,
+ * audit S2), then bounded (audit F6): bounding first could cut a credential so that the remaining
+ * prefix no longer matches.
  */
 const requestIdOf = (
   table: ResponseTable,
@@ -76,7 +95,9 @@ const requestIdOf = (
 
   const header = Option.getOrUndefined(Headers.get(response.headers, table.requestIdHeader));
 
-  return header === undefined ? undefined : boundRequestId(scrub(header, credentials));
+  return header === undefined
+    ? undefined
+    : boundRequestId(scrubAround(header, credentials, (text) => text.replaceAll(unsafeText, "")));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {

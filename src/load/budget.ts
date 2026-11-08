@@ -1,4 +1,4 @@
-import { Array as Arr, ByteSize, Data, Effect, FileSystem, Schema, Stream } from "effect";
+import { Array as Arr, ByteSize, Data, Effect, FileSystem, Option, Schema, Stream } from "effect";
 import type { PlatformError } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
@@ -132,27 +132,131 @@ export const readStreamBounded = (
   );
 
 /**
- * Reads a regular file through `FileSystem.stream`, so `maxBytes` bounds the bytes actually read,
- * not the size `stat` reported. Anything that is not a regular file is refused unread.
+ * A check a trust boundary runs on the opened handle's metadata before any byte is read. A
+ * refusal here leaves the file unread.
+ */
+export type VerifyOpened = (
+  opened: FileSystem.File.Info,
+) => Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+
+const chunkSize = 64 * 1024;
+
+/**
+ * The handle's bytes, chunk by chunk, until end of file.
+ */
+const handleStream = (
+  file: FileSystem.File,
+): Stream.Stream<Uint8Array, PlatformError.PlatformError> =>
+  Stream.paginate(file, (handle) =>
+    handle.readAlloc(chunkSize).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => [[], Option.none()] as const,
+          onSome: (chunk) => [[chunk], Option.some(handle)] as const,
+        }),
+      ),
+    ),
+  );
+
+const checkRegular = (
+  info: FileSystem.File.Info,
+  limits: LoadLimits,
+  document: Document,
+): Effect.Effect<void, LoadRefusal> => {
+  if (info.type !== "File") {
+    return refuse(document, "DOC-14/unreadable");
+  }
+
+  return ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)
+    ? refuse(document, "DOC-14/too-large")
+    : Effect.void;
+};
+
+/**
+ * Whether two `stat` results name the same file: equal `dev` and `ino`. Where the platform reports
+ * no inode, equal `size` stands in for it.
+ */
+export const sameFile = (a: FileSystem.File.Info, b: FileSystem.File.Info): boolean =>
+  a.dev === b.dev &&
+  (Option.isSome(a.ino) && Option.isSome(b.ino)
+    ? a.ino.value === b.ino.value
+    : ByteSize.toBigInt(a.size) === ByteSize.toBigInt(b.size));
+
+type VerifyAgainst = (
+  before: FileSystem.File.Info,
+  opened: FileSystem.File.Info,
+) => Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+
+/**
+ * Opens `path` without following a symlink at its final component, checks the open handle (a
+ * regular file within `maxBytes`, then `verify` against the `stat` taken before the open), and
+ * reads that same handle through `Stream.limitBytes`, so the bytes read are the bytes checked and
+ * `maxBytes` bounds what is actually read. The `stat` before the open refuses a special file
+ * already in place without opening it; one swapped in after that `stat` is refused by the handle
+ * check, but the open itself can block, since the FileSystem service cannot open non-blocking
+ * (accepted risk). `noFollow` refuses a symlink at the final component only; a parent directory
+ * swapped before the open is not detected here, so what `verify` can prove is limited to the
+ * window between the pre-open `stat` and the open.
+ */
+const readOpened = (
+  path: string,
+  limits: LoadLimits,
+  document: Document,
+  verify: VerifyAgainst,
+): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
+  Effect.gen(function* readBounded() {
+    const fs = yield* FileSystem.FileSystem;
+    const unreadable = () => refuse(document, "DOC-14/unreadable");
+
+    const before = yield* fs.stat(path).pipe(Effect.catchTag("PlatformError", unreadable));
+
+    yield* checkRegular(before, limits, document);
+
+    const file = yield* fs
+      .open(path, { flag: "r", noFollow: true })
+      .pipe(Effect.catchTag("PlatformError", unreadable));
+    const opened = yield* file.stat.pipe(Effect.catchTag("PlatformError", unreadable));
+
+    yield* checkRegular(opened, limits, document);
+    yield* verify(before, opened);
+
+    return yield* readStreamBounded(handleStream(file), limits, document);
+  }).pipe(Effect.scoped);
+
+/**
+ * Reads a path the operator named (the entry document, a `--document` pair). A symlinked name is
+ * the operator's choice, so its real path is resolved first; that real path is then opened
+ * without following a symlink, and the handle must be the file a `stat` of the real path saw
+ * (`sameFile`). The dev/ino comparison covers only the window between that `stat` and the open:
+ * a file or final-component link swapped in there is refused, not read. A swap between
+ * `realPath` and the `stat` is not detected.
  */
 export const readFileBounded = (
   path: string,
   limits: LoadLimits,
   document: Document,
 ): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* readBounded() {
+  Effect.gen(function* readOperatorPath() {
     const fs = yield* FileSystem.FileSystem;
-    const info = yield* fs
-      .stat(path)
+    const real = yield* fs
+      .realPath(path)
       .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
 
-    if (info.type !== "File") {
-      return yield* refuse(document, "DOC-14/unreadable");
-    }
-
-    if (ByteSize.toBigInt(info.size) > BigInt(limits.maxBytes)) {
-      return yield* refuse(document, "DOC-14/too-large");
-    }
-
-    return yield* readStreamBounded(fs.stream(path), limits, document);
+    return yield* readOpened(real, limits, document, (before, opened) =>
+      sameFile(before, opened) ? Effect.void : refuse(document, "DOC-14/unreadable"),
+    );
   });
+
+/**
+ * Reads a file found inside a trust boundary (a `--ref-root` member). `path` is opened as given,
+ * never through a symlink at its final component, and `verify` decides whether the open handle
+ * is still the file the boundary admitted. What `verify` can prove is bounded by what it checks:
+ * the `--ref-root` check is path-based after the open (see `sameCheckedFile`).
+ */
+export const readMemberBounded = (
+  path: string,
+  limits: LoadLimits,
+  document: Document,
+  verify: VerifyOpened,
+): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
+  readOpened(path, limits, document, (_before, opened) => verify(opened));

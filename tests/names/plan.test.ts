@@ -25,6 +25,7 @@ interface ParameterInput {
 interface OperationInput {
   readonly body?: readonly {
     readonly codec?: string;
+    readonly encoding?: readonly Json[];
     readonly media: string;
     readonly schema?: string;
   }[];
@@ -60,6 +61,7 @@ const parameterJson = (home: string, parameter: ParameterInput, index: number): 
     allowReserved: false,
     explode: parameter.in === "query",
     kind: "style",
+    objectValued: false,
     origin: origin(`${home}/parameters/${index}`),
     rows: [],
     rules: "3.1",
@@ -102,7 +104,7 @@ const operationJson = (input: OperationInput): Json => {
           alternatives: input.body.map((alternative) => {
             const media = {
               codec: alternative.codec ?? "json",
-              encoding: [],
+              encoding: alternative.encoding ?? [],
               mediaType: alternative.media,
               origin: origin(`${home}/requestBody/content/${escape(alternative.media)}`),
               prefixEncoding: [],
@@ -149,6 +151,7 @@ const makeApi = (input: ApiInput): Api =>
       name: scheme.name,
       origin: origin(`/components/securitySchemes/${escape(scheme.name)}`),
       rows: [],
+      source: "spec",
     })),
     servers: [],
     tags: input.tags ?? [],
@@ -541,6 +544,7 @@ describe("planNames: multipart parts", () => {
     const result = plan({
       defs: {
         Body: object({
+          choice: { oneOf: [{ type: "string" }, { type: "integer" }] },
           file: { format: "binary", type: "string" },
           meta: object({ a: { type: "string" } }),
           name: { type: "string" },
@@ -556,7 +560,7 @@ describe("planNames: multipart parts", () => {
       ],
     });
 
-    expect(flagNames(commandOf(result, "upload"))).toEqual(["file", "name"]);
+    expect(flagNames(commandOf(result, "upload"))).toEqual(["file", "meta", "name"]);
     expect(codes(result)).toEqual([
       { code: "RQB-03/unnamed-property", scope: "element", severity: "notice" },
     ]);
@@ -578,6 +582,197 @@ describe("planNames: multipart parts", () => {
     expect(flagNames(commandOf(result, "upload"))).toEqual(["ok"]);
     expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
       "The multipart part at /!!! has no flag and is not reachable; a multipart body has no --body or --body-file.",
+    ]);
+  });
+});
+
+describe("planNames: a multipart part with several content types (ENC-10)", () => {
+  const media = "multipart/form-data";
+  const home = `/paths/~1u/post/requestBody/content/${escape(media)}`;
+  const fileRule: Json = {
+    contentType: ["image/png", "image/jpeg"],
+    headers: [],
+    origin: origin(`${home}/encoding/file`),
+    rows: [],
+    target: { kind: "property", name: "file" },
+  };
+  const upload = (properties: Readonly<Record<string, Json>>): ApiInput => ({
+    defs: { Body: object(properties) },
+    operations: [
+      {
+        body: [{ codec: "multipart", encoding: [fileRule], media, schema: "Body" }],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  });
+
+  test("the part gets a --<part>-content-type choice over the listed types", () => {
+    const result = plan(upload({ file: { format: "binary", type: "string" } }));
+    const command = commandOf(result, "upload");
+
+    expect(flagNames(command)).toEqual(["file", "file-content-type"]);
+    expect(command?.flags.find((flag) => flag.name === "file-content-type")?.source).toEqual({
+      _tag: "PartOption",
+      media: [media],
+      option: { choices: ["image/png", "image/jpeg"], kind: "content-type" },
+      part: "/file",
+      pointer: `${home}/encoding/file`,
+    });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("a flag of the same name is the flag collision, renamed through the part flag", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "file-content-type": { type: "string" },
+      }),
+    );
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("/file");
+  });
+});
+
+describe("planNames: one body field of two kinds across alternatives (RQB-03)", () => {
+  // OpenAI's CreateContainerFile shape: one schema behind a JSON and a multipart alternative, so
+  // /file is a plain value in one and a file part in the other.
+  const upload: ApiInput = {
+    defs: {
+      Body: object({ file: { format: "binary", type: "string" }, name: { type: "string" } }),
+    },
+    operations: [
+      {
+        body: [
+          { media: "application/json", schema: "Body" },
+          { codec: "multipart", media: "multipart/form-data", schema: "Body" },
+        ],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  };
+
+  test("the refusal says a field rename cannot separate them and offers no rename", () => {
+    const result = plan(upload);
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("cannot separate");
+    expect(result.diagnostics[0]?.hint).not.toContain(".fields[");
+    expect(result.diagnostics[0]?.hint).toContain('naming.operations["upload"].skip');
+  });
+
+  test("renaming the field does not separate them, and the refusal still offers no rename", () => {
+    const config = makeConfig({
+      naming: { operations: { upload: { fields: { "/file": { flag: "upload-file" } } } } },
+    });
+    const result = plan(upload, config);
+
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+    expect(result.diagnostics[0]?.message).toContain("--upload-file");
+    expect(result.diagnostics[0]?.hint).not.toContain(".fields[");
+  });
+});
+
+describe("planNames: multipart part headers (ENC-03)", () => {
+  const media = "multipart/form-data";
+  const home = `/paths/~1u/post/requestBody/content/${escape(media)}`;
+  const header = (name: string, schema: string, required: boolean): Json => ({
+    deprecated: false,
+    name,
+    required,
+    schema: { key: schema },
+    serialization: {
+      allowReserved: false,
+      explode: false,
+      kind: "style",
+      objectValued: false,
+      origin: origin(`${home}/encoding/file/headers/${name}`),
+      rows: [],
+      rules: "3.1",
+      style: "simple",
+    },
+  });
+  const upload = (properties: Readonly<Record<string, Json>>): ApiInput => ({
+    defs: { Body: object(properties), Flag: { type: "boolean" }, Text: { type: "string" } },
+    operations: [
+      {
+        body: [
+          {
+            codec: "multipart",
+            encoding: [
+              {
+                contentType: ["image/png"],
+                headers: [header("X-Checksum", "Text", true), header("X-Signed", "Flag", false)],
+                origin: origin(`${home}/encoding/file`),
+                rows: [],
+                target: { kind: "property", name: "file" },
+              },
+            ],
+            media,
+            schema: "Body",
+          },
+        ],
+        method: "POST",
+        operationId: "upload",
+        path: "/u",
+      },
+    ],
+  });
+
+  test("each header is a --<part>-<header> option; a boolean header is negatable", () => {
+    const result = plan(upload({ file: { format: "binary", type: "string" } }));
+    const command = commandOf(result, "upload");
+    const checksum = command?.flags.find((flag) => flag.name === "file-x-checksum");
+
+    expect(flagNames(command)).toEqual(["file", "file-x-checksum", "file-x-signed"]);
+    expect(checksum?.source).toEqual({
+      _tag: "PartOption",
+      media: [media],
+      option: { kind: "header", name: "X-Checksum" },
+      part: "/file",
+      pointer: `${home}/encoding/file/headers/X-Checksum`,
+    });
+    expect(checksum?.boolean).toBe(false);
+    expect(command?.flags.find((flag) => flag.name === "file-x-signed")?.boolean).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("a flag of the same name is the flag collision, hinted through the part flag", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "file-x-checksum": { type: "string" },
+      }),
+    );
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
+    ]);
+  });
+
+  test("a boolean header's negation collides too", () => {
+    const result = plan(
+      upload({
+        file: { format: "binary", type: "string" },
+        "no-file-x-signed": { type: "string" },
+      }),
+    );
+
+    expect(codes(result)).toEqual([
+      { code: "RQB-03/flag-collision", scope: "operation", severity: "refusal" },
     ]);
   });
 });
@@ -714,6 +909,28 @@ describe("planNames: root module reservations", () => {
         severity: "notice",
       })),
     );
+  });
+});
+
+describe("planNames: package import reservations", () => {
+  test("groups that fold to a name a cli module imports take a suffixed namespace", () => {
+    const tags = ["effect", "groups", "layer", "schema", "users"];
+    const result = plan({
+      operations: tags.map((tag) => ({
+        method: "GET",
+        operationId: `list-${tag}`,
+        path: `/${tag}`,
+        tags: [tag],
+      })),
+    });
+
+    expect(result.groups.map((group) => [group.name, String(group.namespace)])).toEqual([
+      ["effect", "Effect2"],
+      ["groups", "Groups2"],
+      ["layer", "Layer2"],
+      ["schema", "Schema2"],
+      ["users", "Users"],
+    ]);
   });
 });
 

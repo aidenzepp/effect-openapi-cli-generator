@@ -2,7 +2,8 @@ import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
 import { PathTemplate } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { methodTokens } from "../model/method-tokens.ts";
-import { referenceAt } from "../resolve/index.ts";
+import { keyOf } from "../resolve/canonical.ts";
+import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
@@ -67,6 +68,14 @@ const rules = {
     hint: "Add the parameter's name to the path as an expression, or remove the parameter.",
     message: "A path parameter has no expression in the path key.",
     scope: "operation",
+  },
+  "PTH-11/ref-sibling-conflict": {
+    anchor: "path-item-ref",
+    element: "Path Item $ref",
+    hint: "Keep each field in one of the two Path Item Objects.",
+    message:
+      "A Path Item $ref has a sibling field the referenced Path Item also defines; which applies is undefined.",
+    scope: "document",
   },
   "PTH-23/method-not-allowed": {
     anchor: "path-item-object",
@@ -162,18 +171,27 @@ const componentSections = {
   "3.2": [...sections30, "pathItems", "mediaTypes"],
 } as const;
 
-// An object at a use site, followed through its Reference Object to the end of the chain.
+interface Place {
+  readonly document: CanonicalKey["document"];
+  readonly node: JsonObject;
+  readonly pointer: string;
+}
+
+// An object at a use site in the entry document, followed through its Reference Object to the end
+// of the chain, which is read from the document of the set that holds it.
 const locate = (
   resolution: Resolution,
   pointer: string,
   node: Json | undefined,
-): { readonly node: JsonObject; readonly pointer: string } | undefined => {
-  const reference = referenceAt(resolution, pointer);
-  const target =
-    reference === undefined ? node : nodeAt(resolution.value, reference.target.pointer);
+): Place | undefined => {
+  const site = { document: resolution.document, pointer };
+  const at = resolution.references.get(keyOf(site))?.target ?? site;
+  const document = resolution.documents.get(at.document);
+  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
+  const target = at === site ? node : read;
 
   return isObject(target)
-    ? { node: target, pointer: reference === undefined ? pointer : reference.target.pointer }
+    ? { document: at.document, node: target, pointer: at.pointer }
     : undefined;
 };
 
@@ -190,7 +208,8 @@ const pathItems = (resolution: Resolution): readonly PathItem[] => {
     const use = childPointer("/paths", key);
     const located = locate(resolution, use, value);
 
-    return located === undefined
+    // A path item in another document of the set is not walked: the checks read entry sites.
+    return located === undefined || located.document !== resolution.document
       ? []
       : [{ key, node: located.node, pointer: located.pointer, use }];
   });
@@ -208,13 +227,12 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
         )
       : [];
   const entries = [
-    ...fixed.map((name) => [name, childPointer(item.pointer, name)] as const),
-    ...additional,
+    ...fixed.map((name) => [name, childPointer(item.pointer, name), false] as const),
+    ...additional.map(([name, pointer]) => [name, pointer, true] as const),
   ];
 
-  return entries.flatMap(([name, pointer]) => {
+  return entries.flatMap(([name, pointer, additionalKey]) => {
     const node = nodeAt(resolution.value, pointer);
-    const additionalKey = !fixed.includes(name);
 
     return isObject(node)
       ? [
@@ -292,6 +310,37 @@ const expressionsOf = (key: string): readonly string[] =>
   Arr.map(Arr.fromIterable(key.matchAll(expression)), (match) => match.groups?.name ?? "");
 
 const normalizedTemplate = (key: string): string => key.replaceAll(expression, "{}");
+
+// A sibling of a Path Item `$ref` that the target also defines leaves the result undefined (D-OC6,
+// DOC-16). The target may sit in any document of the set.
+const refSiblingFindings = (resolution: Resolution): readonly Finding[] => {
+  const paths = isObject(resolution.value) ? resolution.value.paths : undefined;
+
+  return Object.entries(isObject(paths) ? paths : {}).flatMap(([key, value]) => {
+    const use = childPointer("/paths", key);
+    const referenced = resolution.references.has(
+      keyOf({ document: resolution.document, pointer: use }),
+    );
+    const target = referenced ? locate(resolution, use, value) : undefined;
+    if (!isObject(value) || target === undefined) {
+      return [];
+    }
+
+    const shared = Object.keys(value).filter(
+      (member) => member !== "$ref" && Object.hasOwn(target.node, member),
+    );
+
+    return shared.length === 0
+      ? []
+      : [
+          {
+            code: "PTH-11/ref-sibling-conflict",
+            pointer: use,
+            related: shared.map((member) => childPointer(use, member)),
+          },
+        ];
+  });
+};
 
 const componentFindings = (resolution: Resolution): readonly Finding[] => {
   const components = isObject(resolution.value) ? resolution.value.components : undefined;
@@ -451,6 +500,7 @@ const findingsOf = (resolution: Resolution): readonly Finding[] => {
 
   return [
     ...componentFindings(resolution),
+    ...refSiblingFindings(resolution),
     ...operations.flatMap((operation) =>
       operationFindings(resolution, operation, twinsOf(operation.item)),
     ),

@@ -2,7 +2,14 @@ import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } fr
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { Line } from "../validate/index.ts";
-import { documentBase, resolveUri, schemaBase, stringMember, stripFragment } from "./base-uri.ts";
+import {
+  documentBase,
+  resolveUri,
+  retrievalBase,
+  schemaBase,
+  stringMember,
+  stripFragment,
+} from "./base-uri.ts";
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
 import {
@@ -22,11 +29,24 @@ export type { CanonicalKey } from "./canonical.ts";
 type Document = typeof DocumentUri.Type;
 
 /**
- * One document of the set (a set of one in Milestone 1), with the `openapi` line it declares.
+ * A document of the set other than the entry, under its retrieval URI. `line` is the line its base
+ * URIs follow, the entry's when absent. A member without an `openapi` field is a fragment: its root
+ * may be the target of a reference, and it has no `$self`.
+ */
+export interface ResolveMember {
+  readonly document: Document;
+  readonly line?: Line;
+  readonly value: Json;
+}
+
+/**
+ * The entry document with the `openapi` line it declares, and the other documents of the set
+ * (design 3.3); with no members the set is the entry alone.
  */
 export interface ResolveInput {
   readonly document: Document;
   readonly line: Line;
+  readonly members?: readonly ResolveMember[];
   readonly value: Json;
 }
 
@@ -81,13 +101,16 @@ export interface ResolvedReference extends Docs {
 /**
  * The resolved document set. Maps are keyed by `keyOf` of a canonical key; `defs` maps each schema
  * target to its `$defs` key. `diagnostics` holds notices and element-scope refusals; a
- * document-scope refusal fails the resolution instead. `value` is the entry document, not a copy.
+ * document-scope refusal fails the resolution instead. `value` is the entry document, not a copy;
+ * `documents` holds every document of the set, the entry included, by retrieval URI, so a target
+ * key's node is `nodeAt(documents.get(key.document), key.pointer)`.
  */
 export interface Resolution {
   readonly base: string;
   readonly defs: ReadonlyMap<string, string>;
   readonly diagnostics: readonly Diagnostic[];
   readonly document: Document;
+  readonly documents: ReadonlyMap<Document, Json>;
   readonly line: Line;
   readonly operationIds: ReadonlyMap<string, CanonicalKey>;
   readonly references: ReadonlyMap<string, ResolvedReference>;
@@ -107,10 +130,21 @@ export class ResolveRefusal extends Data.TaggedError("ResolveRefusal")<{
 export type ComponentSection = "schemas" | "securitySchemes";
 
 const rules = {
+  "DOC-19/two-object-types": {
+    anchor: "structural-interoperability",
+    element: "Object used as two types",
+    message:
+      "One object is used as two different Object types; the related pointer names its other use.",
+  },
   "DOC-23/non-schema-cycle": {
     anchor: "handling-reference-cycles",
     element: "Reference cycle",
     message: "A chain of non-schema references returns to an object already on the chain.",
+  },
+  "REF-02/non-schema-target": {
+    anchor: "reference-object",
+    element: "Reference to the document root",
+    message: "The reference target is the document root, which is not an object of this kind.",
   },
   "REF-05/sibling-ignored": {
     anchor: "reference-object",
@@ -147,6 +181,12 @@ const rules = {
     element: "Schema $id",
     message: "Two schemas, or a schema and a document, declare the same URI.",
   },
+  "REF-14/pointer-crosses-id": {
+    anchor: "parsing-documents",
+    element: "Schema $ref",
+    message:
+      "The JSON Pointer enters a schema with its own $id, which is not interoperable; reference that schema by its $id.",
+  },
   "REF-15/outside-set": {
     anchor: "reference-object",
     element: "Reference to another document",
@@ -172,6 +212,11 @@ const rules = {
     element: "Reference Object",
     message: "The reference target does not exist in the document set.",
   },
+  "SCH-03/non-schema-target": {
+    anchor: "json-schema-keywords",
+    element: "Schema $ref target",
+    message: "The $ref target is the document root, which is not a schema.",
+  },
   "SCH-05/dynamic-ref": {
     anchor: "json-schema-keywords",
     element: "Schema $dynamicRef",
@@ -186,7 +231,17 @@ const rules = {
 
 type Code = keyof typeof rules;
 
-type NoticeCode = "REF-05/sibling-ignored" | "REF-06/sibling-ignored" | "REF-07/sibling-ignored";
+// 3.2 moved the DOC-19 rule to its own section; every other rule cites one anchor on each line.
+const anchorOn = (code: Code, line: Line): string =>
+  code === "DOC-19/two-object-types" && line === "3.2"
+    ? "conflicts-between-field-types-and-reference-contexts"
+    : rules[code].anchor;
+
+type NoticeCode =
+  | "REF-05/sibling-ignored"
+  | "REF-06/sibling-ignored"
+  | "REF-07/sibling-ignored"
+  | "REF-14/pointer-crosses-id";
 
 type ElementCode = "SCH-05/dynamic-ref" | "SEC-10/uri-like-name";
 
@@ -196,6 +251,7 @@ const notices: ReadonlySet<Code> = new Set<Code>([
   "REF-05/sibling-ignored",
   "REF-06/sibling-ignored",
   "REF-07/sibling-ignored",
+  "REF-14/pointer-crosses-id",
 ]);
 
 const elementRefusals: ReadonlySet<Code> = new Set<Code>([
@@ -205,6 +261,7 @@ const elementRefusals: ReadonlySet<Code> = new Set<Code>([
 
 interface Finding {
   readonly code: Code;
+  readonly document: Document;
   readonly pointer: string;
   readonly related?: CanonicalKey;
 }
@@ -213,8 +270,8 @@ interface Failure {
   readonly finding: Finding & { readonly code: DocumentCode };
 }
 
-const failure = (code: DocumentCode, pointer: string, related?: CanonicalKey): Failure => ({
-  finding: related === undefined ? { code, pointer } : { code, pointer, related },
+const failure = (code: DocumentCode, at: CanonicalKey, related?: CanonicalKey): Failure => ({
+  finding: related === undefined ? { code, ...at } : { code, ...at, related },
 });
 
 type Kind =
@@ -372,14 +429,19 @@ const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
 
-const tokensOf = (pointer: string): readonly string[] => {
+const tokensOf = (pointer: string): readonly string[] | undefined => {
   const exit = Effect.runSyncExit(parsePointer(pointer));
 
-  return Exit.isSuccess(exit) ? exit.value : [];
+  return Exit.isSuccess(exit) ? exit.value : undefined;
 };
 
-const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const exit = Effect.runSyncExit(evaluateTokens(root, tokensOf(pointer)));
+export const nodeAt = (root: Json, pointer: string): Json | undefined => {
+  const tokens = tokensOf(pointer);
+  if (tokens === undefined) {
+    return undefined;
+  }
+
+  const exit = Effect.runSyncExit(evaluateTokens(root, tokens));
 
   return Exit.isSuccess(exit) ? exit.value : undefined;
 };
@@ -431,21 +493,25 @@ const nearest = (near: Docs, far: Docs): Docs =>
   docsFrom(near.summary ?? far.summary, near.description ?? far.description);
 
 interface Edge {
-  readonly site: string;
+  readonly site: CanonicalKey;
+  readonly target: CanonicalKey;
   readonly to: string;
 }
 
-// The nearest target that physically contains `pointer`, else the root.
-const ownerOf = (pointer: string, targets: ReadonlySet<string>): string => {
-  let prefix = pointer;
+const rootKey = (document: Document): string => keyOf({ document, pointer: "" });
+
+// The nearest target in the same document that physically contains `key`, else that document's root.
+const ownerOf = (key: CanonicalKey, targets: ReadonlySet<string>): string => {
+  let prefix = key.pointer;
   while (prefix !== "") {
     prefix = prefix.slice(0, prefix.lastIndexOf("/"));
-    if (targets.has(prefix)) {
-      return prefix;
+    const owner = keyOf({ document: key.document, pointer: prefix });
+    if (targets.has(owner)) {
+      return owner;
     }
   }
 
-  return "";
+  return rootKey(key.document);
 };
 
 // Iterative depth-first search from `start`; returns the edge that closes a cycle.
@@ -479,30 +545,72 @@ const cycleFrom = (
   return undefined;
 };
 
-interface Visit {
+/**
+ * One document of the set as the resolver walks it. `openapi` is true when the root is an OpenAPI
+ * Object; a member without `openapi` is a fragment, whose root a reference may target as any kind.
+ */
+interface Member {
+  readonly base: string;
+  readonly document: Document;
+  readonly line: Line;
+  readonly openapi: boolean;
+  readonly value: Json;
+}
+
+// A node of the set: the member that holds it and its pointer there.
+interface Place {
+  readonly member: Member;
+  readonly pointer: string;
+}
+
+// `via` is the reference site that reached the node, absent for a node reached by its position.
+interface Visit extends Place {
   readonly base: string;
   readonly kind: Kind;
   readonly node: Json;
-  readonly pointer: string;
+  readonly via?: CanonicalKey;
 }
 
-interface Site {
+interface Site extends Place {
   readonly base: string;
   readonly kind: ReferenceKind;
   readonly node: JsonObject;
-  readonly pointer: string;
   readonly ref: string;
 }
 
-interface Located {
+interface Located extends Place {
   readonly node: Json;
-  readonly pointer: string;
 }
+
+const visitKey = (item: Visit): string =>
+  `${item.member.document}\u0000${item.kind}\u0000${item.pointer}`;
+
+// A Reference Object's siblings are fields only for a Path Item and a 3.1 or 3.2 schema.
+const siblingsAreFields = (line: Line, kind: ReferenceKind): boolean =>
+  kind === "pathItem" || (kind === "schema" && line !== "3.0");
+
+// Pushes `items` so that they pop in their given order.
+const pushInOrder = (stack: Visit[], items: readonly Visit[]): void => {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item !== undefined) {
+      stack.push(item);
+    }
+  }
+};
+
+const keyAt = (place: Place): CanonicalKey => ({
+  document: place.member.document,
+  pointer: place.pointer,
+});
+
+const samePlace = (left: Place, right: Place): boolean =>
+  left.member === right.member && left.pointer === right.pointer;
 
 // `waitOn` names the resource whose later $id or $anchor could still resolve the reference.
 type Missing =
   | { readonly missing: "outside"; readonly waitOn?: string }
-  | { readonly missing: "unresolvable"; readonly pointer?: string; readonly waitOn?: string };
+  | { readonly missing: "unresolvable"; readonly target?: CanonicalKey; readonly waitOn?: string };
 
 interface Waiting {
   readonly order: number;
@@ -511,49 +619,145 @@ interface Waiting {
 
 const byOrder = Order.mapInput(Order.Number, (entry: Waiting) => entry.order);
 
-type Lookup = { readonly found: Located } | Missing;
+// `crosses` is the innermost schema with its own $id that a pointer fragment enters (REF-14).
+type Lookup = { readonly crosses?: CanonicalKey; readonly found: Located } | Missing;
+
+const lookupFailure = (site: Site, outcome: Missing): Failure => {
+  if (outcome.missing === "outside") {
+    return failure(
+      remoteUri.test(site.ref) ? "REF-16/outside-set" : "REF-15/outside-set",
+      keyAt(site),
+    );
+  }
+
+  return failure("REF-18/unresolvable", keyAt(site), outcome.target);
+};
+
+// The root of an OpenAPI document is no object a reference may stand for (D-AD12).
+const isDocumentRoot = (found: Place): boolean => found.pointer === "" && found.member.openapi;
+
+const rootCode = (line: Line): "REF-02/non-schema-target" | "SCH-03/non-schema-target" =>
+  line === "3.0" ? "REF-02/non-schema-target" : "SCH-03/non-schema-target";
+
+// The base URI a schema target inherits from the schemas around it, found by walking down from
+// its document's root. A fragment document's root is taken as a schema.
+const enclosingBase = (found: Place): string => {
+  const { line } = found.member;
+  let node: Json | undefined = found.member.value;
+  let state: Step = { kind: found.member.openapi ? "root" : "schema" };
+  let { base } = found.member;
+  for (const token of tokensOf(found.pointer) ?? []) {
+    if (node === undefined) {
+      break;
+    }
+
+    if ("kind" in state && state.kind === "schema") {
+      base = schemaBase(line, base, node) ?? base;
+    }
+
+    if ("container" in state) {
+      state = { kind: state.container };
+    } else if (state.kind !== undefined) {
+      state = stepInto(line, state.kind, token);
+    }
+
+    node = memberOf(node, token);
+  }
+
+  return base;
+};
+
+// The structural children of a node, in document order.
+const childrenOf = (place: Place, kind: Kind, node: JsonObject, base: string): Visit[] => {
+  const { member, pointer } = place;
+  const members = memberKinds.get(kind);
+  const childBase = kind === "schema" ? base : member.base;
+  const queued: Visit[] = [];
+  const enqueue = (childKind: Kind, value: Json, at: string): void => {
+    queued.push({ base: childBase, kind: childKind, member, node: value, pointer: at });
+  };
+
+  for (const [name, value] of Object.entries(node)) {
+    const at = childPointer(pointer, name);
+    const field = fieldOf(member.line, kind, name);
+    if (members !== undefined && !name.startsWith("x-")) {
+      enqueue(members, value, at);
+    } else if (field?.[2] === "one") {
+      enqueue(field[1], value, at);
+    } else if (field?.[2] === "list" && isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        enqueue(field[1], item, childPointer(at, `${index}`));
+      }
+    } else if (field?.[2] === "map" && isObject(value)) {
+      for (const [entry, item] of Object.entries(value)) {
+        enqueue(field[1], item, childPointer(at, entry));
+      }
+    }
+  }
+
+  return queued;
+};
 
 /**
- * The resolver's working state for one run.
+ * The resolver's working state for one run over the whole document set.
  */
 class Resolver {
   // Resources that gained an $id or $anchor since the last round.
   readonly added = new Set<string>();
-  readonly anchors = new Map<string, string>();
-  readonly base: string;
+  readonly all: readonly Member[];
+  readonly anchors = new Map<string, Place>();
+  readonly byDocument: ReadonlyMap<Document, Member>;
+  // Nodes already charged to the node budget, so a node indexed and then walked costs once.
+  readonly charged = new Set<string>();
   readonly defs = new Map<string, string>();
-  readonly documents = new Map<string, string>();
+  // Every resource URI a member is known by (its retrieval URI and its base) to that member.
+  readonly documents = new Map<string, Member>();
+  readonly entry: Member;
   readonly findings: Finding[] = [];
-  readonly ids = new Map<string, string>();
-  readonly input: ResolveInput;
+  readonly ids = new Map<string, Place>();
   readonly limits: ResolveLimits;
   readonly operationIds = new Map<string, CanonicalKey>();
   readonly references = new Map<string, ResolvedReference>();
+  // Every schema that declares its own $id, by `keyOf` of its place.
+  readonly resources = new Set<string>();
   readonly stack: Visit[] = [];
+  // The first Object type each node is walked as, and the site that reached it (DOC-19).
+  readonly typed = new Map<string, { readonly by: CanonicalKey; readonly kind: Kind }>();
   readonly visited = new Set<string>();
   nodes = 0;
 
-  constructor(input: ResolveInput, base: string, limits: ResolveLimits) {
-    this.input = input;
-    this.base = base;
+  constructor(entry: Member, others: readonly Member[], limits: ResolveLimits) {
+    this.entry = entry;
+    this.all = [entry, ...others];
+    const byDocument = new Map<Document, Member>();
+    for (const member of this.all) {
+      if (!byDocument.has(member.document)) {
+        byDocument.set(member.document, member);
+      }
+    }
+
+    this.byDocument = byDocument;
     this.limits = limits;
   }
 
-  get line(): Line {
-    return this.input.line;
-  }
+  // Charges one node, or one retry when `seen` is absent, to the node budget.
+  spend(seen?: string): Failure | undefined {
+    if (seen !== undefined) {
+      if (this.charged.has(seen)) {
+        return undefined;
+      }
 
-  key(pointer: string): CanonicalKey {
-    return { document: this.input.document, pointer };
-  }
+      this.charged.add(seen);
+    }
 
-  spend(): Failure | undefined {
     this.nodes += 1;
 
-    return this.nodes > this.limits.maxNodes ? failure("REF-18/node-budget", "") : undefined;
+    return this.nodes > this.limits.maxNodes
+      ? failure("REF-18/node-budget", { document: this.entry.document, pointer: "" })
+      : undefined;
   }
 
-  // Walks every queued node, collecting reference sites in document order.
+  // Walks every queued node, collecting reference sites in walk order.
   drain(sites: Site[]): Failure | undefined {
     let next = this.stack.pop();
     while (next !== undefined) {
@@ -569,32 +773,43 @@ class Resolver {
   }
 
   visit(item: Visit, sites: Site[]): Failure | undefined {
-    const seen = `${item.kind}\u0000${item.pointer}`;
-    if (this.visited.has(seen) || !isObject(item.node)) {
+    const { member, node, pointer } = item;
+    const seen = visitKey(item);
+    if (this.visited.has(seen) || !isObject(node)) {
       return undefined;
     }
 
     this.visited.add(seen);
 
-    const { node, pointer } = item;
-    const spent = this.spend();
+    const spent = this.spend(seen);
     if (spent !== undefined) {
       return spent;
     }
 
+    const place: Place = { member, pointer };
+    const conflict = this.typeOnce(item);
+    if (conflict !== undefined) {
+      return conflict;
+    }
+
     let { base } = item;
     if (item.kind === "schema") {
-      const own = schemaBase(this.line, base, node);
+      const own = schemaBase(member.line, base, node);
       if (own === undefined) {
         return failure(
-          this.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
-          pointer,
+          member.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
+          keyAt(place),
         );
       }
 
-      const indexed = this.index(node, own, base, pointer);
+      // A node reached only by a reference into a non-schema position is indexed here.
+      const indexed = this.declare(place, node, own, base);
       if (indexed !== undefined) {
         return indexed;
+      }
+
+      if (member.line !== "3.0" && stringMember(node, "$dynamicRef") !== undefined) {
+        this.findings.push({ code: "SCH-05/dynamic-ref", ...keyAt(place) });
       }
 
       base = own;
@@ -602,78 +817,170 @@ class Resolver {
 
     const ref = stringMember(node, "$ref");
     if (ref !== undefined && isReferenceKind(item.kind)) {
-      sites.push({ base, kind: item.kind, node, pointer, ref });
-      if (!this.walksSiblings(item.kind, node, pointer)) {
+      sites.push({ base, kind: item.kind, member, node, pointer, ref });
+      if (!this.walksSiblings(place, item.kind, node)) {
         return undefined;
       }
     }
 
-    this.record(item.kind, node, pointer);
-    this.push(item.kind, node, pointer, base);
+    this.record(place, item.kind, node);
+    this.push(place, item.kind, node, base);
 
     return undefined;
   }
 
-  // Indexes a schema's $id and $anchor, and refuses $dynamicRef at element scope.
-  index(node: JsonObject, own: string, enclosing: string, pointer: string): Failure | undefined {
-    if (this.line === "3.0") {
+  // Indexes a schema's $id and $anchor; indexing one place twice is a no-op.
+  declare(place: Place, node: JsonObject, own: string, enclosing: string): Failure | undefined {
+    if (place.member.line === "3.0") {
       return undefined;
     }
 
     if (own !== enclosing && stringMember(node, "$id") !== undefined) {
-      if (this.documents.has(own) || (this.ids.get(own) ?? pointer) !== pointer) {
-        return failure("REF-14/duplicate-id", pointer);
+      const known = this.ids.get(own);
+      if (this.documents.has(own) || (known !== undefined && !samePlace(known, place))) {
+        return failure("REF-14/duplicate-id", keyAt(place));
       }
 
-      this.ids.set(own, pointer);
+      this.ids.set(own, place);
+      this.resources.add(keyOf(keyAt(place)));
       this.added.add(own);
     }
 
     const anchor = stringMember(node, "$anchor");
     if (anchor !== undefined) {
       const name = `${own}#${anchor}`;
-      if ((this.anchors.get(name) ?? pointer) !== pointer) {
-        return failure("REF-14/duplicate-anchor", pointer);
+      const known = this.anchors.get(name);
+      if (known !== undefined && !samePlace(known, place)) {
+        return failure("REF-14/duplicate-anchor", keyAt(place));
       }
 
-      this.anchors.set(name, pointer);
+      this.anchors.set(name, place);
       this.added.add(own);
-    }
-
-    if (stringMember(node, "$dynamicRef") !== undefined) {
-      this.findings.push({ code: "SCH-05/dynamic-ref", pointer });
     }
 
     return undefined;
   }
 
+  // Indexes every $id and $anchor at a schema position of every member before any reference is
+  // judged (design 3.3: resolution happens only after every supplied document is parsed). Each
+  // node is charged to the node budget once, here or in the walk.
+  index(): Failure | undefined {
+    for (const member of this.all) {
+      const stack: Visit[] = [
+        {
+          base: member.base,
+          kind: member.openapi ? "root" : "schema",
+          member,
+          node: member.value,
+          pointer: "",
+        },
+      ];
+      let item = stack.pop();
+      while (item !== undefined) {
+        const failed = this.indexNode(item, stack);
+        if (failed !== undefined) {
+          return failed;
+        }
+
+        item = stack.pop();
+      }
+    }
+
+    this.added.clear();
+
+    return undefined;
+  }
+
+  // Indexes one node and queues its structural children; Reference Object siblings that are not
+  // fields are skipped, as the walk skips them.
+  indexNode(item: Visit, stack: Visit[]): Failure | undefined {
+    const { kind, member, node } = item;
+    const seen = visitKey(item);
+    if (!isObject(node) || this.charged.has(seen)) {
+      return undefined;
+    }
+
+    const spent = this.spend(seen);
+    if (spent !== undefined) {
+      return spent;
+    }
+
+    const place: Place = { member, pointer: item.pointer };
+    let { base } = item;
+    if (kind === "schema") {
+      const own = schemaBase(member.line, base, node);
+      if (own === undefined) {
+        return failure(
+          member.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
+          keyAt(place),
+        );
+      }
+
+      const declared = this.declare(place, node, own, base);
+      if (declared !== undefined) {
+        return declared;
+      }
+
+      base = own;
+    }
+
+    const ref = stringMember(node, "$ref");
+    if (ref !== undefined && isReferenceKind(kind) && !siblingsAreFields(member.line, kind)) {
+      return undefined;
+    }
+
+    pushInOrder(stack, childrenOf(place, kind, node, base));
+
+    return undefined;
+  }
+
+  // Refuses a node walked as a second Object type (DOC-19), naming the site of each use.
+  typeOnce(item: Visit): Failure | undefined {
+    const at = keyAt(item);
+    const by = item.via ?? at;
+    const known = this.typed.get(keyOf(at));
+    if (known === undefined) {
+      this.typed.set(keyOf(at), { by, kind: item.kind });
+
+      return undefined;
+    }
+
+    return known.kind === item.kind ? undefined : failure("DOC-19/two-object-types", by, known.by);
+  }
+
   // Records the sibling notice; true when the siblings are fields to walk.
-  walksSiblings(kind: ReferenceKind, node: JsonObject, pointer: string): boolean {
-    if (kind === "pathItem" || (kind === "schema" && this.line !== "3.0")) {
+  walksSiblings(place: Place, kind: ReferenceKind, node: JsonObject): boolean {
+    const { line } = place.member;
+    if (siblingsAreFields(line, kind)) {
       return true;
     }
 
-    const allowed = this.line === "3.0" ? ["$ref"] : ["$ref", "description", "summary"];
+    const allowed = line === "3.0" ? ["$ref"] : ["$ref", "description", "summary"];
     if (Object.keys(node).some((member) => !allowed.includes(member))) {
       let code: NoticeCode = "REF-06/sibling-ignored";
-      if (this.line === "3.0") {
+      if (line === "3.0") {
         code = kind === "schema" ? "REF-07/sibling-ignored" : "REF-05/sibling-ignored";
       }
 
-      this.findings.push({ code, pointer });
+      this.findings.push({ code, ...keyAt(place) });
     }
 
     return false;
   }
 
-  record(kind: Kind, node: JsonObject, pointer: string): void {
+  // Implicit connections resolve from the entry document only (design 3.3), so only it is recorded.
+  record(place: Place, kind: Kind, node: JsonObject): void {
+    if (place.member !== this.entry) {
+      return;
+    }
+
     const operationId = kind === "operation" ? stringMember(node, "operationId") : undefined;
     if (operationId !== undefined && !this.operationIds.has(operationId)) {
-      this.operationIds.set(operationId, this.key(pointer));
+      this.operationIds.set(operationId, keyAt(place));
     }
 
     const schemes = kind === "components" ? memberOf(node, "securitySchemes") : undefined;
-    if (this.line !== "3.2" || schemes === undefined || !isObject(schemes)) {
+    if (this.entry.line !== "3.2" || schemes === undefined || !isObject(schemes)) {
       return;
     }
 
@@ -681,54 +988,31 @@ class Resolver {
       if (uriSyntax.test(name)) {
         this.findings.push({
           code: "SEC-10/uri-like-name",
-          pointer: childPointer(childPointer(pointer, "securitySchemes"), name),
+          document: this.entry.document,
+          pointer: childPointer(childPointer(place.pointer, "securitySchemes"), name),
         });
       }
     }
   }
 
   // Queues the structural children so that they pop in document order.
-  push(kind: Kind, node: JsonObject, pointer: string, base: string): void {
-    const members = memberKinds.get(kind);
-    const childBase = kind === "schema" ? base : this.base;
-    const queued: Visit[] = [];
-    const enqueue = (childKind: Kind, value: Json, at: string): void => {
-      queued.push({ base: childBase, kind: childKind, node: value, pointer: at });
-    };
-
-    for (const [name, value] of Object.entries(node)) {
-      const at = childPointer(pointer, name);
-      const field = fieldOf(this.line, kind, name);
-      if (members !== undefined && !name.startsWith("x-")) {
-        enqueue(members, value, at);
-      } else if (field?.[2] === "one") {
-        enqueue(field[1], value, at);
-      } else if (field?.[2] === "list" && isArray(value)) {
-        for (const [index, item] of value.entries()) {
-          enqueue(field[1], item, childPointer(at, `${index}`));
-        }
-      } else if (field?.[2] === "map" && isObject(value)) {
-        for (const [entry, item] of Object.entries(value)) {
-          enqueue(field[1], item, childPointer(at, entry));
-        }
-      }
-    }
-
-    for (let index = queued.length - 1; index >= 0; index -= 1) {
-      const item = queued[index];
-      if (item !== undefined) {
-        this.stack.push(item);
-      }
-    }
+  push(place: Place, kind: Kind, node: JsonObject, base: string): void {
+    pushInOrder(this.stack, childrenOf(place, kind, node, base));
   }
 
-  // The pointer of the resource a URI names: a document of the set, or for a schema an $id.
-  resourceRoot(resource: string, isSchema: boolean): string | undefined {
-    return this.documents.get(resource) ?? (isSchema ? this.ids.get(resource) : undefined);
+  // The node a resource URI names: a document of the set, or for a schema an $id.
+  resourceRoot(resource: string, isSchema: boolean): Place | undefined {
+    const member = this.documents.get(resource);
+    if (member !== undefined) {
+      return { member, pointer: "" };
+    }
+
+    return isSchema ? this.ids.get(resource) : undefined;
   }
 
-  // Finds the node a reference names inside the document set, without fetching anything.
-  lookup(ref: string, base: string, isSchema: boolean): Lookup {
+  // Finds the node a reference names inside the document set, without fetching anything. `line` is
+  // the line of the document that holds the reference.
+  lookup(ref: string, base: string, isSchema: boolean, line: Line): Lookup {
     const hash = ref.indexOf("#");
     const uriPart = hash === -1 ? ref : ref.slice(0, hash);
     const fragment = hash === -1 ? "" : ref.slice(hash + 1);
@@ -743,30 +1027,29 @@ class Resolver {
       return isSchema ? { missing: "outside", waitOn: resource } : { missing: "outside" };
     }
 
-    const pointer = this.fragmentTarget(resource, root, fragment, isSchema);
-    const byAnchor =
-      isSchema && this.line !== "3.0" && fragment !== "" && !fragment.startsWith("/");
-    if (pointer === undefined) {
+    const target = this.fragmentTarget(resource, root, fragment, isSchema, line);
+    const byAnchor = isSchema && line !== "3.0" && fragment !== "" && !fragment.startsWith("/");
+    if (target === undefined) {
       return byAnchor ? { missing: "unresolvable", waitOn: resource } : { missing: "unresolvable" };
     }
 
-    const node = nodeAt(this.input.value, pointer);
-    const accepted =
-      node !== undefined &&
-      (isObject(node) || (isSchema && this.line !== "3.0" && Predicate.isBoolean(node)));
+    const node = nodeAt(target.member.value, target.pointer);
+    const isBooleanSchema = isSchema && target.member.line !== "3.0" && Predicate.isBoolean(node);
+    if (node !== undefined && (isObject(node) || isBooleanSchema)) {
+      return this.foundAt(root, target, node, isSchema && fragment.startsWith("/"));
+    }
 
-    return node !== undefined && accepted
-      ? { found: { node, pointer } }
-      : { missing: "unresolvable", pointer };
+    return { missing: "unresolvable", target: keyAt(target) };
   }
 
   // An empty fragment names the resource, a pointer a node in it, a plain name a schema $anchor.
   fragmentTarget(
     resource: string,
-    root: string,
+    root: Place,
     fragment: string,
     isSchema: boolean,
-  ): string | undefined {
+    line: Line,
+  ): Place | undefined {
     if (fragment === "") {
       return root;
     }
@@ -774,27 +1057,34 @@ class Resolver {
     if (fragment.startsWith("/")) {
       const pointer = fragmentPointer(fragment);
 
-      return pointer === undefined ? undefined : `${root}${pointer}`;
+      return pointer === undefined
+        ? undefined
+        : { member: root.member, pointer: `${root.pointer}${pointer}` };
     }
 
-    return isSchema && this.line !== "3.0"
-      ? this.anchors.get(`${resource}#${fragment}`)
-      : undefined;
+    return isSchema && line !== "3.0" ? this.anchors.get(`${resource}#${fragment}`) : undefined;
   }
 
-  lookupFailure(site: Site, outcome: Missing): Failure {
-    if (outcome.missing === "outside") {
-      return failure(
-        remoteUri.test(site.ref) ? "REF-16/outside-set" : "REF-15/outside-set",
-        site.pointer,
-      );
+  // The node a lookup found, with the $id its pointer fragment crosses to reach it, if any.
+  foundAt(root: Place, target: Place, node: Json, byPointer: boolean): Lookup {
+    const found = { member: target.member, node, pointer: target.pointer };
+    const crosses = byPointer ? this.crossedId(root, target) : undefined;
+
+    return crosses === undefined ? { found } : { crosses, found };
+  }
+
+  // The innermost schema with its own $id strictly between a pointer's resource and its target.
+  crossedId(root: Place, target: Place): CanonicalKey | undefined {
+    let { pointer } = target;
+    while (pointer.length > root.pointer.length) {
+      pointer = pointer.slice(0, pointer.lastIndexOf("/"));
+      const key = { document: target.member.document, pointer };
+      if (pointer.length > root.pointer.length && this.resources.has(keyOf(key))) {
+        return key;
+      }
     }
 
-    return failure(
-      "REF-18/unresolvable",
-      site.pointer,
-      outcome.pointer === undefined ? undefined : this.key(outcome.pointer),
-    );
+    return undefined;
   }
 
   // Resolves one schema reference, or names the resource it waits on. Every attempt, retries
@@ -805,58 +1095,84 @@ class Resolver {
       return spent;
     }
 
-    const outcome = this.lookup(site.ref, site.base, true);
+    const outcome = this.lookup(site.ref, site.base, true, site.member.line);
     if (!("found" in outcome)) {
       return outcome.waitOn === undefined
-        ? this.lookupFailure(site, outcome)
+        ? lookupFailure(site, outcome)
         : { waitOn: outcome.waitOn };
     }
 
     const { found } = outcome;
-    const target = this.key(found.pointer);
-    const key = defsKey(this.input.document, target);
+    const siteKey = keyAt(site);
+    const target = keyAt(found);
+    if (outcome.crosses !== undefined) {
+      this.findings.push({
+        code: "REF-14/pointer-crosses-id",
+        ...siteKey,
+        related: outcome.crosses,
+      });
+    }
+
+    if (isDocumentRoot(found)) {
+      // The root is no schema (D-AD12): the use site keeps a reference with no `$defs` key, nothing
+      // is lifted and the root is not walked as a schema; schema normalization refuses the site.
+      this.references.set(keyOf(siteKey), { kind: "schema", site: siteKey, target, via: [] });
+
+      return undefined;
+    }
+
+    const key = defsKey(this.entry.document, target);
     this.defs.set(keyOf(target), key);
-    this.references.set(keyOf(this.key(site.pointer)), {
+    this.references.set(keyOf(siteKey), {
       defsKey: key,
       kind: "schema",
-      site: this.key(site.pointer),
+      site: siteKey,
       target,
       via: [],
     });
     this.stack.push({
-      base: this.enclosingBase(found.pointer),
+      base: enclosingBase(found),
       kind: "schema",
+      member: found.member,
       node: found.node,
       pointer: found.pointer,
+      via: siteKey,
     });
 
     return undefined;
   }
 
-  // Follows a non-schema chain to its end, at most `maxHops` references.
+  // Follows a non-schema chain to its end, at most `maxHops` references, across documents. Each
+  // hop resolves against the base of the document that holds its Reference Object.
   chainSite(site: Site): Failure | undefined {
-    const onChain = new Set([site.pointer]);
+    const siteKey = keyAt(site);
+    const onChain = new Set([keyOf(siteKey)]);
     const via: CanonicalKey[] = [];
-    let docs = this.line === "3.0" || site.kind === "pathItem" ? {} : docsOf(site.node);
-    let { ref } = site;
+    const overrides = site.member.line !== "3.0" && site.kind !== "pathItem";
+    let docs = overrides ? docsOf(site.node) : {};
+    let { member, ref } = site;
     for (let hops = 1; hops <= this.limits.maxHops; hops += 1) {
       const spent = this.spend();
       if (spent !== undefined) {
         return spent;
       }
 
-      const outcome = this.lookup(ref, this.base, false);
+      const outcome = this.lookup(ref, member.base, false, member.line);
       if (!("found" in outcome)) {
-        return this.lookupFailure({ ...site, ref }, outcome);
+        return lookupFailure({ ...site, ref }, outcome);
       }
 
       const { found } = outcome;
-      if (onChain.has(found.pointer)) {
-        return failure("DOC-23/non-schema-cycle", site.pointer, this.key(found.pointer));
+      if (isDocumentRoot(found)) {
+        return failure(rootCode(site.member.line), siteKey);
       }
 
-      const hop = this.key(found.pointer);
-      if (this.line !== "3.0" && site.kind !== "pathItem") {
+      const hop = keyAt(found);
+      if (onChain.has(keyOf(hop))) {
+        return failure("DOC-23/non-schema-cycle", siteKey, hop);
+      }
+
+      if (overrides) {
         docs = nearest(docs, docsOf(found.node));
       }
 
@@ -865,7 +1181,7 @@ class Resolver {
       if (known?.kind === site.kind) {
         const total = [...via, hop, ...known.via];
         if (total.length >= this.limits.maxHops) {
-          return failure("REF-18/hop-limit", site.pointer);
+          return failure("REF-18/hop-limit", siteKey);
         }
 
         this.settle(site, known.target, total, nearest(docs, known));
@@ -879,53 +1195,37 @@ class Resolver {
         return undefined;
       }
 
-      onChain.add(found.pointer);
+      onChain.add(keyOf(hop));
       via.push(hop);
       ref = next;
+      ({ member } = found);
     }
 
-    return failure("REF-18/hop-limit", site.pointer);
+    return failure("REF-18/hop-limit", siteKey);
   }
 
   settle(site: Site, target: CanonicalKey, via: readonly CanonicalKey[], docs: Docs): void {
-    this.references.set(keyOf(this.key(site.pointer)), {
+    const siteKey = keyAt(site);
+    this.references.set(keyOf(siteKey), {
       ...docs,
       kind: site.kind,
-      site: this.key(site.pointer),
+      site: siteKey,
       target,
       via,
     });
 
-    const node = nodeAt(this.input.value, target.pointer);
-    if (node !== undefined) {
-      this.stack.push({ base: this.base, kind: site.kind, node, pointer: target.pointer });
+    const member = this.byDocument.get(target.document);
+    const node = member === undefined ? undefined : nodeAt(member.value, target.pointer);
+    if (member !== undefined && node !== undefined) {
+      this.stack.push({
+        base: member.base,
+        kind: site.kind,
+        member,
+        node,
+        pointer: target.pointer,
+        via: siteKey,
+      });
     }
-  }
-
-  // The base URI a target inherits from the schemas around it, found by walking down from the root.
-  enclosingBase(pointer: string): string {
-    let node: Json | undefined = this.input.value;
-    let state: Step = { kind: "root" };
-    let { base } = this;
-    for (const token of tokensOf(pointer)) {
-      if (node === undefined) {
-        break;
-      }
-
-      if ("kind" in state && state.kind === "schema") {
-        base = schemaBase(this.line, base, node) ?? base;
-      }
-
-      if ("container" in state) {
-        state = { kind: state.container };
-      } else if (state.kind !== undefined) {
-        state = stepInto(this.line, state.kind, token);
-      }
-
-      node = memberOf(node, token);
-    }
-
-    return base;
   }
 
   // Refuses a cycle that passes through the content of a non-schema target (design 3.3).
@@ -933,43 +1233,89 @@ class Resolver {
     const references = [...this.references.values()].filter(
       (reference) => reference.kind !== "schema",
     );
-    const targets = new Set(references.map((reference) => reference.target.pointer));
+    const targets = new Map(
+      references.map((reference): [string, CanonicalKey] => [
+        keyOf(reference.target),
+        reference.target,
+      ]),
+    );
+    const names = new Set(targets.keys());
     const edges = new Map<string, Edge[]>();
-    for (const reference of references) {
-      const owner = ownerOf(reference.site.pointer, targets);
+    const add = (owner: string, edge: Edge): void => {
       const list = edges.get(owner) ?? [];
-      list.push({ site: reference.site.pointer, to: reference.target.pointer });
+      list.push(edge);
       edges.set(owner, list);
+    };
+
+    for (const reference of references) {
+      add(ownerOf(reference.site, names), {
+        site: reference.site,
+        target: reference.target,
+        to: keyOf(reference.target),
+      });
     }
 
     // A target also reaches every target nested inside it, so a cycle through nested content shows.
-    for (const target of targets) {
-      const owner = ownerOf(target, targets);
-      if (target !== "" && owner !== "") {
-        const list = edges.get(owner) ?? [];
-        list.push({ site: target, to: target });
-        edges.set(owner, list);
+    for (const [name, target] of targets) {
+      const owner = ownerOf(target, names);
+      if (target.pointer !== "" && owner !== rootKey(target.document)) {
+        add(owner, { site: target, target, to: name });
       }
     }
 
     const done = new Set<string>();
-    for (const start of ["", ...targets]) {
+    for (const start of [rootKey(this.entry.document), ...names]) {
       const closing = cycleFrom(start, edges, done);
       if (closing !== undefined) {
-        return failure("DOC-23/non-schema-cycle", closing.site, this.key(closing.to));
+        return failure("DOC-23/non-schema-cycle", closing.site, closing.target);
       }
     }
 
     return undefined;
   }
 
-  // Walks to a fixed point: a schema reference may wait for an $id or $anchor found later. A
-  // waiting site is retried only when its resource gains one, and only while the walk progresses.
+  // Makes a member reachable by its retrieval URI and its base; two members may not share one.
+  register(member: Member): Failure | undefined {
+    const retrieval = retrievalBase(member.document);
+    for (const resource of [retrieval, member.base]) {
+      const known = this.documents.get(resource);
+      if (known !== undefined && known !== member) {
+        return failure("REF-14/duplicate-id", {
+          document: member.document,
+          pointer: resource === retrieval ? "" : "/$self",
+        });
+      }
+
+      this.documents.set(resource, member);
+    }
+
+    return undefined;
+  }
+
+  // Indexes every member, then walks to a fixed point from the entry root: members are walked
+  // where references reach them. A schema reference may still wait for an $id or $anchor that only
+  // a walked reference reveals (a schema under an extension, say); a waiting site is retried only
+  // when its resource gains one, and only while the walk progresses.
   run(): Failure | undefined {
-    const retrieval = resolveUri(this.input.document, this.input.document) ?? this.input.document;
-    this.documents.set(stripFragment(retrieval), "");
-    this.documents.set(this.base, "");
-    this.stack.push({ base: this.base, kind: "root", node: this.input.value, pointer: "" });
+    for (const member of this.all) {
+      const failed = this.register(member);
+      if (failed !== undefined) {
+        return failed;
+      }
+    }
+
+    const indexed = this.index();
+    if (indexed !== undefined) {
+      return indexed;
+    }
+
+    this.stack.push({
+      base: this.entry.base,
+      kind: "root",
+      member: this.entry,
+      node: this.entry.value,
+      pointer: "",
+    });
 
     const waiting = new Map<string, Waiting[]>();
     let order = 0;
@@ -1030,21 +1376,19 @@ class Resolver {
       return undefined;
     }
 
-    const outcome = this.lookup(first.site.ref, first.site.base, true);
+    const { site } = first;
+    const outcome = this.lookup(site.ref, site.base, true, site.member.line);
 
-    return this.lookupFailure(
-      first.site,
-      "found" in outcome ? { missing: "unresolvable" } : outcome,
-    );
+    return lookupFailure(site, "found" in outcome ? { missing: "unresolvable" } : outcome);
   }
 }
 
 const Declared = Schema.Struct({ openapi: Schema.String });
 
-const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diagnostic> => {
+const toDiagnostic = (member: Member, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule = rules[finding.code];
   const [row] = finding.code.split("/");
-  const openapi = Schema.decodeUnknownOption(Declared)(input.value).pipe(
+  const openapi = Schema.decodeUnknownOption(Declared)(member.value).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
@@ -1055,7 +1399,7 @@ const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diag
 
   const fields = {
     code: finding.code,
-    document: input.document,
+    document: finding.document,
     element: rule.element,
     message: rule.message,
     openapi,
@@ -1063,7 +1407,7 @@ const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diag
     row,
     scope,
     severity: notices.has(finding.code) ? "notice" : "refusal",
-    specSection: specSectionUrl(input.line, rule.anchor),
+    specSection: specSectionUrl(member.line, anchorOn(finding.code, member.line)),
   };
 
   return Schema.decodeUnknownEffect(Diagnostic)(
@@ -1071,30 +1415,67 @@ const toDiagnostic = (input: ResolveInput, finding: Finding): Effect.Effect<Diag
   ).pipe(Effect.orDie);
 };
 
+interface Prepared {
+  readonly invalidBase: boolean;
+  readonly member: Member;
+}
+
+// A document of the set with its base URI (design 3.3); a fragment has no `$self` to honour.
+const prepare = (input: ResolveMember, line: Line, openapi: boolean): Prepared => {
+  const base = openapi
+    ? documentBase(line, input.document, input.value)
+    : retrievalBase(input.document);
+  const member: Member = {
+    base: base ?? input.document,
+    document: input.document,
+    line,
+    openapi,
+    value: input.value,
+  };
+
+  return { invalidBase: base === undefined, member };
+};
+
 /**
- * Resolves every reference in a document set of one (design 3.3): canonical keys, base URIs per
- * line, sibling rules, hop and node budgets, cycles, and `$defs` keys for schema targets. A URI
- * outside the set is refused, never fetched.
+ * Resolves every reference reachable from the entry document across the document set (design
+ * 3.3): canonical keys, base URIs per document and line, sibling rules, hop and node budgets over
+ * the whole set, cycles, and `$defs` keys for schema targets. A URI outside the set is refused,
+ * never fetched.
  */
 export const resolve = (
   input: ResolveInput,
   limits: Partial<ResolveLimits> = {},
 ): Effect.Effect<Resolution, ResolveRefusal> => {
-  const base = documentBase(input.line, input.document, input.value);
-  const resolver = new Resolver(input, base ?? input.document, { ...defaultLimits, ...limits });
-  const failed = base === undefined ? failure("REF-12/invalid-base", "/$self") : resolver.run();
+  const head = prepare(input, input.line, true);
+  const rest = (input.members ?? []).map((member) =>
+    prepare(member, member.line ?? input.line, stringMember(member.value, "openapi") !== undefined),
+  );
+  const set = [head, ...rest];
+  const entry = head.member;
+  const others = rest.map((prepared) => prepared.member);
+  const resolver = new Resolver(entry, others, { ...defaultLimits, ...limits });
+  const invalid = set.find((prepared) => prepared.invalidBase)?.member;
+  const failed =
+    invalid === undefined
+      ? resolver.run()
+      : failure("REF-12/invalid-base", { document: invalid.document, pointer: "/$self" });
+  const memberOfFinding = (finding: Finding): Member =>
+    resolver.byDocument.get(finding.document) ?? entry;
   if (failed !== undefined) {
-    return toDiagnostic(input, failed.finding).pipe(
+    return toDiagnostic(memberOfFinding(failed.finding), failed.finding).pipe(
       Effect.flatMap((diagnostic) => Effect.fail(new ResolveRefusal({ diagnostic }))),
     );
   }
 
-  return Effect.all(resolver.findings.map((finding) => toDiagnostic(input, finding))).pipe(
+  return Effect.all(
+    resolver.findings.map((finding) => toDiagnostic(memberOfFinding(finding), finding)),
+  ).pipe(
     Effect.map((diagnostics): Resolution => ({
-      base: resolver.base,
+      base: entry.base,
       defs: resolver.defs,
       diagnostics,
       document: input.document,
+      documents: new Map(resolver.all.map((member) => [member.document, member.value])),
       line: input.line,
       operationIds: resolver.operationIds,
       references: resolver.references,
@@ -1112,8 +1493,9 @@ export const referenceAt = (
 ): ResolvedReference | undefined =>
   resolution.references.get(keyOf({ document: resolution.document, pointer }));
 
-// A 3.2 Security Scheme URI (SEC-10), resolved inside the set only.
-const schemeByUri = (resolution: Resolution, name: string): Option.Option<CanonicalKey> => {
+// A name read as a URI, resolved inside the set only: a 3.2 Security Scheme URI (SEC-10) or a
+// discriminator mapping value that is not a component name (DSC-03, DSC-08).
+const componentByUri = (resolution: Resolution, name: string): Option.Option<CanonicalKey> => {
   const resolved = resolveUri(name, resolution.base);
   const hash = resolved?.indexOf("#") ?? -1;
   const resource = resolved === undefined ? undefined : stripFragment(resolved);
@@ -1130,8 +1512,9 @@ const schemeByUri = (resolution: Resolution, name: string): Option.Option<Canoni
 };
 
 /**
- * Resolves an implicit connection by name from the entry document only (design 3.3). For a 3.2
- * security scheme, a name that is not a component name is a URI resolved inside the set.
+ * Resolves an implicit connection by name from the entry document only (design 3.3). For a schema
+ * on every line, and for a 3.2 security scheme, a name that is not a component name is a URI
+ * resolved inside the set.
  */
 export const implicitComponent = (
   resolution: Resolution,
@@ -1143,9 +1526,43 @@ export const implicitComponent = (
     return Option.some({ document: resolution.document, pointer });
   }
 
-  return resolution.line === "3.2" && section === "securitySchemes"
-    ? schemeByUri(resolution, name)
+  return section === "schemas" || resolution.line === "3.2"
+    ? componentByUri(resolution, name)
     : Option.none();
+};
+
+const referrersMemo = new WeakMap<Resolution, ReadonlyMap<string, readonly CanonicalKey[]>>();
+
+/**
+ * The `allOf` members that reference each schema, keyed by `keyOf` of the target: the use sites
+ * whose pointer ends `/allOf/<i>`, in every document and component, referenced by an operation or
+ * not. These are the children of the allOf discriminator pattern (DSC-05, DSC-11). Built once
+ * per resolution.
+ */
+export const allOfReferrers = (
+  resolution: Resolution,
+): ReadonlyMap<string, readonly CanonicalKey[]> => {
+  const known = referrersMemo.get(resolution);
+  if (known !== undefined) {
+    return known;
+  }
+
+  const referrers = new Map<string, CanonicalKey[]>();
+  for (const reference of resolution.references.values()) {
+    if (/\/allOf\/\d+$/u.test(reference.site.pointer)) {
+      const key = keyOf(reference.target);
+      const sites = referrers.get(key);
+      if (sites === undefined) {
+        referrers.set(key, [reference.site]);
+      } else {
+        sites.push(reference.site);
+      }
+    }
+  }
+
+  referrersMemo.set(resolution, referrers);
+
+  return referrers;
 };
 
 /**

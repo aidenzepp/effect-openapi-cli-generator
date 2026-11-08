@@ -1,0 +1,141 @@
+{
+  "commands": [
+    {
+      "document": "openapi.json",
+      "flags": [
+        {
+          "location": "query",
+          "name": "limit",
+          "pointer": "/paths/~1pets/get/parameters/0",
+          "wireName": "limit"
+        }
+      ],
+      "method": "GET",
+      "path": [
+        "pets",
+        "list"
+      ],
+      "pathTemplate": "/pets",
+      "pointer": "/paths/~1pets/get",
+      "requestMedia": [],
+      "responses": [
+        "200"
+      ],
+      "security": [
+        [
+          "apiKey"
+        ]
+      ],
+      "servers": [
+        "https://api.example.com"
+      ]
+    },
+    {
+      "document": "openapi.json",
+      "flags": [
+        {
+          "location": "path",
+          "name": "pet-id",
+          "pointer": "/paths/~1pets~1{petId}/get/parameters/0",
+          "wireName": "petId"
+        }
+      ],
+      "method": "GET",
+      "path": [
+        "pets",
+        "get"
+      ],
+      "pathTemplate": "/pets/{petId}",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "requestMedia": [],
+      "responses": [
+        "200"
+      ],
+      "security": [
+        [
+          "apiKey"
+        ]
+      ],
+      "servers": [
+        "https://api.example.com"
+      ]
+    },
+    {
+      "document": "openapi.json",
+      "flags": [
+        {
+          "location": "path",
+          "name": "pet-id",
+          "pointer": "/paths/~1pets~1{petId}~1toys/get/parameters/0",
+          "wireName": "petId"
+        }
+      ],
+      "method": "GET",
+      "path": [
+        "pets",
+        "toys",
+        "list"
+      ],
+      "pathTemplate": "/pets/{petId}/toys",
+      "pointer": "/paths/~1pets~1{petId}~1toys/get",
+      "requestMedia": [],
+      "responses": [
+        "200"
+      ],
+      "security": [
+        [
+          "apiKey"
+        ]
+      ],
+      "servers": [
+        "https://api.example.com"
+      ]
+    },
+    {
+      "document": "openapi.json",
+      "flags": [],
+      "method": "GET",
+      "path": [
+        "stores",
+        "list"
+      ],
+      "pathTemplate": "/stores",
+      "pointer": "/paths/~1stores/get",
+      "requestMedia": [],
+      "responses": [
+        "200"
+      ],
+      "security": [
+        [
+          "apiKey"
+        ]
+      ],
+      "servers": [
+        "https://api.example.com"
+      ]
+    },
+    {
+      "document": "openapi.json",
+      "flags": [],
+      "method": "GET",
+      "path": [
+        "health"
+      ],
+      "pathTemplate": "/health",
+      "pointer": "/paths/~1health/get",
+      "requestMedia": [],
+      "responses": [
+        "200"
+      ],
+      "security": [
+        [
+          "apiKey"
+        ]
+      ],
+      "servers": [
+        "https://api.example.com"
+      ]
+    }
+  ],
+  "describeVersion": 1
+}

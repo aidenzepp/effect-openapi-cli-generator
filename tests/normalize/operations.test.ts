@@ -37,7 +37,9 @@ const run = (line: Line, paths: Json, rest: Members = {}) =>
       line,
       value: { info: { title: "t", version: "1" }, openapi: openapi[line], paths, ...rest },
     }).pipe(
-      Effect.flatMap((resolution) => normalize(resolution, { config, configDocument: configUri })),
+      Effect.flatMap((resolution) =>
+        normalize(resolution, { checkFindings: [], config, configDocument: configUri }),
+      ),
     ),
   );
 
@@ -81,7 +83,8 @@ describe("operation keys", () => {
   test("3.2 query and additionalOperations keys are sent as spelled", () => {
     const { api } = run("3.2", { "/a": { additionalOperations: { PURGE: ok }, query: ok } });
 
-    see(api.operations.map((found) => found.key.method)).toEqual(["QUERY", "PURGE"]);
+    // Canonical order (design 3.7): `/paths/~1a/additionalOperations/PURGE` sorts before `query`.
+    see(api.operations.map((found) => found.key.method)).toEqual(["PURGE", "QUERY"]);
   });
 
   test("operationId, deprecated and docs are read from the operation", () => {
@@ -273,15 +276,18 @@ describe("bodies on GET, HEAD, DELETE, OPTIONS and TRACE", () => {
   });
 });
 
-const cookie = (required: boolean): Json => ({
-  in: "cookie",
+// A parameter that stays refused: a query parameter in matrix style (STY-40).
+const refusedQuery = (required: boolean): Json => ({
+  in: "query",
   name: "sid",
   required,
   schema: { type: "string" },
+  style: "matrix",
 });
 
-const formBody = (required: boolean): Json => ({
-  content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
+// A body that stays refused: multipart with no schema on 3.0 and 3.1 (ENC-33).
+const refusedBody = (required: boolean): Json => ({
+  content: { "multipart/form-data": {} },
   required,
 });
 
@@ -302,7 +308,7 @@ const raised = (diagnostics: readonly Diagnostic[]) =>
 describe("operation-scope refusals", () => {
   test("a required parameter that is refused removes the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, parameters: [cookie(true)] }, post: ok },
+      "/a": { get: { ...ok, parameters: [refusedQuery(true)] }, post: ok },
     });
 
     see(api.operations.map((found) => found.key.method)).toEqual(["POST"]);
@@ -311,7 +317,7 @@ describe("operation-scope refusals", () => {
 
   test("an optional parameter that is refused leaves the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, parameters: [cookie(false)] } },
+      "/a": { get: { ...ok, parameters: [refusedQuery(false)] } },
     });
 
     see(api.operations).toHaveLength(1);
@@ -321,7 +327,7 @@ describe("operation-scope refusals", () => {
 
   test("a required path item parameter that is refused removes every operation of the item", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { get: ok, parameters: [cookie(true)], post: ok },
+      "/a": { get: ok, parameters: [refusedQuery(true)], post: ok },
     });
 
     see(api.operations).toEqual([]);
@@ -334,8 +340,8 @@ describe("operation-scope refusals", () => {
   test("a refused required parameter that an operation overrides does not remove it", () => {
     const { api } = run("3.1", {
       "/a": {
-        get: { ...ok, parameters: [{ in: "cookie", name: "sid", schema: { type: "string" } }] },
-        parameters: [cookie(true)],
+        get: { ...ok, parameters: [{ in: "query", name: "sid", schema: { type: "string" } }] },
+        parameters: [refusedQuery(true)],
       },
     });
 
@@ -344,7 +350,7 @@ describe("operation-scope refusals", () => {
 
   test("a required body whose only alternative is refused removes the operation", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { post: { ...ok, requestBody: formBody(true) } },
+      "/a": { post: { ...ok, requestBody: refusedBody(true) } },
     });
 
     see(api.operations).toEqual([]);
@@ -353,7 +359,7 @@ describe("operation-scope refusals", () => {
 
   test("an optional body whose only alternative is refused leaves the operation without a body", () => {
     const { api, diagnostics } = run("3.1", {
-      "/a": { post: { ...ok, requestBody: formBody(false) } },
+      "/a": { post: { ...ok, requestBody: refusedBody(false) } },
     });
 
     see(api.operations).toHaveLength(1);
@@ -369,7 +375,7 @@ describe("operation-scope refusals", () => {
           requestBody: {
             content: {
               "application/json": { schema: { type: "string" } },
-              "application/x-www-form-urlencoded": { schema: { type: "object" } },
+              "multipart/form-data": {},
             },
             required: true,
           },
@@ -449,7 +455,7 @@ describe("operation-scope refusals", () => {
 
   test("the raise names the operation and points at the refused element", () => {
     const { diagnostics } = run("3.1", {
-      "/a": { get: { ...ok, operationId: "g", parameters: [cookie(true)] } },
+      "/a": { get: { ...ok, operationId: "g", parameters: [refusedQuery(true)] } },
     });
     const found = diagnostics.find((diagnostic) => diagnostic.scope === "operation");
 
@@ -539,10 +545,7 @@ const mixedPaths: Json = Object.fromEntries([
     {
       delete: {
         ...ok,
-        requestBody: {
-          content: { "application/x-www-form-urlencoded": { schema: { type: "object" } } },
-          required: true,
-        },
+        requestBody: refusedBody(true),
         security: [{ oauth: [] }],
       },
     },
@@ -552,7 +555,7 @@ const mixedPaths: Json = Object.fromEntries([
     {
       get: {
         ...ok,
-        parameters: [{ in: "cookie", name: "sid", schema: { type: "string" } }],
+        parameters: [refusedQuery(false)],
         requestBody: jsonBody,
       },
       parameters: [{ in: "header", name: "Accept", schema: { type: "string" } }],
@@ -572,15 +575,12 @@ describe("diagnostic order", () => {
 
     see(diagnostics).toEqual(sortDiagnostics([entry], diagnostics));
     see(diagnostics.map((diagnostic) => [diagnostic.pointer, diagnostic.code])).toEqual([
-      ["/paths/~1a/get/parameters/0", "STY-33/not-implemented"],
+      ["/paths/~1a/get/parameters/0", "STY-40/style-location"],
       ["/paths/~1a/get/requestBody", "OPR-10/body-refused"],
       ["/paths/~1a/parameters/0", "PRM-19/ignored-header"],
       ["/paths/~1b/delete", "OPR-09/required-body-refused"],
       ["/paths/~1b/delete", "SEC-06/no-satisfiable-alternative"],
-      [
-        "/paths/~1b/delete/requestBody/content/application~1x-www-form-urlencoded",
-        "ENC-27/not-implemented",
-      ],
+      ["/paths/~1b/delete/requestBody/content/multipart~1form-data", "ENC-33/missing-schema"],
       ["/paths/~1b/delete/security/0", "SSC-18/not-implemented"],
     ]);
   });

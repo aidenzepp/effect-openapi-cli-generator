@@ -1,0 +1,14 @@
+{
+  "openapi": "3.2.0",
+  "$self": "https://api.example.com/v1/openapi.json#ignored",
+  "info": { "title": "multi 3.2", "version": "1" },
+  "security": [{ "MemberKey": [] }],
+  "paths": {
+    "/pets": {
+      "get": {
+        "parameters": [{ "$ref": "common.json#/components/parameters/Limit" }],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  }
+}

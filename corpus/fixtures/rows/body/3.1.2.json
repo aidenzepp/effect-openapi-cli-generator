@@ -1,0 +1,436 @@
+{
+  "info": {
+    "title": "Request Body, Media Type and Binary data rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.2",
+  "paths": {
+    "/annotated": {
+      "post": {
+        "operationId": "annotated-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "blob": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/binary": {
+      "put": {
+        "operationId": "binary-put",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "image/png"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/blob/optional": {
+      "put": {
+        "operationId": "blob-optional-put",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/blob/required": {
+      "put": {
+        "operationId": "blob-required-put",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/bounded": {
+      "put": {
+        "operationId": "bounded-put",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream",
+                "maxLength": 4,
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "maxLength": 4,
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/choose": {
+      "post": {
+        "operationId": "choose-create",
+        "requestBody": {
+          "content": {
+            "application/gzip": {
+              "schema": {
+                "contentMediaType": "application/octet-stream"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/encoded": {
+      "post": {
+        "operationId": "encoded-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  },
+                  "urlsafe": {
+                    "contentEncoding": "base64url",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/encoded-form": {
+      "post": {
+        "operationId": "encoded-form-create",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "contentEncoding": "base64",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/files": {
+      "post": {
+        "operationId": "files-upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "avatar": {
+                  "contentType": "application/octet-stream"
+                },
+                "files": {
+                  "contentType": "application/octet-stream"
+                },
+                "note": {
+                  "contentType": "text/csv"
+                }
+              },
+              "schema": {
+                "properties": {
+                  "avatar": {
+                    "contentMediaType": "image/png",
+                    "type": "string"
+                  },
+                  "files": {
+                    "items": {
+                      "contentMediaType": "application/octet-stream"
+                    },
+                    "type": "array"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/form": {
+      "post": {
+        "operationId": "form-create",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "encoding": {
+                "tags": {
+                  "explode": false
+                }
+              },
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/image": {
+      "put": {
+        "operationId": "image-put",
+        "requestBody": {
+          "content": {
+            "image/*": {
+              "schema": {
+                "contentMediaType": "application/octet-stream"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/json": {
+      "post": {
+        "operationId": "json-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "count": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/raw": {
+      "put": {
+        "operationId": "raw-put",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/specific": {
+      "post": {
+        "operationId": "specific-create",
+        "requestBody": {
+          "content": {
+            "application/*": {
+              "schema": {
+                "contentMediaType": "application/octet-stream"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/vendor": {
+      "post": {
+        "operationId": "vendor-create",
+        "requestBody": {
+          "content": {
+            "application/vnd.github.v3+json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}

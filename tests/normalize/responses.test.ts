@@ -161,6 +161,72 @@ describe("response headers", () => {
     expect(codes(result)).toEqual(["RSP-09/invalid-header-name"]);
     expect(result.diagnostics[0]?.severity).toBe("refusal");
   });
+
+  test("required and deprecated are read from each Header Object, through a $ref, absent as false", () => {
+    const [first] = normalize(
+      "3.1",
+      {
+        "200": {
+          description: "ok",
+          headers: {
+            "X-Both": { deprecated: true, required: true, schema: {} },
+            "X-Plain": { schema: {} },
+            "X-Shared": { $ref: "#/components/headers/Shared" },
+          },
+        },
+      },
+      { headers: { Shared: { deprecated: true, schema: {} } } },
+    ).responses;
+
+    expect(
+      first?.headers.map(({ deprecated, name, required }) => [text(name), required, deprecated]),
+    ).toEqual([
+      ["X-Both", true, true],
+      ["X-Plain", false, false],
+      ["X-Shared", false, true],
+    ]);
+  });
+});
+
+describe("HDR-15 response header percent-encoding in 3.0", () => {
+  const traced: Members = {
+    "200": {
+      description: "ok",
+      headers: {
+        "Content-Type": { schema: { type: "string" } },
+        "X-Body": { content: { "text/plain": { schema: { type: "string" } } } },
+        "X-Rate": { schema: { type: "integer" } },
+        "X-Trace": { $ref: "#/components/headers/Trace" },
+      },
+    },
+  };
+  const components: Members = { headers: { Trace: { schema: { type: "string" } } } };
+
+  test("each schema-serialized header gets one notice at its use site", () => {
+    const result = normalize("3.0", traced, components);
+    const notices = result.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "HDR-15/header-percent-encoding",
+    );
+
+    expect(notices.map((diagnostic) => text(diagnostic.pointer))).toEqual([
+      `${responsesPointer}/200/headers/X-Rate`,
+      `${responsesPointer}/200/headers/X-Trace`,
+    ]);
+    expect(notices.map((diagnostic) => [diagnostic.severity, diagnostic.scope])).toEqual([
+      ["notice", "element"],
+      ["notice", "element"],
+    ]);
+    expect(codes(result)).toEqual([
+      "RSP-09/ignored-content-type",
+      "HDR-15/header-percent-encoding",
+      "HDR-15/header-percent-encoding",
+    ]);
+  });
+
+  test("3.1 and 3.2 headers already agree with the correction", () => {
+    expect(codes(normalize("3.1", traced, components))).toEqual(["RSP-09/ignored-content-type"]);
+    expect(codes(normalize("3.2", traced, components))).toEqual(["RSP-09/ignored-content-type"]);
+  });
 });
 
 describe("referenced responses and docs", () => {

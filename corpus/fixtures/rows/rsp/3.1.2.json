@@ -1,0 +1,384 @@
+{
+  "info": {
+    "title": "Responses, Response and Header Object rows witness",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.2",
+  "paths": {
+    "/correlated": {
+      "get": {
+        "operationId": "correlated-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "5XX": {
+            "description": "unavailable",
+            "headers": {
+              "x-correlation-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/default-only": {
+      "get": {
+        "operationId": "default-only-get",
+        "responses": {
+          "default": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "any status"
+          }
+        }
+      }
+    },
+    "/empty": {
+      "delete": {
+        "operationId": "empty-delete",
+        "responses": {
+          "204": {
+            "description": "deleted"
+          }
+        }
+      }
+    },
+    "/explicit": {
+      "get": {
+        "operationId": "explicit-get",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "description": "created"
+          }
+        }
+      }
+    },
+    "/fallback": {
+      "get": {
+        "operationId": "fallback-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "any other status"
+          }
+        }
+      }
+    },
+    "/ignored": {
+      "get": {
+        "operationId": "ignored-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "enum": ["application/json"],
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media": {
+      "get": {
+        "operationId": "media-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/ranked": {
+      "get": {
+        "operationId": "ranked-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "404": {
+            "description": "not found"
+          },
+          "4XX": {
+            "description": "client error"
+          },
+          "default": {
+            "description": "anything else"
+          }
+        }
+      }
+    },
+    "/sparse": {
+      "get": {
+        "operationId": "sparse-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/specific": {
+      "get": {
+        "operationId": "specific-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/*": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/traced": {
+      "get": {
+        "operationId": "traced-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok",
+            "headers": {
+              "X-Rate": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "client error"
+          }
+        }
+      }
+    },
+    "/typed": {
+      "get": {
+        "operationId": "typed-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok",
+            "headers": {
+              "X-Color": {
+                "explode": true,
+                "schema": {
+                  "properties": {
+                    "G": {
+                      "type": "integer"
+                    },
+                    "R": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "style": "simple"
+              },
+              "X-Count": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Deprecated": {
+                "deprecated": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-List": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "style": "simple"
+              },
+              "X-Meta": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              "X-Required": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/unregistered": {
+      "get": {
+        "operationId": "unregistered-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "499": {
+            "description": "unregistered client status"
+          },
+          "4XX": {
+            "description": "client error"
+          }
+        }
+      }
+    },
+    "/untraced": {
+      "get": {
+        "operationId": "untraced-get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "4XX": {
+            "description": "client error"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "80"
+        }
+      }
+    }
+  ]
+}

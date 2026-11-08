@@ -41,7 +41,11 @@ const prepared = (value: Schema.Json) =>
   Effect.gen(function* prepare() {
     const config = yield* decodeAuthorConfig(configJson, { document: configDocument });
     const resolution = yield* resolve({ document, line: "3.1", value });
-    const { api, diagnostics } = yield* normalize(resolution, { config, configDocument });
+    const { api, diagnostics } = yield* normalize(resolution, {
+      checkFindings: [],
+      config,
+      configDocument,
+    });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
 
     return { api, config, diagnostics: [...diagnostics, ...plan.diagnostics], plan };
@@ -219,6 +223,13 @@ describe("emitReadme", () => {
 
     expect(refusals).toContain("Generation refused 2 elements of generated commands;");
     expect(fenced(refusals)).toEqual(['GET "/gone"']);
+  });
+
+  test("tells users to write a value that starts with a dash as --flag=-value", async () => {
+    const usage = section(emitReadme(await input()).content, "Usage");
+
+    expect(usage).toContain("Write a flag value that starts with `-` as `--flag=-value`");
+    expect(usage).toContain("no `-h` or `-v` short form");
   });
 
   test("publishes the reserved CLI names in the usage section", async () => {

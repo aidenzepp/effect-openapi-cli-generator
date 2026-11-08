@@ -103,20 +103,40 @@ describe("sortDiagnostics", () => {
 });
 
 describe("Verdict", () => {
+  // Every list carries a real entry so the round trip exercises each element and claim shape,
+  // not only empty arrays; the counts agree with the lists.
   const verdict: typeof Verdict.Encoded = {
+    commandSources: { config: 1, fern: 0, fold: 1, forge: 0 },
     corpusVersion: 1,
     counts: {
       informational: 0,
+      nonStandard: 1,
       notices: 1,
       operations: { generated: 2, refused: 1, total: 3 },
       refusals: { document: 0, element: 1, operation: 0 },
     },
-    coverage: { checked: true, missing: [] },
+    coverage: {
+      byNotice: [
+        {
+          document: "file:///stripe.json",
+          in: "header",
+          kind: "parameter",
+          name: "X-Trace",
+          pointer: "/paths/~1x/get/parameters/0",
+        },
+      ],
+      checked: true,
+      invented: [{ kind: "server", path: ["charges", "list"], url: "https://example.test" }],
+      missing: [{ document: "file:///stripe.json", kind: "operation", pointer: "/paths/~1y/get" }],
+    },
     generator: {
       config: "corpus/config/stripe.json",
       configSha256: "ab".repeat(32),
       version: "0.1.0",
     },
+    nonStandard: [
+      { choice: "deepObjectBrackets", pointer: "/paths/~1x/get/parameters/1", row: "PRM-27" },
+    ],
     notices: [{ code: "PRM-19/ignored-header", pointer: "/paths/~1x", row: "PRM-19" }],
     refusals: [
       { code: "PRM-27/compound-nested", pointer: "/paths/~1x", row: "PRM-27", scope: "element" },
