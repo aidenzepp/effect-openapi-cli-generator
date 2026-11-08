@@ -192,8 +192,11 @@ describe("SSC rows through the built CLI", () => {
       test(`SSC-13: a failed request with a query credential never prints it (${line})`, async () => {
         const observed = await run(line, ["query-fail"], { SSC_QUERY_KEY: canary });
 
+        // The 500 is retried twice by default; the output, retry notes included, never shows the key.
         expect(observed.exitCode).toBe(1);
-        expect(observed.sent.map((sent) => sent.target)).toEqual([`/query-fail?api_key=${canary}`]);
+        expect(observed.sent.map((sent) => sent.target)).toEqual(
+          Array.from({ length: 3 }, () => `/query-fail?api_key=${canary}`),
+        );
         expectNoCanary(observed);
       }, 60_000);
 

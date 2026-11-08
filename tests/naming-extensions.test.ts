@@ -364,7 +364,7 @@ describe("naming extensions through the built CLI", () => {
     ]);
   });
 
-  test("behaviour extensions change nothing: no prompt, the hidden operation runs, no retries", async () => {
+  test("behaviour extensions change nothing: no prompt, the hidden operation runs, default retries", async () => {
     const [deleted, retried, control] = await run(
       Effect.forEach(
         [
@@ -380,12 +380,13 @@ describe("naming extensions through the built CLI", () => {
     expect(deleted?.result.timedOut).toBe(false);
     expect(deleted?.result.exitCode).toBe(0);
     expect(deleted?.sent.map(line)).toEqual(["DELETE /jobs/j-1"]);
-    expect(retried?.sent.map(line)).toEqual(["DELETE /jobs/unavailable"]);
-    // A 503 gets the runtime's default treatment: the control operation has no extension.
-    expect([retried?.result.exitCode, retried?.sent.length]).toEqual([
-      control?.result.exitCode,
-      control?.sent.length,
-    ]);
+    // A 503 gets the runtime's default treatment, two retries after the first send, exactly as the
+    // control operation, which has no extension.
+    expect(retried?.sent.map(line)).toEqual(
+      Array.from({ length: 3 }, () => "DELETE /jobs/unavailable"),
+    );
+    expect(control?.sent.map(line)).toEqual(Array.from({ length: 3 }, () => "GET /reports"));
+    expect(retried?.result.exitCode).toBe(control?.result.exitCode);
   }, 60_000);
 
   test("the collisions are refused with OPR-06/command-collision and PRM-02/flag-collision", () => {
