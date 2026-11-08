@@ -6,6 +6,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Option,
   Path,
   Runtime,
   Schedule,
@@ -17,6 +18,7 @@ import type { Duration } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
+import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
 import { mapClientError } from "../../src/runtime-src/runtime/response.ts";
 
@@ -62,11 +64,25 @@ const scripted = (headersAfter: Duration.Input, chunkEvery: Duration.Input = "1 
     }),
   );
 
+const prefix = "ACME";
+
+// The provider `main.ts` supplies: the environment, then the author defaults keyed by the same
+// prefixed names (design D-AD7). Nothing is nested or remapped.
+const provider = (env: Record<string, string>, defaults: Readonly<Record<string, number>> = {}) =>
+  ConfigProvider.orElse(ConfigProvider.fromEnv({ env }), ConfigProvider.fromUnknown(defaults));
+
+// The servers layer the root provides; only its env prefix matters here.
+const servers = BaseUrl.layer({ boundOrigins: [], servers: [] }, prefix);
+
 // One request through the policy transform, then the whole body. The clock moves in steps so
 // both the headers wait and the body reads are driven by virtual time.
 const send = (
   headersAfter: Duration.Input,
-  options: { readonly chunkEvery?: Duration.Input; readonly timeout?: number } = {},
+  options: {
+    readonly chunkEvery?: Duration.Input;
+    readonly env?: Record<string, string>;
+    readonly timeout?: number;
+  } = {},
 ) => {
   const client = scripted(headersAfter, options.chunkEvery).pipe(
     Client.redirectLoop(noAttach, sentinel, allowed),
@@ -77,10 +93,17 @@ const send = (
       Effect.catchTag("HttpClientError", mapClientError),
     ),
   );
-  const configured =
+  const flagged =
     options.timeout === undefined
       ? exchange
-      : Effect.provideService(exchange, Client.timeoutSetting, options.timeout);
+      : Effect.provideService(exchange, Client.timeoutSetting, Option.some(options.timeout));
+  const configured =
+    options.env === undefined
+      ? flagged
+      : flagged.pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, provider(options.env)),
+          Effect.provide(servers),
+        );
 
   return Effect.runPromiseExit(
     Effect.gen(function* drive() {
@@ -118,6 +141,25 @@ describe("per-attempt --timeout to response headers", () => {
     expect(await send("4 seconds", { timeout: 5 })).toEqual(Exit.succeed("abc"));
   });
 
+  test("<PREFIX>_TIMEOUT from the root's prefix is the bound", async () => {
+    expect(failure(await send("6 seconds", { env: { ACME_TIMEOUT: "5" } }))).toMatchObject({
+      _tag: "TransportError",
+      reason: "timeout",
+    });
+    expect(await send("4 seconds", { env: { ACME_TIMEOUT: "5" } })).toEqual(Exit.succeed("abc"));
+  });
+
+  test("an unprefixed TIMEOUT is never read", async () => {
+    expect(await send("6 seconds", { env: { TIMEOUT: "5" } })).toEqual(Exit.succeed("abc"));
+  });
+
+  test("an invalid <PREFIX>_TIMEOUT fails with a UsageError naming --timeout only", async () => {
+    const error = failure(await send("1 second", { env: { ACME_TIMEOUT: "1.5" } }));
+    expect(error).toMatchObject({ _tag: "UsageError", flag: "--timeout" });
+    expect(JSON.stringify(error)).not.toContain("1.5");
+    expect(error[Runtime.errorExitCode]).toBe(2);
+  });
+
   test("--timeout 0 never fails", async () => {
     expect(await send("90 minutes", { timeout: 0 })).toEqual(Exit.succeed("abc"));
   });
@@ -144,25 +186,27 @@ const flagEnvironment = Layer.mergeAll(
   ),
 );
 
-const prefix = "ACME";
-
-// The provider shape `main.ts` supplies: the environment under the env prefix, then the author
-// defaults (design D-AD7).
-const provider = (env: Record<string, string>, defaults: Readonly<Record<string, number>> = {}) =>
-  ConfigProvider.orElse(
-    ConfigProvider.nested(ConfigProvider.fromEnv({ env }), prefix),
-    ConfigProvider.fromUnknown(defaults),
-  );
-
-const resolve = (
-  flags: Record<string, readonly string[]>,
-  configProvider: ConfigProvider.ConfigProvider,
-) =>
+const parse = (flags: Record<string, readonly string[]>) =>
   Effect.runPromiseExit(
     Client.timeoutSetting.flag.parse({ arguments: [], flags }).pipe(
       Effect.map(([, value]) => value),
-      Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        provider({ ACME_TIMEOUT: "9", TIMEOUT: "9" }),
+      ),
       Effect.provide(flagEnvironment),
+    ),
+  );
+
+const resolve = (
+  flag: Option.Option<number>,
+  env: Record<string, string>,
+  defaults: Readonly<Record<string, number>> = {},
+) =>
+  Effect.runPromiseExit(
+    Client.effectiveTimeoutSeconds(prefix).pipe(
+      Effect.provideService(Client.timeoutSetting, flag),
+      Effect.provideService(ConfigProvider.ConfigProvider, provider(env, defaults)),
     ),
   );
 
@@ -171,19 +215,32 @@ describe("--timeout resolution", () => {
     expect(Client.timeoutSetting.id).toBe("timeout");
   });
 
+  test("the flag holds only the operator's value", async () => {
+    expect(await parse({ timeout: ["3"] })).toEqual(Exit.succeed(Option.some(3)));
+    expect(await parse({ timeout: ["0"] })).toEqual(Exit.succeed(Option.some(0)));
+    expect(await parse({})).toEqual(Exit.succeed(Option.none()));
+  });
+
   test("flag over env over author default over 30", async () => {
-    const all = provider({ ACME_TIMEOUT: "9" }, { TIMEOUT: 7 });
-    expect(await resolve({ timeout: ["3"] }, all)).toEqual(Exit.succeed(3));
-    expect(await resolve({}, all)).toEqual(Exit.succeed(9));
-    expect(await resolve({}, provider({ TIMEOUT: "9" }, { TIMEOUT: 7 }))).toEqual(Exit.succeed(7));
-    expect(await resolve({}, provider({}))).toEqual(Exit.succeed(30));
-    expect(await resolve({ timeout: ["0"] }, provider({}))).toEqual(Exit.succeed(0));
+    const env = { ACME_TIMEOUT: "9" };
+    const defaults = { ACME_TIMEOUT: 7 };
+    expect(await resolve(Option.some(3), env, defaults)).toEqual(Exit.succeed(3));
+    expect(await resolve(Option.some(0), env, defaults)).toEqual(Exit.succeed(0));
+    expect(await resolve(Option.none(), env, defaults)).toEqual(Exit.succeed(9));
+    expect(await resolve(Option.none(), {}, defaults)).toEqual(Exit.succeed(7));
+    expect(await resolve(Option.none(), {})).toEqual(Exit.succeed(30));
+  });
+
+  test("an unprefixed TIMEOUT is never read, from the env or the defaults", async () => {
+    expect(await resolve(Option.none(), { TIMEOUT: "9" }, { TIMEOUT: 7 })).toEqual(
+      Exit.succeed(30),
+    );
   });
 
   test.each(["-1", "1.5", "abc", ""])(
     "--timeout %p is a UsageError naming the flag only",
     async (raw) => {
-      const error = failure(await resolve({ timeout: [raw] }, provider({})));
+      const error = failure(await parse({ timeout: [raw] }));
       expect(error).toMatchObject({
         _tag: "UserError",
         cause: { _tag: "UsageError", flag: "--timeout" },
@@ -195,12 +252,16 @@ describe("--timeout resolution", () => {
     },
   );
 
-  test("an invalid env value fails the same way", async () => {
-    const error = failure(await resolve({}, provider({ ACME_TIMEOUT: "1.5" })));
-    expect(error).toMatchObject({
-      _tag: "UserError",
-      cause: { _tag: "UsageError", flag: "--timeout" },
-    });
-    expect(JSON.stringify(error)).not.toContain("1.5");
+  test.each(["-1", "1.5", "abc"])(
+    "ACME_TIMEOUT %p is a UsageError naming --timeout only",
+    async (raw) => {
+      const error = failure(await resolve(Option.none(), { ACME_TIMEOUT: raw }));
+      expect(error).toMatchObject({ _tag: "UsageError", flag: "--timeout" });
+      expect(JSON.stringify(error)).not.toContain(raw);
+    },
+  );
+
+  test("an empty ACME_TIMEOUT counts as unset", async () => {
+    expect(await resolve(Option.none(), { ACME_TIMEOUT: "" })).toEqual(Exit.succeed(30));
   });
 });

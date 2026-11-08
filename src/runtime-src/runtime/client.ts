@@ -26,6 +26,7 @@ import {
 import type { HttpClientError } from "effect/http";
 import { RedirectRefused, UsageError } from "../domain/errors.ts";
 import { isLoopbackHost } from "./auth.ts";
+import { Servers } from "./base-url.ts";
 import { queryWireForm } from "./redact.ts";
 
 /**
@@ -42,45 +43,61 @@ export const defaultTimeoutSeconds = 30;
 
 const wholeSeconds = /^\d+$/u;
 
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause and names only the flag.
-const parseTimeout = (raw: string): Effect.Effect<number, CliError.CliError> => {
-  const seconds = Number(raw);
-  if (wholeSeconds.test(raw) && Number.isSafeInteger(seconds)) {
-    return Effect.succeed(seconds);
-  }
-
-  const error = new UsageError({
+const invalidTimeout = (): UsageError =>
+  new UsageError({
     flag: "--timeout",
     message: "--timeout must be a whole number of seconds, 0 or more",
   });
 
-  return Effect.fail(new CliError.UserError({ cause: error, userMessage: error.message }));
+// Whole seconds, 0 or more. The failure names `--timeout` only, never the value.
+const parseTimeout = (raw: string): Effect.Effect<number, UsageError> => {
+  const seconds = Number(raw);
+
+  return wholeSeconds.test(raw) && Number.isSafeInteger(seconds)
+    ? Effect.succeed(seconds)
+    : Effect.fail(invalidTimeout());
 };
+
+// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
+const asCliError = (error: UsageError): CliError.CliError =>
+  new CliError.UserError({ cause: error, userMessage: error.message });
 
 /**
  * `--timeout <seconds>` bounds each attempt's wait for response headers; 0 disables it (design
- * D-AD7). Precedence is the flag, then the `TIMEOUT` key, which `main.ts`'s provider reads under
- * the env prefix (`<PREFIX>_TIMEOUT`) before the author default, then `defaultTimeoutSeconds`.
- * The flag and the config value are validated alike; a bad value fails naming `--timeout` only.
+ * D-AD7). The flag holds only the operator's value; `effectiveTimeoutSeconds` applies the
+ * fallbacks, because the env name needs the prefix the root supplies.
  */
 export const timeoutSetting = GlobalFlag.Setting("timeout")({
   flag: Flag.String("timeout").pipe(
     Flag.withMetavar("seconds"),
     Flag.withDescription("Seconds to wait for response headers on each attempt; 0 waits forever"),
-    Flag.withFallbackConfig(Config.String("TIMEOUT")),
-    Flag.mapEffect(parseTimeout),
-    Flag.withDefault(defaultTimeoutSeconds),
+    Flag.mapEffect((raw) => parseTimeout(raw).pipe(Effect.mapError(asCliError))),
+    Flag.optional,
   ),
 });
 
+// The operator's `--timeout`, if the root registers the setting and the flag was given.
+const flagTimeout = Effect.map(Effect.serviceOption(timeoutSetting), Option.flatten);
+
 /**
- * The effective `--timeout` in seconds. A root that registers no `timeoutSetting` runs with the
- * built-in value.
+ * The effective `--timeout` in seconds: the flag, then `<envPrefix>_TIMEOUT` read by that explicit
+ * name (as `base-url.ts` reads `<PREFIX>_BASE_URL`), then `defaultTimeoutSeconds`. The author
+ * default reaches the env read through the `ConfigProvider` `main.ts` provides (design D-AD7). An
+ * unprefixed `TIMEOUT` is never read. A root that registers no `timeoutSetting` has no flag value.
  */
-export const effectiveTimeoutSeconds: Effect.Effect<number> = Effect.map(
-  Effect.serviceOption(timeoutSetting),
-  Option.getOrElse(() => defaultTimeoutSeconds),
-);
+export const effectiveTimeoutSeconds = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveTimeout() {
+    const flag = yield* flagTimeout;
+    if (Option.isSome(flag)) {
+      return flag.value;
+    }
+
+    const env = yield* Config.option(Config.String(`${envPrefix}_TIMEOUT`)).pipe(
+      Effect.mapError(invalidTimeout),
+    );
+
+    return Option.isSome(env) ? yield* parseTimeout(env.value) : defaultTimeoutSeconds;
+  });
 
 /**
  * The per-hop attach step: `Auth.attach` with the run's table and attachment. It strips every
@@ -396,7 +413,8 @@ const foldUrlParams = (
  * One run of the loop is one attempt, and `HttpClient.timeout` bounds it by the effective
  * `--timeout` (design D-AD7): the bound ends when the final hop's headers arrive, so the body is
  * the idle timeout's. `HttpClient.timeout` fixes its duration when the client is built, and the
- * setting is read per request, so the timed client is built per request; 0 leaves it untimed.
+ * setting is read per request, so the timed client is built per request; 0 leaves it untimed. An
+ * invalid `<PREFIX>_TIMEOUT` fails the request with a `UsageError` before anything is sent.
  * Expiry is an `HttpClientError` with a `TimeoutError` cause, which `mapClientError` reports as
  * `TransportError` `timeout`.
  */
@@ -451,10 +469,19 @@ export const redirectLoop =
     const timed = (seconds: number) =>
       seconds === 0 ? attempt : HttpClient.timeout(attempt, Duration.seconds(seconds));
 
-    return HttpClient.transform(client, (_unsent, request) =>
-      effectiveTimeoutSeconds.pipe(
-        Effect.flatMap((seconds) => timed(seconds).postprocess(Effect.succeed(request))),
+    // The prefix is the one the root supplies with the servers table. Without that layer there is
+    // no env name to read, so only the flag and the built-in value apply.
+    const seconds = Effect.serviceOption(Servers).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => flagTimeout.pipe(Effect.map(Option.getOrElse(() => defaultTimeoutSeconds))),
+          onSome: ({ envPrefix }) => effectiveTimeoutSeconds(envPrefix),
+        }),
       ),
+    );
+
+    return HttpClient.transform(client, (_unsent, request) =>
+      seconds.pipe(Effect.flatMap((value) => timed(value).postprocess(Effect.succeed(request)))),
     );
   };
 
