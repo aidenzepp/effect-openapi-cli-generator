@@ -45,34 +45,105 @@ export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(Run
 export const queryWireForm = (text: string): string =>
   encodeURIComponent(text).replaceAll("'", "%27");
 
+const searchParamsForm = (text: string): string =>
+  new URLSearchParams([["", text]]).toString().slice(1);
+
 /**
- * Every form a scrub entry travels in. A secret: the value as given and JSON-escaped, as a JSON
- * body echoes it (a kept trailing LF appears as `\n`). A credential (audit F2): the raw value; for
- * http basic also the base64 token `basicAuth` sends and the password alone; for an apiKey in the
- * query also the form the request target carries and the URLSearchParams form a server may echo.
- * Empty forms are dropped.
+ * The forms a value takes in a URL or a form-urlencoded body, shared by credentials and secrets:
+ * as `encodeURIComponent` writes it, as the request target carries it (`queryWireForm`), and as
+ * URLSearchParams writes it, `+` for a space. `encodeURIComponent` throws on a lone surrogate, so
+ * such a value gets only the URLSearchParams form.
+ */
+const loneSurrogate = /\p{Cs}/u;
+
+const encodedForms = (text: string): readonly string[] =>
+  loneSurrogate.test(text)
+    ? [searchParamsForm(text)]
+    : [encodeURIComponent(text), queryWireForm(text), searchParamsForm(text)];
+
+const hexLower = (unit: number): string => unit.toString(16).padStart(4, "0");
+
+const hexUpper = (unit: number): string => hexLower(unit).toUpperCase();
+
+// The UTF-16 units of one code point: itself, or its surrogate pair above U+FFFF.
+const utf16Units = (point: number): readonly number[] => {
+  const offset = point - 0x1_00_00;
+
+  return offset >= 0
+    ? [0xd8_00 + Math.floor(offset / 0x4_00), 0xdc_00 + (offset % 0x4_00)]
+    : [point];
+};
+
+// A JSON string body with every non-ASCII UTF-16 unit written as `\uXXXX`, as an ASCII-only JSON
+// encoder echoes it. `JSON.stringify` already escaped any lone surrogate, so every code point here
+// is whole.
+const asciiEscaped = (escaped: string, hex: (unit: number) => string): string => {
+  let ascii = "";
+  for (const character of escaped) {
+    const point = character.codePointAt(0) ?? 0;
+
+    ascii +=
+      point < 0x80
+        ? character
+        : utf16Units(point)
+            .map((unit) => `\\u${hex(unit)}`)
+            .join("");
+  }
+
+  return ascii;
+};
+
+// The value without its trailing CR and LF characters, which a server reading a line drops.
+const withoutLineEnd = (text: string): string => {
+  let end = text.length;
+  while (end > 0 && (text.charAt(end - 1) === "\n" || text.charAt(end - 1) === "\r")) {
+    end -= 1;
+  }
+
+  return text.slice(0, end);
+};
+
+/**
+ * Every form a secret travels in or is echoed in (security review of bd3128a): the value as given
+ * and without its trailing CR/LF, each also URL- and form-encoded (`encodedForms`) and
+ * JSON-escaped, both as written and ASCII-only with lower- and upper-case hex.
+ */
+const secretForms = (secret: string): readonly string[] =>
+  [secret, withoutLineEnd(secret)].flatMap((base) => {
+    const escaped = JSON.stringify(base).slice(1, -1);
+
+    return [
+      base,
+      ...encodedForms(base),
+      escaped,
+      asciiEscaped(escaped, hexLower),
+      asciiEscaped(escaped, hexUpper),
+    ];
+  });
+
+/**
+ * Every form a scrub entry travels in, each once and none empty. A secret: `secretForms`. A
+ * credential (audit F2): the raw value; for http basic also the base64 token `basicAuth` sends and
+ * the password alone; for an apiKey in the query also its `encodedForms`, the form the request
+ * target carries and the forms a server may echo.
  */
 const wireForms = (entry: ScrubEntry): readonly string[] => {
-  if (isSecret(entry)) {
-    const secret = Redacted.value(entry.value);
+  const value: string = Redacted.value(entry.value);
+  const forms = isSecret(entry) ? [...secretForms(value)] : [value];
 
-    return [secret, JSON.stringify(secret).slice(1, -1)].filter((form) => form !== "");
+  if (!isSecret(entry)) {
+    const { definition } = entry;
+
+    if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
+      forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
+    }
+
+    if (definition.kind === "apiKey" && definition.in === "query") {
+      forms.push(...encodedForms(value));
+    }
   }
 
-  const credential = entry;
-  const value: string = Redacted.value(credential.value);
-  const { definition } = credential;
-  const forms = [value];
-
-  if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
-    forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
-  }
-
-  if (definition.kind === "apiKey" && definition.in === "query") {
-    forms.push(queryWireForm(value), new URLSearchParams([["", value]]).toString().slice(1));
-  }
-
-  return forms.filter((form) => form !== "");
+  return [...new Set(forms)].filter((form) => form !== "");
 };
 
 /**

@@ -178,6 +178,27 @@ describe("a secret-file field flag", () => {
     ]);
   });
 
+  test("a file secret echoed trimmed, form-encoded or percent-encoded renders the label", async () => {
+    const exit = await runInput(
+      withTempFile("pa55 w0rd\n", (path) =>
+        merge({ fields: { "/password": secret(path) } }).pipe(
+          Effect.andThen(recorded),
+          Effect.map((entries) =>
+            ["pa55 w0rd", "pa55+w0rd", "pa55%20w0rd"].map((echo) =>
+              Output.boundedExcerpt(`echo=${echo};`, 4096, entries),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(Exit.isSuccess(exit) ? exit.value : []).toEqual([
+      `echo=${LABEL};`,
+      `echo=${LABEL};`,
+      `echo=${LABEL};`,
+    ]);
+  });
+
   test("the defect line scrubs the value", async () => {
     const stderr: Buffer[] = [];
     const program = Output.finalCatch([])(
