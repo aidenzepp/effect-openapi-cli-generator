@@ -3,6 +3,7 @@ import { Effect, Runtime } from "effect";
 import type { HttpClientRequest } from "effect/http";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
+import type { MediaDeclaration } from "../../src/runtime-src/runtime/negotiate.ts";
 import type { FormEncoding, Json } from "../../src/runtime-src/runtime/serialize.ts";
 
 const media = "application/x-www-form-urlencoded";
@@ -342,5 +343,62 @@ describe("form-urlencoded body", () => {
     await expectUsage(
       Serialize.urlEncoded(media, "a=b", { properties: [], required: true }).expand,
     );
+  });
+});
+
+describe("form-urlencoded refused fields", () => {
+  const refusedBody = (value: Json, refused: MediaDeclaration["refused"]) =>
+    Serialize.urlEncoded(media, value, {
+      properties: [
+        ["a", {}],
+        ["metadata", {}],
+      ],
+      refused,
+      required: false,
+    }).expand;
+
+  test("a declared property refused at field scope is refused in the merged body", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(refusedBody({ a: "x", metadata: "secret-value" }, { [media]: ["metadata"] })),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error[Runtime.errorExitCode]).toBe(2);
+    expect(error.flag).toBe("--body");
+    expect(error.message).toContain("metadata");
+    expect(error.message).not.toContain("secret-value");
+  });
+
+  test("an undeclared key equal to a refused name is refused", async () => {
+    await expectUsage(refusedBody({ extra: "x" }, { [media]: ["extra"] }));
+  });
+
+  test("a refused key holding null is still refused", async () => {
+    await expectUsage(refusedBody({ metadata: null }, { [media]: ["metadata"] }));
+  });
+
+  test("the refusal stops the request before it is built", async () => {
+    const built = Serialize.request("POST", {
+      body: Serialize.urlEncoded(
+        media,
+        { metadata: "x" },
+        { properties: [["metadata", {}]], refused: { [media]: ["metadata"] }, required: true },
+      ),
+      headers: [],
+      path: Serialize.path("/", []),
+      query: [],
+    });
+
+    await expectUsage(built);
+  });
+
+  test.each([
+    ["no refused names", undefined],
+    ["a refused name the body does not hold", { [media]: ["metadata"] }],
+    ["a refused name under another media type", { "multipart/form-data": ["a"] }],
+  ])("a body with %s is sent", async (_, refused) => {
+    const built = await Effect.runPromise(refusedBody({ a: "x" }, refused));
+
+    expect(built._tag).toBe("Uint8Array");
   });
 });

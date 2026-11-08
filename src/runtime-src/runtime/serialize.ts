@@ -5,6 +5,7 @@ import { UsageError } from "../domain/errors.ts";
 import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -1681,11 +1682,31 @@ export const urlEncode = (
     return pairs.join("&");
   });
 
-const urlEncodedOf = (
+/**
+ * A form body's options: its declared properties, whether it is required, and the operation's
+ * refused fields keyed by request media type, the `refused` list of its `MediaDeclaration`.
+ */
+export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
+  readonly refused?: MediaDeclaration["refused"];
+  readonly required: boolean;
+}
+
+/**
+ * The first own key of the merged body that names a property refused at `field` scope under
+ * `mediaType`, declared or not (design 4.5 Refused body fields).
+ */
+const refusedKeyOf = (
+  value: JsonObject,
   mediaType: string,
-  value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
-) =>
+  refused: MediaDeclaration["refused"],
+): string | undefined => {
+  const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
+  const names = (listed ? refused[mediaType] : undefined) ?? [];
+
+  return Object.keys(value).find((key) => names.includes(key));
+};
+
+const urlEncodedOf = (mediaType: string, value: Json | undefined, options: UrlEncodedBodyOptions) =>
   Effect.gen(function* urlEncodedEvaluation() {
     if (mediaType === "" || unsafeHeaderText(mediaType)) {
       return yield* refuse("the request media type is not a valid header value");
@@ -1697,6 +1718,18 @@ const urlEncodedOf = (
 
     if (!isJsonObject(value)) {
       return yield* refuse("a form-urlencoded body must be an object");
+    }
+
+    // A refused field has no flag, so only the whole body can carry it; the name is the field's,
+    // never its value.
+    const refusedKey = refusedKeyOf(value, mediaType, options.refused);
+    if (refusedKey !== undefined) {
+      return yield* Effect.fail(
+        new UsageError({
+          flag: "--body",
+          message: `property ${refusedKey} is refused for ${mediaType} and cannot be set through --body or --body-file`,
+        }),
+      );
     }
 
     return HttpBody.text(yield* urlEncode(value, options), mediaType);
@@ -1712,7 +1745,7 @@ const urlEncodedOf = (
 export const urlEncoded = (
   mediaType: string,
   value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
+  options: UrlEncodedBodyOptions,
 ): RequestBody => ({
   expand: urlEncodedOf(mediaType, value, options),
   mediaType,
