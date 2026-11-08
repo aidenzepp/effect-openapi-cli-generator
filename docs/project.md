@@ -216,7 +216,7 @@ The current line starts from `main`. An earlier implementation exists on another
 The generator itself has one directory per pipeline stage, a model directory, the generated runtime's source, a library entry and a generator CLI. The layout below is the target after the first milestone. Some paths do not exist yet.
 
 ```text
-.github/workflows/check.yml      # format, lint, type-check, Bun pin check, tests, corpus, coverage
+.github/workflows/check.yml      # format, lint, type-check, Bun pin check, tests, corpus (with the coverage join)
 .agents/skills/                  # repository skills: conventional-commits, document-code
 AGENTS.md  README.md
 docs/
