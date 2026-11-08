@@ -821,8 +821,35 @@ const decodedName = (raw: string): string =>
   new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
 
 /**
- * The URL a hop is sent to, without its fragment: userinfo redacted, and each query value whose
- * decoded name `names` lists replaced by `<redacted>`. Every other byte stays as sent.
+ * A URI reference, absolute or relative, with userinfo redacted (`UrlParams.redactUrl`) and each
+ * query value whose decoded name `names` lists replaced by `<redacted>`. Every other byte, the
+ * fragment included, stays as given.
+ */
+const redactUriText = (text: string, names: readonly (string | RegExp)[]): string => {
+  const reference = UrlParams.redactUrl(text, []);
+  const hash = reference.indexOf("#");
+  const end = hash === -1 ? reference.length : hash;
+  const at = reference.slice(0, end).indexOf("?");
+  if (at === -1) {
+    return reference;
+  }
+
+  const query = reference
+    .slice(at + 1, end)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+
+      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+        ? `${part.slice(0, equals + 1)}${redactedValue}`
+        : part;
+    });
+
+  return `${reference.slice(0, at + 1)}${query.join("&")}${reference.slice(end)}`;
+};
+
+/**
+ * The URL a hop is sent to, without its fragment, redacted as `redactUriText` redacts.
  */
 const verboseUrl = (
   request: HttpClientRequest.HttpClientRequest,
@@ -833,38 +860,62 @@ const verboseUrl = (
     url.success.hash = "";
   }
 
-  const href = UrlParams.redactUrl(Result.isSuccess(url) ? url.success.href : request.url, []);
-  const at = href.indexOf("?");
-  if (at === -1) {
-    return href;
+  return redactUriText(Result.isSuccess(url) ? url.success.href : request.url, names);
+};
+
+// Each `<URI-reference>` of a `Link` value (RFC 8288).
+const linkTarget = /<(?<uri>[^>]*)>/gu;
+
+// The `url=` part of a `Refresh` value, unquoted or in matching quotes.
+const refreshTarget = /^(?<lead>.*?\burl\s*=\s*)(?<quote>["']?)(?<uri>.*?)\k<quote>$/isu;
+
+/**
+ * A header value with each URL it carries redacted by `redactUriText`: the whole value of
+ * `Location` and `Content-Location`, each `<URI>` of `Link`, and the `url=` part of `Refresh`.
+ * Any other header's value is returned as given.
+ */
+const redactHeaderUrls = (
+  name: string,
+  value: string,
+  names: readonly (string | RegExp)[],
+): string => {
+  const header = name.toLowerCase();
+  if (header === "location" || header === "content-location") {
+    return redactUriText(value, names);
   }
 
-  const query = href
-    .slice(at + 1)
-    .split("&")
-    .map((part) => {
-      const equals = part.indexOf("=");
+  if (header === "link") {
+    return value.replaceAll(linkTarget, (_match, uri: string) => `<${redactUriText(uri, names)}>`);
+  }
 
-      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
-        ? `${part.slice(0, equals + 1)}${redactedValue}`
-        : part;
-    });
+  const refresh = header === "refresh" ? refreshTarget.exec(value)?.groups : undefined;
+  if (refresh === undefined) {
+    return value;
+  }
 
-  return `${href.slice(0, at + 1)}${query.join("&")}`;
+  const { lead = "", quote = "", uri = "" } = refresh;
+
+  return `${lead}${quote}${redactUriText(uri, names)}${quote}`;
 };
 
 /**
  * One block's header lines in the order the record holds them, which is the order they were set.
- * A value whose name `names` lists is `<redacted>`; the caller scrubs each whole line.
+ * A value whose name `names` lists is `<redacted>`; a URL a header carries is redacted by
+ * `redactHeaderUrls` with `queryNames`; the caller scrubs each whole line.
  */
 const headerLines = (
   prefix: "<" | ">",
   headers: Headers.Headers,
   names: readonly (string | RegExp)[],
+  queryNames: readonly (string | RegExp)[],
 ): readonly string[] =>
   Object.entries(headers).map(
     ([name, value]) =>
-      `${prefix} ${name}: ${Headers.isRedactedName(name, names) ? redactedValue : value}`,
+      `${prefix} ${name}: ${
+        Headers.isRedactedName(name, names)
+          ? redactedValue
+          : redactHeaderUrls(name, value, queryNames)
+      }`,
   );
 
 // One block on stderr, each whole line through the RT-6 value scrubber.
@@ -878,7 +929,8 @@ const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =
  * arrive; no bodies. A send that fails writes only its request block. Header and query values
  * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
  * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
- * `<redacted:<scheme>>`. The scrubber runs over each whole line, the URL included.
+ * `<redacted:<scheme>>`. A URL a header carries (`Location`, `Content-Location`, `Link`,
+ * `Refresh`) is redacted as the request URL is. The scrubber runs over each whole line.
  *
  * It wraps the inner client `redirectLoop` receives, inside the loop and inside `retryTransform`,
  * because only there does it see each hop as sent, after the attach step, of every attempt.
@@ -899,13 +951,13 @@ export const verboseTransform =
         const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
         yield* printBlock(scrub, [
           `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
-          ...headerLines(">", request.headers, headerNames),
+          ...headerLines(">", request.headers, headerNames, queryNames),
         ]);
 
         const response = yield* send;
         yield* printBlock(scrub, [
           `< ${response.status}`,
-          ...headerLines("<", response.headers, headerNames),
+          ...headerLines("<", response.headers, headerNames, queryNames),
         ]);
 
         return response;

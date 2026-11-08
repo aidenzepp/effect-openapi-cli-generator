@@ -59,7 +59,7 @@ interface Run {
 
 // One request through the verbose transform as the inner client of the redirect loop (m3-wire's
 // order), optionally inside the retry transform, with the `key` query name on the redacted list
-// as `Auth.redactedNames` puts an apiKey query name there.
+// as `Auth.redactedNames` puts an apiKey query name there (and `api_key` for the header cases).
 const run = async (answers: readonly Answer[], options: Run = {}) => {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
@@ -77,7 +77,7 @@ const run = async (answers: readonly Answer[], options: Run = {}) => {
     client.execute(request).pipe(Effect.map((response) => response.status)),
   ).pipe(
     Effect.provideService(Client.verboseSetting, options.verbose ?? true),
-    Effect.provideService(UrlParams.CurrentRedactedNames, ["key"]),
+    Effect.provideService(UrlParams.CurrentRedactedNames, ["key", "api_key"]),
   );
   const exit = await Effect.runPromiseExit(
     Effect.gen(function* drive() {
@@ -160,5 +160,41 @@ describe("--verbose", () => {
     expect(exit).toEqual(Exit.succeed(200));
     expect(lines).toEqual([]);
     expect(stdout).toBe("");
+  });
+
+  // A URL a response header carries is not a credential value the scrubber knows, so userinfo
+  // and a query value on the redacted list are redacted by name, as in the request line.
+  test("a Location with userinfo and a redacted query name prints neither", async () => {
+    const location = "https://u:p@host/next?api_key=l0cation-secret&ok=1";
+    const { lines } = await run([{ headers: [["location", location]], status: 307 }]);
+    const shown = lines.find((line) => line.startsWith("< location: "));
+    expect(shown).toBeDefined();
+    expect(shown).not.toContain("u:p");
+    expect(shown).not.toContain("l0cation-secret");
+    expect(shown).toContain("&ok=1");
+  });
+
+  test("each URI in a Link header, relative or not, is redacted", async () => {
+    const link = '</page?api_key=l1nk-secret&ok=1>; rel="next", <//u:p@host/x>; rel="alt"';
+    const { lines } = await run([{ headers: [["link", link]], status: 200 }]);
+    expect(lines).toContain(
+      '< link: </page?api_key=<redacted>&ok=1>; rel="next", <//REDACTED:REDACTED@host/x>; rel="alt"',
+    );
+  });
+
+  test("Content-Location and Refresh URLs are redacted", async () => {
+    const { lines } = await run([
+      {
+        headers: [
+          ["content-location", "/c?api_key=c0ntent-secret&ok=1"],
+          ["refresh", "5; url='https://u:p@host/r?api_key=r3fresh-secret&ok=1'"],
+        ],
+        status: 200,
+      },
+    ]);
+    expect(lines).toContain("< content-location: /c?api_key=<redacted>&ok=1");
+    expect(lines).toContain(
+      "< refresh: 5; url='https://REDACTED:REDACTED@host/r?api_key=<redacted>&ok=1'",
+    );
   });
 });
