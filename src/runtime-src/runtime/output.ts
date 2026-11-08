@@ -1,9 +1,11 @@
 import type { PlatformError } from "effect";
 import {
   Cause,
+  Config,
   Console,
   Context,
   Data,
+  Duration,
   Effect,
   FileSystem,
   Layer,
@@ -935,15 +937,58 @@ const withheldNotice = (credentials: readonly Credential[]): string => {
 };
 
 /**
- * A response body read that fails part-way is a truncated body (exit 5). A bodiless response
- * (`isBodiless`) is the empty body and is never read.
+ * The built-in stream idle timeout in seconds (design D-AD7), used when neither
+ * `<PREFIX>_IDLE_TIMEOUT` nor an author default sets one.
+ */
+export const defaultIdleTimeoutSeconds = 300;
+
+const wholeSeconds = /^\d+$/u;
+
+/**
+ * The effective stream idle timeout in seconds: `<envPrefix>_IDLE_TIMEOUT` read by that explicit
+ * name (as `base-url.ts` reads `<PREFIX>_BASE_URL`), then `defaultIdleTimeoutSeconds`. The author
+ * default reaches the env read through the `ConfigProvider` `main.ts` provides (design D-AD7);
+ * there is no flag. The value is whole seconds, 1 or more; anything else is a `UsageError` naming
+ * the variable, never the value. An unprefixed `IDLE_TIMEOUT` is never read.
+ */
+export const effectiveIdleTimeoutSeconds = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveIdleTimeout() {
+    const name = `${envPrefix}_IDLE_TIMEOUT`;
+    const invalid = new UsageError({
+      flag: name,
+      message: `${name} must be a whole number of seconds, 1 or more`,
+    });
+    const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
+    if (Option.isNone(env)) {
+      return defaultIdleTimeoutSeconds;
+    }
+
+    const seconds = Number(env.value);
+
+    return wholeSeconds.test(env.value) && Number.isSafeInteger(seconds) && seconds >= 1
+      ? seconds
+      : yield* invalid;
+  });
+
+/**
+ * A response body read that fails part-way is a truncated body (exit 5). A read that waits longer
+ * than `idleSeconds` for its next chunk fails `idleTimeout` (exit 5; design 9 I5): the only bound
+ * on a raw stream. `Stream.timeoutOrElse` with a failure, because `Stream.timeout` ends a stalled
+ * stream successfully. A bodiless response (`isBodiless`) is the empty body and is never read.
  */
 const bodyOf = (
   response: HttpClientResponse.HttpClientResponse,
+  idleSeconds: number,
 ): Stream.Stream<Uint8Array, ResponseStreamError> =>
   isBodiless(response)
     ? Stream.empty
-    : Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+    : response.stream.pipe(
+        Stream.mapError(() => new ResponseStreamError({ reason: "truncated" })),
+        Stream.timeoutOrElse({
+          duration: Duration.seconds(idleSeconds),
+          orElse: () => Stream.fail(new ResponseStreamError({ reason: "idleTimeout" })),
+        }),
+      );
 
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
@@ -985,8 +1030,10 @@ const warnMissingHeaders = (
  * loopback hops, `User-Agent`); then response matching, after a stderr warning for each required
  * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
  * bodiless one, `isBodiless`, writes nothing and reads nothing); any
- * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
- * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
+ * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. Every
+ * body read, the excerpt's included, is bounded by the stream idle timeout
+ * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
+ * run in one scope. Errors are not rendered here: `finalCatch` does.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -997,7 +1044,8 @@ export const send =
         yield* printStderr(`Notice: the operation ${operation} is deprecated`);
       }
 
-      const servers = meta.servers ?? (yield* Servers).table;
+      const { envPrefix, table: rootServers } = yield* Servers;
+      const servers = meta.servers ?? rootServers;
       const selection = yield* select(
         {
           baseUrl: yield* baseUrlSetting,
@@ -1031,6 +1079,7 @@ export const send =
         yield* printStderr(withheldNotice(credentials));
       }
 
+      const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
       const policy = yield* ClientPolicy;
       const client = (yield* HttpClient.HttpClient).pipe(
         redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
@@ -1049,8 +1098,12 @@ export const send =
           classify(table, response, credentials).pipe(
             Effect.matchEffect({
               onFailure: () =>
-                readExcerpt(bodyOf(response), credentials).pipe(
-                  Effect.orElseSucceed(() => ""),
+                readExcerpt(bodyOf(response, idleSeconds), credentials).pipe(
+                  // A truncated excerpt is no excerpt; a stalled one is the idle timeout.
+                  Effect.catchIf(
+                    (error) => error.reason !== "idleTimeout",
+                    () => Effect.succeed(""),
+                  ),
                   Effect.flatMap((excerpt) =>
                     Effect.fail(toApiResponseError(table, response, excerpt, credentials)),
                   ),
@@ -1059,7 +1112,7 @@ export const send =
                 isBodiless(ok)
                   ? Effect.void
                   : writeBody({
-                      bytes: bodyOf(ok),
+                      bytes: bodyOf(ok, idleSeconds),
                       mediaType: dispatchResponse(
                         declaredMedia(meta, ok.status),
                         Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
