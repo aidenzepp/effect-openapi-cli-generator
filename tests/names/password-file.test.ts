@@ -24,7 +24,7 @@ const config: Schema.Json = {
 const password: Schema.Json = { format: "password", type: "string" };
 
 const spec = (properties: Readonly<Record<string, Schema.Json>>): Schema.Json => ({
-  components: { schemas: { Secret: password } },
+  components: { schemas: { Plain: { type: "string" }, Secret: password } },
   info: { title: "Pw", version: "1.0.0" },
   openapi: "3.1.1",
   paths: {
@@ -94,6 +94,29 @@ describe("a format password body property is a secret-file flag", () => {
     expect(flags.get("pin-file")?.source).toMatchObject({ kind: "secret-file", wireName: "/pin" });
     expect(flags.has("pin")).toBe(false);
   });
+
+  // A password format reached through a composition the flattener follows, or through any anyOf or
+  // oneOf branch, fails closed: the flag is a secret-file flag (design invariant I4).
+  const composed: readonly (readonly [string, Schema.Json])[] = [
+    ["an allOf member", { allOf: [{ type: "string" }, { format: "password" }] }],
+    ["a $ref sibling", { $ref: "#/components/schemas/Plain", format: "password" }],
+    ["an anyOf branch", { anyOf: [password, { type: "integer" }] }],
+    ["a oneOf branch", { oneOf: [{ type: "integer" }, { $ref: "#/components/schemas/Secret" }] }],
+  ];
+
+  for (const [through, schema] of composed) {
+    test(`a password format through ${through} is a secret-file flag`, async () => {
+      const { codes, flags } = await planned({ secret: schema });
+
+      expect(codes).toEqual([]);
+      expect(flags.get("secret-file")?.source).toMatchObject({
+        kind: "secret-file",
+        repeated: false,
+        wireName: "/secret",
+      });
+      expect(flags.has("secret")).toBe(false);
+    });
+  }
 
   test("a nested flattened property is a secret-file flag at its dotted name", async () => {
     const { flags } = await planned({ auth: { properties: { password }, type: "object" } });

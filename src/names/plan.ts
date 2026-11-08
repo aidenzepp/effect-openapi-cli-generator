@@ -899,9 +899,49 @@ const memberSchema = (
   return undefined;
 };
 
-// A `format: password` string property of a JSON or form body is read from a file or stdin: its
-// flag is --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). A property
-// inside a JSON-valued flag has no flag of its own and gets none (m3 open question 6).
+const branchesOf = (json: Schema.Json | undefined): readonly Schema.Json[] =>
+  isJsonArray(json) ? json : [];
+
+// Whether a flag's own schema carries `format: password` on any node the flattener reads (each node
+// of a `$ref` chain with its sibling keywords, each `allOf` member) or in any `anyOf` or `oneOf`
+// branch. It never descends into `properties` or `items`. It fails closed: past the hop or visit
+// budget the answer is yes, so a secret never falls back to an argv flag (design invariant I4).
+const isPassword = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  budget: { visits: number },
+  hops = 0,
+): boolean => {
+  budget.visits += 1;
+  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+    return true;
+  }
+
+  if (!isJsonObject(json)) {
+    return false;
+  }
+
+  if (json.format === "password") {
+    return true;
+  }
+
+  const { $ref, allOf, anyOf, oneOf } = json;
+  const target =
+    Predicate.isString($ref) && $ref.startsWith(refPrefix)
+      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
+      : undefined;
+
+  return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
+    isPassword(defs, branch, budget, hops + 1),
+  );
+};
+
+// A `format: password` property of a JSON or form body is read from a file or stdin: its flag is
+// --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). That holds for a
+// string flag and for a JSON flag whose own schema is a composition with a password branch; a
+// property inside a JSON-valued flag has no flag of its own and gets none (m3 open question 6). A
+// property the walk cannot locate within the budget fails closed. Repeated flags and multipart
+// parts are unchanged (R4 open for them).
 const secretFile = (
   defs: DraftContext["defs"],
   alternative: Pick<MediaAlternative, "codec" | "schema">,
@@ -910,7 +950,8 @@ const secretFile = (
   Effect.gen(function* secret() {
     const key = alternative.schema?.key;
     const flattened = alternative.codec === "json" || alternative.codec === "form";
-    if (!flattened || key === undefined || flag.kind !== "string" || flag.repeated) {
+    const candidate = flag.kind === "string" || flag.kind === "json";
+    if (!flattened || key === undefined || !candidate || flag.repeated) {
       return flag;
     }
 
@@ -920,7 +961,7 @@ const secretFile = (
       property = memberSchema(defs, property, token, budget);
     }
 
-    return dereference(defs, property)?.format === "password"
+    return property === undefined || isPassword(defs, property, budget)
       ? { ...flag, kind: "secret-file", name: `${flag.name}-file` }
       : flag;
   });
