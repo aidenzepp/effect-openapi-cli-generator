@@ -62,6 +62,7 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
+import { jsonSeqRecords, ndjsonRecords, sseRecords } from "./sequential.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -107,6 +108,39 @@ export const MaxErrorBytes = GlobalFlag.Setting("max-error-bytes")({
     Flag.filter(inErrorBytesRange, errorBytesRangeMessage),
     Flag.withDescription("Bytes of an error response body to print; 0 prints none"),
     Flag.withDefault(defaultMaxErrorBytes),
+  ),
+});
+
+/**
+ * `--raw` writes a sequential response (SSE, NDJSON/JSONL, JSON-seq) as the bytes received
+ * instead of one JSON value per line (design 4.6).
+ */
+export const Raw = GlobalFlag.Setting("raw")({
+  flag: Flag.Boolean("raw").pipe(
+    Flag.withDescription("Write a streamed response as the bytes received, not one item per line"),
+    Flag.withDefault(false),
+  ),
+});
+
+/**
+ * Default `--max-record-bytes`: 16 MiB per record (planner choice P6; the design names no number).
+ */
+export const defaultMaxRecordBytes = 16 * 1024 * 1024;
+
+const isPositive = (n: number): boolean => n >= 1;
+
+const recordBytesRangeMessage = (): string => "must be 1 or more";
+
+/**
+ * `--max-record-bytes` bounds one record of a sequential response, in UTF-8 bytes.
+ */
+export const MaxRecordBytes = GlobalFlag.Setting("max-record-bytes")({
+  flag: Flag.Int("max-record-bytes").pipe(
+    // Flag.filter takes (predicate, onFalse); it is not an array method with a thisArg.
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument
+    Flag.filter(isPositive, recordBytesRangeMessage),
+    Flag.withDescription("Largest record of a streamed response, in bytes"),
+    Flag.withDefault(defaultMaxRecordBytes),
   ),
 });
 
@@ -241,13 +275,64 @@ const toFile = <E, R>(
   });
 
 /**
- * Write a response body to its destination: stdout, or with `--output <path>` a temp sibling
- * renamed into place (an existing path is refused unless `--force`). `--output -` is stdout.
- * Binary media to a terminal is refused before the body is read unless `--output -` is given.
- * EPIPE on stdout stops the stream and succeeds.
+ * A sequential framer: one record's text per element, without a line terminator.
  */
-export const writeBody = <E, R>(
-  response: ResponseBody<E, R>,
+type Framer = (
+  maxRecordBytes: number,
+) => <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+) => Stream.Stream<string, E | ResponseStreamError, R>;
+
+const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
+
+/**
+ * The framer the matched response media key selects (design 4.6, 5), or `undefined` for raw
+ * bytes: NDJSON for `application/x-ndjson` and `application/jsonl`, JSON-seq for
+ * `application/json-seq` and any `+json-seq` type, SSE for `text/event-stream`.
+ */
+const framerFor = (mediaType: string | undefined): Framer | undefined => {
+  const key = mediaType?.trim().toLowerCase();
+
+  if (key === "application/x-ndjson" || key === "application/jsonl") {
+    return ndjsonRecords;
+  }
+
+  if (key === "application/json-seq" || (key !== undefined && jsonSeqSuffix.test(key))) {
+    return jsonSeqRecords;
+  }
+
+  return key === "text/event-stream" ? sseRecords : undefined;
+};
+
+// A root that registers no `--raw` or `--max-record-bytes` gets their defaults.
+const rawRequested = Effect.map(
+  Effect.serviceOption(Raw),
+  Option.getOrElse(() => false),
+);
+
+const recordBound = Effect.map(
+  Effect.serviceOption(MaxRecordBytes),
+  Option.getOrElse(() => defaultMaxRecordBytes),
+);
+
+/**
+ * Each record as one LF-terminated line, its own chunk, so the sink writes it as it arrives.
+ */
+const asLines = <E, R>(records: Stream.Stream<string, E, R>): Stream.Stream<Uint8Array, E, R> =>
+  records.pipe(
+    Stream.map((record) => `${record}\n`),
+    Stream.encodeText,
+  );
+
+/**
+ * The destination the output settings name: with `--output <path>` a temp sibling renamed into
+ * place (an existing path is refused unless `--force`), else stdout (`--output -` is stdout).
+ * `binary` refuses a terminal before the body is read unless `--output -` is given. EPIPE on
+ * stdout stops the stream and succeeds.
+ */
+const writeStream = <E, R>(
+  bytes: Stream.Stream<Uint8Array, E, R>,
+  binary: boolean,
 ): Effect.Effect<
   void,
   E | OutputError | UsageError,
@@ -264,10 +349,10 @@ export const writeBody = <E, R>(
     const target = Option.getOrUndefined(output);
 
     if (target !== undefined && target !== stdoutPath) {
-      return yield* toFile(response.bytes, target, force);
+      return yield* toFile(bytes, target, force);
     }
 
-    if (target === undefined && !isText(response.mediaType)) {
+    if (target === undefined && binary) {
       const stdio = yield* Stdio.Stdio;
 
       if (yield* stdio.stdoutIsTerminal) {
@@ -279,7 +364,31 @@ export const writeBody = <E, R>(
       }
     }
 
-    return yield* toStdout(response.bytes);
+    return yield* toStdout(bytes);
+  });
+
+/**
+ * Write a response body as received to its destination: stdout, or with `--output <path>` a temp
+ * sibling renamed into place (an existing path is refused unless `--force`). `--output -` is
+ * stdout. Binary media to a terminal is refused before the body is read unless `--output -` is
+ * given. EPIPE on stdout stops the stream and succeeds.
+ */
+export const writeBody = <E, R>(response: ResponseBody<E, R>) =>
+  writeStream(response.bytes, !isText(response.mediaType));
+
+/**
+ * Write a 2xx response body by its matched media key (design 4.6): a sequential type
+ * (`framerFor`) one compact JSON line per record, each written as it arrives and bounded by
+ * `--max-record-bytes`; with `--raw`, or for any other type, the bytes received (`writeBody`).
+ * Sequential lines are text, so the binary terminal guard does not apply to them.
+ */
+export const writeResponse = <E, R>(response: ResponseBody<E, R>) =>
+  Effect.gen(function* dispatchOutput() {
+    const framer = (yield* rawRequested) ? undefined : framerFor(response.mediaType);
+
+    return framer === undefined
+      ? yield* writeBody(response)
+      : yield* writeStream(asLines(framer(yield* recordBound)(response.bytes)), false);
   });
 
 /**
@@ -1105,7 +1214,7 @@ export const send =
               onSuccess: (ok) =>
                 isBodiless(ok)
                   ? Effect.void
-                  : writeBody({
+                  : writeResponse({
                       bytes: bodyOf(ok, idleSeconds),
                       mediaType: dispatchResponse(
                         declaredMedia(meta, ok.status),
