@@ -1427,6 +1427,50 @@ const groupPrefix = (group: PlannedGroup, byTag: ReadonlyMap<string, PlannedGrou
 const deprecation = (scheme: SecurityScheme): readonly (readonly [string, Expr])[] =>
   scheme.deprecated ? [["deprecated", bool(true)]] : [];
 
+type OAuthFlows = Extract<SecurityScheme["kind"], { readonly type: "oauth2Token" }>["flows"];
+
+type OAuthFlow = NonNullable<OAuthFlows[keyof OAuthFlows]>;
+
+const flowKinds = [
+  "authorizationCode",
+  "clientCredentials",
+  "deviceAuthorization",
+  "implicit",
+  "password",
+] as const satisfies readonly (keyof OAuthFlows)[];
+
+// An optional help-only string field prints only when the spec gave it.
+const present = (name: string, value: string | undefined): readonly (readonly [string, Expr])[] =>
+  value === undefined ? [] : [[name, str(value)]];
+
+const flowExpr = (flow: OAuthFlow): Expr =>
+  obj([
+    ...present("authorizationUrl", flow.authorizationUrl),
+    ...present("refreshUrl", flow.refreshUrl),
+    [
+      "scopes",
+      arr(
+        flow.scopes.map((scope) =>
+          obj([
+            ["description", str(scope.description)],
+            ["name", str(scope.name)],
+          ]),
+        ),
+      ),
+    ],
+    ...present("tokenUrl", flow.tokenUrl),
+  ]);
+
+// An `oauth2` scheme's flows, help-only data the runtime never sends (design 9 I3).
+const flowsExpr = (flows: OAuthFlows): Expr =>
+  obj(
+    flowKinds.flatMap((flowKind) => {
+      const flow = flows[flowKind];
+
+      return flow === undefined ? [] : [[flowKind, flowExpr(flow)] as const];
+    }),
+  );
+
 const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr, ApiEmitError> => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
@@ -1448,6 +1492,28 @@ const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr,
         ["env", str(env)],
         ["kind", str("http")],
         ["scheme", str(kind.scheme)],
+      ]),
+    );
+  }
+
+  if (kind.type === "oauth2Token") {
+    return Effect.succeed(
+      obj([
+        ...deprecation(scheme),
+        ["env", str(env)],
+        ["flows", flowsExpr(kind.flows)],
+        ["kind", str("oauth2")],
+      ]),
+    );
+  }
+
+  if (kind.type === "oidcToken") {
+    return Effect.succeed(
+      obj([
+        ...deprecation(scheme),
+        ["env", str(env)],
+        ["kind", str("openIdConnect")],
+        ["openIdConnectUrl", str(kind.openIdConnectUrl)],
       ]),
     );
   }

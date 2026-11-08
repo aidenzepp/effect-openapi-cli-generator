@@ -415,14 +415,23 @@ const runtimeScheme = (
     return { env, in: kind.in, kind: "apiKey", name: kind.name };
   }
 
-  return kind.type === "http" ? { env, kind: "http", scheme: kind.scheme } : undefined;
+  if (kind.type === "http") {
+    return { env, kind: "http", scheme: kind.scheme };
+  }
+
+  if (kind.type === "oauth2Token") {
+    return { env, kind: "oauth2" };
+  }
+
+  return kind.type === "oidcToken" ? { env, kind: "openIdConnect" } : undefined;
 };
 
 /**
- * The credential names of a scheme the runtime can send (`apiKey`, `http`): `<scheme>-file` and
- * `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design 6.5), through the
- * runtime's own `schemeSlug` and `envName`. Other kinds have no credential flag in Milestone 1.
- * `slug` is empty when the scheme name folds to nothing; the caller refuses that.
+ * The credential names of a scheme the runtime sends as a token (`apiKey`, `http`, `oauth2Token`
+ * and `oidcToken`, whose operator-supplied token is passed through; design D-SEC1):
+ * `<scheme>-file` and `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design
+ * 6.5), through the runtime's own `schemeSlug` and `envName`. A `mutualTls` scheme has no single
+ * credential name. `slug` is empty when the scheme name folds to nothing; the caller refuses that.
  */
 export const credentialNames = (
   config: AuthorConfig,

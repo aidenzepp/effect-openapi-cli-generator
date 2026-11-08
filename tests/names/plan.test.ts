@@ -1033,6 +1033,50 @@ describe("planNames: credentials", () => {
     ]);
   });
 
+  const oauth2 = {
+    flows: { clientCredentials: { scopes: [], tokenUrl: "https://a.example/token" } },
+    type: "oauth2Token",
+  };
+  const oidc = {
+    openIdConnectUrl: "https://a.example/.well-known/openid-configuration",
+    type: "oidcToken",
+  };
+
+  test("an oauth2 and an openIdConnect scheme each get <scheme>-file and <PREFIX>_<SCHEME>", () => {
+    const result = plan({
+      operations: [{ operationId: "me", path: "/me", security: [["petAuth"], ["oidcAuth"]] }],
+      schemes: [
+        { kind: oauth2, name: "petAuth" },
+        { kind: oidc, name: "oidcAuth" },
+      ],
+    });
+
+    expect(result.credentials).toEqual([
+      { env: "EXAMPLE_OIDC_AUTH", flag: "oidc-auth-file", scheme: "oidcAuth" },
+      { env: "EXAMPLE_PET_AUTH", flag: "pet-auth-file", scheme: "petAuth" },
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  test("an oauth2 and an openIdConnect scheme folding to one env name are a collision", () => {
+    const result = plan({
+      operations: [
+        { operationId: "a", path: "/a", security: [["petAuth"]] },
+        { operationId: "b", path: "/b", security: [["pet_auth"]] },
+      ],
+      schemes: [
+        { kind: oauth2, name: "petAuth" },
+        { kind: oidc, name: "pet_auth" },
+      ],
+    });
+
+    expect(allCommands(result)).toEqual([]);
+    expect(codes(result)).toEqual([
+      { code: "SSC-01/credential-collision", scope: "operation", severity: "refusal" },
+      { code: "SSC-01/credential-collision", scope: "operation", severity: "refusal" },
+    ]);
+  });
+
   test("a scheme env equal to a reserved environment name is a collision", () => {
     const result = plan({
       operations: [{ operationId: "a", path: "/a", security: [["baseUrl"]] }],

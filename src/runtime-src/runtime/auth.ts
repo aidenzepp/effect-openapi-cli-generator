@@ -25,13 +25,36 @@ import { StdinClaim } from "./input.ts";
 export type SecurityRequirement = readonly (readonly string[])[];
 
 /**
+ * One OAuth flow as help-only data: its URLs when the spec gives them and its scopes by name. No
+ * URL here is ever a request target (design 9 I3).
+ */
+export interface OAuthFlow {
+  readonly authorizationUrl?: string;
+  readonly refreshUrl?: string;
+  readonly scopes: readonly { readonly description: string; readonly name: string }[];
+  readonly tokenUrl?: string;
+}
+
+/**
+ * The flows of an `oauth2` scheme by flow kind, for help only.
+ */
+export interface OAuthFlows {
+  readonly authorizationCode?: OAuthFlow;
+  readonly clientCredentials?: OAuthFlow;
+  readonly deviceAuthorization?: OAuthFlow;
+  readonly implicit?: OAuthFlow;
+  readonly password?: OAuthFlow;
+}
+
+/**
  * A scheme the runtime sends. `env` overrides the default environment name `<PREFIX>_<SCHEME>`;
  * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it. An `oauth2` or
  * `openIdConnect` scheme is operator-supplied token pass-through (design 6.5, D-SEC1): the token is
  * sent as `Authorization: Bearer`, and no token is acquired, no discovery is run, and no scope or
- * role is sent. A `mutualTLS` scheme is a client certificate (design 6.5, D-SEC3): its paths are
- * read from `Config` by the names it carries, `certEnv`, `keyEnv` and `caEnv`, which the name plan
- * derives once (design 4.4) and the runtime never folds itself; it is never a header.
+ * role is sent; their `flows` and `openIdConnectUrl` are help-only data the runtime never reads to
+ * send (design 9 I3). A `mutualTLS` scheme is a client certificate (design 6.5, D-SEC3): its paths
+ * are read from `Config` by the names it carries, `certEnv`, `keyEnv` and `caEnv`, which the name
+ * plan derives once (design 4.4) and the runtime never folds itself; it is never a header.
  */
 export type SecurityScheme =
   | {
@@ -50,12 +73,14 @@ export type SecurityScheme =
   | {
       readonly deprecated?: true;
       readonly env?: string | undefined;
+      readonly flows?: OAuthFlows;
       readonly kind: "oauth2";
     }
   | {
       readonly deprecated?: true;
       readonly env?: string | undefined;
       readonly kind: "openIdConnect";
+      readonly openIdConnectUrl?: string;
     }
   | {
       readonly caEnv: string;
