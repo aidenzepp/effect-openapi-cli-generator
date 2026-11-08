@@ -30,6 +30,7 @@ import {
 } from "effect/http";
 import { RedirectRefused, UsageError } from "../domain/errors.ts";
 import type { TransportError } from "../domain/errors.ts";
+import type { CertificateInit } from "./auth.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
 import { queryWireForm } from "./redact.ts";
@@ -145,6 +146,15 @@ export type DirectRoute = FetchHttpClient.RequestInit["Service"];
 export const directRoute: DirectRoute = { proxy: false } as RequestInit;
 
 /**
+ * The per-hop client-certificate decision (design 6.5 `mutualTLS` row and Origin binding): the
+ * certificate init for the hop's URL, or none. `send` binds `certificateInitFor` to the
+ * operation's bound origins; a hop decided none is sent without the certificate, never refused.
+ */
+export type CertificateDecision = (url: string) => Effect.Effect<Option.Option<CertificateInit>>;
+
+const noCertificate: CertificateDecision = () => Effect.succeedNone;
+
+/**
  * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
  */
 const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
@@ -171,20 +181,35 @@ const becomesGet = (status: number, method: string): boolean =>
   (status === 303 && method !== "GET" && method !== "HEAD");
 
 /**
- * A hop to a loopback host executes with the direct-route init; every other hop is sent with no
- * added init, so the platform routes it from the proxy environment. The decision reads the hop's
- * own URL and is made on every hop.
+ * The init a hop executes with. A loopback hop takes the direct-route init; a hop the certificate
+ * decision binds takes the certificate init; a bound loopback hop takes one init holding both
+ * sets of keys, which share none (design 6.5 Merge with the client certificate). Any other hop is
+ * sent with no added init, so the platform routes it from the proxy environment and presents no
+ * certificate. Both decisions read the hop's own URL and are made on every hop, never cached; no
+ * `tls` key is ever set client-wide.
  */
 const routeHop = <A, E, R>(
   attached: HttpClientRequest.HttpClientRequest,
   direct: DirectRoute,
+  certificate: CertificateDecision,
   send: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> => {
   const url = Url.make(attached.url, attached.urlParams, Option.getOrUndefined(attached.hash));
+  if (Result.isFailure(url)) {
+    return send;
+  }
 
-  return Result.isSuccess(url) && isLoopbackHost(url.success.hostname)
-    ? Effect.provideService(send, FetchHttpClient.RequestInit, direct)
-    : send;
+  const loopback = isLoopbackHost(url.success.hostname);
+
+  return Effect.flatMap(certificate(url.success.href), (init) => {
+    if (Option.isSome(init)) {
+      const merged = loopback ? { ...init.value, ...direct } : init.value;
+
+      return Effect.provideService(send, FetchHttpClient.RequestInit, merged);
+    }
+
+    return loopback ? Effect.provideService(send, FetchHttpClient.RequestInit, direct) : send;
+  });
 };
 
 const asGet = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
@@ -425,6 +450,10 @@ const foldUrlParams = (
  * around the interruptible attach and send, so a discarded 3xx cannot escape its scope. Native
  * `followRedirects` is used nowhere.
  *
+ * `certificate` is the per-hop client-certificate decision (design 6.5 `mutualTLS` row): asked
+ * with each hop's URL, so on every hop of every retry attempt, its init is the hop's request init,
+ * merged with `direct` on a loopback hop. Without one, no hop carries a certificate.
+ *
  * `allowed` is the method allowlist `bin.ts` provides with the client layer (design 6.7), required
  * like `direct`. It is asserted on every attached hop before it is sent, including one a redirect
  * turned into `GET`: a miss is a defect (exit 70) and nothing is sent, because Bun's `fetch` sends
@@ -440,7 +469,12 @@ const foldUrlParams = (
  * `TransportError` `timeout`.
  */
 export const redirectLoop =
-  (attach: Attach, direct: DirectRoute, allowed: ReadonlySet<string>) =>
+  (
+    attach: Attach,
+    direct: DirectRoute,
+    allowed: ReadonlySet<string>,
+    certificate: CertificateDecision = noCertificate,
+  ) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
   ): HttpClient.HttpClient.With<
@@ -456,7 +490,7 @@ export const redirectLoop =
 
           const scope = yield* Scope.fork(yield* Scope.Scope);
           const response = yield* restore(
-            routeHop(attached, direct, scoped.postprocess(Effect.succeed(attached))),
+            routeHop(attached, direct, certificate, scoped.postprocess(Effect.succeed(attached))),
           ).pipe(
             Scope.provide(scope),
             Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
