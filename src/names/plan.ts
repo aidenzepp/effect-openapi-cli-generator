@@ -936,22 +936,57 @@ const isPassword = (
   );
 };
 
+// Whether an array schema's `items` is a password string on any node the flattener reads: each
+// node of a `$ref` chain with its sibling keywords, each `allOf` member, and any `anyOf` or `oneOf`
+// branch. Like `isPassword`, it fails closed past the hop or visit budget.
+const hasPasswordItems = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  budget: { visits: number },
+  hops = 0,
+): boolean => {
+  budget.visits += 1;
+  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+    return true;
+  }
+
+  if (!isJsonObject(json)) {
+    return false;
+  }
+
+  const { $ref, allOf, anyOf, items, oneOf } = json;
+  if (items !== undefined && isPassword(defs, items, budget)) {
+    return true;
+  }
+
+  const target =
+    Predicate.isString($ref) && $ref.startsWith(refPrefix)
+      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
+      : undefined;
+
+  return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
+    hasPasswordItems(defs, branch, budget, hops + 1),
+  );
+};
+
 // A `format: password` property of a JSON or form body is read from a file or stdin: its flag is
 // --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). That holds for a
 // string flag and for a JSON flag whose own schema is a composition with a password branch; a
 // property inside a JSON-valued flag has no flag of its own and gets none (m3 open question 6). A
-// property the walk cannot locate within the budget fails closed. Repeated flags and multipart
-// parts are unchanged (R4 open for them).
+// property whose array items are password strings, as a repeated flag or a JSON flag, has no flag
+// at all (`undefined`) and is reached through --body-file (design 4.5, FMT-05/password-array). A
+// property the walk cannot locate within the budget fails closed.
+// Multipart parts are unchanged (m3-pw1m).
 const secretFile = (
   defs: DraftContext["defs"],
   alternative: Pick<MediaAlternative, "codec" | "schema">,
   flag: BodyFlag,
-): Effect.Effect<PlannedBodyFlag> =>
+): Effect.Effect<PlannedBodyFlag | undefined> =>
   Effect.gen(function* secret() {
     const key = alternative.schema?.key;
     const flattened = alternative.codec === "json" || alternative.codec === "form";
     const candidate = flag.kind === "string" || flag.kind === "json";
-    if (!flattened || key === undefined || !candidate || flag.repeated) {
+    if (!flattened || key === undefined || !candidate) {
       return flag;
     }
 
@@ -961,9 +996,11 @@ const secretFile = (
       property = memberSchema(defs, property, token, budget);
     }
 
-    return property === undefined || isPassword(defs, property, budget)
-      ? { ...flag, kind: "secret-file", name: `${flag.name}-file` }
-      : flag;
+    if (!flag.repeated && (property === undefined || isPassword(defs, property, budget))) {
+      return { ...flag, kind: "secret-file", name: `${flag.name}-file` };
+    }
+
+    return property === undefined || hasPasswordItems(defs, property, budget) ? undefined : flag;
   });
 
 // A skipped property's notice. A multipart body has no whole-body flag, so a part whose name
@@ -1191,6 +1228,7 @@ const draftBody = (
     const { collector } = context;
     const merged = new Map<string, Merged>();
     const fields = new Set<string>();
+    const passwordArrays = new Set<string>();
     let flattenedAll = true;
     for (const alternative of operation.body?.alternatives ?? []) {
       const { pointer } = alternative.origin;
@@ -1222,7 +1260,27 @@ const draftBody = (
       }
 
       for (const found of flattened.success.flags) {
-        const flag = renamed(site, yield* secretFile(context.defs, alternative, found));
+        const secret = yield* secretFile(context.defs, alternative, found);
+        if (secret === undefined) {
+          if (!passwordArrays.has(found.schemaPointer)) {
+            passwordArrays.add(found.schemaPointer);
+            collector.report(
+              operation,
+              "FMT-05/password-array",
+              "Request body",
+              `The property at ${found.pointer} is an array of password strings and has no flag.`,
+              {
+                hint: "Send it in a --body-file document, which keeps the values out of argv.",
+                pointer: found.schemaPointer,
+                scope: "element",
+              },
+            );
+          }
+
+          continue;
+        }
+
+        const flag = renamed(site, secret);
         fields.add(flag.pointer);
 
         const known = merged.get(flag.name);

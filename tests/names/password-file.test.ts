@@ -24,7 +24,13 @@ const config: Schema.Json = {
 const password: Schema.Json = { format: "password", type: "string" };
 
 const spec = (properties: Readonly<Record<string, Schema.Json>>): Schema.Json => ({
-  components: { schemas: { Plain: { type: "string" }, Secret: password } },
+  components: {
+    schemas: {
+      Plain: { type: "string" },
+      Secret: password,
+      Secrets: { items: { $ref: "#/components/schemas/Secret" }, type: "array" },
+    },
+  },
   info: { title: "Pw", version: "1.0.0" },
   openapi: "3.1.1",
   paths: {
@@ -62,7 +68,11 @@ const planned = (properties: Readonly<Record<string, Schema.Json>>) =>
         severity,
       }));
 
-      return { codes, flags: new Map(flags.map((flag) => [flag.name, flag] as const)) };
+      return {
+        codes,
+        diagnostics: plan.diagnostics,
+        flags: new Map(flags.map((flag) => [flag.name, flag] as const)),
+      };
     }),
   );
 
@@ -149,5 +159,46 @@ describe("a format password body property is a secret-file flag", () => {
     expect([...flags.keys()].some((name) => name.endsWith("-file") && name !== "body-file")).toBe(
       false,
     );
+  });
+});
+
+// An array of format password strings has no flag: a repeatable argv flag would expose each value.
+// It is refused at element scope and stays reachable through --body-file (design 4.5, 13.1 R4).
+const propertyPointer = (name: string): string =>
+  `/paths/~1logins/post/requestBody/content/application~1json/schema/properties/${name}`;
+
+describe("an array of format password strings is refused at element scope", () => {
+  const arrays: readonly (readonly [string, Schema.Json])[] = [
+    ["inline items", { items: password, type: "array" }],
+    ["items through a $ref", { items: { $ref: "#/components/schemas/Secret" }, type: "array" }],
+    ["an array component", { $ref: "#/components/schemas/Secrets" }],
+    ["an allOf member", { allOf: [{ type: "array" }, { items: password }] }],
+  ];
+
+  for (const [through, schema] of arrays) {
+    test(`an array of password strings with ${through} plans no flag`, async () => {
+      const { codes, diagnostics, flags } = await planned({ secrets: schema, user: password });
+
+      expect(codes).toEqual([
+        { code: "FMT-05/password-array", scope: "element", severity: "refusal" },
+      ]);
+      expect(String(diagnostics[0]?.pointer)).toBe(propertyPointer("secrets"));
+      expect(diagnostics[0]?.hint).toContain("--body-file");
+      expect(flags.has("secrets")).toBe(false);
+      expect(flags.has("secrets-file")).toBe(false);
+      expect(flags.has("body-file")).toBe(true);
+      expect(flags.get("user-file")?.source).toMatchObject({ kind: "secret-file" });
+    });
+  }
+
+  test("an array of plain strings keeps its repeatable flag", async () => {
+    const { codes, flags } = await planned({ tags: { items: { type: "string" }, type: "array" } });
+
+    expect(codes).toEqual([]);
+    expect(flags.get("tags")?.source).toMatchObject({
+      kind: "string",
+      repeated: true,
+      wireName: "/tags",
+    });
   });
 });
