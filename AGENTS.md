@@ -21,7 +21,7 @@ Use kebab-case filenames.
 - Prefer the smallest explicit implementation. Reject unsupported input with useful errors rather than silently guessing.
 - Select relevant personal skills by task: `api-boundary-design`, `designing-trustworthy-functions-and-data`, `small-software`, `software-taste`, `contract-tests`, and `correctness`. Avoid bulk copying skills into the repository. The repository's own skills live in `.agents/skills/`: `conventional-commits` for commit messages and `document-code` for JSDoc.
 - Include new TypeScript source in tsconfig.json when implementation begins. Add meaningful targeted tests and build/package checks when there is code to exercise.
-- Run `bun run check` and the relevant targeted checks before completion. Explain skipped or failed checks. When work is split into slices (bounded units delegated to separate agents), a slice runs its own `validation` line only; `bun run check`, `bun run test`, corpus and coverage are the lint, test and merge gates on the integration branch.
+- Run `bun run check` and the relevant targeted checks before completion. Explain skipped or failed checks. When work is split into slices (bounded units delegated to separate agents), a slice runs its own `validation` line only; `bun run check`, `bun run test` and the corpus run (which also runs the coverage join) are the lint, test and merge gates on the integration branch.
 - Commit substantive completed work and report the hash plus verification evidence. Preserve unrelated edits.
 - Confirm the target before remote changes. Push, publish, deploy, or mutate external services only within explicit user authorization.
 
