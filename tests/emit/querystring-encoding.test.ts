@@ -265,4 +265,40 @@ describe("querystring form content with Encoding Objects (audit S1, design 6.1)"
       [`${parameterPointer}/content/application~1x-www-form-urlencoded/encoding/filter`, "PRM-27"],
     ]);
   });
+
+  test("a refused form content keeps no bracket notice for its marked entries (audit NF2)", async () => {
+    const owner = { properties: { name: { type: "string" } }, type: "object" };
+    const filter = { properties: { owner }, type: "object" };
+    const deep = { explode: true, style: "deepObject" };
+    const note = { type: "string" };
+    const orders: readonly (readonly (readonly [string, Schema.Json])[])[] = [
+      [
+        ["filter", filter],
+        ["note", note],
+      ],
+      [
+        ["note", note],
+        ["filter", filter],
+      ],
+    ];
+    const outcomes = await Promise.all(
+      orders.map((order) =>
+        generate(
+          specWith(
+            { filter: deep, note: deep },
+            { properties: Object.fromEntries(order), type: "object" },
+          ),
+          true,
+        ),
+      ),
+    );
+
+    for (const refused of outcomes) {
+      const codes = refused.diagnostics.map((diagnostic) => diagnostic.code);
+
+      expect(codes).toContain("PRM-27/non-object-schema");
+      expect(codes).not.toContain("PRM-27/bracket-author-choice");
+      expect(refused.api.operations).toEqual([]);
+    }
+  });
 });

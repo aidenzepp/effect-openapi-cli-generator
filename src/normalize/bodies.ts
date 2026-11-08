@@ -1781,9 +1781,11 @@ const compoundNested = (input: RuleInput): Finding =>
     ),
   );
 
+const bracketChoiceCode = "PRM-27/bracket-author-choice";
+
 const bracketChoice = (input: RuleInput): Finding =>
   notice(
-    "PRM-27/bracket-author-choice",
+    bracketChoiceCode,
     "style-values",
     "Encoding style deepObject under form-urlencoded",
     `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
@@ -1945,6 +1947,11 @@ const formPositional = (media: Media): readonly Finding[] => [
       ]),
 ];
 
+// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention:
+// its bracket notices go with it (design 8.4), whatever the order of its properties.
+const refusedFormParts = (findings: readonly Finding[]): Parts =>
+  refusedParts(findings.filter((finding) => finding.code !== bracketChoiceCode));
+
 // Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
 const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBudget> =>
   Effect.gen(function* parts() {
@@ -1961,7 +1968,7 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
       const result = yield* formRule(ctx, input);
       findings.push(...result.findings);
       if (result.rule === undefined) {
-        return refusedParts(findings);
+        return refusedFormParts(findings);
       }
 
       rules.push(result.rule);
