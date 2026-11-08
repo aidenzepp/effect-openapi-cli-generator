@@ -233,6 +233,10 @@ interface Finding {
    */
   readonly scope?: "field";
   readonly severity: "notice" | "refusal";
+  /**
+   * The refused property's wire name, set with `field` scope only.
+   */
+  readonly wire?: string;
 }
 
 const refusal = (
@@ -269,10 +273,11 @@ const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly
   );
 
 // A dropping refusal of an optional property whose alternative stays is refused at `field` scope,
-// anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4).
-const fieldRefusal = (entry: CanonicalKey, finding: Finding): Finding => {
+// anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4),
+// and names the property by `wire`.
+const fieldRefusal = (entry: CanonicalKey, finding: Finding, wire: string): Finding => {
   const { drops: _drops, ...kept } = finding;
-  const field: Finding = { ...kept, at: entry, scope: "field" };
+  const field: Finding = { ...kept, at: entry, scope: "field", wire };
 
   return keyOf(finding.at) === keyOf(entry)
     ? field
@@ -1743,14 +1748,16 @@ const partStyles = (
 
     const requirement = yield* requirementOf(ctx.walk, schema);
     const drops = refusedFields.some((name) => isRequired(requirement, name));
-    const moved = (finding: Finding): Finding =>
-      drops ? dropping(finding) : fieldRefusal(finding.at, finding);
+    const moved = (finding: Finding, name: string): Finding =>
+      drops ? dropping(finding) : fieldRefusal(finding.at, finding, name);
 
     return {
       drops,
-      findings: findings.map((finding) =>
-        nameOf(finding) === undefined ? finding : moved(finding),
-      ),
+      findings: findings.map((finding) => {
+        const name = nameOf(finding);
+
+        return name === undefined ? finding : moved(finding, name);
+      }),
       refusedFields: drops ? [] : refusedFields,
     };
   });
@@ -2127,7 +2134,7 @@ const formParts = (
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
     const refusedFields: string[] = [];
-    const entries = new Map<Finding, CanonicalKey>();
+    const entries = new Map<Finding, { readonly at: CanonicalKey; readonly name: string }>();
     let requirement: Requirement | undefined;
     for (const input of propertyInputs(media, members, true, false)) {
       const result = yield* formRule(ctx, input);
@@ -2149,7 +2156,7 @@ const formParts = (
       refusedFields.push(input.target.name);
       for (const finding of result.findings) {
         if (finding.drops === true) {
-          entries.set(finding, input.actual);
+          entries.set(finding, { at: input.actual, name: input.target.name });
         }
       }
     }
@@ -2160,7 +2167,7 @@ const formParts = (
       findings: findings.map((finding) => {
         const entry = entries.get(finding);
 
-        return entry === undefined ? finding : fieldRefusal(entry, finding);
+        return entry === undefined ? finding : fieldRefusal(entry.at, finding, entry.name);
       }),
       refusedFields,
     };
@@ -2283,6 +2290,7 @@ interface DiagnosticFields {
   scope: "element" | "field";
   severity: "notice" | "refusal";
   specSection: string;
+  wire?: string;
 }
 
 // The use site is the operation's request body; when it is a reference, the element's own
@@ -2308,6 +2316,10 @@ const toDiagnostics = (
       };
       if (item.hint !== undefined) {
         fields.hint = item.hint;
+      }
+
+      if (item.wire !== undefined) {
+        fields.wire = item.wire;
       }
 
       if (ctx.site.operation !== undefined) {
