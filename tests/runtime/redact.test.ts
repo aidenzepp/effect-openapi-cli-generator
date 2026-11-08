@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import type { Secret } from "../../src/runtime-src/runtime/redact.ts";
 import {
   dropTrailingFragment,
   queryWireForm,
@@ -66,6 +67,30 @@ describe("a trailing fragment split by stripped characters is dropped (audit S2)
   test("text with no fragment is unchanged", () => {
     expect(dropTrailingFragment("kept S\u00ADX", [bearerOf("SECRETTOKEN")], stripControls)).toBe(
       "kept S\u00ADX",
+    );
+  });
+});
+
+const secretOf = (label: string, value: string): Secret => ({
+  kind: "secret",
+  label,
+  value: Redacted.make(value),
+});
+
+describe("a secret entry is scrubbed as given and JSON-escaped", () => {
+  const entry = secretOf("password-file", 'pa55"word\n');
+
+  test("echoed raw", () => {
+    expect(scrub('got pa55"word\n end', [entry])).toBe("got <redacted:password-file> end");
+  });
+
+  test("echoed inside a JSON string, the kept LF as \\n", () => {
+    expect(scrub('{"echo":"pa55\\"word\\n"}', [entry])).toBe('{"echo":"<redacted:password-file>"}');
+  });
+
+  test("beside a credential, each keeps its own label", () => {
+    expect(scrub('a pa55"word\n b SECRETTOKEN', [entry, bearerOf("SECRETTOKEN")])).toBe(
+      "a <redacted:password-file> b <redacted:bearer>",
     );
   });
 });

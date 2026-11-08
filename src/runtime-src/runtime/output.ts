@@ -8,7 +8,6 @@ import {
   Duration,
   Effect,
   FileSystem,
-  Layer,
   Option,
   Path,
   Ref,
@@ -54,7 +53,8 @@ import type { DirectRoute } from "./client.ts";
 import { redirectLoop, withUserAgent } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
-import { dropTrailingFragment, longestFormBytes, scrubAround } from "./redact.ts";
+import type { ScrubEntry } from "./redact.ts";
+import { dropTrailingFragment, longestFormBytes, RunCredentials, scrubAround } from "./redact.ts";
 import {
   classify,
   isBodiless,
@@ -297,7 +297,7 @@ export const sanitize = (text: string): string => text.replaceAll(unsafeText, ""
  * Credential values scrubbed, then the text sanitized, then scrubbed again (design 7.4, audit
  * S2), so neither a credential holding a removed character nor one split by them survives.
  */
-const scrubbedAndSanitized = (text: string, credentials: readonly Credential[]): string =>
+const scrubbedAndSanitized = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubAround(text, credentials, sanitize);
 
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
@@ -349,7 +349,7 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
 export const boundedExcerpt = (
   text: string,
   maxBytes: number,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
 ): string => truncateUtf8(scrubbedAndSanitized(text, credentials), maxBytes);
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
@@ -388,7 +388,7 @@ const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
  */
 export const readExcerpt = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
 ): Effect.Effect<string, E, R | GlobalFlag.Setting.Identifier<"max-error-bytes">> =>
   Effect.gen(function* step5() {
     const maxBytes = yield* MaxErrorBytes;
@@ -434,7 +434,7 @@ const isKnownError = (error: unknown): error is KnownError =>
 
 const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
 
-const singleLine = (text: string, credentials: readonly Credential[]): string =>
+const singleLine = (text: string, credentials: readonly ScrubEntry[]): string =>
   oneLine(scrubbedAndSanitized(text, credentials));
 
 /**
@@ -442,7 +442,7 @@ const singleLine = (text: string, credentials: readonly Credential[]): string =>
  * `ApiResponseError` then `Request ID: <id>` when set, then the excerpt (omitted when empty).
  * Every part is scrubbed and sanitized again here, because the error may come from anywhere.
  */
-export const renderError = (error: KnownError, credentials: readonly Credential[]): string => {
+export const renderError = (error: KnownError, credentials: readonly ScrubEntry[]): string => {
   const lines = [`Error: ${singleLine(error[CliError.userMessage], credentials)}`];
 
   if (error instanceof ApiResponseError) {
@@ -549,26 +549,17 @@ const reportOnce = <E extends object>(
     Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
   );
 
-/**
- * The credentials the run evaluated, so the final catch scrubs what the command handler chose.
- * `send` records them; `finalCatch` adds them to its own list. Both require the service, so an
- * entry that omits `runCredentialsLayer` does not compile.
- */
-export class RunCredentials extends Context.Service<
-  RunCredentials,
-  Ref.Ref<readonly Credential[]>
->()("openapi-cli/runtime/RunCredentials") {}
+// `RunCredentials` lives in `redact.ts`, beside the entries it holds, so `input.ts` records a
+// secret-file value without an import cycle (this module imports `auth.ts`, which imports
+// `input.ts`).
+export { RunCredentials, runCredentialsLayer } from "./redact.ts";
 
-export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
-  Ref.make<readonly Credential[]>([]),
-);
-
-const recordedCredentials: Effect.Effect<readonly Credential[], never, RunCredentials> =
+const recordedCredentials: Effect.Effect<readonly ScrubEntry[], never, RunCredentials> =
   Effect.flatMap(Effect.service(RunCredentials), Ref.get);
 
 const renderCause = <E>(
   cause: Cause.Cause<E>,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
 ): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
   const failure = Cause.findErrorOption(cause);
 
@@ -608,10 +599,10 @@ const renderCause = <E>(
  * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
  * line and "internal error, please report" and fails with `InternalError`, exit 70.
  * `credentials` are the values to scrub that the caller holds; `RunCredentials`, provided outside
- * the catch, adds the credentials the command handler evaluated.
+ * the catch, adds the credentials the command handler evaluated and its secret-file values.
  */
 export const finalCatch =
-  (credentials: readonly Credential[]) =>
+  (credentials: readonly ScrubEntry[]) =>
   <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | InternalError, R | RunCredentials | Stdio.Stdio> =>
@@ -1019,21 +1010,21 @@ const warnMissingHeaders = (
 };
 
 /**
- * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
- * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
+ * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a typed
+ * error, and the only runtime function that sends. In order: the base URL (`--base-url`,
  * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
- * operation's effective servers: its meta's override, else the root table from `Servers`)
- * joined to the builder's path and query; `Accept` from the declared response media or
- * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
- * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
- * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching, after a stderr warning for each required
- * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
- * bodiless one, `isBodiless`, writes nothing and reads nothing); any
- * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. Every
- * body read, the excerpt's included, is bounded by the stream idle timeout
- * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
- * run in one scope. Errors are not rendered here: `finalCatch` does.
+ * operation's effective servers: its meta's override, else the root table from `Servers`) joined to
+ * the builder's path and query; `Accept` from the declared response media or `accept` (`--accept`),
+ * leaving the builder's `Content-Type`; the security requirement evaluated against `Schemes` before
+ * any connection (`CredentialMissing`); the policy client (redirect loop with the per-hop attach
+ * gated by the base's provenance, method allowlist, direct route for loopback hops, `User-Agent`);
+ * then response matching, after a stderr warning for each required header the matched case declares
+ * and the response lacks. A 2xx streams to the output sink (a bodiless one, `isBodiless`, writes
+ * nothing and reads nothing); any other status fails with `ApiResponseError` carrying the body
+ * excerpt, bounded and scrubbed of every value the run recorded (its credentials, added to the
+ * record, and its secret-file values). Every body read, the excerpt's included, is bounded by the
+ * stream idle timeout (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request
+ * and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -1064,7 +1055,10 @@ export const send =
       });
 
       const credentials = yield* evaluate(operation, meta.security);
-      yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
+      // Merged, never replaced: a secret-file value the body recorded before `send` stays
+      // recorded, and the error excerpt below scrubs it (audit ad9f808b F3).
+      const recorded = yield* Effect.service(RunCredentials);
+      const scrubbed = yield* Ref.updateAndGet(recorded, (entries) => [...entries, ...credentials]);
 
       const { table: security } = yield* Schemes;
       const baseOrigin = new URL(baseUrl).origin;
@@ -1098,7 +1092,7 @@ export const send =
           classify(table, response, credentials).pipe(
             Effect.matchEffect({
               onFailure: () =>
-                readExcerpt(bodyOf(response, idleSeconds), credentials).pipe(
+                readExcerpt(bodyOf(response, idleSeconds), scrubbed).pipe(
                   // A truncated excerpt is no excerpt; a stalled one is the idle timeout.
                   Effect.catchIf(
                     (error) => error.reason !== "idleTimeout",

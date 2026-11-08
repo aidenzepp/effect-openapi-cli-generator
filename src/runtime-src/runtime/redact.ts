@@ -1,6 +1,41 @@
-import { Array as Arr, Order, Redacted } from "effect";
+import { Array as Arr, Context, Layer, Order, Redacted, Ref } from "effect";
 import { Base64 } from "effect/encoding";
 import type { Credential } from "./auth.ts";
+
+/**
+ * A value read from a secret-file field flag (design 13.1 R4): scrubbed like a credential, but it
+ * answers no security scheme, so its placeholder is `<redacted:<label>>`, the flag's name.
+ */
+export interface Secret {
+  readonly kind: "secret";
+  readonly label: string;
+  readonly value: Redacted.Redacted;
+}
+
+/**
+ * One value the run scrubs: a configured credential or a secret-file value.
+ */
+export type ScrubEntry = Credential | Secret;
+
+const isSecret = (entry: ScrubEntry): entry is Secret => "kind" in entry;
+
+const placeholderOf = (entry: ScrubEntry): string =>
+  `<redacted:${isSecret(entry) ? entry.label : entry.scheme}>`;
+
+/**
+ * The values the run recorded, so the final catch scrubs what the command handler chose: the
+ * credentials `send` evaluated and the secret-file values the body read; `send` adds to it and
+ * never replaces it. `finalCatch` adds them to its own list. Both require the service, so an entry
+ * that omits `runCredentialsLayer` does not compile.
+ */
+export class RunCredentials extends Context.Service<
+  RunCredentials,
+  Ref.Ref<readonly ScrubEntry[]>
+>()("openapi-cli/runtime/RunCredentials") {}
+
+export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
+  Ref.make<readonly ScrubEntry[]>([]),
+);
 
 /**
  * A query name or value exactly as the request target carries it (audit M F1): percent-encoded
@@ -11,11 +46,20 @@ export const queryWireForm = (text: string): string =>
   encodeURIComponent(text).replaceAll("'", "%27");
 
 /**
- * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
- * token `basicAuth` sends and the password alone; for an apiKey in the query also the form the
- * request target carries and the URLSearchParams form a server may echo. Empty forms are dropped.
+ * Every form a scrub entry travels in. A secret: the value as given and JSON-escaped, as a JSON
+ * body echoes it (a kept trailing LF appears as `\n`). A credential (audit F2): the raw value; for
+ * http basic also the base64 token `basicAuth` sends and the password alone; for an apiKey in the
+ * query also the form the request target carries and the URLSearchParams form a server may echo.
+ * Empty forms are dropped.
  */
-const wireForms = (credential: Credential): readonly string[] => {
+const wireForms = (entry: ScrubEntry): readonly string[] => {
+  if (isSecret(entry)) {
+    const secret = Redacted.value(entry.value);
+
+    return [secret, JSON.stringify(secret).slice(1, -1)].filter((form) => form !== "");
+  }
+
+  const credential = entry;
   const value: string = Redacted.value(credential.value);
   const { definition } = credential;
   const forms = [value];
@@ -36,8 +80,8 @@ const wireForms = (credential: Credential): readonly string[] => {
  */
 const formsAround =
   (strip: (text: string) => string) =>
-  (credential: Credential): readonly string[] =>
-    wireForms(credential)
+  (entry: ScrubEntry): readonly string[] =>
+    wireForms(entry)
       .flatMap((form) => [form, strip(form)])
       .filter((form) => form !== "");
 
@@ -58,12 +102,12 @@ const byStartThenLongest = Order.combine(
  */
 const occurrences = (
   text: string,
-  credentials: readonly Credential[],
-  formsOf: (credential: Credential) => readonly string[],
+  entries: readonly ScrubEntry[],
+  formsOf: (entry: ScrubEntry) => readonly string[],
 ): readonly Covered[] =>
-  credentials.flatMap((credential) =>
-    formsOf(credential).flatMap((form) => {
-      const placeholder = `<redacted:${credential.scheme}>`;
+  entries.flatMap((entry) =>
+    formsOf(entry).flatMap((form) => {
+      const placeholder = placeholderOf(entry);
       const found: Covered[] = [];
 
       for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
@@ -96,10 +140,10 @@ const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
 
 const scrubForms = (
   text: string,
-  credentials: readonly Credential[],
-  formsOf: (credential: Credential) => readonly string[],
+  entries: readonly ScrubEntry[],
+  formsOf: (entry: ScrubEntry) => readonly string[],
 ): string => {
-  const runs = mergeRuns(occurrences(text, credentials, formsOf));
+  const runs = mergeRuns(occurrences(text, entries, formsOf));
   let scrubbed = "";
   let at = 0;
 
@@ -116,7 +160,7 @@ const scrubForms = (
  * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
  * character of any form survives (recheck N1), and placeholders are never rescanned.
  */
-export const scrub = (text: string, credentials: readonly Credential[]): string =>
+export const scrub = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubForms(text, credentials, wireForms);
 
 /**
@@ -127,13 +171,13 @@ export const scrub = (text: string, credentials: readonly Credential[]): string 
  */
 export const scrubAround = (
   text: string,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
   strip: (text: string) => string,
 ): string => scrubForms(strip(scrub(text, credentials)), credentials, formsAround(strip));
 
 const encoder = new TextEncoder();
 
-export const longestFormBytes = (credentials: readonly Credential[]): number =>
+export const longestFormBytes = (credentials: readonly ScrubEntry[]): number =>
   Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));
 
 /**
@@ -195,7 +239,7 @@ const tailKeeping = (text: string, kept: number, strip: (text: string) => string
  */
 export const dropTrailingFragment = (
   text: string,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
   strip: (text: string) => string,
 ): string => {
   const stripped = strip(text);
