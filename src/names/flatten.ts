@@ -195,7 +195,7 @@ interface Ctx {
    */
   readonly refusedFields: ReadonlySet<string>;
   /**
-   * Multipart only: a binary string is a `file` part, not a `string`.
+   * Multipart only: a binary or `format: password` string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
   /**
@@ -449,8 +449,13 @@ const lookupRef = (
   );
 };
 
+// A `format: password` string (design 4.5): as a multipart part it is read from a file, so the
+// secret never enters argv.
+const isPassword = (schema: SchemaNode, type: SchemaNode["type"]): boolean =>
+  type === "string" && schema.format === "password";
+
 const leaf = (ctx: Ctx, schema: SchemaNode, type: SchemaNode["type"]): Classified => {
-  if (ctx.fileParts && isBinary(schema, type)) {
+  if (ctx.fileParts && (isBinary(schema, type) || isPassword(schema, type))) {
     return { _tag: "Scalar", kind: "file", repeated: false };
   }
 
@@ -640,10 +645,10 @@ const walkProperties = (
 
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
- * (repeated parts), a `file` part when it is binary or its rule sends it base64 encoded, or a
- * `json` flag for an object part, sent as one JSON part (ENC-22); any other shape is skipped with
- * a reason. A part whose style normalize refused (ENC-40) or that it refused at `field` scope gets
- * nothing.
+ * (repeated parts), a `file` part when it is binary, a `format: password` string (an array of
+ * them a repeated file part) or its rule sends it base64 encoded, or a `json` flag for an object
+ * part, sent as one JSON part (ENC-22); any other shape is skipped with a reason. A part whose
+ * style normalize refused (ENC-40) or that it refused at `field` scope gets nothing.
  */
 const walkParts = (
   ctx: Ctx,
