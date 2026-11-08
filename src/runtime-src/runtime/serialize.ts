@@ -1692,19 +1692,65 @@ export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
 }
 
 /**
- * The first own key of the merged body that names a property refused at `field` scope under
- * `mediaType`, declared or not (design 4.5 Refused body fields).
+ * The properties refused at `field` scope under `mediaType`, from the operation's `refused` list.
  */
-const refusedKeyOf = (
-  value: JsonObject,
+const refusedNamesOf = (
   mediaType: string,
   refused: MediaDeclaration["refused"],
-): string | undefined => {
+): readonly string[] => {
   const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
-  const names = (listed ? refused[mediaType] : undefined) ?? [];
 
-  return Object.keys(value).find((key) => names.includes(key));
+  return (listed ? refused[mediaType] : undefined) ?? [];
 };
+
+/**
+ * Whether a sent pair name carries `field`: the name itself, or a bracketed or dotted name under
+ * it, as a server reading brackets or dots would nest it.
+ */
+const carries = (field: string, pairName: string): boolean =>
+  pairName === field || pairName.startsWith(`${field}[`) || pairName.startsWith(`${field}.`);
+
+// A refused field has no flag, so only the whole body can carry it; the name is the field's,
+// never its value.
+const refuseField = (field: string, mediaType: string): Refusal =>
+  Effect.fail(
+    new UsageError({
+      flag: "--body",
+      message: `property ${field} is refused for ${mediaType} and cannot be set through --body or --body-file`,
+    }),
+  );
+
+/**
+ * The form text of `value`, refusing a refused field however it would be sent (design 4.5
+ * Refused body fields, 8.5): an own key of the merged body named like one, even one that sends no
+ * pair, and any pair the text carries, decoded as a server decodes it, whose name carries one. A
+ * pair named exactly like a declared property that is not refused is that property's own.
+ */
+const guardedText = (value: JsonObject, mediaType: string, options: UrlEncodedBodyOptions) =>
+  Effect.gen(function* refusedFieldGuard() {
+    const names = refusedNamesOf(mediaType, options.refused);
+    const ownKey = Object.keys(value).find((key) => names.includes(key));
+    if (ownKey !== undefined) {
+      return yield* refuseField(ownKey, mediaType);
+    }
+
+    const text = yield* urlEncode(value, options);
+    if (names.length === 0) {
+      return text;
+    }
+
+    const own = new Set(
+      options.properties.map(([name]) => name).filter((name) => !names.includes(name)),
+    );
+    for (const pairName of new URLSearchParams(text).keys()) {
+      const field = own.has(pairName) ? undefined : names.find((name) => carries(name, pairName));
+      if (field !== undefined) {
+        return yield* refuseField(field, mediaType);
+      }
+    }
+
+    return text;
+  });
 
 const urlEncodedOf = (mediaType: string, value: Json | undefined, options: UrlEncodedBodyOptions) =>
   Effect.gen(function* urlEncodedEvaluation() {
@@ -1720,19 +1766,7 @@ const urlEncodedOf = (mediaType: string, value: Json | undefined, options: UrlEn
       return yield* refuse("a form-urlencoded body must be an object");
     }
 
-    // A refused field has no flag, so only the whole body can carry it; the name is the field's,
-    // never its value.
-    const refusedKey = refusedKeyOf(value, mediaType, options.refused);
-    if (refusedKey !== undefined) {
-      return yield* Effect.fail(
-        new UsageError({
-          flag: "--body",
-          message: `property ${refusedKey} is refused for ${mediaType} and cannot be set through --body or --body-file`,
-        }),
-      );
-    }
-
-    return HttpBody.text(yield* urlEncode(value, options), mediaType);
+    return HttpBody.text(yield* guardedText(value, mediaType, options), mediaType);
   });
 
 /**

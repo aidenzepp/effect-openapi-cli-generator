@@ -392,6 +392,71 @@ describe("form-urlencoded refused fields", () => {
     await expectUsage(built);
   });
 
+  // The pair names the encoded text actually carries are checked, decoded, so a refused field
+  // reaches no server under a bracketed or dotted name either.
+  const expectFieldRefusal = async (
+    value: { readonly [property: string]: Json },
+    properties: Properties,
+  ) => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        Serialize.urlEncoded(media, value, {
+          properties,
+          refused: { [media]: ["metadata"] },
+          required: false,
+        }).expand,
+      ),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error[Runtime.errorExitCode]).toBe(2);
+    expect(error.flag).toBe("--body");
+    expect(error.message).toContain("metadata");
+    expect(error.message).not.toContain("secret-value");
+  };
+
+  test.each([["metadata[a]"], ["metadata.a"], ["metadata[a][b]"]])(
+    "an undeclared key %s under a refused name is refused",
+    async (key) => {
+      await expectFieldRefusal({ a: "x", [key]: "secret-value" }, [
+        ["a", {}],
+        ["metadata", {}],
+      ]);
+    },
+  );
+
+  test("an exploded member pair named under a refused name is refused", async () => {
+    await expectFieldRefusal({ opts: { "metadata[a]": "secret-value" } }, [
+      ["metadata", {}],
+      ["opts", { explode: true, style: "form" }],
+    ]);
+  });
+
+  test("an exploded member pair named exactly like an undeclared refused name is refused", async () => {
+    await expectFieldRefusal({ opts: { metadata: "secret-value" } }, [
+      ["opts", { explode: true, style: "form" }],
+    ]);
+  });
+
+  test("a declared property whose own name extends a refused name is sent", async () => {
+    const built = await Effect.runPromise(
+      Serialize.urlEncoded(
+        media,
+        { "metadata.kind": "x" },
+        {
+          properties: [
+            ["metadata", {}],
+            ["metadata.kind", {}],
+          ],
+          refused: { [media]: ["metadata"] },
+          required: false,
+        },
+      ).expand,
+    );
+
+    expect(built._tag).toBe("Uint8Array");
+  });
+
   test.each([
     ["no refused names", undefined],
     ["a refused name the body does not hold", { [media]: ["metadata"] }],
