@@ -40,10 +40,8 @@ const apiKey = scheme("apiKey", { in: "header", name: "X-Key", type: "apiKey" })
 
 const client = scheme("client", { type: "mutualTls" });
 
-const contentOf = (schemes: readonly SecurityScheme[] | undefined, path: string): string => {
-  const files = Effect.runSync(
-    schemes === undefined ? emitEntryFiles(config) : emitEntryFiles(config, schemes),
-  );
+const contentOf = (schemes: readonly SecurityScheme[], path: string): string => {
+  const files = Effect.runSync(emitEntryFiles(config, schemes));
   const file = files.find((candidate) => candidate.path === path);
   expect(file).toBeDefined();
 
@@ -182,7 +180,7 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
   });
 
   test("the Bun client layer never receives a tls key", () => {
-    for (const schemes of [[client], [bearer], undefined]) {
+    for (const schemes of [[client], [bearer], []]) {
       const call = layerOptionsCall(contentOf(schemes, "src/bin.ts"));
       expect(call.args).toHaveLength(1);
       expect(call.keys).toEqual(["redirect", "timeout"]);
@@ -192,11 +190,10 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
   test("main.ts does not name Bun and is unchanged by the scheme", () => {
     const main = contentOf([client], "src/main.ts");
     expect(main).not.toContain("Bun");
-    expect(main).toBe(contentOf(undefined, "src/main.ts"));
+    expect(main).toBe(contentOf([], "src/main.ts"));
   });
 
   test("without a mutualTLS scheme bin.ts is byte-identical to before", () => {
-    expect(sha256(contentOf(undefined, "src/bin.ts"))).toBe(previousBinSha256);
     expect(sha256(contentOf([], "src/bin.ts"))).toBe(previousBinSha256);
     expect(sha256(contentOf([bearer, apiKey], "src/bin.ts"))).toBe(previousBinSha256);
   });

@@ -34,7 +34,7 @@ export const emitScaffold = (
 ): Effect.Effect<readonly EmittedFile[], PackageEmitError | PrinterError> =>
   Effect.gen(function* emit() {
     const packageFiles = yield* emitPackageFiles(input.config, input.generator);
-    const entryFiles = yield* emitEntryFiles(input.config);
+    const entryFiles = yield* emitEntryFiles(input.config, input.api.securitySchemes);
 
     return Arr.sort([...packageFiles, ...entryFiles, emitReadme(input), ...runtime], byPath);
   });

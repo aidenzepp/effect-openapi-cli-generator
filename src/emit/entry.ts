@@ -357,7 +357,7 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
  */
 export const emitEntryFiles = (
   config: AuthorConfig,
-  securitySchemes: readonly SecurityScheme[] = [],
+  securitySchemes: readonly SecurityScheme[],
 ): Effect.Effect<readonly EmittedFile[], PrinterError> =>
   Effect.all([
     printModule(
