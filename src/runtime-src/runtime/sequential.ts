@@ -1,4 +1,5 @@
-import { Effect, Stream } from "effect";
+import { Duration, Effect, Stream } from "effect";
+import { Sse } from "effect/encoding";
 import { ResponseStreamError } from "../domain/errors.ts";
 
 /**
@@ -434,6 +435,104 @@ export const jsonSeqRecords =
             return last === undefined ? [] : [last];
           },
         },
+      ),
+      Stream.mapEffect(raise),
+    );
+
+/**
+ * The longest prefix a `data` line carries before its value. `Sse.makeParser` counts the line it
+ * is reading with its prefix, so its buffer bound is the record bound plus this prefix.
+ */
+const dataPrefix = "data: ";
+
+/**
+ * Render one dispatched SSE event as a compact JSON line with alphabetical keys: `data` as a
+ * string, `event` unless it is the default type `message`, `id` when the stream has set one, and
+ * `retry` in milliseconds when a `retry` field arrived since the previous event.
+ */
+const eventLine = (event: Sse.Event, retry: number | undefined): string =>
+  JSON.stringify({
+    data: event.data,
+    event: event.event === "message" ? undefined : event.event,
+    id: event.id,
+    retry,
+  });
+
+/**
+ * Build the SSE framer for one response body: a step that feeds a chunk of decoded text to
+ * `Sse.makeParser` and returns the lines of the events it dispatched, then the first failure,
+ * after which the step takes no more input. The parser is created per body, so a stream run twice
+ * starts clean.
+ */
+const sseFramer = (maxRecordBytes: number) => {
+  const out: Framed[] = [];
+  let failed = false;
+  let itemIndex = 0;
+  let retry: number | undefined;
+
+  const fail = (): void => {
+    failed = true;
+    out.push(new ResponseStreamError({ itemIndex, reason: "recordTooLarge" }));
+  };
+
+  const parser = Sse.makeParser(
+    (parsed) => {
+      if (failed) {
+        return;
+      }
+
+      if (parsed._tag === "Retry") {
+        retry = Duration.toMillis(parsed.duration);
+
+        return;
+      }
+
+      if (utf8Length(parsed.data) > maxRecordBytes) {
+        fail();
+
+        return;
+      }
+
+      out.push(eventLine(parsed, retry));
+      retry = undefined;
+      itemIndex += 1;
+    },
+    { maxEventSize: maxRecordBytes + dataPrefix.length },
+  );
+
+  return (chunk: string): Framed[] => {
+    if (!failed && parser.feed(chunk) !== undefined && !failed) {
+      fail();
+    }
+
+    return out.splice(0);
+  };
+};
+
+/**
+ * Frame a Server-Sent Events response body (`text/event-stream`) as one compact JSON line per
+ * dispatched event, `{"data":…,"event":…,"id":…,"retry":…}` with absent fields omitted, emitted as
+ * each event is dispatched (design 4.6, the OAS generic event schema).
+ *
+ * The body is parsed by `Sse.makeParser` per `text/event-stream`: comments and unknown fields are
+ * ignored, multi-line `data` is joined by LF, `id` is the last event ID the stream set, and an
+ * event the stream ends inside is not dispatched. `Sse.decode` is not used because it fails the
+ * stream on a `retry` field (design 5, SSE row); here `retry` is an integer field of the next
+ * event dispatched. `data` stays a string: `contentMediaType` and `contentSchema` are not applied
+ * (MED-18). An event whose `data` is over `maxRecordBytes` UTF-8 bytes, or a line the parser is
+ * reading that passes the bound plus a `data: ` prefix, fails with `recordTooLarge` carrying the
+ * zero-based `itemIndex` of the event, after every event before it has been emitted.
+ */
+export const sseRecords =
+  (maxRecordBytes: number) =>
+  <E, R>(
+    body: Stream.Stream<Uint8Array, E, R>,
+  ): Stream.Stream<string, E | ResponseStreamError, R> =>
+    body.pipe(
+      Stream.decodeText(),
+      Stream.mapAccum(
+        () => sseFramer(maxRecordBytes),
+        (frame, chunk: string) => [frame, frame(chunk)] as const,
       ),
       Stream.mapEffect(raise),
     );
