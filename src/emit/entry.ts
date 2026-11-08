@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
+import type { SecurityScheme } from "../model/entities.ts";
 import { methodTokens } from "../model/method-tokens.ts";
 import type { EmittedFile } from "./package.ts";
 import {
@@ -16,10 +17,13 @@ import {
   newExpr,
   num,
   obj,
+  plus,
   printModule,
   str,
+  typeKeyword,
+  typeRef,
 } from "./printer.ts";
-import type { Expr, Import, Module, PrinterError, Statement } from "./printer.ts";
+import type { Expr, Import, Module, Param, PrinterError, Statement } from "./printer.ts";
 
 const I = Schema.decodeSync(Identifier);
 
@@ -54,6 +58,10 @@ const namespace = (from: string, name: string): Import => ({
   name: I(name),
   typeOnly: false,
 });
+
+const stringParam = (name: string): Param => ({ name: I(name), type: typeKeyword("string") });
+
+const piped = (head: Expr, ...steps: readonly Expr[]): Expr => call(member(head, M("pipe")), steps);
 
 const constant = (name: string, value: Expr, exported = false): Statement => ({
   _tag: "Const",
@@ -116,6 +124,137 @@ const mainModule = (config: AuthorConfig): Module => {
 };
 
 /**
+ * The client-certificate part of `bin.ts` (design 4.3, 6.5 `mutualTLS` row, D-SEC3), emitted only
+ * for a package with a `mutualTLS` scheme. At start-up it reads each `mutualTLS` scheme of
+ * `api/security.ts` through the runtime's `Auth.clientCertificatePaths` (the names the scheme
+ * carries are the one derivation), checks each configured path readable (an unreadable one is a
+ * `UsageError` naming its environment variable, exit 2, rendered once by `Output.finalCatch`), and
+ * provides `{ tls: { cert, key, ca? } }` over `Bun.file` as `Auth.ClientCertificate`, the first
+ * configured scheme's. The runtime sets it per hop on bound origins only; `layerOptions` never
+ * gets a `tls` key, because a client-wide one presents the certificate to every host (I3).
+ */
+const clientCertificateStatements = (): readonly Statement[] => {
+  const unreadable = arrow(
+    [stringParam("message")],
+    newExpr(path("UsageError"), [obj([["message", path("message")]])]),
+  );
+  const certificateFile = arrow(
+    [stringParam("name"), stringParam("path")],
+    piped(
+      fn(
+        "FileSystem.FileSystem.use",
+        arrow([{ name: I("fs") }], fn("fs.access", path("path"), obj([["readable", bool(true)]]))),
+      ),
+      fn(
+        "Effect.mapError",
+        arrow([], fn("unreadable", plus(str("cannot read the file named by "), path("name")))),
+      ),
+      fn("Effect.as", fn("Bun.file", path("path"))),
+    ),
+  );
+  const files = obj([
+    [
+      "ca",
+      fn(
+        "Effect.transposeOption",
+        fn(
+          "Option.map",
+          path("configured.ca"),
+          arrow([{ name: I("ca") }], fn("certificateFile", path("scheme.caEnv"), path("ca"))),
+        ),
+      ),
+    ],
+    ["cert", fn("certificateFile", path("scheme.certEnv"), path("configured.cert"))],
+    ["key", fn("certificateFile", path("scheme.keyEnv"), path("configured.key"))],
+  ]);
+  const pair: readonly (readonly [string, Expr])[] = [
+    ["cert", path("files.cert")],
+    ["key", path("files.key")],
+  ];
+  const init = arrow(
+    [{ name: I("files") }],
+    obj([
+      [
+        "tls",
+        fn(
+          "Option.match",
+          path("files.ca"),
+          obj([
+            ["onNone", arrow([], obj(pair))],
+            ["onSome", arrow([{ name: I("ca") }], obj([["ca", path("ca")], ...pair]))],
+          ]),
+        ),
+      ],
+    ]),
+    typeRef(I("BunFetchRequestInit")),
+  );
+  const certificateInit = arrow(
+    [{ name: I("scheme"), type: typeRef(I("Auth"), [M("MutualTlsScheme")]) }],
+    piped(
+      fn("Auth.clientCertificatePaths", path("scheme")),
+      fn(
+        "Effect.mapError",
+        arrow([], fn("unreadable", plus(str("cannot read the setting "), path("scheme.certEnv")))),
+      ),
+      fn(
+        "Effect.flatMap",
+        arrow(
+          [{ name: I("paths") }],
+          fn(
+            "Effect.transposeOption",
+            fn(
+              "Option.map",
+              path("paths"),
+              arrow([{ name: I("configured") }], fn("Effect.all", files)),
+            ),
+          ),
+        ),
+      ),
+      fn("Effect.map", fn("Option.map", init)),
+    ),
+  );
+  const perScheme = arrow(
+    [{ name: I("scheme") }],
+    piped(
+      fn("Match.value", path("scheme")),
+      fn("Match.when", obj([["kind", str("mutualTLS")]]), path("certificateInit")),
+      fn("Match.orElse", arrow([], path("Effect.succeedNone"))),
+    ),
+  );
+  const certificateInits = fn(
+    "Effect.forEach",
+    fn("Object.values", path("security.schemes")),
+    perScheme,
+  );
+  const clientCertificate = piped(
+    fn(
+      "Layer.effect",
+      path("Auth.ClientCertificate"),
+      piped(
+        fn(
+          "Effect.map",
+          path("certificateInits"),
+          arrow([{ name: I("all") }], fn("Option.firstSomeOf", path("all"))),
+        ),
+        fn("Output.finalCatch", arr([])),
+      ),
+    ),
+    fn(
+      "Layer.provide",
+      fn("Layer.mergeAll", path("BunServices.layer"), path("Output.runCredentialsLayer")),
+    ),
+  );
+
+  return [
+    constant("unreadable", unreadable),
+    constant("certificateFile", certificateFile),
+    constant("certificateInit", certificateInit),
+    constant("certificateInits", certificateInits),
+    constant("clientCertificate", clientCertificate),
+  ];
+};
+
+/**
  * `bin.ts` (design 4.1, 4.3): the only emitted module that names Bun. It composes the platform:
  * Bun services, the Bun HTTP client with manual redirects and no client timeout or `proxy` key,
  * the `FileBody` layer over `Bun.file` (spike S3), the client policy (the method allowlist of
@@ -123,9 +262,11 @@ const mainModule = (config: AuthorConfig): Module => {
  * `User-Agent` name and version), `RunCredentials` outside the final catch, the
  * runtime presenter with no second formatter, the runtime's built-in flags (`Output.builtIns`:
  * every effect default but `--wizard`, help and version without `-h`/`-v`), logs to stderr and
- * no trace propagation. `runMain` reports no error: the final catch already rendered it.
+ * no trace propagation. `runMain` reports no error: the final catch already rendered it. With a
+ * `mutualTLS` scheme it also provides the client certificate (`clientCertificateStatements`);
+ * without one it is the Milestone 2 module, byte for byte.
  */
-const binModule = (config: AuthorConfig): Module => {
+const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
   const fileBody = fn(
     "Layer.succeed",
     path("FileBody.FileBody"),
@@ -162,6 +303,7 @@ const binModule = (config: AuthorConfig): Module => {
     ),
     path("clientPolicy"),
     path("fileBody"),
+    ...(mutualTls ? [path("clientCertificate")] : []),
     path("Output.runCredentialsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
     fn("CliConfig.layer", obj([["builtIns", path("Output.builtIns")]])),
@@ -172,10 +314,19 @@ const binModule = (config: AuthorConfig): Module => {
   return {
     imports: [
       named("@effect/platform-bun", ["BunHttpClient", "BunRuntime", "BunServices"]),
-      named("effect", ["Effect", "Layer", "References"]),
+      named(
+        "effect",
+        mutualTls
+          ? ["Effect", "FileSystem", "Layer", "Match", "Option", "References"]
+          : ["Effect", "Layer", "References"],
+      ),
       named("effect/cli", ["CliConfig", "CliOutput"]),
       named("effect/http", ["HttpBody", "HttpClient"]),
+      ...(mutualTls
+        ? [named("./api/security.ts", ["security"]), named("./domain/errors.ts", ["UsageError"])]
+        : []),
       named("./main.ts", ["run"]),
+      ...(mutualTls ? [namespace("./runtime/auth.ts", "Auth")] : []),
       namespace("./runtime/client.ts", "Client"),
       namespace("./runtime/file-body.ts", "FileBody"),
       namespace("./runtime/output.ts", "Output"),
@@ -184,6 +335,7 @@ const binModule = (config: AuthorConfig): Module => {
     statements: [
       constant("fileBody", fileBody),
       constant("clientPolicy", clientPolicy),
+      ...(mutualTls ? clientCertificateStatements() : []),
       constant("entry", entry),
       {
         _tag: "Expression",
@@ -200,12 +352,22 @@ const binModule = (config: AuthorConfig): Module => {
 /**
  * Emits the generated package's `src/bin.ts` and `src/main.ts` (design 4.1, 4.3), sorted by path.
  * The package version is the `--version` text and the `User-Agent` version; the bin name is the
- * `User-Agent` name. Both print as escaped string literals.
+ * `User-Agent` name. Both print as escaped string literals. `securitySchemes` are the model's
+ * declared schemes: a `mutualTLS` one among them makes `bin.ts` provide the client certificate.
  */
 export const emitEntryFiles = (
   config: AuthorConfig,
+  securitySchemes: readonly SecurityScheme[],
 ): Effect.Effect<readonly EmittedFile[], PrinterError> =>
-  Effect.all([printModule(binModule(config)), printModule(mainModule(config))]).pipe(
+  Effect.all([
+    printModule(
+      binModule(
+        config,
+        securitySchemes.some((scheme) => scheme.kind.type === "mutualTls"),
+      ),
+    ),
+    printModule(mainModule(config)),
+  ]).pipe(
     Effect.map(([bin, main]) => [
       { content: bin, path: "src/bin.ts" },
       { content: main, path: "src/main.ts" },

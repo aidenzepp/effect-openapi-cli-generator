@@ -20,7 +20,7 @@ const config = Schema.decodeUnknownSync(AuthorConfig)({
   package: { name: "example-cli", version: "1.2.3" },
 });
 
-const emit = () => Effect.runSync(emitEntryFiles(config));
+const emit = () => Effect.runSync(emitEntryFiles(config, []));
 
 const contentOf = (path: string): string => {
   const file = emit().find((candidate) => candidate.path === path);
