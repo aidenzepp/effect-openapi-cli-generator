@@ -17,11 +17,25 @@ export interface ConnectionEvent {
   readonly origin: OriginName;
 }
 
+export interface SentChunk {
+  readonly at: number;
+  readonly connection: number;
+  readonly index: number;
+}
+
+export interface PacedChunk {
+  readonly data: string;
+  readonly delayMs: number;
+}
+
 export interface ScriptedResponse {
   readonly body?: string;
+  readonly chunks?: readonly PacedChunk[];
   readonly endless?: true;
+  readonly headerDelayMs?: number;
   readonly headers?: HeaderList;
   readonly location?: string;
+  readonly stallAfter?: number;
   readonly status: number;
 }
 
@@ -35,6 +49,7 @@ export interface CaptureServer {
   readonly origins: Readonly<Record<OriginName, string>>;
   readonly requests: () => readonly RecordedRequest[];
   readonly script: (path: string, response: ScriptedResponse) => void;
+  readonly sent: () => readonly SentChunk[];
   readonly stop: () => void;
 }
 
@@ -42,7 +57,7 @@ interface Connection {
   buffer: Buffer;
   readonly id: number;
   readonly origin: OriginName;
-  timer: ReturnType<typeof setInterval> | null;
+  readonly timers: Set<ReturnType<typeof setTimeout>>;
 }
 
 interface Parsed {
@@ -136,11 +151,21 @@ const head = (response: ScriptedResponse, length: number | null) => {
   return `${lines.join("\r\n")}\r\n\r\n`;
 };
 
+// Runs `task` after `delayMs`; the socket's close handler cancels whatever is still pending.
+const later = (socket: Bun.Socket<Connection>, delayMs: number, task: () => void) => {
+  const timer = setTimeout(() => {
+    socket.data.timers.delete(timer);
+    task();
+  }, delayMs);
+  socket.data.timers.add(timer);
+};
+
 // A raw TCP listener, not Bun.serve: Bun.serve sorts and merges headers, rewrites the target
 // into an absolute URL and exposes no connection lifecycle, so it cannot record bytes as sent.
 export const startCaptureServer = (options?: CaptureServerOptions): CaptureServer => {
   const requests: RecordedRequest[] = [];
   const events: ConnectionEvent[] = [];
+  const sent: SentChunk[] = [];
   const scripts = new Map<string, ScriptedResponse>();
   let connections = 0;
 
@@ -149,21 +174,72 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
     const scripted = scripts.get(path) ?? defaultResponse;
     const echoes = options?.canary === true && (scripted.status === 401 || scripted.status === 500);
     const body = echoes ? (headerValue(request.headers, "authorization") ?? "") : scripted.body;
+    const closes = headerValue(request.headers, "connection")?.toLowerCase() === "close";
+    const finish = () => {
+      if (closes) {
+        socket.end();
+      }
+    };
 
     if (scripted.endless === true) {
       socket.write(head(scripted, null));
-      socket.data.timer = setInterval(() => {
-        socket.write("5\r\nchunk\r\n");
-      }, 10);
+      socket.data.timers.add(
+        setInterval(() => {
+          socket.write("5\r\nchunk\r\n");
+        }, 10),
+      );
+
+      return;
+    }
+
+    if (scripted.chunks !== undefined) {
+      socket.write(head(scripted, null));
+
+      const pace = (index: number) => {
+        const chunk = scripted.chunks?.[index];
+        if (chunk === undefined) {
+          socket.write("0\r\n\r\n");
+          finish();
+
+          return;
+        }
+
+        later(socket, chunk.delayMs, () => {
+          const bytes = Buffer.from(chunk.data);
+          socket.write(`${bytes.length.toString(16)}\r\n`);
+          socket.write(Buffer.concat([bytes, Buffer.from("\r\n", "latin1")]));
+          sent.push({ at: performance.now(), connection: socket.data.id, index });
+          pace(index + 1);
+        });
+      };
+      pace(0);
 
       return;
     }
 
     const bytes = Buffer.from(body ?? "");
-    socket.write(Buffer.concat([Buffer.from(head(scripted, bytes.length), "latin1"), bytes]));
+    const prefix = Buffer.from(head(scripted, bytes.length), "latin1");
 
-    if (headerValue(request.headers, "connection")?.toLowerCase() === "close") {
-      socket.end();
+    // A stalled body promises every byte in Content-Length, sends the first N and holds the socket.
+    if (scripted.stallAfter !== undefined) {
+      socket.write(Buffer.concat([prefix, bytes.subarray(0, scripted.stallAfter)]));
+
+      return;
+    }
+
+    socket.write(Buffer.concat([prefix, bytes]));
+    finish();
+  };
+
+  const dispatch = (socket: Bun.Socket<Connection>, request: RecordedRequest) => {
+    const scripted = scripts.get(request.target.split("?")[0] ?? "");
+
+    if (scripted?.headerDelayMs === undefined) {
+      respond(socket, request);
+    } else {
+      later(socket, scripted.headerDelayMs, () => {
+        respond(socket, request);
+      });
     }
   };
 
@@ -173,8 +249,8 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
       port: 0,
       socket: {
         close: (socket) => {
-          if (socket.data.timer !== null) {
-            clearInterval(socket.data.timer);
+          for (const timer of socket.data.timers) {
+            clearTimeout(timer);
           }
 
           events.push({ connection: socket.data.id, kind: "close", origin: socket.data.origin });
@@ -187,7 +263,7 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
             const request = { ...parsed.request, connection: state.id, origin: state.origin };
             requests.push(request);
             state.buffer = state.buffer.subarray(parsed.consumed);
-            respond(socket, request);
+            dispatch(socket, request);
             parsed = parseRequest(state.buffer);
           }
         },
@@ -197,7 +273,7 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
             buffer: Buffer.alloc(0),
             id: connections,
             origin: hostname,
-            timer: null,
+            timers: new Set(),
           };
           events.push({ connection: connections, kind: "open", origin: hostname });
         },
@@ -217,6 +293,7 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
     script: (path, response) => {
       scripts.set(path, response);
     },
+    sent: () => sent,
     stop: () => {
       listeners["127.0.0.1"].stop(true);
       listeners.localhost.stop(true);
