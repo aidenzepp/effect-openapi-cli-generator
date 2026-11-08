@@ -5,6 +5,7 @@ import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
+import type { Line } from "../validate/index.ts";
 import { implicitComponent } from "../resolve/index.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { escapeToken, unescapeToken, formatPointer } from "../model/pointer.ts";
@@ -74,6 +75,7 @@ const SchemeNode = Schema.Struct({
   flows: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   in: Schema.optionalKey(Schema.String),
   name: Schema.optionalKey(Schema.String),
+  oauth2MetadataUrl: Schema.optionalKey(Schema.String),
   openIdConnectUrl: Schema.optionalKey(Schema.String),
   scheme: Schema.optionalKey(Schema.String),
   type: Schema.String,
@@ -255,9 +257,10 @@ const flowsOf = (fields: SchemeFields): Option.Option<Readonly<Record<string, Fl
 };
 
 // The modelled kind and inventory row of a scheme node, or undefined when the type is unknown or
-// an `oauth2` flow is malformed.
+// an `oauth2` flow is malformed. `oauth2MetadataUrl` is a 3.2 field and is recorded only on 3.2.
 const kindOf = (
   fields: SchemeFields,
+  line: Line,
 ): { readonly kind: unknown; readonly row: string } | undefined => {
   if (fields.type === "apiKey") {
     return {
@@ -279,9 +282,14 @@ const kindOf = (
   if (fields.type === "oauth2") {
     const flows = flowsOf(fields);
 
+    const metadata =
+      line === "3.2" && fields.oauth2MetadataUrl !== undefined
+        ? { oauth2MetadataUrl: sanitize(fields.oauth2MetadataUrl) }
+        : {};
+
     return Option.isNone(flows)
       ? undefined
-      : { kind: { flows: flows.value, type: "oauth2Token" }, row: "SSC-18" };
+      : { kind: { flows: flows.value, ...metadata, type: "oauth2Token" }, row: "SSC-18" };
   }
 
   // An openIdConnect node without its discovery URL is malformed and stays unmodelled.
@@ -294,11 +302,13 @@ const kindOf = (
 };
 
 /**
- * Where a scheme is declared: its pointer, the document that holds it and whether the spec or the
- * author config declares it. A finding about an author-supplied scheme points into the config.
+ * Where a scheme is declared: its pointer, the document that holds it, the OAS line of the spec it
+ * serves and whether the spec or the author config declares it. A finding about an author-supplied
+ * scheme points into the config.
  */
 interface Site {
   readonly document: typeof DocumentUri.Type;
+  readonly line: Line;
   readonly pointer: string;
   readonly source: SecurityScheme["source"];
 }
@@ -366,7 +376,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
     };
   }
 
-  const modelled = kindOf(node);
+  const modelled = kindOf(node, site.line);
   const decoded =
     modelled === undefined
       ? Option.none<SecurityScheme>()
@@ -403,7 +413,7 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
 
   return modelScheme(
     name,
-    { document: resolution.document, pointer, source: "spec" },
+    { document: resolution.document, line: resolution.line, pointer, source: "spec" },
     nodeAt(resolution, target).pipe(
       Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
     ),
@@ -439,7 +449,11 @@ interface Added {
 
 // The schemes `security.add` contributes, in config order. A collision with a declared name is a
 // document-scope refusal and the added scheme is dropped.
-const addedSchemes = (declared: ReadonlySet<string>, author: AuthorSecurity | undefined): Added => {
+const addedSchemes = (
+  declared: ReadonlySet<string>,
+  author: AuthorSecurity | undefined,
+  line: Line,
+): Added => {
   const entries = Object.entries(author?.config.security?.add?.schemes ?? {});
   const built = entries.map(([name, node]): Built => {
     if (author === undefined) {
@@ -452,6 +466,7 @@ const addedSchemes = (declared: ReadonlySet<string>, author: AuthorSecurity | un
           name,
           {
             document: author.configDocument,
+            line,
             pointer: formatPointer(["security", "add", "schemes", name]),
             source: "author-supplied",
           },
@@ -501,7 +516,7 @@ export const normalizeSecuritySchemes = (
       // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
       return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
     });
-    const extra = addedSchemes(new Set(names), author);
+    const extra = addedSchemes(new Set(names), author, resolution.line);
     const all = [...built, ...extra.built];
     const diagnostics = yield* Effect.all(
       all.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),

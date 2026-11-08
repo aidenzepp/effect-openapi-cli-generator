@@ -1491,6 +1491,7 @@ const parameterInputs = (command: PlannedCommand, context: CommandContext) =>
 
 const annotationsOf = (command: PlannedCommand, meta: Expr, context: CommandContext) => {
   const help = operationHelp({
+    certificates: context.plan.certificates,
     credentials: context.plan.credentials,
     diagnostics: context.plan.diagnostics,
     flags: helpFlags(command, context),

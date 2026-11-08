@@ -57,7 +57,19 @@ export interface HelpCredential {
   readonly scheme: string;
 }
 
+/**
+ * The environment names that carry one `mutualTLS` scheme's client certificate, key and CA paths;
+ * it has no flag (design 6.5, D-SEC3).
+ */
+export interface HelpCertificate {
+  readonly caEnv: string;
+  readonly certEnv: string;
+  readonly keyEnv: string;
+  readonly scheme: string;
+}
+
 export interface HelpInput {
+  readonly certificates?: readonly HelpCertificate[];
   readonly credentials: readonly HelpCredential[];
   readonly diagnostics: readonly Diagnostic[];
   readonly flags: readonly HelpFlag[];
@@ -251,21 +263,117 @@ const firstByKey = <T>(items: readonly T[], keyOf: (item: T) => string): Readonl
 };
 
 interface UseLookup {
+  readonly certificates: ReadonlyMap<string, HelpCertificate>;
   readonly credentials: ReadonlyMap<string, HelpCredential>;
   readonly schemes: ReadonlyMap<string, SecurityScheme>;
 }
 
-const useLine = (lookup: UseLookup, name: string): string => {
-  const scheme = lookup.schemes.get(name);
+type Use = Operation["security"]["alternatives"][number]["uses"][number];
+
+type Flows = Extract<SecurityScheme["kind"], { readonly type: "oauth2Token" }>["flows"];
+
+// Flow kinds in a fixed order, so the line does not depend on the spec's key order.
+const flowKinds = [
+  "authorizationCode",
+  "clientCredentials",
+  "deviceAuthorization",
+  "implicit",
+  "password",
+] as const;
+
+const acquisition = "token acquisition is not supported; supply an access token";
+
+// One flow: its URLs when the spec gives them, then its scope names and descriptions (OAF-01, OAF-12).
+const flowText = (kind: string, flow: NonNullable<Flows[keyof Flows]>): string => {
+  const urls = (["authorizationUrl", "tokenUrl", "refreshUrl"] as const).flatMap((field) => {
+    const url = flow[field];
+
+    return url === undefined ? [] : [`${field} ${line(url)}`];
+  });
+  const scopes =
+    flow.scopes.length === 0
+      ? "none"
+      : flow.scopes
+          .map(({ description, name }) =>
+            description === "" ? line(name) : `${line(name)} (${line(description)})`,
+          )
+          .join(", ");
+
+  return `${kind} flow ${[...urls, `scopes ${scopes}`].join(", ")}`;
+};
+
+// What help shows of a scheme besides its sources: the oauth2 flows and metadata URL, the OIDC
+// discovery URL (neither URL is ever fetched, design 9 I3), and that no token is acquired.
+const kindDetails = (scheme: SecurityScheme): readonly string[] => {
+  const { kind } = scheme;
+  if (kind.type === "oauth2Token") {
+    const flows = flowKinds.flatMap((flowKind) => {
+      const flow = kind.flows[flowKind];
+
+      return flow === undefined ? [] : [flowText(flowKind, flow)];
+    });
+    const metadata =
+      kind.oauth2MetadataUrl === undefined
+        ? []
+        : [`oauth2MetadataUrl ${line(kind.oauth2MetadataUrl)} (never fetched)`];
+
+    return [...flows, ...metadata, acquisition];
+  }
+
+  return kind.type === "oidcToken"
+    ? [`openIdConnectUrl ${line(kind.openIdConnectUrl)} (never fetched)`, acquisition]
+    : [];
+};
+
+// The values of a requirement entry: required scopes for a token scheme (SEC-11), role names for
+// any other (SEC-13). Help shows them; they are never sent.
+const scopesNote = (scheme: SecurityScheme | undefined, scopes: readonly string[]): string[] => {
+  if (scopes.length === 0) {
+    return [];
+  }
+
+  const type = scheme?.kind.type;
+  const label = type === "oauth2Token" || type === "oidcToken" ? "required scopes" : "roles";
+
+  return [`${label} ${scopes.map(line).join(", ")} (never sent)`];
+};
+
+// Where the credential is read from: a token scheme's file flag and env name, then the TTY prompt
+// when the scheme's credential sources hold it; a mutualTLS scheme's three env names and no flag.
+const sourcesOf = (
+  lookup: UseLookup,
+  scheme: SecurityScheme | undefined,
+  name: string,
+): string | undefined => {
+  const certificate = lookup.certificates.get(name);
+  if (certificate !== undefined) {
+    const envs = [certificate.certEnv, certificate.keyEnv, certificate.caEnv].map(line);
+
+    return `env ${envs.join(", ")}; the certificate is presented only to accepted origins`;
+  }
+
   const credential = lookup.credentials.get(name);
+  const prompt = scheme?.credentialSources.includes("prompt") === true ? ", TTY prompt" : "";
+
+  return credential === undefined
+    ? undefined
+    : `--${line(credential.flag)} <path|->, env ${line(credential.env)}${prompt}`;
+};
+
+const useLine = (lookup: UseLookup, use: Use): string => {
+  const name = use.scheme;
+  const scheme = lookup.schemes.get(name);
   const marked = scheme === undefined ? [] : markers(scheme);
   const mark = marked.length === 0 ? "" : ` [${marked.join(", ")}]`;
   const head = scheme === undefined ? line(name) : `${line(name)} (${kindNote(scheme)})${mark}`;
-  if (credential === undefined) {
-    return head;
-  }
+  const sources = sourcesOf(lookup, scheme, name);
+  const details = [
+    ...(scheme === undefined ? [] : kindDetails(scheme)),
+    ...scopesNote(scheme, use.scopes),
+  ];
+  const text = sources === undefined ? head : `${head}: ${sources}`;
 
-  return `${head}: --${line(credential.flag)} <path|->, env ${line(credential.env)}`;
+  return details.length === 0 ? text : `${text}; ${details.join("; ")}`;
 };
 
 const anonymous = "no authentication";
@@ -279,6 +387,7 @@ const authLine = (input: HelpInput): string => {
   }
 
   const lookup: UseLookup = {
+    certificates: firstByKey(input.certificates ?? [], (certificate) => certificate.scheme),
     credentials: firstByKey(input.credentials, (credential) => credential.scheme),
     schemes: firstByKey(input.schemes, (scheme) => scheme.name),
   };
@@ -287,7 +396,7 @@ const authLine = (input: HelpInput): string => {
     .map((alternative) =>
       alternative.uses.length === 0
         ? anonymous
-        : alternative.uses.map((use) => useLine(lookup, use.scheme)).join(" and "),
+        : alternative.uses.map((use) => useLine(lookup, use)).join(" and "),
     )
     .join(" or ");
 };

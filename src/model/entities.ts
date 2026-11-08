@@ -309,7 +309,12 @@ const schemeKind = Schema.Union([
     type: Schema.Literal("apiKey"),
   }),
   Schema.Struct({ scheme: Schema.Literals(["basic", "bearer"]), type: Schema.Literal("http") }),
-  Schema.Struct({ flows: OAuthFlows, type: Schema.Literal("oauth2Token") }),
+  // `oauth2MetadataUrl` (3.2) is shown in help and never fetched (design 9 I3).
+  Schema.Struct({
+    flows: OAuthFlows,
+    oauth2MetadataUrl: Schema.optionalKey(SafeText),
+    type: Schema.Literal("oauth2Token"),
+  }),
   Schema.Struct({ openIdConnectUrl: SafeText, type: Schema.Literal("oidcToken") }),
   Schema.Struct({ type: Schema.Literal("mutualTls") }),
 ]);

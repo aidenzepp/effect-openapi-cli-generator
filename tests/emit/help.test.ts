@@ -78,7 +78,7 @@ const response = (key: Schema.Json, types: readonly string[]) => ({
 });
 
 const schemePlain = {
-  credentialSources: ["flag", "env"],
+  credentialSources: ["file", "env", "prompt"],
   deprecated: false,
   kind: { scheme: "bearer", type: "http" },
   name: "bearerAuth",
