@@ -788,6 +788,12 @@ interface Assembly {
   readonly operation?: Operation;
 }
 
+// An operation refused whole sends nothing, so none of its elements is sent in the bracket
+// convention: its bracket notices go with it (design 8.5 rule 7, option A), as a refused form
+// alternative's do in the body assembly. `nonStandard` reads generated operations only.
+const withoutBracketNotices = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
+  diagnostics.filter((diagnostic) => diagnostic.code !== "PRM-27/bracket-author-choice");
+
 const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly, OperationsError> =>
   Effect.gen(function* assemble() {
     const { resolution } = shared;
@@ -843,7 +849,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       ...raises,
     ];
     if (raises.length > 0) {
-      return { diagnostics };
+      return { diagnostics: withoutBracketNotices(diagnostics) };
     }
 
     const fields: Plain<typeof Operation.Encoded> = {

@@ -6,6 +6,7 @@ import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import { sortDiagnostics } from "../../src/model/diagnostic.ts";
 import type { Operation } from "../../src/model/entities.ts";
 import { normalize } from "../../src/normalize/index.ts";
+import { nonStandardEntries } from "../../src/report/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
@@ -587,5 +588,80 @@ describe("diagnostic order", () => {
 
   test("the same input yields the same diagnostics twice", () => {
     see(mixed().diagnostics).toEqual(mixed().diagnostics);
+  });
+});
+
+// Design 8.5 rule 7 (option A): notices follow what is sent. An operation refused whole sends
+// nothing, so its marked parameters keep no `PRM-27/bracket-author-choice` notice, and the report's
+// `nonStandard` list, which reads generated operations only, is unchanged (need 91eda55c).
+describe("bracket notices of an operation refused whole", () => {
+  const bracketConfig = Schema.decodeUnknownSync(AuthorConfig)({
+    binName: "example",
+    nonStandard: { deepObjectBrackets: true },
+    package: { name: "example-cli", version: "1.0.0" },
+  });
+
+  const bracketRun = (paths: Json, rest: Members = {}) =>
+    Effect.runSync(
+      resolve({
+        document: entry,
+        line: "3.1",
+        value: { info: { title: "t", version: "1" }, openapi: openapi["3.1"], paths, ...rest },
+      }).pipe(
+        Effect.flatMap((resolution) =>
+          normalize(resolution, {
+            checkFindings: [],
+            config: bracketConfig,
+            configDocument: configUri,
+          }),
+        ),
+      ),
+    );
+
+  // A nested deepObject query parameter: the bracket switch sends it and marks it.
+  const marked: Json = {
+    explode: true,
+    in: "query",
+    name: "filter",
+    schema: {
+      properties: { owner: { properties: { name: { type: "string" } }, type: "object" } },
+      type: "object",
+    },
+    style: "deepObject",
+  };
+
+  // `/kept` is generated with the same marked parameter: its notice and entry stay.
+  const keptPointer = "/paths/~1kept/get/parameters/0";
+
+  const kept: Json = { get: { ...ok, parameters: [marked] } };
+
+  const cases: readonly (readonly [string, Json, Members])[] = [
+    [
+      "OPR-08/required-parameter-refused",
+      { get: { ...ok, parameters: [marked, refusedQuery(true)] } },
+      {},
+    ],
+    [
+      "OPR-09/required-body-refused",
+      { post: { ...ok, parameters: [marked], requestBody: refusedBody(true) } },
+      {},
+    ],
+    [
+      "SEC-06/no-satisfiable-alternative",
+      { get: { ...ok, parameters: [marked], security: [{ oauth: [] }] } },
+      oauthSchemes,
+    ],
+  ];
+
+  test.each(cases)("%s keeps no bracket-author-choice notice", (raise, item, rest) => {
+    const { api, diagnostics } = bracketRun({ "/items": item, "/kept": kept }, rest);
+    const notices = diagnostics.filter(
+      (diagnostic) => diagnostic.code === "PRM-27/bracket-author-choice",
+    );
+
+    see(api.operations.map((found) => found.key.path)).toEqual(["/kept"]);
+    see(raised(diagnostics)).toEqual([raise]);
+    see(notices.map((diagnostic) => diagnostic.pointer)).toEqual([keptPointer]);
+    see(nonStandardEntries(api, [entry]).map((found) => found.pointer)).toEqual([keptPointer]);
   });
 });
