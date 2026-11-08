@@ -1,4 +1,5 @@
 import {
+  Clock,
   Config,
   Duration,
   Effect,
@@ -6,9 +7,12 @@ import {
   Inspectable,
   Option,
   Pipeable,
+  Pull,
   Redacted,
   Result,
+  Schedule,
   Scope,
+  Stdio,
   Stream,
 } from "effect";
 import { CliError, Flag, GlobalFlag } from "effect/cli";
@@ -17,17 +21,19 @@ import {
   Headers,
   HttpBody,
   HttpClient,
+  HttpClientError,
   HttpClientRequest,
   HttpClientResponse,
   HttpIncomingMessage,
   Url,
   UrlParams,
 } from "effect/http";
-import type { HttpClientError } from "effect/http";
 import { RedirectRefused, UsageError } from "../domain/errors.ts";
+import type { TransportError } from "../domain/errors.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
 import { queryWireForm } from "./redact.ts";
+import { mapClientError } from "./response.ts";
 
 /**
  * The most redirects one request follows (design 6.5 Redirect loop). The response to the last
@@ -496,4 +502,230 @@ export const withUserAgent =
     HttpClient.mapRequestInput(
       client,
       HttpClientRequest.setHeader("user-agent", `${binName}/${version}`),
+    );
+
+/**
+ * The methods retried without `--retry-unsafe` (design D-AD7): RFC 9110 9.2.2's idempotent
+ * methods and `QUERY`.
+ */
+const idempotentMethods: ReadonlySet<string> = new Set([
+  "DELETE",
+  "GET",
+  "HEAD",
+  "OPTIONS",
+  "PUT",
+  "QUERY",
+  "TRACE",
+]);
+
+/**
+ * The final statuses retried (design D-AD7). The status is the redirect loop's final response.
+ */
+const retriedStatuses: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
+
+/**
+ * The `TransportError` reasons retried (design D-AD7, m3 P13). `tls` repeats and `aborted` is
+ * an interrupt or a closed pipe, so neither is retried.
+ */
+const retriedReasons: ReadonlySet<TransportError["reason"]> = new Set([
+  "connect",
+  "dns",
+  "timeout",
+]);
+
+/**
+ * Whether a method is retried without `--retry-unsafe`: an idempotent method, or any method when
+ * the request carries an `Idempotency-Key` header (design D-AD7). The table the retry hints of
+ * design 7.4 read.
+ */
+export const wouldRetry = (method: string, idempotencyKeyPresent: boolean): boolean =>
+  idempotencyKeyPresent || idempotentMethods.has(method);
+
+/**
+ * The built-in `--retries` (design D-AD7), used when no flag, environment value or author default
+ * sets one.
+ */
+export const defaultRetries = 2;
+
+const maxRetries = 10;
+
+const invalidRetries = (): UsageError =>
+  new UsageError({
+    flag: "--retries",
+    message: `--retries must be a whole number from 0 to ${maxRetries}`,
+  });
+
+// A whole number from 0 to `maxRetries`. The failure names `--retries` only, never the value.
+const parseRetries = (raw: string): Effect.Effect<number, UsageError> => {
+  const retries = Number(raw);
+
+  return wholeSeconds.test(raw) && retries <= maxRetries
+    ? Effect.succeed(retries)
+    : Effect.fail(invalidRetries());
+};
+
+/**
+ * `--retries <n>`: how many times a transient failure is retried (design D-AD7). The flag holds
+ * only the operator's value; `effectiveRetries` applies the fallbacks.
+ */
+export const retriesSetting = GlobalFlag.Setting("retries")({
+  flag: Flag.String("retries").pipe(
+    Flag.withMetavar("n"),
+    Flag.withDescription(`Times to retry a transient failure, 0 to ${maxRetries}`),
+    Flag.mapEffect((raw) => parseRetries(raw).pipe(Effect.mapError(asCliError))),
+    Flag.optional,
+  ),
+});
+
+/**
+ * `--retry-unsafe` retries any method, `POST` and `PATCH` included (design D-AD7). A one-shot
+ * body is still never retried.
+ */
+export const retryUnsafeSetting = GlobalFlag.Setting("retry-unsafe")({
+  flag: Flag.Boolean("retry-unsafe").pipe(
+    Flag.withDescription("Retry methods that are not idempotent, such as POST and PATCH"),
+    Flag.withDefault(false),
+  ),
+});
+
+const flagRetries = Effect.map(Effect.serviceOption(retriesSetting), Option.flatten);
+
+/**
+ * The effective `--retries`: the flag, then `<envPrefix>_RETRIES` read by that explicit name (as
+ * `effectiveTimeoutSeconds` reads `<PREFIX>_TIMEOUT`), then `defaultRetries`. The author default
+ * reaches the env read through the `ConfigProvider` `main.ts` provides. An unprefixed `RETRIES` is
+ * never read.
+ */
+export const effectiveRetries = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveRetries() {
+    const flag = yield* flagRetries;
+    if (Option.isSome(flag)) {
+      return flag.value;
+    }
+
+    const env = yield* Config.option(Config.String(`${envPrefix}_RETRIES`)).pipe(
+      Effect.mapError(invalidRetries),
+    );
+
+    return Option.isSome(env) ? yield* parseRetries(env.value) : defaultRetries;
+  });
+
+// Exponential from 500 ms, jittered (design D-AD7). `Retry-After` is not read here.
+const backoff = Schedule.jittered(Schedule.exponential("500 millis"));
+
+/**
+ * Why an attempt's outcome is retried: the final status, or the `TransportError` reason as
+ * `mapClientError` classifies it. `None` for every other outcome, interrupts and defects included.
+ */
+const retryCause = <E>(
+  exit: Exit.Exit<HttpClientResponse.HttpClientResponse, E>,
+): Effect.Effect<Option.Option<string>> => {
+  if (Exit.isSuccess(exit)) {
+    const { status } = exit.value;
+
+    return Effect.succeed(
+      retriedStatuses.has(status) ? Option.some(String(status)) : Option.none(),
+    );
+  }
+
+  const error = Exit.findErrorOption(exit);
+  if (
+    Exit.hasInterrupts(exit) ||
+    Option.isNone(error) ||
+    !HttpClientError.isHttpClientError(error.value) ||
+    error.value.reason._tag !== "TransportError"
+  ) {
+    return Effect.succeedNone;
+  }
+
+  return Effect.flip(mapClientError(error.value)).pipe(
+    Effect.map(({ reason }) => (retriedReasons.has(reason) ? Option.some(reason) : Option.none())),
+  );
+};
+
+const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* printRetryNote() {
+    const stdio = yield* Stdio.Stdio;
+
+    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
+  }).pipe(Effect.ignore);
+
+/**
+ * The retry policy (design D-AD7, 5 Retries row), an `HttpClient.transform` applied outside the
+ * redirect loop, so one attempt is one run of the loop with its hops, and the loop's replay rule
+ * is the retry's. An attempt is retried when its method is retried (`wouldRetry`, or any method
+ * with `--retry-unsafe`), its outcome is a retried status or `TransportError` reason, and attempts
+ * remain (`effectiveRetries` + 1 in all). A one-shot body (stdin, `isOneShot`) is never retried:
+ * one stderr line names `unreplayableBody` and the outcome stands. File and in-memory bodies
+ * re-run from the start.
+ *
+ * Each attempt runs in its own scope, a child of the caller's, so a discarded response is aborted
+ * by closing that scope, not drained; the final response's scope closes with the caller's. Before
+ * each retry one stderr note names the method, the URL through `scrub` (the RT-6 scrubber `send`
+ * passes), the cause, the attempt and the delay: exponential from 500 ms, jittered. The last
+ * outcome is returned or failed unchanged. An invalid `<PREFIX>_RETRIES` fails with a `UsageError`
+ * before anything is sent.
+ */
+export const retryTransform =
+  (scrub: (text: string) => string) =>
+  <E, R>(
+    client: HttpClient.HttpClient.With<E, R>,
+  ): HttpClient.HttpClient.With<E | UsageError, R | Scope.Scope | Stdio.Stdio> =>
+    HttpClient.transform(client, (attempt, request) =>
+      Effect.gen(function* retrying() {
+        // The prefix comes with the root's servers table; without it only the flag and the
+        // built-in value apply, as for the timeout.
+        const retries = yield* Effect.serviceOption(Servers).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => flagRetries.pipe(Effect.map(Option.getOrElse(() => defaultRetries))),
+              onSome: ({ envPrefix }) => effectiveRetries(envPrefix),
+            }),
+          ),
+        );
+        const unsafe = Option.getOrElse(
+          yield* Effect.serviceOption(retryUnsafeSetting),
+          () => false,
+        );
+        const retried =
+          unsafe || wouldRetry(request.method, Headers.has(request.headers, "idempotency-key"));
+        const total = retries + 1;
+        const label = `${request.method} ${scrub(UrlParams.redactUrl(request.url))}`;
+        const caller = yield* Scope.Scope;
+        const step = yield* Schedule.toStep(backoff);
+
+        for (let made = 1; ; made += 1) {
+          const scope = yield* Scope.fork(caller);
+          const exit = yield* Effect.exit(attempt.pipe(Scope.provide(scope)));
+          const cause = yield* retryCause(exit);
+          if (retried && made < total && Option.isSome(cause)) {
+            if (!isOneShot(request.body)) {
+              yield* Scope.close(scope, Exit.void);
+
+              const now = yield* Clock.currentTimeMillis;
+              const delay = yield* step(now, cause.value).pipe(
+                Effect.map(([, next]) => next),
+                Pull.catchDone((leftover) => Effect.succeed(leftover)),
+              );
+              yield* printNote(
+                `Notice: retrying ${label} after ${cause.value} ` +
+                  `(attempt ${made + 1} of ${total}) in ${Math.round(Duration.toMillis(delay))} ms`,
+              );
+              yield* Effect.sleep(delay);
+              continue;
+            }
+
+            yield* printNote(
+              `Notice: not retrying ${label} after ${cause.value}: unreplayableBody, ` +
+                "the request body was read once and cannot be sent again",
+            );
+          }
+
+          if (Exit.isFailure(exit)) {
+            yield* Scope.close(scope, exit);
+          }
+
+          return yield* exit;
+        }
+      }),
     );
