@@ -45,10 +45,12 @@ export interface CaptureServerOptions {
 
 export interface CaptureServer {
   readonly connections: () => number;
+  readonly count: (path: string) => number;
   readonly events: () => readonly ConnectionEvent[];
   readonly origins: Readonly<Record<OriginName, string>>;
   readonly requests: () => readonly RecordedRequest[];
   readonly script: (path: string, response: ScriptedResponse) => void;
+  readonly sequence: (path: string, responses: readonly ScriptedResponse[]) => void;
   readonly sent: () => readonly SentChunk[];
   readonly stop: () => void;
 }
@@ -140,6 +142,25 @@ const parseRequest = (buffer: Buffer): Parsed | null => {
 
 const defaultResponse: ScriptedResponse = { body: "ok", status: 200 };
 
+// Canary statuses whose body is replaced by the request's Authorization value and body.
+const echoStatuses = new Set([401, 500, 503]);
+
+// Canary mode echoes request material so a client that renders a response verbatim leaks it.
+const canaryBody = (request: RecordedRequest) =>
+  Buffer.concat([
+    Buffer.from(headerValue(request.headers, "authorization") ?? ""),
+    Buffer.from("\n", "latin1"),
+    request.body,
+  ]);
+
+const canaryLocation = (request: RecordedRequest, location: string) => {
+  const authorization = headerValue(request.headers, "authorization");
+
+  return authorization === undefined
+    ? location
+    : `${location}${location.includes("?") ? "&" : "?"}authorization=${authorization}`;
+};
+
 const head = (response: ScriptedResponse, length: number | null) => {
   const lines = [
     `HTTP/1.1 ${response.status} Scripted`,
@@ -166,14 +187,34 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
   const requests: RecordedRequest[] = [];
   const events: ConnectionEvent[] = [];
   const sent: SentChunk[] = [];
-  const scripts = new Map<string, ScriptedResponse>();
+  // Each path answers its sequence in order and repeats the last response once it runs out.
+  const scripts = new Map<string, readonly ScriptedResponse[]>();
+  const counts = new Map<string, number>();
   let connections = 0;
 
-  const respond = (socket: Bun.Socket<Connection>, request: RecordedRequest) => {
-    const path = request.target.split("?")[0] ?? "";
-    const scripted = scripts.get(path) ?? defaultResponse;
-    const echoes = options?.canary === true && (scripted.status === 401 || scripted.status === 500);
-    const body = echoes ? (headerValue(request.headers, "authorization") ?? "") : scripted.body;
+  const take = (path: string) => {
+    const seen = counts.get(path) ?? 0;
+    counts.set(path, seen + 1);
+
+    const sequence = scripts.get(path) ?? [];
+
+    return sequence[Math.min(seen, sequence.length - 1)] ?? defaultResponse;
+  };
+
+  const respond = (
+    socket: Bun.Socket<Connection>,
+    request: RecordedRequest,
+    script: ScriptedResponse,
+  ) => {
+    const canary = options?.canary === true;
+    const redirects = canary && script.status >= 300 && script.status < 400;
+    const scripted = redirects
+      ? { ...script, location: canaryLocation(request, script.location ?? "/") }
+      : script;
+    const payload =
+      canary && echoStatuses.has(scripted.status)
+        ? canaryBody(request)
+        : Buffer.from(scripted.body ?? "");
     const closes = headerValue(request.headers, "connection")?.toLowerCase() === "close";
     const finish = () => {
       if (closes) {
@@ -217,28 +258,27 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
       return;
     }
 
-    const bytes = Buffer.from(body ?? "");
-    const prefix = Buffer.from(head(scripted, bytes.length), "latin1");
+    const prefix = Buffer.from(head(scripted, payload.length), "latin1");
 
     // A stalled body promises every byte in Content-Length, sends the first N and holds the socket.
     if (scripted.stallAfter !== undefined) {
-      socket.write(Buffer.concat([prefix, bytes.subarray(0, scripted.stallAfter)]));
+      socket.write(Buffer.concat([prefix, payload.subarray(0, scripted.stallAfter)]));
 
       return;
     }
 
-    socket.write(Buffer.concat([prefix, bytes]));
+    socket.write(Buffer.concat([prefix, payload]));
     finish();
   };
 
   const dispatch = (socket: Bun.Socket<Connection>, request: RecordedRequest) => {
-    const scripted = scripts.get(request.target.split("?")[0] ?? "");
+    const scripted = take(request.target.split("?")[0] ?? "");
 
-    if (scripted?.headerDelayMs === undefined) {
-      respond(socket, request);
+    if (scripted.headerDelayMs === undefined) {
+      respond(socket, request, scripted);
     } else {
       later(socket, scripted.headerDelayMs, () => {
-        respond(socket, request);
+        respond(socket, request, scripted);
       });
     }
   };
@@ -284,6 +324,7 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
 
   return {
     connections: () => connections,
+    count: (path) => counts.get(path) ?? 0,
     events: () => events,
     origins: {
       "127.0.0.1": `http://127.0.0.1:${listeners["127.0.0.1"].port}`,
@@ -291,9 +332,12 @@ export const startCaptureServer = (options?: CaptureServerOptions): CaptureServe
     },
     requests: () => requests,
     script: (path, response) => {
-      scripts.set(path, response);
+      scripts.set(path, [response]);
     },
     sent: () => sent,
+    sequence: (path, responses) => {
+      scripts.set(path, responses);
+    },
     stop: () => {
       listeners["127.0.0.1"].stop(true);
       listeners.localhost.stop(true);
