@@ -2,6 +2,7 @@ import { Array as Arr, Console, Context, Effect, Option, Order, Schema } from "e
 import type { Command } from "effect/cli";
 import { Flag, GlobalFlag } from "effect/cli";
 import { Servers } from "./base-url.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
 
 const Location = Schema.Literals(["body", "cookie", "header", "path", "query", "querystring"]);
 
@@ -20,10 +21,7 @@ export interface ParameterBinding {
  */
 export interface CommandBinding {
   readonly operation: {
-    readonly media: {
-      readonly request: readonly string[];
-      readonly responses: { readonly [responseKey: string]: readonly string[] };
-    };
+    readonly media: MediaDeclaration;
     readonly method: string;
     readonly origin: { readonly document: string; readonly pointer: string };
     readonly pathTemplate: string;
@@ -46,6 +44,8 @@ export const Binding = Context.Service<CommandBinding>("openapi-cli/runtime/desc
  * `requestMedia` and `responses` are the spec's keys as spelled, in order; `security` is the
  * effective requirement's alternatives; `servers` are the effective server URLs (the operation's or
  * path item's override, else the root's from `Servers`, empty when that service is absent).
+ * `refusedFields` are the body properties refused at `field` scope, in request media then property
+ * order; it is present on every command, empty when none is refused.
  */
 export const Description = Schema.Struct({
   commands: Schema.Array(
@@ -63,6 +63,7 @@ export const Description = Schema.Struct({
       path: Schema.Array(Schema.String),
       pathTemplate: Schema.String,
       pointer: Schema.String,
+      refusedFields: Schema.Array(Schema.Struct({ mediaType: Schema.String, name: Schema.String })),
       requestMedia: Schema.Array(Schema.String),
       responses: Schema.Array(Schema.String),
       security: Schema.Array(Schema.Array(Schema.String)),
@@ -75,6 +76,17 @@ export const Description = Schema.Struct({
 type Entry = (typeof Description.Type)["commands"][number];
 
 const byName = Order.mapInput(Order.String, (flag: Entry["flags"][number]) => flag.name);
+
+// Read from the media declaration's `refused` list, the one the `--body` guard reads.
+const refusedFieldsOf = ({ refused, request }: MediaDeclaration): Entry["refusedFields"] =>
+  refused === undefined
+    ? []
+    : request.flatMap((mediaType) =>
+        (Object.hasOwn(refused, mediaType) ? (refused[mediaType] ?? []) : []).map((name) => ({
+          mediaType,
+          name,
+        })),
+      );
 
 const entryOf = (
   path: readonly string[],
@@ -95,6 +107,7 @@ const entryOf = (
   path,
   pathTemplate: binding.operation.pathTemplate,
   pointer: binding.operation.origin.pointer,
+  refusedFields: refusedFieldsOf(binding.operation.media),
   requestMedia: binding.operation.media.request,
   responses: Object.keys(binding.operation.media.responses),
   security: binding.operation.security,

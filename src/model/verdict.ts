@@ -11,7 +11,8 @@ const Entry = Schema.Struct({
   row: Schema.String,
 });
 
-// A walk element (design 8.3) by its use site, its kind and the kind's value.
+// A walk element (design 8.3) by its use site, its kind and the kind's value, or a `field` refusal
+// no command agrees with (rule 6) by its pointer, request media type and property name.
 const site = { document: DocumentUri, pointer: JsonPointer };
 
 const Element = Schema.Union([
@@ -20,6 +21,12 @@ const Element = Schema.Union([
     ...site,
     in: Schema.String,
     kind: Schema.Literal("parameter"),
+    name: Schema.String,
+  }),
+  Schema.Struct({
+    ...site,
+    kind: Schema.Literal("refusedField"),
+    mediaType: Schema.String,
     name: Schema.String,
   }),
   Schema.Struct({ ...site, kind: Schema.Literal("requestMedia"), mediaType: Schema.String }),
@@ -37,6 +44,12 @@ const claim = { path: Schema.Array(Schema.String) };
 
 const Invented = Schema.Union([
   Schema.Struct({ ...claim, kind: Schema.Literal("command") }),
+  Schema.Struct({
+    ...claim,
+    kind: Schema.Literal("refusedField"),
+    mediaType: Schema.String,
+    name: Schema.String,
+  }),
   Schema.Struct({ ...claim, kind: Schema.Literal("requestMedia"), mediaType: Schema.String }),
   Schema.Struct({ ...claim, key: Schema.String, kind: Schema.Literal("response") }),
   Schema.Struct({

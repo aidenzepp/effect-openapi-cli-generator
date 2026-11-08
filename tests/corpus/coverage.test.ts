@@ -224,6 +224,7 @@ describe("coverage check", () => {
       path: ["users", "delete"],
       pathTemplate: "/users/{id}",
       pointer: "/paths/~1users~1{id}/delete",
+      refusedFields: [],
       requestMedia: [],
       responses: [],
       security: [],
@@ -408,6 +409,7 @@ const command = (fields: Partial<Command>): Command => ({
   path: ["a"],
   pathTemplate: "/a",
   pointer: "/paths/~1a/get",
+  refusedFields: [],
   requestMedia: [],
   responses: ["200"],
   security: [],
@@ -585,6 +587,124 @@ describe("coverage join without a build", () => {
   });
 });
 
+// A POST at `/a` whose body offers JSON and a form alternative with an optional `meta` property.
+const formSpec: Json = {
+  ...bare,
+  paths: {
+    "/a": {
+      post: {
+        requestBody: {
+          content: {
+            "application/json": { schema: { type: "object" } },
+            "application/x-www-form-urlencoded": {
+              encoding: { meta: { style: "deepObject" } },
+              schema: { properties: { meta: { type: "object" } }, type: "object" },
+            },
+          },
+        },
+        responses: { "200": { description: "ok" } },
+      },
+    },
+  },
+};
+
+const form = "application/x-www-form-urlencoded";
+
+const formMedia = "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded";
+
+const metaField = `${formMedia}/encoding/meta`;
+
+// The POST as `--describe` lists it, offering both media types and listing `refused` fields.
+const post = (fields: Partial<Command> = {}): Command =>
+  command({
+    method: "POST",
+    path: ["a", "post"],
+    pointer: "/paths/~1a/post",
+    requestMedia: ["application/json", form],
+    ...fields,
+  });
+
+const refusedMeta = { mediaType: form, name: "meta" };
+
+// A report with one `field` refusal at `pointer`, plus `refusals`.
+const fieldReport = (pointer: string, refusals: readonly Json[] = []): Json => ({
+  notices: [],
+  refusals: [
+    { code: "PRM-27/compound-nested", document: entry, pointer, scope: "field" },
+    ...refusals,
+  ],
+});
+
+describe("coverage join of field refusals", () => {
+  test("a field refusal every command lists under a media type it carries accounts both ways", () => {
+    const result = joinSpec(
+      formSpec,
+      [
+        post({ refusedFields: [refusedMeta] }),
+        post({ path: ["a", "send"], refusedFields: [refusedMeta] }),
+      ],
+      fieldReport(metaField),
+    );
+
+    expect(result.missing).toEqual([]);
+    expect(result.invented).toEqual([]);
+  });
+
+  test("a field refusal under an alternative no command carries is missing, and so is its media", () => {
+    const result = joinSpec(
+      formSpec,
+      [post({ requestMedia: ["application/json"] })],
+      fieldReport(metaField),
+    );
+
+    expect(result.invented).toEqual([]);
+    expect(result.missing).toEqual([
+      expect.objectContaining({ kind: "requestMedia", pointer: formMedia }),
+      { document: entry, kind: "refusedField", mediaType: form, name: "meta", pointer: metaField },
+    ]);
+  });
+
+  test("a field refusal one alias does not list is missing", () => {
+    const result = joinSpec(
+      formSpec,
+      [post({ refusedFields: [refusedMeta] }), post({ path: ["a", "send"] })],
+      fieldReport(metaField),
+    );
+
+    expect(result.invented).toEqual([]);
+    expect(result.missing).toEqual([
+      { document: entry, kind: "refusedField", mediaType: form, name: "meta", pointer: metaField },
+    ]);
+  });
+
+  test("a described refused field with no field refusal at its encoding entry is invented", () => {
+    const result = joinSpec(formSpec, [post({ refusedFields: [refusedMeta] })]);
+
+    expect(result.missing).toEqual([]);
+    expect(result.invented).toEqual([
+      {
+        document: "openapi.json",
+        kind: "refusedField",
+        mediaType: form,
+        name: "meta",
+        path: ["a", "post"],
+        pointer: "/paths/~1a/post",
+      },
+    ]);
+  });
+
+  test("a field refusal under a refused operation is accounted by that refusal", () => {
+    const refusedPost = {
+      code: "SEC-06/unsupported-scheme",
+      document: entry,
+      pointer: "/paths/~1a/post",
+      scope: "operation",
+    };
+
+    expect(joinSpec(formSpec, [], fieldReport(metaField, [refusedPost])).missing).toEqual([]);
+  });
+});
+
 // A flag as `--describe` lists it, named on the wire as in the spec.
 const describedFlag = (pointer: string, name: string, location: "header" | "query") => ({
   location,
@@ -644,7 +764,8 @@ const largeJoin = (count: number) => {
     };
 
     // Every fourth POST is refused by a collision at the shared header; every fourth GET has its
-    // 500 refused; every fourth POST body is ignored by notice; every fourth GET drops `b` by notice.
+    // 500 refused and its POST a form field `f` refused, which the POST lists; every fourth POST
+    // body is ignored by notice; every fourth GET drops `b` by notice.
     const variant = index % 4;
     if (variant === 0) {
       refusals.push({
@@ -657,7 +778,14 @@ const largeJoin = (count: number) => {
     }
 
     if (variant === 1) {
-      refusals.push({ document: entry, pointer: `${item}/get/responses/500`, scope: "element" });
+      refusals.push(
+        { document: entry, pointer: `${item}/get/responses/500`, scope: "element" },
+        {
+          document: entry,
+          pointer: `${item}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/f`,
+          scope: "field",
+        },
+      );
     }
 
     if (variant === 2) {
@@ -696,6 +824,8 @@ const largeJoin = (count: number) => {
           path: [`r${String(index)}`, "post"],
           pathTemplate: path,
           pointer: `${item}/post`,
+          refusedFields:
+            variant === 1 ? [{ mediaType: "application/x-www-form-urlencoded", name: "f" }] : [],
           requestMedia:
             variant === 2 ? [] : ["application/json", "application/x-www-form-urlencoded"],
           responses: ["201", "400", "500"],

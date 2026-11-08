@@ -15,12 +15,11 @@ import { Description } from "../../src/runtime-src/runtime/describe.ts";
 import { lineOf } from "../../src/validate/dispatch.ts";
 import { sha256Hex } from "../../src/write/manifest.ts";
 import { coverageOf } from "./coverage.ts";
-import type { Coverage, Invented } from "./coverage.ts";
+import type { Coverage, Invented, Missing } from "./coverage.ts";
 import { Corpus, fetchPinned, githubSource } from "./fetch.ts";
 import type { CorpusEntry, Pin } from "./fetch.ts";
 import { Generation, GenerationRequest, reportFile } from "./generate.ts";
 import { walk } from "./walk.ts";
-import type { WalkElement } from "./walk.ts";
 
 // The corpus run (design 8.2, CP-2): for each `ci` spec with an author config, generate from the
 // pinned bytes, compare the YAML twin, build, run `--describe`, join coverage and print the
@@ -154,7 +153,11 @@ const spawn = (
         );
   });
 
-const describeElement = (element: WalkElement): string => {
+const describeElement = (element: Missing): string => {
+  if (element.kind === "refusedField") {
+    return `refusedField ${element.pointer} ${element.mediaType} ${element.name}`;
+  }
+
   if (element.kind === "parameter") {
     return `parameter ${element.pointer} ${element.in} ${element.name}`;
   }
@@ -179,6 +182,10 @@ const describeElement = (element: WalkElement): string => {
 const describeInvented = (invented: Invented): string => {
   const head = `invented ${invented.kind} ${invented.document} ${invented.pointer}`;
 
+  if (invented.kind === "refusedField") {
+    return `${head} ${invented.mediaType} ${invented.name}`;
+  }
+
   if (invented.kind === "requestMedia") {
     return `${head} ${invented.mediaType}`;
   }
@@ -196,9 +203,14 @@ const describeInvented = (invented: Invented): string => {
 
 type CoverageEntries = typeof VerdictCoverage.Encoded;
 
-// A walk element as the verdict lists it: its use site, its kind and the kind's value.
-const elementEntry = (element: WalkElement): CoverageEntries["missing"][number] => {
+// A walk element or field refusal as the verdict lists it: its use site, its kind and the kind's
+// value.
+const elementEntry = (element: Missing): CoverageEntries["missing"][number] => {
   const site = { document: element.document, pointer: element.pointer };
+
+  if (element.kind === "refusedField") {
+    return { ...site, kind: element.kind, mediaType: element.mediaType, name: element.name };
+  }
 
   if (element.kind === "parameter") {
     return { ...site, in: element.in, kind: element.kind, name: element.name };
@@ -224,6 +236,10 @@ const elementEntry = (element: WalkElement): CoverageEntries["missing"][number] 
 // A claim as the verdict lists it: its kind, the command's path and the value.
 const inventedEntry = (invented: Invented): CoverageEntries["invented"][number] => {
   const { path } = invented;
+
+  if (invented.kind === "refusedField") {
+    return { kind: invented.kind, mediaType: invented.mediaType, name: invented.name, path };
+  }
 
   if (invented.kind === "requestMedia") {
     return { kind: invented.kind, mediaType: invented.mediaType, path };
