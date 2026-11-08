@@ -577,3 +577,84 @@ describe("emitApi: multipart request bodies", () => {
     expect(api).not.toContain("ContentType =");
   });
 });
+
+const formMedia = "application/x-www-form-urlencoded";
+
+const accountSchema = {
+  properties: { metadata: { type: "object" }, name: { type: "string" } },
+  type: "object",
+};
+
+const accounts = (content: Readonly<Record<string, Schema.Json>>) =>
+  withPaths({
+    "/accounts": {
+      post: {
+        operationId: "accounts-update",
+        requestBody: { content },
+        responses: ok,
+        tags: ["accounts"],
+      },
+    },
+  });
+
+// The pipeline's API with `refusedFields` set on the form alternative, as normalize will set it
+// (m3-fl6). The plan's commands hold the api's own operation objects, so the change reaches both.
+const emitRefusing = (value: Schema.Json, refusedFields: readonly string[] | undefined) =>
+  Effect.runPromise(
+    pipeline(value).pipe(
+      Effect.flatMap(({ api, bound, plan }) => {
+        for (const operation of api.operations) {
+          for (const alternative of operation.body?.alternatives ?? []) {
+            if (alternative.mediaType === formMedia && refusedFields !== undefined) {
+              Object.defineProperty(alternative, "refusedFields", { value: refusedFields });
+            }
+          }
+        }
+
+        return emitApi({ api, boundOrigins: bound, plan });
+      }),
+    ),
+  ).then((files) => contentOf(files)("src/api/accounts.ts") ?? "");
+
+describe("emitApi: refused body fields", () => {
+  test("the media declaration lists the refused fields once and the serializer reads that list", async () => {
+    const content = await emitRefusing(accounts({ [formMedia]: { schema: accountSchema } }), [
+      "metadata",
+    ]);
+
+    expect(content).toContain(
+      [
+        "const updateMedia: MediaDeclaration = {",
+        '  refused: { "application/x-www-form-urlencoded": ["metadata"] },',
+        '  request: ["application/x-www-form-urlencoded"],',
+      ].join("\n"),
+    );
+    expect(content).toContain("refused: updateMedia.refused,");
+    expect(content.match(/"metadata"\]/gu)?.length).toBe(1);
+  });
+
+  test("a form alternative chosen among several passes the same list to its serializer", async () => {
+    const content = await emitRefusing(
+      accounts({
+        "application/json": { schema: accountSchema },
+        [formMedia]: { schema: accountSchema },
+      }),
+      ["metadata"],
+    );
+
+    expect(content).toContain("refused: updateMedia.refused,");
+  });
+
+  test.each([
+    ["no refused fields", undefined],
+    ["an empty refused list", []],
+  ])("an operation with %s emits no refused list", async (_, refusedFields) => {
+    const content = await emitRefusing(
+      accounts({ [formMedia]: { schema: accountSchema } }),
+      refusedFields,
+    );
+
+    expect(content).toContain("Serialize.urlEncoded(");
+    expect(content).not.toContain("refused");
+  });
+});

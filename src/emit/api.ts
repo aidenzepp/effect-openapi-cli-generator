@@ -250,6 +250,29 @@ const isRange = (mediaType: string): boolean => essence(mediaType).endsWith("/*"
 const mediaTypes = (alternatives: readonly MediaAlternative[]) =>
   alternatives.map((alternative) => alternative.mediaType);
 
+const refusedFieldsOf = (alternative: MediaAlternative): readonly string[] =>
+  alternative.refusedFields ?? [];
+
+/**
+ * The `refused` entry of an operation's media declaration: each request key with refused fields,
+ * in alternative order (design 8.5 rule 6). `None` when no alternative refuses one, so a spec
+ * without a field refusal emits what it emitted before.
+ */
+const refusedEntry = (alternatives: readonly MediaAlternative[]): Option.Option<Expr> => {
+  const listed = alternatives.filter((alternative) => refusedFieldsOf(alternative).length > 0);
+
+  return listed.length === 0
+    ? Option.none()
+    : Option.some(
+        obj(
+          listed.map((alternative) => [
+            alternative.mediaType,
+            strings(refusedFieldsOf(alternative)),
+          ]),
+        ),
+      );
+};
+
 const responseKey = (key: ResponseCase["key"]): string => {
   if (key === "default") {
     return key;
@@ -908,7 +931,9 @@ const bytesEncoder: Encoder = {
 };
 
 // One alternative's encoder (design 4.5, 6.3). A form body is its JSON value, or `undefined` for
-// no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order.
+// no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order;
+// a form alternative with refused fields passes its operation's `media` declaration's `refused`
+// list, the one list `--describe` also reads (design 8.5 rule 6).
 // A multipart body the writer can send is its part values, streamed by `Serialize.formData`. Any
 // other body is an `HttpBody` that `Serialize.body` sends. A multipart body the writer cannot send
 // has no encoder (`None`); `cli/` refuses its operation. A multipart body with a chosen part type is
@@ -918,6 +943,7 @@ const encoderOf = (
   alternative: MediaAlternative,
   defs: Defs,
   formName: string,
+  media: typeof Identifier.Type,
 ): Effect.Effect<Option.Option<Encoder>, ApiEmitError> =>
   Effect.gen(function* encoder() {
     const required = bool(command.operation.body?.required ?? false);
@@ -932,6 +958,9 @@ const encoderOf = (
       );
       const options = obj([
         ["properties", arr(properties)],
+        ...(refusedFieldsOf(alternative).length > 0
+          ? ([["refused", member(ident(media), M("refused"))]] as const)
+          : []),
         ["required", required],
       ]);
 
@@ -1036,6 +1065,7 @@ const chosenParts = (
   defs: Defs,
   name: typeof Identifier.Type,
   formName: string,
+  media: typeof Identifier.Type,
 ) =>
   Effect.gen(function* chosen() {
     const declarations: Statement[] = [];
@@ -1044,7 +1074,7 @@ const chosenParts = (
     for (const alternative of command.operation.body?.alternatives ?? []) {
       const forms = declarations.length;
       const numbered = forms === 0 ? formName : `${formName}${forms + 1}`;
-      const found = yield* encoderOf(command, alternative, defs, numbered);
+      const found = yield* encoderOf(command, alternative, defs, numbered, media);
       if (Option.isNone(found)) {
         continue;
       }
@@ -1091,6 +1121,7 @@ const bodyParts = (
   defs: Defs,
   bodies: typeof Identifier.Type,
   formName: string,
+  media: typeof Identifier.Type,
 ): Effect.Effect<BodyParts, ApiEmitError> =>
   Effect.gen(function* parts() {
     const alternatives = command.operation.body?.alternatives ?? [];
@@ -1100,13 +1131,13 @@ const bodyParts = (
     }
 
     if (encodesByKey(alternatives)) {
-      return yield* chosenParts(command, defs, bodies, formName);
+      return yield* chosenParts(command, defs, bodies, formName, media);
     }
 
     const input = ident(I("input"));
     const value = member(input, M("body"));
     if (alternatives.length === 1 && !isRange(first.mediaType)) {
-      const found = yield* encoderOf(command, first, defs, formName);
+      const found = yield* encoderOf(command, first, defs, formName, media);
       const encoder = Option.getOrElse(found, () => bytesEncoder);
 
       return {
@@ -1229,7 +1260,7 @@ const commandStatements = (
       parameterParts(entry, context),
     );
     const bodies = yield* identifier(`${capitalized}Bodies`);
-    const body = yield* bodyParts(command, context.defs, bodies, `${capitalized}Form`);
+    const body = yield* bodyParts(command, context.defs, bodies, `${capitalized}Form`, mediaName);
     const cookies = parameters.flatMap((part) => (part.cookie === undefined ? [] : [part.cookie]));
     const parts: (readonly [string, Expr])[] = [
       [
@@ -1262,7 +1293,9 @@ const commandStatements = (
       fn("request", [str(operation.key.method), obj(parts)]),
       typeRef(I("Serialize"), [M("Request")]),
     );
+    const refused = refusedEntry(operation.body?.alternatives ?? []);
     const media = obj([
+      ...(Option.isSome(refused) ? ([["refused", refused.value]] as const) : []),
       ["request", strings(mediaTypes(operation.body?.alternatives ?? []))],
       [
         "responses",

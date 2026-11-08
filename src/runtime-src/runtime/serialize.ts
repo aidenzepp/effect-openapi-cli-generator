@@ -5,6 +5,7 @@ import { UsageError } from "../domain/errors.ts";
 import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -1681,11 +1682,77 @@ export const urlEncode = (
     return pairs.join("&");
   });
 
-const urlEncodedOf = (
+/**
+ * A form body's options: its declared properties, whether it is required, and the operation's
+ * refused fields keyed by request media type, the `refused` list of its `MediaDeclaration`.
+ */
+export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
+  readonly refused?: MediaDeclaration["refused"];
+  readonly required: boolean;
+}
+
+/**
+ * The properties refused at `field` scope under `mediaType`, from the operation's `refused` list.
+ */
+const refusedNamesOf = (
   mediaType: string,
-  value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
-) =>
+  refused: MediaDeclaration["refused"],
+): readonly string[] => {
+  const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
+
+  return (listed ? refused[mediaType] : undefined) ?? [];
+};
+
+/**
+ * Whether a sent pair name carries `field`: the name itself, or a bracketed or dotted name under
+ * it, as a server reading brackets or dots would nest it.
+ */
+const carries = (field: string, pairName: string): boolean =>
+  pairName === field || pairName.startsWith(`${field}[`) || pairName.startsWith(`${field}.`);
+
+// A refused field has no flag, so only the whole body can carry it; the name is the field's,
+// never its value.
+const refuseField = (field: string, mediaType: string): Refusal =>
+  Effect.fail(
+    new UsageError({
+      flag: "--body",
+      message: `property ${field} is refused for ${mediaType} and cannot be set through --body or --body-file`,
+    }),
+  );
+
+/**
+ * The form text of `value`, refusing a refused field however it would be sent (design 4.5
+ * Refused body fields, 8.5): an own key of the merged body named like one, even one that sends no
+ * pair, and any pair the text carries, decoded as a server decodes it, whose name carries one. A
+ * pair named exactly like a declared property that is not refused is that property's own.
+ */
+const guardedText = (value: JsonObject, mediaType: string, options: UrlEncodedBodyOptions) =>
+  Effect.gen(function* refusedFieldGuard() {
+    const names = refusedNamesOf(mediaType, options.refused);
+    const ownKey = Object.keys(value).find((key) => names.includes(key));
+    if (ownKey !== undefined) {
+      return yield* refuseField(ownKey, mediaType);
+    }
+
+    const text = yield* urlEncode(value, options);
+    if (names.length === 0) {
+      return text;
+    }
+
+    const own = new Set(
+      options.properties.map(([name]) => name).filter((name) => !names.includes(name)),
+    );
+    for (const pairName of new URLSearchParams(text).keys()) {
+      const field = own.has(pairName) ? undefined : names.find((name) => carries(name, pairName));
+      if (field !== undefined) {
+        return yield* refuseField(field, mediaType);
+      }
+    }
+
+    return text;
+  });
+
+const urlEncodedOf = (mediaType: string, value: Json | undefined, options: UrlEncodedBodyOptions) =>
   Effect.gen(function* urlEncodedEvaluation() {
     if (mediaType === "" || unsafeHeaderText(mediaType)) {
       return yield* refuse("the request media type is not a valid header value");
@@ -1699,7 +1766,7 @@ const urlEncodedOf = (
       return yield* refuse("a form-urlencoded body must be an object");
     }
 
-    return HttpBody.text(yield* urlEncode(value, options), mediaType);
+    return HttpBody.text(yield* guardedText(value, mediaType, options), mediaType);
   });
 
 /**
@@ -1712,7 +1779,7 @@ const urlEncodedOf = (
 export const urlEncoded = (
   mediaType: string,
   value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
+  options: UrlEncodedBodyOptions,
 ): RequestBody => ({
   expand: urlEncodedOf(mediaType, value, options),
   mediaType,
