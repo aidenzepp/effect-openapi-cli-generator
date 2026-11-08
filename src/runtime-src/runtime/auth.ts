@@ -23,7 +23,10 @@ export type SecurityRequirement = readonly (readonly string[])[];
 
 /**
  * A scheme the runtime sends. `env` overrides the default environment name `<PREFIX>_<SCHEME>`;
- * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it.
+ * `deprecated` marks a 3.2 scheme the runtime names on stderr when it sends it. An `oauth2` or
+ * `openIdConnect` scheme is operator-supplied token pass-through (design 6.5, D-SEC1): the token is
+ * sent as `Authorization: Bearer`, and no token is acquired, no discovery is run, and no scope or
+ * role is sent.
  */
 export type SecurityScheme =
   | {
@@ -38,6 +41,16 @@ export type SecurityScheme =
       readonly env?: string | undefined;
       readonly kind: "http";
       readonly scheme: "basic" | "bearer";
+    }
+  | {
+      readonly deprecated?: true;
+      readonly env?: string | undefined;
+      readonly kind: "oauth2";
+    }
+  | {
+      readonly deprecated?: true;
+      readonly env?: string | undefined;
+      readonly kind: "openIdConnect";
     };
 
 /**
@@ -386,8 +399,9 @@ const apiKeyNames = (table: SecurityTable, place: "cookie" | "header" | "query")
     ),
   );
 
-const hasHttpScheme = (table: SecurityTable): boolean =>
-  Object.values(table.schemes).some((definition) => definition.kind === "http");
+// Every kind but `apiKey` sends `Authorization`.
+const hasAuthorizationScheme = (table: SecurityTable): boolean =>
+  Object.values(table.schemes).some((definition) => definition.kind !== "apiKey");
 
 const cookiePairs = (cookie: string): readonly string[] =>
   cookie
@@ -414,8 +428,8 @@ const stripUrlQuery = (url: string, names: ReadonlySet<string>): string => {
 };
 
 /**
- * Remove every managed credential the table can name: `Authorization` when any `http` scheme is
- * declared, each `apiKey` header, query name and cookie name.
+ * Remove every managed credential the table can name: `Authorization` when any `http`, `oauth2` or
+ * `openIdConnect` scheme is declared, each `apiKey` header, query name and cookie name.
  */
 const strip = (
   table: SecurityTable,
@@ -425,7 +439,7 @@ const strip = (
   const cookieNames = apiKeyNames(table, "cookie");
   const headerNames = [
     ...apiKeyNames(table, "header"),
-    ...(hasHttpScheme(table) ? ["authorization"] : []),
+    ...(hasAuthorizationScheme(table) ? ["authorization"] : []),
   ];
   let { headers } = request;
   for (const name of headerNames) {
@@ -506,6 +520,12 @@ const attachOne = (
   { definition, scheme, value }: Credential,
 ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
   const secret = Redacted.value(value);
+  if (definition.kind === "oauth2" || definition.kind === "openIdConnect") {
+    return Effect.map(headerValue(scheme, secret), (token) =>
+      HttpClientRequest.bearerToken(request, token),
+    );
+  }
+
   if (definition.kind === "http") {
     return definition.scheme === "bearer"
       ? Effect.map(headerValue(scheme, secret), (token) =>
