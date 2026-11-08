@@ -27,6 +27,13 @@ const meta: Output.OperationMeta = {
   security: [],
 };
 
+// Retry notices carry a jittered delay (design D-AD7); fix only that value so two runs compare equal.
+const fixRetryDelays = (stderr: string) =>
+  stderr.replaceAll(
+    /^(?<notice>Notice: retrying .+ \(attempt \d+ of \d+\) in )\d+ ms$/gmu,
+    "$<notice><delay> ms",
+  );
+
 const run = async (
   operation: Output.OperationMeta,
   status: number,
@@ -123,7 +130,7 @@ describe("missing required response headers (HDR-03)", () => {
     const result = await run(meta, 500, {});
     const plain = await run({ ...meta, requiredHeaders: undefined }, 500, {});
 
-    expect(result.stderr).toBe(plain.stderr);
+    expect(fixRetryDelays(result.stderr)).toBe(fixRetryDelays(plain.stderr));
   });
 
   test("an operation without required headers writes nothing", async () => {
