@@ -1,0 +1,7 @@
+{
+  "package": { "name": "field-refusal-cli", "version": "0.1.0" },
+  "binName": "fields",
+  "envPrefix": "FIELDS",
+  "servers": { "accepted": ["https://api.example.com"] },
+  "nonStandard": { "deepObjectBrackets": true }
+}
