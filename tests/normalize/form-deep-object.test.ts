@@ -232,3 +232,48 @@ describe("PRM-27 scalar members: a deepObject over a flat object is unchanged", 
     }
   });
 });
+
+// Audit NF2 (design 8.4): a refused alternative sends nothing, so its marked entries are not sent
+// in the bracket convention and keep no notice, whichever property comes first.
+const nonObject = (name: string) => ({
+  code: "PRM-27/non-object-schema",
+  pointer: media,
+  related: [`${media}/encoding/${name}`],
+  row: "PRM-27",
+  scope: "element",
+  severity: "refusal",
+});
+
+const metadata: Members = { metadata: nestedProperties.metadata ?? {} };
+
+// The same two properties, the marked entry first and then the refusing one first.
+const orders: readonly (readonly [string, Members])[] = [
+  ["marked entry first", Object.fromEntries([...Object.entries(metadata), ["tag", string]])],
+  ["refusing entry first", Object.fromEntries([["tag", string], ...Object.entries(metadata)])],
+];
+
+describe("PRM-27 switch: a refused alternative keeps no bracket notice", () => {
+  for (const [order, properties] of orders) {
+    test(`PRM-27: ${order}, only the refusal remains`, () => {
+      const outcome = bodyWith(bodyOf(properties), true);
+
+      expect(outcome._tag).toBe("Refused");
+      expect(findings(outcome.diagnostics)).toEqual([nonObject("tag")]);
+    });
+  }
+
+  test("PRM-27: both property orders give the same diagnostics", () => {
+    const [first, second] = orders.map(([, properties]) => bodyWith(bodyOf(properties), true));
+
+    expect(findings(first?.diagnostics ?? [])).toEqual(findings(second?.diagnostics ?? []));
+  });
+
+  test("PRM-27: an alternative that is kept still carries its bracket notice", () => {
+    const outcome = bodyWith(bodyOf(metadata), true);
+
+    expect(markers(formAlternative(outcome))).toEqual({ metadata: "deepObjectBrackets" });
+    expect(findings(outcome._tag === "Implemented" ? outcome.diagnostics : [])).toEqual([
+      bracketChoice("metadata"),
+    ]);
+  });
+});
