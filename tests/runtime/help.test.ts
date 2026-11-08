@@ -44,7 +44,10 @@ const update = Command.make(
     },
     sections: [
       ["REQUEST", "PATCH /users/{id}, body application/json (required), operationId users-update"],
-      ["AUTH", "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH"],
+      [
+        "AUTH",
+        "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH, TTY prompt",
+      ],
       [
         "RESPONSES",
         "200 application/json; 404; default application/json. Non-2xx exits 1 (401/403 exit 3)",
