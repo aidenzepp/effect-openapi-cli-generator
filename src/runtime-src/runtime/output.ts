@@ -59,6 +59,7 @@ import {
   verboseSetting,
   verboseTransform,
   withUserAgent,
+  wouldRetry,
 } from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
@@ -150,6 +151,24 @@ export const MaxRecordBytes = GlobalFlag.Setting("max-record-bytes")({
     Flag.filter(isPositive, recordBytesRangeMessage),
     Flag.withDescription("Largest record of a streamed response, in bytes"),
     Flag.withDefault(defaultMaxRecordBytes),
+  ),
+});
+
+const errorFormats = ["text", "json"] as const;
+
+/**
+ * How errors render on stderr (design 7.4): `text` lines, or one `json` object.
+ */
+export type ErrorFormat = (typeof errorFormats)[number];
+
+/**
+ * `--error-format text|json`. The flag holds only the operator's choice; `recordRun` applies the
+ * fallbacks, because the env name needs the prefix the root supplies.
+ */
+export const errorFormatSetting = GlobalFlag.Setting("error-format")({
+  flag: Flag.Literals("error-format", errorFormats).pipe(
+    Flag.withDescription("Print errors as text lines or as one JSON object"),
+    Flag.optional,
   ),
 });
 
@@ -560,12 +579,48 @@ const singleLine = (text: string, credentials: readonly ScrubEntry[]): string =>
   oneLine(scrubbedAndSanitized(text, credentials));
 
 /**
- * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
+ * The sentence a message carries when the failed request is one D-AD7 would retry (SM-16):
+ * running it again is safe. After a request D-AD7 would not retry, no message carries it.
+ */
+export const retryHint = "The request is idempotent, so running the command again is safe.";
+
+/**
+ * The sentence the text form adds when retrying stopped because the server's `Retry-After`
+ * exceeded the `--timeout` cap (design 7.4, m3 P14).
+ */
+const cappedSentence = (seconds: number): string =>
+  `Retrying stopped: the server's Retry-After of ${seconds} second${seconds === 1 ? "" : "s"} ` +
+  "exceeds the --timeout cap.";
+
+/**
+ * The failures of an exchange with the server, the errors a retry hint may follow (SM-16).
+ */
+const isExchangeFailure = (error: KnownError): boolean =>
+  error instanceof ApiResponseError ||
+  error instanceof TransportError ||
+  error instanceof ResponseStreamError;
+
+/**
+ * The text printed on stderr for a known error (design 7.4): `Error: <message>`; for an
+ * `ApiResponseError` whose retrying stopped at the cap, the sentence naming the server's
+ * `Retry-After`; `retryHint` when `hint` is set and the error is an exchange failure; for an
  * `ApiResponseError` then `Request ID: <id>` when set, then the excerpt (omitted when empty).
  * Every part is scrubbed and sanitized again here, because the error may come from anywhere.
  */
-export const renderError = (error: KnownError, credentials: readonly ScrubEntry[]): string => {
+export const renderError = (
+  error: KnownError,
+  credentials: readonly ScrubEntry[],
+  hint = false,
+): string => {
   const lines = [`Error: ${singleLine(error[CliError.userMessage], credentials)}`];
+
+  if (error instanceof ApiResponseError && error.retryAfterSeconds !== undefined) {
+    lines.push(cappedSentence(error.retryAfterSeconds));
+  }
+
+  if (hint && isExchangeFailure(error)) {
+    lines.push(retryHint);
+  }
 
   if (error instanceof ApiResponseError) {
     if (error.requestId !== undefined) {
@@ -676,31 +731,246 @@ const reportOnce = <E extends object>(
 // `input.ts`).
 export { RunCredentials, runCredentialsLayer } from "./redact.ts";
 
+/**
+ * What the run recorded for its error rendering (design 7.4 revision 31b): the effective format,
+ * once `recordRun` ran, and the retry-hint input, once `send` reached the client.
+ */
+export interface RunRecordState {
+  readonly format?: ErrorFormat | undefined;
+  readonly sent?: { readonly idempotencyKey: boolean; readonly method: string } | undefined;
+}
+
+/**
+ * The run-scoped error-rendering record, provided outside the final catch like `RunCredentials`.
+ * Every reader and writer takes it with `Effect.serviceOption`; without it the documented default
+ * applies: format `text` (or, in `finalCatch`, `<PREFIX>_ERROR_FORMAT`) and no retry hint.
+ */
+export class RunRecord extends Context.Service<RunRecord, Ref.Ref<RunRecordState>>()(
+  "openapi-cli/runtime/RunRecord",
+) {}
+
+/**
+ * A fresh record per run: nothing recorded yet.
+ */
+export const runRecordLayer: Layer.Layer<RunRecord> = Layer.effect(RunRecord)(
+  Ref.make<RunRecordState>({}),
+);
+
+const errorFormatName = (envPrefix: string): string => `${envPrefix}_ERROR_FORMAT`;
+
+const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
+
+/**
+ * `<envPrefix>_ERROR_FORMAT`, read by that explicit name (memo 6f21e261), then `text`. A value
+ * other than `text` or `json` is a `UsageError` naming the variable, never the value.
+ */
+const envErrorFormat = Effect.fnUntraced(function* readErrorFormat(envPrefix: string) {
+  const name = errorFormatName(envPrefix);
+  const invalid = new UsageError({ flag: name, message: `${name} must be text or json` });
+  const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
+  if (Option.isNone(env)) {
+    return "text" as const;
+  }
+
+  return isErrorFormat(env.value) ? env.value : yield* invalid;
+});
+
+// The operator's `--error-format`, if the root registers the setting and the flag was given.
+const flagErrorFormat = Effect.map(Effect.serviceOption(errorFormatSetting), Option.flatten);
+
+/**
+ * Record the run's effective error format (design 7.4 revision 31b): `--error-format`, then
+ * `<envPrefix>_ERROR_FORMAT`, then `text`. A generated command runs it after argument parsing and
+ * before its handler's first step that can fail, so an error raised before `send` renders in that
+ * format. Without `RunRecord` it does nothing.
+ */
+export const recordRun = Effect.fnUntraced(function* recordRunFormat(envPrefix: string) {
+  const record = yield* Effect.serviceOption(RunRecord);
+  if (Option.isNone(record)) {
+    return;
+  }
+
+  const flag = yield* flagErrorFormat;
+  const format = Option.isSome(flag) ? flag.value : yield* envErrorFormat(envPrefix);
+  yield* Ref.update(record.value, (state) => ({ ...state, format }));
+});
+
+/**
+ * The retry-hint input `send` adds to `RunRecord` before the request reaches the client: the
+ * method and whether an `Idempotency-Key` header was sent, read before the attach step, as
+ * `retryTransform` reads it.
+ */
+const recordSent = (request: HttpClientRequest.HttpClientRequest): Effect.Effect<void> =>
+  Effect.flatMap(
+    Effect.serviceOption(RunRecord),
+    Option.match({
+      onNone: () => Effect.void,
+      onSome: (record) =>
+        Ref.update(record, (state) => ({
+          ...state,
+          sent: {
+            idempotencyKey: Headers.has(request.headers, "idempotency-key"),
+            method: request.method,
+          },
+        })),
+    }),
+  );
+
+/**
+ * How the final catch renders this run's error: the format and whether a retry hint applies.
+ */
+interface Rendering {
+  readonly format: ErrorFormat;
+  readonly hint: boolean;
+}
+
+/**
+ * The format a parse-time error renders in, when nothing was recorded: `json` when
+ * `<envPrefix>_ERROR_FORMAT` is `json`, text otherwise (design 7.4).
+ */
+const parseTimeFormat = (envPrefix: string): Effect.Effect<ErrorFormat> =>
+  Config.option(Config.String(errorFormatName(envPrefix))).pipe(
+    Effect.map((env): ErrorFormat => (Option.getOrUndefined(env) === "json" ? "json" : "text")),
+    Effect.orElseSucceed((): ErrorFormat => "text"),
+  );
+
+/**
+ * The run's rendering from `RunRecord`: the recorded format, else the parse-time format when the
+ * caller named the env prefix, else `text`; the hint when `send` recorded a method D-AD7 would
+ * retry (`wouldRetry`).
+ */
+const runRendering = Effect.fnUntraced(function* readRendering(envPrefix: string | undefined) {
+  const record = yield* Effect.serviceOption(RunRecord);
+  const state: RunRecordState = Option.isSome(record) ? yield* Ref.get(record.value) : {};
+  const fallback: ErrorFormat =
+    envPrefix === undefined ? "text" : yield* parseTimeFormat(envPrefix);
+  const rendering: Rendering = {
+    format: state.format ?? fallback,
+    hint: state.sent !== undefined && wouldRetry(state.sent.method, state.sent.idempotencyKey),
+  };
+
+  return rendering;
+});
+
 const recordedCredentials: Effect.Effect<readonly ScrubEntry[], never, RunCredentials> =
   Effect.flatMap(Effect.service(RunCredentials), Ref.get);
+
+/**
+ * The fields of the `--error-format json` object (design 7.4). Declared in alphabetical order,
+ * which `JSON.stringify` keeps; an `undefined` field is left out.
+ */
+interface ErrorFields {
+  readonly body?: string | undefined;
+  readonly kind: string;
+  readonly matched?: string | undefined;
+  readonly message: string;
+  readonly operation?: string | undefined;
+  readonly requestId?: string | undefined;
+  readonly retryAfter?: number | undefined;
+  readonly status?: number | undefined;
+}
+
+/**
+ * One line holding `{"error":{...}}`, keys alphabetical. Every string arrives scrubbed and
+ * sanitized; the JSON escaping covers the characters sanitizing keeps (design 7.4, C5).
+ */
+const jsonLine = (fields: ErrorFields): string =>
+  JSON.stringify({
+    error: {
+      body: fields.body,
+      kind: fields.kind,
+      matched: fields.matched,
+      message: fields.message,
+      operation: fields.operation,
+      requestId: fields.requestId,
+      retryAfter: fields.retryAfter,
+      status: fields.status,
+    },
+  });
+
+const withHint = (message: string, hint: boolean): string =>
+  hint ? `${message} ${retryHint}` : message;
+
+/**
+ * The JSON object for a known error: `operation` only for the classes that carry one, and for an
+ * `ApiResponseError` its status, matched key, excerpt (when not empty), request id and capped
+ * `Retry-After` (design 7.4, m3 P14, P15).
+ */
+const renderErrorJson = (
+  error: KnownError,
+  credentials: readonly ScrubEntry[],
+  hint: boolean,
+): string => {
+  const api = error instanceof ApiResponseError ? error : undefined;
+  const excerpt =
+    api === undefined ? "" : boundedExcerpt(api.bodyExcerpt, maxErrorBytesCeiling, credentials);
+  const operation =
+    error instanceof ApiResponseError || error instanceof CredentialMissing
+      ? singleLine(error.operation, credentials)
+      : undefined;
+
+  return jsonLine({
+    body: excerpt === "" ? undefined : excerpt,
+    kind: error._tag,
+    matched: api?.matched,
+    message: withHint(
+      singleLine(error[CliError.userMessage], credentials),
+      hint && isExchangeFailure(error),
+    ),
+    operation,
+    requestId: api?.requestId === undefined ? undefined : singleLine(api.requestId, credentials),
+    retryAfter: api?.retryAfterSeconds,
+    status: api?.status,
+  });
+};
+
+/**
+ * The JSON object for a parse-time `CliError`, value-free as `renderCliError` is, or `undefined`
+ * when there is nothing to print. `kind` is the one parse error's tag, or the failure's own tag
+ * when help carries several.
+ */
+const renderCliErrorJson = (
+  error: CliError.CliError,
+  credentials: readonly ScrubEntry[],
+): string | undefined => {
+  const errors = error._tag === "ShowHelp" ? error.errors : [error];
+  const [only] = errors;
+
+  return only === undefined
+    ? undefined
+    : jsonLine({
+        kind: errors.length === 1 ? only._tag : error._tag,
+        message: errors.map((each) => singleLine(rawMessage(each), credentials)).join("; "),
+      });
+};
 
 const renderCause = <E>(
   cause: Cause.Cause<E>,
   credentials: readonly ScrubEntry[],
+  rendering: Rendering,
 ): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
   const failure = Cause.findErrorOption(cause);
+  const json = rendering.format === "json";
 
   if (Cause.hasInterruptsOnly(cause)) {
     return Effect.failCause(cause);
   }
 
   if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
-    const text = renderCliError(failure.value);
+    const raw = renderCliError(failure.value);
+    const text = raw === undefined ? undefined : scrubbedAndSanitized(raw, credentials);
+    const rendered = json ? renderCliErrorJson(failure.value, credentials) : text;
 
-    return text === undefined
-      ? Effect.failCause(cause)
-      : reportOnce(scrubbedAndSanitized(text, credentials), failure.value);
+    return rendered === undefined ? Effect.failCause(cause) : reportOnce(rendered, failure.value);
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
     const error = failure.value;
+    const rendered = json
+      ? renderErrorJson(error, credentials, rendering.hint)
+      : renderError(error, credentials, rendering.hint);
 
-    return reportOnce(renderError(error, credentials), error);
+    return reportOnce(rendered, error);
   }
 
   const squashed = Cause.squash(cause);
@@ -708,30 +978,40 @@ const renderCause = <E>(
     isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
     credentials,
   ).slice(0, maxDefectLineLength);
+  const rendered = json
+    ? jsonLine({ kind: "Internal", message: `${line}; internal error, please report` })
+    : `Error: ${line}\ninternal error, please report`;
 
-  return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
-    Effect.andThen(Effect.fail(new InternalError())),
-  );
+  return printStderr(rendered).pipe(Effect.andThen(Effect.fail(new InternalError())));
 };
 
 /**
  * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
  * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
- * itself, so its exit code stands; a `CliError` parse error is rendered once through
- * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
- * line and "internal error, please report" and fails with `InternalError`, exit 70.
+ * itself, so its exit code stands; a `CliError` parse error is rendered once, value-free; help and
+ * interruption pass through; anything else prints one scrubbed line and "internal error, please
+ * report" and fails with `InternalError`, exit 70. Exit codes do not depend on the format.
  * `credentials` are the values to scrub that the caller holds; `RunCredentials`, provided outside
  * the catch, adds the credentials the command handler evaluated and its secret-file values.
+ *
+ * The format is the one `recordRun` put in `RunRecord`; when nothing was recorded (a parse-time
+ * error) and `options.envPrefix` is given, `json` when `<envPrefix>_ERROR_FORMAT` is `json`; else
+ * text. `json` prints one `{"error":{...}}` object per error. An exchange failure carries
+ * `retryHint` when the method `send` recorded is one D-AD7 would retry. Without `RunRecord`
+ * nothing is recorded and no hint applies.
  */
 export const finalCatch =
-  (credentials: readonly ScrubEntry[]) =>
+  (credentials: readonly ScrubEntry[], options?: { readonly envPrefix: string }) =>
   <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | InternalError, R | RunCredentials | Stdio.Stdio> =>
     Effect.catchCause(effect, (cause) =>
-      recordedCredentials.pipe(
-        Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
-      ),
+      Effect.gen(function* renderFailure() {
+        const recorded = yield* recordedCredentials;
+        const rendering = yield* runRendering(options?.envPrefix);
+
+        return yield* renderCause(cause, [...credentials, ...recorded], rendering);
+      }),
     );
 
 /**
@@ -1224,7 +1504,9 @@ const undeclaredMediaNotice = (
  * transforms print passes through the run's scrubber (`scrubbedAndSanitized` over the recorded
  * values). Every body read, the excerpt's included, is bounded by the stream idle timeout
  * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
- * run in one scope. Errors are not rendered here: `finalCatch` does.
+ * run in one scope. Before the client runs, `send` adds the retry-hint input (the method and
+ * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. Errors are
+ * not rendered here: `finalCatch` does.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -1296,6 +1578,7 @@ export const send =
         responses: meta.media.responses,
       };
 
+      yield* recordSent(built);
       yield* client.execute(built).pipe(
         Effect.catchTag("HttpClientError", mapClientError),
         Effect.tap((response) => warnMissingHeaders(meta, response)),
