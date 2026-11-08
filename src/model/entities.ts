@@ -272,6 +272,26 @@ export class Server extends Schema.Class<Server>("Server")({
   ),
 }) {}
 
+// One OAuth flow as help text: its URLs when the spec gives them and its scopes by name. No URL here
+// ever becomes a request target (design 9 I3).
+const OAuthFlow = Schema.Struct({
+  authorizationUrl: Schema.optionalKey(SafeText),
+  refreshUrl: Schema.optionalKey(SafeText),
+  scopes: Schema.Array(Schema.Struct({ description: SafeText, name: SafeText })),
+  tokenUrl: Schema.optionalKey(SafeText),
+});
+
+/**
+ * The flows of an `oauth2` scheme by flow kind, recorded for help only.
+ */
+export const OAuthFlows = Schema.Struct({
+  authorizationCode: Schema.optionalKey(OAuthFlow),
+  clientCredentials: Schema.optionalKey(OAuthFlow),
+  deviceAuthorization: Schema.optionalKey(OAuthFlow),
+  implicit: Schema.optionalKey(OAuthFlow),
+  password: Schema.optionalKey(OAuthFlow),
+});
+
 const schemeKind = Schema.Union([
   Schema.Struct({
     in: Schema.Literal("cookie"),
@@ -289,8 +309,8 @@ const schemeKind = Schema.Union([
     type: Schema.Literal("apiKey"),
   }),
   Schema.Struct({ scheme: Schema.Literals(["basic", "bearer"]), type: Schema.Literal("http") }),
-  Schema.Struct({ flows: Docs, type: Schema.Literal("oauth2Token") }),
-  Schema.Struct({ type: Schema.Literal("oidcToken"), url: Docs }),
+  Schema.Struct({ flows: OAuthFlows, type: Schema.Literal("oauth2Token") }),
+  Schema.Struct({ openIdConnectUrl: SafeText, type: Schema.Literal("oidcToken") }),
   Schema.Struct({ type: Schema.Literal("mutualTls") }),
 ]);
 

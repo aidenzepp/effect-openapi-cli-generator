@@ -267,10 +267,8 @@ const staged = withSchemes({
   oidc: { openIdConnectUrl: "https://a.example/.well-known", type: "openIdConnect" },
 });
 
-describe("staged refusals (SSC-18, SSC-19, SSC-20)", () => {
+describe("staged refusals (SSC-20)", () => {
   const cases: readonly (readonly [string, string, readonly Line[]])[] = [
-    ["oauth", "SSC-18/not-implemented", ["3.1"]],
-    ["oidc", "SSC-19/not-implemented", ["3.1"]],
     ["mtls", "SSC-20/not-implemented", ["3.1", "3.2"]],
   ];
 
@@ -293,10 +291,10 @@ describe("staged refusals (SSC-18, SSC-19, SSC-20)", () => {
   }
 
   test("one staged scheme refuses the whole AND alternative, never dropped silently", () => {
-    const { policy } = run("3.1", { ...staged, security: [{ key: [], oauth: [] }] });
+    const { policy } = run("3.1", { ...staged, security: [{ key: [], mtls: [] }] });
 
     expect(policy.policy.alternatives).toEqual([]);
-    expect(codes(policy.diagnostics)).toEqual(["SSC-18/not-implemented"]);
+    expect(codes(policy.diagnostics)).toEqual(["SSC-20/not-implemented"]);
   });
 });
 
