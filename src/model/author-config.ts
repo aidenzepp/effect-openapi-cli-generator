@@ -43,7 +43,18 @@ const commandsModule = Schema.NonEmptyString.pipe(
 
 const environmentName = Schema.String.pipe(Schema.check(Schema.isPattern(environmentNamePattern)));
 
-const nonNegative = Schema.Finite.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
+// An integer from `min` to `max` inclusive.
+const intBetween = (min: number, max: number) =>
+  Schema.Int.pipe(Schema.check(Schema.isBetween({ maximum: max, minimum: min })));
+
+// The runtime settings a generated CLI starts from (planner choice P3): `timeoutSeconds: 0` disables
+// the per-attempt timeout. The decoded config keeps only what the author wrote, so it round-trips;
+// `runtimeSettings` applies `runtimeDefaults`, the one place the defaults live.
+const RuntimeConfig = Schema.Struct({
+  idleTimeoutSeconds: Schema.optionalKey(intBetween(1, 86_400)),
+  retries: Schema.optionalKey(intBetween(0, 10)),
+  timeoutSeconds: Schema.optionalKey(intBetween(0, 3600)),
+});
 
 // The Security Scheme Object subset an author may add (D-OQ3 (b)); normalization refuses a type or
 // scheme the runtime cannot send exactly as it does a declared one.
@@ -141,13 +152,7 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
     version: Schema.String.pipe(Schema.check(Schema.isPattern(semverPattern))),
   }),
   retrievalUri: Schema.optionalKey(DocumentUri),
-  runtime: Schema.optionalKey(
-    Schema.Struct({
-      idleTimeoutSeconds: Schema.optionalKey(nonNegative),
-      retries: Schema.optionalKey(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
-      timeoutSeconds: Schema.optionalKey(nonNegative),
-    }),
-  ),
+  runtime: Schema.optionalKey(RuntimeConfig),
   // `security.add` adds a scheme and requirement (D-OQ3 (b)); every other key is a scheme name with
   // its credential environment variable (D-AD11), so a scheme cannot be named `add`.
   security: Schema.optionalKey(
@@ -329,3 +334,27 @@ export const decodeAuthorConfig = (
     errors: "all",
     onExcessProperty: "error",
   }).pipe(Effect.mapError((failure) => refuse(failure.issue, context)));
+
+/**
+ * The runtime settings a generated CLI starts from, every field resolved.
+ */
+export interface RuntimeSettings {
+  readonly idleTimeoutSeconds: number;
+  readonly retries: number;
+  readonly timeoutSeconds: number;
+}
+
+const runtimeDefaults: RuntimeSettings = {
+  idleTimeoutSeconds: 300,
+  retries: 2,
+  timeoutSeconds: 30,
+};
+
+/**
+ * The author's runtime settings with the defaults applied to every absent field (design D-AD7);
+ * the defaults live only here.
+ */
+export const runtimeSettings = (config: AuthorConfig): RuntimeSettings => ({
+  ...runtimeDefaults,
+  ...config.runtime,
+});
