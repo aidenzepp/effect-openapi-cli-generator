@@ -86,9 +86,37 @@ describe("SSE records", () => {
     ]);
   });
 
-  test("an empty body and an event the stream ends inside yield no records", async () => {
+  test("an empty body, blank lines and a trailing comment yield no records and no failure", async () => {
     expect(await lines([])).toEqual([]);
-    expect(await lines(["data: a\n\ndata: cut"])).toEqual(['{"data":"a"}']);
+    expect(await lines(["data: a\n\n", "\r\n: bye"])).toEqual(['{"data":"a"}']);
+  });
+
+  test("a stream that ends after a data line with no blank line is truncated at its index", async () => {
+    expect(await failure(["data: a\n\n", "data: x\n"])).toEqual({
+      _tag: "ResponseStreamError",
+      emitted: ['{"data":"a"}'],
+      itemIndex: 1,
+      reason: "truncated",
+    });
+  });
+
+  test("a stream that ends inside a line or after a field without data is truncated", async () => {
+    expect(await failure(["data: a\n\ndata: cut"])).toMatchObject({
+      emitted: ['{"data":"a"}'],
+      itemIndex: 1,
+      reason: "truncated",
+    });
+    expect(await failure(["event: done\n"])).toMatchObject({
+      emitted: [],
+      itemIndex: 0,
+      reason: "truncated",
+    });
+  });
+
+  test("retry keeps its digits past 2^53 and drops leading zeros", async () => {
+    expect(
+      await lines(["retry: 9007199254740993\ndata: a\n\n", "retry:", "007\r\ndata: b\n\n"]),
+    ).toEqual(['{"data":"a","retry":9007199254740993}', '{"data":"b","retry":7}']);
   });
 
   test("an event of exactly the bound passes; one byte more is recordTooLarge with its index", async () => {

@@ -1,4 +1,4 @@
-import { Duration, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { Sse } from "effect/encoding";
 import { ResponseStreamError } from "../domain/errors.ts";
 
@@ -446,33 +446,135 @@ export const jsonSeqRecords =
 const dataPrefix = "data: ";
 
 /**
+ * The byte order mark `Sse.makeParser` strips from the start of the stream.
+ */
+const byteOrderMark = "\uFEFF";
+
+/**
+ * The prefix every `retry` line starts with.
+ */
+const retryPrefix = "retry:";
+
+/**
+ * A `retry` line `Sse.makeParser` acts on: the field, one optional space, and digits only.
+ */
+const retryLine = /^retry: ?(?<digits>\d+)$/u;
+
+/**
+ * The SSE line scanner's state between body chunks. It splits lines as `Sse.makeParser` does, to
+ * learn two things the parser does not expose: the digits of each `retry` line, queued in the
+ * order the parser reports them, and whether an event block is open (a field line has arrived
+ * since the last blank line). `text` holds the line being read only while it can still be a
+ * `retry` line; `first` is that line's first character.
+ */
+interface LineScan {
+  afterCarriageReturn: boolean;
+  first: string;
+  length: number;
+  open: boolean;
+  readonly retries: string[];
+  started: boolean;
+  text: string | undefined;
+}
+
+/**
+ * Close the line being read: a blank line closes the event block, and any line but a comment
+ * opens one. A `retry` line's digits are queued without leading zeros, so they form a JSON number.
+ */
+const endLine = (scan: LineScan): void => {
+  const digits = scan.text === undefined ? undefined : retryLine.exec(scan.text)?.groups?.digits;
+
+  if (digits !== undefined) {
+    scan.retries.push(digits.replace(/^0+(?=\d)/u, ""));
+  }
+
+  scan.open = scan.length > 0 ? scan.open || scan.first !== ":" : false;
+  scan.first = "";
+  scan.length = 0;
+  scan.text = "";
+};
+
+/**
+ * Advance the line scanner over one chunk of decoded text. Lines end at LF, CR or CRLF, the LF of a
+ * CRLF may arrive in the next chunk, and a byte order mark opening the stream is skipped, as in
+ * `Sse.makeParser`.
+ */
+const scanLines = (scan: LineScan, chunk: string): void => {
+  const skipMark = !scan.started && chunk.startsWith(byteOrderMark);
+
+  scan.started ||= chunk.length > 0;
+
+  for (let index = skipMark ? 1 : 0; index < chunk.length; index += 1) {
+    const char = chunk.charAt(index);
+    const lineFeedOfPair = scan.afterCarriageReturn && char === "\n";
+
+    scan.afterCarriageReturn = char === "\r";
+
+    if (char === "\r" || char === "\n") {
+      if (!lineFeedOfPair) {
+        endLine(scan);
+      }
+    } else {
+      const text = scan.text === undefined ? undefined : scan.text + char;
+
+      scan.first ||= char;
+      scan.length += 1;
+      scan.text =
+        text !== undefined && (text.startsWith(retryPrefix) || retryPrefix.startsWith(text))
+          ? text
+          : undefined;
+    }
+  }
+};
+
+/**
  * Render one dispatched SSE event as a compact JSON line with alphabetical keys: `data` as a
  * string, `event` unless it is the default type `message`, `id` when the stream has set one, and
- * `retry` in milliseconds when a `retry` field arrived since the previous event.
+ * `retry` as the digits received when a `retry` field arrived since the previous event. The digits
+ * are written as they are, not through a JS number, so a value past 2^53 keeps them.
  */
-const eventLine = (event: Sse.Event, retry: number | undefined): string =>
-  JSON.stringify({
+const eventLine = (event: Sse.Event, retry: string | undefined): string => {
+  const fields = JSON.stringify({
     data: event.data,
     event: event.event === "message" ? undefined : event.event,
     id: event.id,
-    retry,
   });
 
+  return retry === undefined ? fields : `${fields.slice(0, -1)},"retry":${retry}}`;
+};
+
 /**
- * Build the SSE framer for one response body: a step that feeds a chunk of decoded text to
- * `Sse.makeParser` and returns the lines of the events it dispatched, then the first failure,
- * after which the step takes no more input. The parser is created per body, so a stream run twice
- * starts clean.
+ * The SSE framer for one response body: `step` feeds a chunk of decoded text to `Sse.makeParser`
+ * and returns the lines of the events it dispatched, then the first failure, after which it takes
+ * no more input; `halt` returns `truncated` when the body ends inside an event block.
  */
-const sseFramer = (maxRecordBytes: number) => {
+interface SseFramer {
+  readonly halt: () => Framed[];
+  readonly step: (chunk: string) => Framed[];
+}
+
+/**
+ * Build the SSE framer for one response body. The parser is created per body, so a stream run
+ * twice starts clean.
+ */
+const sseFramer = (maxRecordBytes: number): SseFramer => {
   const out: Framed[] = [];
+  const scan: LineScan = {
+    afterCarriageReturn: false,
+    first: "",
+    length: 0,
+    open: false,
+    retries: [],
+    started: false,
+    text: "",
+  };
   let failed = false;
   let itemIndex = 0;
-  let retry: number | undefined;
+  let retry: string | undefined;
 
-  const fail = (): void => {
+  const fail = (reason: "recordTooLarge" | "truncated"): void => {
     failed = true;
-    out.push(new ResponseStreamError({ itemIndex, reason: "recordTooLarge" }));
+    out.push(new ResponseStreamError({ itemIndex, reason }));
   };
 
   const parser = Sse.makeParser(
@@ -482,13 +584,13 @@ const sseFramer = (maxRecordBytes: number) => {
       }
 
       if (parsed._tag === "Retry") {
-        retry = Duration.toMillis(parsed.duration);
+        retry = scan.retries.shift();
 
         return;
       }
 
       if (utf8Length(parsed.data) > maxRecordBytes) {
-        fail();
+        fail("recordTooLarge");
 
         return;
       }
@@ -500,12 +602,29 @@ const sseFramer = (maxRecordBytes: number) => {
     { maxEventSize: maxRecordBytes + dataPrefix.length },
   );
 
-  return (chunk: string): Framed[] => {
-    if (!failed && parser.feed(chunk) !== undefined && !failed) {
-      fail();
-    }
+  return {
+    halt: () => {
+      const open = scan.open || (scan.length > 0 && scan.first !== ":");
 
-    return out.splice(0);
+      if (!failed && open) {
+        fail("truncated");
+      }
+
+      return out.splice(0);
+    },
+    step: (chunk) => {
+      if (failed) {
+        return [];
+      }
+
+      scanLines(scan, chunk);
+
+      if (parser.feed(chunk) !== undefined && !failed) {
+        fail("recordTooLarge");
+      }
+
+      return out.splice(0);
+    },
   };
 };
 
@@ -515,13 +634,16 @@ const sseFramer = (maxRecordBytes: number) => {
  * each event is dispatched (design 4.6, the OAS generic event schema).
  *
  * The body is parsed by `Sse.makeParser` per `text/event-stream`: comments and unknown fields are
- * ignored, multi-line `data` is joined by LF, `id` is the last event ID the stream set, and an
- * event the stream ends inside is not dispatched. `Sse.decode` is not used because it fails the
- * stream on a `retry` field (design 5, SSE row); here `retry` is an integer field of the next
- * event dispatched. `data` stays a string: `contentMediaType` and `contentSchema` are not applied
- * (MED-18). An event whose `data` is over `maxRecordBytes` UTF-8 bytes, or a line the parser is
- * reading that passes the bound plus a `data: ` prefix, fails with `recordTooLarge` carrying the
- * zero-based `itemIndex` of the event, after every event before it has been emitted.
+ * ignored, multi-line `data` is joined by LF, and `id` is the last event ID the stream set.
+ * `Sse.decode` is not used because it fails the stream on a `retry` field (design 5, SSE row);
+ * here `retry` is an integer field of the next event dispatched, written with the digits received.
+ * `data` stays a string: `contentMediaType` and `contentSchema` are not applied (MED-18).
+ *
+ * An event whose `data` is over `maxRecordBytes` UTF-8 bytes, or a line the parser is reading
+ * that passes the bound plus a `data: ` prefix, fails with `recordTooLarge`. A body that ends
+ * inside an event block, after a field line with no blank line to dispatch it, fails with
+ * `truncated` and the block is not dispatched. Each failure carries the zero-based `itemIndex` of
+ * the event, after every event before it has been emitted.
  */
 export const sseRecords =
   (maxRecordBytes: number) =>
@@ -532,7 +654,8 @@ export const sseRecords =
       Stream.decodeText(),
       Stream.mapAccum(
         () => sseFramer(maxRecordBytes),
-        (frame, chunk: string) => [frame, frame(chunk)] as const,
+        (framer, chunk: string) => [framer, framer.step(chunk)] as const,
+        { onHalt: (framer) => framer.halt() },
       ),
       Stream.mapEffect(raise),
     );
