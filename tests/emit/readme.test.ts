@@ -156,7 +156,7 @@ describe("emitReadme", () => {
     expect(refusals).toContain("Nothing in the description was refused.");
   });
 
-  test("lists an operation refused at normalize, which is absent from the model", async () => {
+  test("generates an operation whose only oauth2 flow is refused, the token being supplied", async () => {
     const components = Schema.decodeUnknownSync(JsonRecord)(spec.components);
     const schemes = Schema.decodeUnknownSync(JsonRecord)(components.securitySchemes);
     const oauthOnly = {
@@ -181,12 +181,14 @@ describe("emitReadme", () => {
     const base = await input(oauthOnly);
     const refusals = section(emitReadme(base).content, "Refusals");
 
-    expect(base.api.operations.map((operation) => operation.key.path)).not.toContain("/oauth-only");
-    expect(base.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    expect(base.api.operations.map((operation) => String(operation.key.path))).toContain(
+      "/oauth-only",
+    );
+    expect(base.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "SEC-06/no-satisfiable-alternative",
     );
     expect(refusals).not.toContain("Nothing in the description was refused.");
-    expect(fenced(refusals)).toEqual(['GET "/oauth-only"']);
+    expect(fenced(refusals)).toEqual([]);
   });
 
   test("lists an operation refused at the plan once, with other stages' refusals", async () => {

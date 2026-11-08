@@ -10,6 +10,7 @@ import type { CanonicalKey } from "../resolve/canonical.ts";
 import { escapeToken, unescapeToken, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { sanitize } from "./docs.ts";
 import { follow, nodeIn } from "./document-set.ts";
 
 /**
@@ -54,7 +55,11 @@ interface Finding {
   readonly hint?: string;
   readonly message: string;
   readonly pointer: string;
-  readonly related?: string;
+  // Each related site; one without a document points into the spec.
+  readonly related?: readonly {
+    readonly document?: typeof DocumentUri.Type;
+    readonly pointer: string;
+  }[];
   // Element scope unless the finding refuses the whole document.
   readonly scope?: "document";
 }
@@ -69,8 +74,16 @@ const SchemeNode = Schema.Struct({
   flows: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   in: Schema.optionalKey(Schema.String),
   name: Schema.optionalKey(Schema.String),
+  openIdConnectUrl: Schema.optionalKey(Schema.String),
   scheme: Schema.optionalKey(Schema.String),
   type: Schema.String,
+});
+
+const FlowNode = Schema.Struct({
+  authorizationUrl: Schema.optionalKey(Schema.String),
+  refreshUrl: Schema.optionalKey(Schema.String),
+  scopes: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  tokenUrl: Schema.optionalKey(Schema.String),
 });
 
 type SchemeFields = typeof SchemeNode.Type;
@@ -104,8 +117,6 @@ const flowRules = new Map([
 // names the milestone.
 const stagedRules = new Map([
   ["mutualTls", { code: "SSC-20/not-implemented", what: "mutualTLS client certificates" }],
-  ["oauth2Token", { code: "SSC-18/not-implemented", what: "oauth2 token pass-through" }],
-  ["oidcToken", { code: "SSC-19/not-implemented", what: "openIdConnect token pass-through" }],
 ]);
 
 const acquisitionHint = (permanent: boolean): string =>
@@ -132,8 +143,11 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     specSection: specSectionUrl(resolution.line, finding.anchor),
   };
   const withHint = finding.hint === undefined ? base : { ...base, hint: finding.hint };
-  const related = [{ document: resolution.document, pointer: finding.related }];
-  const fields = finding.related === undefined ? withHint : { ...withHint, related };
+  const related = finding.related?.map((site) => ({
+    document: site.document ?? resolution.document,
+    pointer: site.pointer,
+  }));
+  const fields = related === undefined ? withHint : { ...withHint, related };
 
   return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
 };
@@ -196,7 +210,58 @@ const apiKeyRows = new Map([
   ["query", "SSC-13"],
 ]);
 
-// The modelled kind and inventory row of a scheme node, or undefined when the type is unknown.
+// One flow's help-only data, sanitized; a URL is present only when the spec gives it (design 9 I3).
+interface FlowHelp {
+  authorizationUrl?: string;
+  refreshUrl?: string;
+  readonly scopes: readonly { readonly description: string; readonly name: string }[];
+  tokenUrl?: string;
+}
+
+const flowHelp = (flow: typeof FlowNode.Type): FlowHelp => {
+  const help: FlowHelp = {
+    scopes: Object.entries(flow.scopes ?? {}).map(([name, description]) => ({
+      description: sanitize(description),
+      name: sanitize(name),
+    })),
+  };
+  if (flow.authorizationUrl !== undefined) {
+    help.authorizationUrl = sanitize(flow.authorizationUrl);
+  }
+
+  if (flow.refreshUrl !== undefined) {
+    help.refreshUrl = sanitize(flow.refreshUrl);
+  }
+
+  if (flow.tokenUrl !== undefined) {
+    help.tokenUrl = sanitize(flow.tokenUrl);
+  }
+
+  return help;
+};
+
+// The help-only flows of an `oauth2` node by flow kind, or none when a known flow is malformed.
+// Unknown flow names carry nothing a help line needs and are skipped.
+const flowsOf = (fields: SchemeFields): Option.Option<Readonly<Record<string, FlowHelp>>> => {
+  const flows: Record<string, FlowHelp> = {};
+  for (const [kind, json] of Object.entries(fields.flows ?? {})) {
+    if (!flowRules.has(kind)) {
+      continue;
+    }
+
+    const flow = Schema.decodeUnknownOption(FlowNode)(json);
+    if (Option.isNone(flow)) {
+      return Option.none();
+    }
+
+    flows[kind] = flowHelp(flow.value);
+  }
+
+  return Option.some(flows);
+};
+
+// The modelled kind and inventory row of a scheme node, or undefined when the type is unknown or
+// an `oauth2` flow is malformed.
 const kindOf = (
   fields: SchemeFields,
 ): { readonly kind: unknown; readonly row: string } | undefined => {
@@ -218,11 +283,19 @@ const kindOf = (
   }
 
   if (fields.type === "oauth2") {
-    return { kind: { flows: {}, type: "oauth2Token" }, row: "SSC-18" };
+    const flows = flowsOf(fields);
+
+    return Option.isNone(flows)
+      ? undefined
+      : { kind: { flows: flows.value, type: "oauth2Token" }, row: "SSC-18" };
   }
 
-  return fields.type === "openIdConnect"
-    ? { kind: { type: "oidcToken", url: {} }, row: "SSC-19" }
+  // An openIdConnect node without its discovery URL is malformed and stays unmodelled.
+  return fields.type === "openIdConnect" && fields.openIdConnectUrl !== undefined
+    ? {
+        kind: { openIdConnectUrl: sanitize(fields.openIdConnectUrl), type: "oidcToken" },
+        row: "SSC-19",
+      }
     : undefined;
 };
 
@@ -404,7 +477,9 @@ const unresolvedCodes: ReadonlySet<string> = new Set([
 /**
  * Normalizes `components.securitySchemes` into scheme entities (design 6.5). A scheme that cannot
  * be modelled is refused at element scope and listed in `unusable`. An `oauth2` or `openIdConnect`
- * scheme stays modelled and its token acquisition is refused at element scope (D-SEC1). With
+ * scheme stays usable through an operator-supplied token, with its flows, scopes and discovery URL
+ * recorded for help only; its token acquisition is refused at element scope (D-SEC1), and a scheme
+ * whose every flow is refused stays usable (design 10.4). With
  * `author`, the schemes of `security.add` follow the declared ones, marked `author-supplied`; a
  * name that is also declared is refused at document scope and the declared scheme stays.
  * `checkFindings` are the spec-text check findings of the run; a requirement name they refuse as
@@ -583,7 +658,7 @@ const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" 
       element: "Security Requirement Object",
       message: "The requirement names a security scheme that is refused.",
       pointer,
-      related: formatPointer(["components", "securitySchemes", resolved]),
+      related: [{ pointer: formatPointer(["components", "securitySchemes", resolved]) }],
     };
   }
 
@@ -598,6 +673,40 @@ const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" 
     message: "The requirement names a security scheme that is not declared.",
     pointer,
   };
+};
+
+// Whether a scheme writes the one `Authorization` header (design 6.5 Conflicting Authorization
+// schemes): http basic or bearer, oauth2, openIdConnect, or an apiKey header named Authorization.
+const setsAuthorization = ({ kind }: SecurityScheme): boolean => {
+  if (kind.type === "apiKey") {
+    return kind.in === "header" && kind.name.toLowerCase() === "authorization";
+  }
+
+  return kind.type === "http" || kind.type === "oauth2Token" || kind.type === "oidcToken";
+};
+
+// The refusal of an alternative whose schemes write the `Authorization` header more than once, so
+// that every scheme cannot be satisfied (SEC-05); undefined when at most one writes it.
+const conflictRefusal = (
+  schemes: ReadonlyMap<string, SecurityScheme>,
+  pointer: string,
+): Finding | undefined => {
+  const writers = [...schemes.values()].filter(setsAuthorization);
+
+  return writers.length < 2
+    ? undefined
+    : {
+        anchor: "security-requirement-object",
+        code: "SEC-01/conflicting-authorization",
+        element: "Security Requirement Object",
+        hint: "Each of these schemes sets the Authorization header, so one request cannot carry both. Use another alternative.",
+        message: "The alternative requires two schemes that both set the Authorization header.",
+        pointer,
+        related: writers.map((scheme) => ({
+          document: scheme.origin.document,
+          pointer: scheme.origin.pointer,
+        })),
+      };
 };
 
 // `supplied`: the entries come from the author config, so they alone reach the added schemes and
@@ -615,12 +724,14 @@ const judge = (
   const lookup = lookupOf(schemes);
   const { declared: byName, unusable } = supplied ? lookup.author : lookup.spec;
   const used: { readonly scheme: string; readonly scopes: readonly string[] }[] = [];
+  const reached = new Map<string, SecurityScheme>();
   for (const [name, scopes] of entries) {
     const exact = byName.has(name) || unusable.has(name);
     const resolved = exact ? name : (uriComponentName(resolution, name) ?? name);
     const declared = byName.get(resolved);
     if (declared !== undefined) {
       used.push({ scheme: resolved, scopes });
+      reached.set(resolved, declared);
     }
 
     if (declared !== undefined && stagedRules.has(declared.kind.type)) {
@@ -654,16 +765,22 @@ const judge = (
     });
   }
 
+  const conflict = conflictRefusal(reached, pointer);
+  if (conflict !== undefined) {
+    findings.push(conflict);
+  }
+
   return findings.length > 0 || refused ? { findings } : { findings, use: used };
 };
 
 /**
  * Normalizes the effective security policy of an operation, or of the root when `operation` is
  * omitted (design 6.5). `operation` is the pointer of the operation object. An alternative that
- * names an undeclared or refused scheme, or an `oauth2`, `openIdConnect` or `mutualTLS` scheme
- * (staged, SSC-18 to SSC-20), is removed whole with element-scope refusals and never dropped
- * silently. A spec name check already refused as unresolved keeps that one diagnostic and gets no
- * second here. Raising an operation with no alternative left is the caller's job (`listed`).
+ * names an undeclared or refused scheme, a `mutualTLS` scheme (staged, SSC-20), or two schemes that
+ * each set the `Authorization` header (`SEC-01/conflicting-authorization`) is removed whole with
+ * element-scope refusals and never dropped silently. A spec name check already refused as
+ * unresolved keeps that one diagnostic and gets no second here. Raising an operation with no
+ * alternative left is the caller's job (`listed`).
  */
 export const normalizeSecurityPolicy = (
   resolution: Resolution,

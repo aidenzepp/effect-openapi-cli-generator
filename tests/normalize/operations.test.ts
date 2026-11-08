@@ -292,11 +292,12 @@ const refusedBody = (required: boolean): Json => ({
   required,
 });
 
-const oauthSchemes: Members = {
+// A scheme that stays refused: http digest (SSC-17), so an alternative naming it is refused.
+const refusedSchemes: Members = {
   components: {
     securitySchemes: {
       key: { in: "header", name: "X-K", type: "apiKey" },
-      oauth: { flows: {}, type: "oauth2" },
+      refused: { scheme: "digest", type: "http" },
     },
   },
 };
@@ -390,13 +391,13 @@ describe("operation-scope refusals", () => {
   test("every declared security alternative refused removes the operation", () => {
     const { api, diagnostics } = run(
       "3.1",
-      { "/a": { get: { ...ok, security: [{ oauth: [] }] } } },
-      oauthSchemes,
+      { "/a": { get: { ...ok, security: [{ refused: [] }] } } },
+      refusedSchemes,
     );
 
     see(api.operations).toEqual([]);
     see(raised(diagnostics)).toEqual(["SEC-06/no-satisfiable-alternative"]);
-    see(codes(diagnostics)).toContain("SSC-18/not-implemented");
+    see(codes(diagnostics)).toContain("SEC-02/unusable-scheme");
   });
 
   test("an alternative naming an undeclared scheme counts as refused", () => {
@@ -412,7 +413,7 @@ describe("operation-scope refusals", () => {
     const { api, diagnostics } = run(
       "3.1",
       { "/a": { get: ok }, "/b": { get: { ...ok, security: [] } } },
-      { ...oauthSchemes, security: [{ oauth: [] }] },
+      { ...refusedSchemes, security: [{ refused: [] }] },
     );
 
     see(api.operations.map((found) => found.key.path)).toEqual(["/b"]);
@@ -422,8 +423,8 @@ describe("operation-scope refusals", () => {
   test("a {} alternative that remains keeps the operation", () => {
     const { api, diagnostics } = run(
       "3.1",
-      { "/a": { get: { ...ok, security: [{ oauth: [] }, {}] } } },
-      oauthSchemes,
+      { "/a": { get: { ...ok, security: [{ refused: [] }, {}] } } },
+      refusedSchemes,
     );
 
     see(api.operations).toHaveLength(1);
@@ -434,8 +435,8 @@ describe("operation-scope refusals", () => {
   test("a surviving alternative keeps the operation", () => {
     const { api } = run(
       "3.1",
-      { "/a": { get: { ...ok, security: [{ oauth: [] }, { key: [] }] } } },
-      oauthSchemes,
+      { "/a": { get: { ...ok, security: [{ refused: [] }, { key: [] }] } } },
+      refusedSchemes,
     );
 
     see(api.operations[0]?.security.alternatives).toHaveLength(1);
@@ -445,7 +446,7 @@ describe("operation-scope refusals", () => {
     const { api, diagnostics } = run(
       "3.1",
       { "/a": { get: { ...ok, security: [] } } },
-      oauthSchemes,
+      refusedSchemes,
     );
 
     see(api.operations).toHaveLength(1);
@@ -547,7 +548,7 @@ const mixedPaths: Json = Object.fromEntries([
       delete: {
         ...ok,
         requestBody: refusedBody(true),
-        security: [{ oauth: [] }],
+        security: [{ refused: [] }],
       },
     },
   ],
@@ -566,7 +567,7 @@ const mixedPaths: Json = Object.fromEntries([
 
 const mixed = () =>
   run("3.1", mixedPaths, {
-    components: { securitySchemes: { oauth: { flows: {}, type: "oauth2" } } },
+    components: { securitySchemes: { refused: { scheme: "digest", type: "http" } } },
     "x-extra": true,
   });
 
@@ -576,13 +577,14 @@ describe("diagnostic order", () => {
 
     see(diagnostics).toEqual(sortDiagnostics([entry], diagnostics));
     see(diagnostics.map((diagnostic) => [diagnostic.pointer, diagnostic.code])).toEqual([
+      ["/components/securitySchemes/refused", "SSC-17/unsupported-scheme"],
       ["/paths/~1a/get/parameters/0", "STY-40/style-location"],
       ["/paths/~1a/get/requestBody", "OPR-10/body-refused"],
       ["/paths/~1a/parameters/0", "PRM-19/ignored-header"],
       ["/paths/~1b/delete", "OPR-09/required-body-refused"],
       ["/paths/~1b/delete", "SEC-06/no-satisfiable-alternative"],
       ["/paths/~1b/delete/requestBody/content/multipart~1form-data", "ENC-33/missing-schema"],
-      ["/paths/~1b/delete/security/0", "SSC-18/not-implemented"],
+      ["/paths/~1b/delete/security/0/refused", "SEC-02/unusable-scheme"],
     ]);
   });
 
@@ -648,8 +650,8 @@ describe("bracket notices of an operation refused whole", () => {
     ],
     [
       "SEC-06/no-satisfiable-alternative",
-      { get: { ...ok, parameters: [marked], security: [{ oauth: [] }] } },
-      oauthSchemes,
+      { get: { ...ok, parameters: [marked], security: [{ refused: [] }] } },
+      refusedSchemes,
     ],
   ];
 
