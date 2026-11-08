@@ -196,6 +196,27 @@ describe("corpus run options", () => {
     expect(runner("--frobnicate").log).toContain("unknown argument: --frobnicate");
     expect(runner("--check", "--out", "x").code).toBe(1);
   }, 60_000);
+
+  test("--check fails, naming each, on stale verdict files that match no ci entry; a plain run ignores them", () => {
+    // A pin change leaves the old `<id>@<sha256-12>.json`; a removed entry leaves its id behind.
+    const verdicts = nodePath.join(stub, "corpus/verdicts");
+    const stale = ["clean@000000000000.json", "removed@0123456789ab.json"];
+    for (const name of stale) {
+      written(nodePath.join(verdicts, name), "{}\n");
+    }
+
+    const plain = runner("--only", "clean");
+    const checked = runner("--check", "--only", "clean");
+    nodeFs.rmSync(verdicts, { force: true, recursive: true });
+
+    expect(plain.code).toBe(0);
+    expect(checked.code).toBe(1);
+    for (const name of stale) {
+      expect(checked.log).toContain(`corpus/verdicts/${name}`);
+    }
+    // The current verdict is written by the plain run and matches: it is neither stale nor differing.
+    expect(checked.log).not.toContain(`corpus/verdicts/${verdictFile("clean")}`);
+  }, 300_000);
 });
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///fixture/openapi.json");
