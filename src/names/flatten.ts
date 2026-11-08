@@ -190,6 +190,11 @@ interface Ctx {
    */
   readonly styleRefused: ReadonlySet<string>;
   /**
+   * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5). Each
+   * gets no flag and no notice, as a style-refused part gets none.
+   */
+  readonly refusedFields: ReadonlySet<string>;
+  /**
    * Multipart only: a binary string is a `file` part, not a `string`.
    */
   readonly fileParts: boolean;
@@ -228,6 +233,7 @@ const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
   encoding: MediaAlternative["encoding"],
+  refusedFields: readonly string[],
   line: SpecLine,
 ): Ctx => ({
   base64Fields: codec === "json" || codec === "form",
@@ -237,6 +243,7 @@ const newCtx = (
   fileParts: codec === "multipart",
   memo: new Map(),
   readOnlyOmitted: line === "3.0",
+  refusedFields: new Set(refusedFields),
   styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
@@ -583,7 +590,7 @@ const walkProperties = (
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
     }
 
-    if (omitted(ctx, child)) {
+    if ((at.depth === 1 && ctx.refusedFields.has(key)) || omitted(ctx, child)) {
       continue;
     }
 
@@ -635,7 +642,8 @@ const walkProperties = (
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
  * (repeated parts), a `file` part when it is binary or its rule sends it base64 encoded, or a
  * `json` flag for an object part, sent as one JSON part (ENC-22); any other shape is skipped with
- * a reason. A part whose style normalize refused (ENC-40) gets nothing.
+ * a reason. A part whose style normalize refused (ENC-40) or that it refused at `field` scope gets
+ * nothing.
  */
 const walkParts = (
   ctx: Ctx,
@@ -649,7 +657,7 @@ const walkParts = (
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
     }
 
-    if (ctx.styleRefused.has(key) || omitted(ctx, child)) {
+    if (ctx.styleRefused.has(key) || ctx.refusedFields.has(key) || omitted(ctx, child)) {
       continue;
     }
 
@@ -732,12 +740,13 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * `readOnly: true`, directly or through one `$ref`, gets no flag and no skip notice (S30-31,
  * D-SCH2); `--body` and `--body-file` still send it as given. On 3.1 and 3.2 a read-only property
  * keeps its flag (SCH-51). `format: byte` makes a JSON or form property a base64 `file` flag on 3.0
- * only; on 3.1 and 3.2 it is a `string` flag sent as given (FMT-10).
+ * only; on 3.1 and 3.2 it is a `string` flag sent as given (FMT-10). A top-level property named in
+ * `alternative.refusedFields` gets no flag, no nested flag and no skip notice (design 4.5, 8.5).
  */
 export const flattenBody = (
   defs: Defs,
   alternative: Pick<MediaAlternative, "codec" | "schema"> &
-    Partial<Pick<MediaAlternative, "encoding">>,
+    Partial<Pick<MediaAlternative, "encoding" | "refusedFields">>,
   line: SpecLine,
 ): Result.Result<FlattenedBody, FlattenError> => {
   const { codec } = alternative;
@@ -756,7 +765,13 @@ export const flattenBody = (
     return Result.succeed({ flags: whole, reserved: [], skipped: [] });
   }
 
-  const ctx = newCtx(defs, codec, alternative.encoding ?? [], line);
+  const ctx = newCtx(
+    defs,
+    codec,
+    alternative.encoding ?? [],
+    alternative.refusedFields ?? [],
+    line,
+  );
   const root = defs[key];
   if (root === undefined) {
     return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));

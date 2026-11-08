@@ -338,7 +338,7 @@ const refusedLine = (input: HelpInput): string | undefined => {
   const refused = input.diagnostics.filter(
     (diagnostic) =>
       diagnostic.severity === "refusal" &&
-      diagnostic.scope === "element" &&
+      (diagnostic.scope === "element" || diagnostic.scope === "field") &&
       diagnostic.operation?.method === key.method &&
       diagnostic.operation.path === key.path,
   );
@@ -424,7 +424,7 @@ const nonStandardLine = (input: HelpInput): string | undefined => {
  * default and read-only and deprecated marks), and the REQUEST, VARIANTS, AUTH, RESPONSES,
  * RESPONSE HEADERS and REFUSED lines. VARIANTS lists a discriminated body's branches and is absent
  * without a hint; RESPONSE HEADERS is absent when no case declares a header; the REFUSED line lists
- * the command's refused elements by wire name and reason.
+ * the command's refused elements and refused body fields by wire name and reason.
  */
 export const operationHelp = (input: HelpInput): OperationHelp => {
   const { operation } = input;

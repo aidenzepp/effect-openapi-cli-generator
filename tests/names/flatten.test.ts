@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { flattenBody } from "../../src/names/flatten.ts";
+import { WireName } from "../../src/model/brands.ts";
 import { EncodingRule } from "../../src/model/entities.ts";
 import type { MediaAlternative } from "../../src/model/entities.ts";
 
@@ -535,5 +536,70 @@ describe("flattenBody: 3.0 readOnly (S30-31, D-SCH2)", () => {
     const kept = ["body", "body-file", "id", "meta.stamp", "meta.tag", "name", "ref"];
     expect(names("3.1").flags).toEqual(kept);
     expect(names("3.2").flags).toEqual(kept);
+  });
+});
+
+describe("flattenBody: refused fields (design 4.5, 8.5 rule 5)", () => {
+  const defs = {
+    Root: object({
+      help: { type: "string" },
+      meta: object({ a: { type: "string" } }),
+      name: { type: "string" },
+      nested: object({ meta: { type: "string" } }),
+    }),
+  } satisfies Defs;
+
+  const flatten = (codec: Alternative["codec"], refused: readonly string[]) => {
+    const result = flattenBody(
+      defs,
+      {
+        codec,
+        refusedFields: refused.map((name) => Schema.decodeUnknownSync(WireName)(name)),
+        schema: { key: "Root" },
+      },
+      defaultLine,
+    );
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return {
+      flags: result.success.flags.map((flag) => flag.name),
+      reserved: result.success.reserved.map((clash) => clash.flag),
+      skipped: result.success.skipped,
+    };
+  };
+
+  test("a refused top-level property of a form body gets no flag, no nested flag and no notice", () => {
+    expect(flatten("form", ["meta"])).toEqual({
+      flags: ["body", "body-file", "help", "name", "nested.meta"],
+      reserved: ["help"],
+      skipped: [],
+    });
+  });
+
+  test("a refused property gets no flag in a json body or as a multipart part", () => {
+    expect(flatten("json", ["name"]).flags).toEqual([
+      "body",
+      "body-file",
+      "help",
+      "meta.a",
+      "nested.meta",
+    ]);
+    expect(flatten("multipart", ["meta"]).flags).toEqual(["help", "name", "nested"]);
+  });
+
+  test("a refused property named like a reserved flag raises no clash", () => {
+    expect(flatten("form", ["help"])).toEqual({
+      flags: ["body", "body-file", "meta.a", "name", "nested.meta"],
+      reserved: [],
+      skipped: [],
+    });
+  });
+
+  test("an empty or absent list refuses nothing", () => {
+    const all = ["body", "body-file", "help", "meta.a", "name", "nested.meta"];
+    expect(flatten("form", []).flags).toEqual(all);
+    expect(run(defs, "form").flags.map((flag) => flag.name)).toEqual(all);
   });
 });

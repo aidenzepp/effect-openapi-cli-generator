@@ -110,14 +110,18 @@ const refusals = (input: ReadmeInput): string => {
   );
   const isRefused = (method: string, path: string): boolean =>
     operations.some((key) => key.method === method && key.path === path);
-  const elements = refusedDiagnostics.filter(
-    (diagnostic) =>
-      diagnostic.scope === "element" &&
-      (diagnostic.operation === undefined ||
-        !isRefused(diagnostic.operation.method, diagnostic.operation.path)),
-  ).length;
+  // The refusals at one scope that belong to no refused operation: a generated command's.
+  const countOf = (scope: "element" | "field"): number =>
+    refusedDiagnostics.filter(
+      (diagnostic) =>
+        diagnostic.scope === scope &&
+        (diagnostic.operation === undefined ||
+          !isRefused(diagnostic.operation.method, diagnostic.operation.path)),
+    ).length;
+  const elements = countOf("element");
+  const fields = countOf("field");
 
-  if (operations.length === 0 && elements === 0) {
+  if (operations.length === 0 && elements === 0 && fields === 0) {
     return "## Refusals\n\nNothing in the description was refused.";
   }
 
@@ -132,6 +136,12 @@ const refusals = (input: ReadmeInput): string => {
   if (elements > 0) {
     parts.push(
       `Generation refused ${elements} element${elements === 1 ? "" : "s"} of generated commands; each command's \`--help\` names them.`,
+    );
+  }
+
+  if (fields > 0) {
+    parts.push(
+      `Generation refused ${fields} body field${fields === 1 ? "" : "s"} of generated commands; each command's \`--help\` names them.`,
     );
   }
 
