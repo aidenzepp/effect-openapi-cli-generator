@@ -2,6 +2,7 @@ import { Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import { isNonStandard } from "../model/non-standard.ts";
 import type { Json } from "../model/pointer.ts";
 
 /**
@@ -138,9 +139,7 @@ const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
     return false;
   }
 
-  const { serialization } = source.parameter;
-
-  return serialization.kind === "style" && serialization.nonStandard === "deepObjectBrackets";
+  return isNonStandard(source.parameter.serialization);
 };
 
 const locationNote = (source: HelpFlagSource, name: string): string => {

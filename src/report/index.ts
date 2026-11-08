@@ -4,6 +4,7 @@ import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
 import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
+import { nonStandardOrigins } from "../model/non-standard.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
@@ -164,15 +165,9 @@ export const nonStandardEntries = (
   documents: readonly string[],
 ): GenerationReportValue["nonStandard"] => {
   const marked = api.operations.flatMap((operation) => [
-    ...operation.parameters.flatMap(({ serialization }) => {
-      if (serialization.kind === "content") {
-        return serialization.encoding.flatMap((rule) =>
-          rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
-        );
-      }
-
-      return serialization.nonStandard === undefined ? [] : [entryAt(serialization.origin)];
-    }),
+    ...operation.parameters.flatMap(({ serialization }) =>
+      nonStandardOrigins(serialization).map(entryAt),
+    ),
     ...(operation.body?.alternatives ?? []).flatMap((alternative) =>
       alternative.encoding.flatMap((rule) =>
         rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
