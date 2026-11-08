@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import type { Secret } from "../../src/runtime-src/runtime/redact.ts";
 import {
   dropTrailingFragment,
   queryWireForm,
@@ -67,5 +68,65 @@ describe("a trailing fragment split by stripped characters is dropped (audit S2)
     expect(dropTrailingFragment("kept S\u00ADX", [bearerOf("SECRETTOKEN")], stripControls)).toBe(
       "kept S\u00ADX",
     );
+  });
+});
+
+const secretOf = (label: string, value: string): Secret => ({
+  kind: "secret",
+  label,
+  value: Redacted.make(value),
+});
+
+describe("a secret entry is scrubbed as given and JSON-escaped", () => {
+  const entry = secretOf("password-file", 'pa55"word\n');
+
+  test("echoed raw", () => {
+    expect(scrub('got pa55"word\n end', [entry])).toBe("got <redacted:password-file> end");
+  });
+
+  test("echoed inside a JSON string, the kept LF as \\n", () => {
+    expect(scrub('{"echo":"pa55\\"word\\n"}', [entry])).toBe('{"echo":"<redacted:password-file>"}');
+  });
+
+  test("beside a credential, each keeps its own label", () => {
+    expect(scrub('a pa55"word\n b SECRETTOKEN', [entry, bearerOf("SECRETTOKEN")])).toBe(
+      "a <redacted:password-file> b <redacted:bearer>",
+    );
+  });
+});
+
+// Security review of bd3128a: a server may strip the trailing newline or echo the value in a
+// percent-encoded or form-encoded (`+` for a space) body, and a JSON echo may escape non-ASCII.
+describe("a secret's echoed forms are scrubbed", () => {
+  const entry = secretOf("password-file", "pa55 w0rd\n");
+
+  for (const echo of ["pa55 w0rd", "pa55+w0rd", "pa55%20w0rd", "pa55%20w0rd%0A"]) {
+    test(`echoed as ${JSON.stringify(echo)}`, () => {
+      expect(scrub(`got ${echo} end`, [entry])).toBe("got <redacted:password-file> end");
+    });
+  }
+
+  test("a CRLF-terminated value echoed without it", () => {
+    expect(scrub("got pa55 end", [secretOf("password-file", "pa55\r\n")])).toBe(
+      "got <redacted:password-file> end",
+    );
+  });
+
+  for (const echo of ["p\\u00e4ss", "p\\u00E4ss"]) {
+    test(`a non-ASCII value echoed as the escape ${echo}`, () => {
+      expect(scrub(`{"echo":"${echo}"}`, [secretOf("password-file", "päss")])).toBe(
+        '{"echo":"<redacted:password-file>"}',
+      );
+    });
+  }
+
+  test("a value above U+FFFF echoed as its escaped surrogate pair", () => {
+    expect(scrub('{"echo":"k\\ud83d\\udd11"}', [secretOf("password-file", "k\u{1F511}")])).toBe(
+      '{"echo":"<redacted:password-file>"}',
+    );
+  });
+
+  test("a value that is only a newline scrubs no empty form", () => {
+    expect(scrub("a b", [secretOf("password-file", "\n")])).toBe("a b");
   });
 });
