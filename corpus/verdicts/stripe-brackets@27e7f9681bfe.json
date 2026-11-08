@@ -2,23 +2,23 @@
   "commandSources": {
     "config": 0,
     "fern": 0,
-    "fold": 703,
+    "fold": 681,
     "forge": 0
   },
   "corpusVersion": 1,
   "counts": {
     "informational": 5,
-    "nonStandard": 1018,
-    "notices": 2424,
+    "nonStandard": 730,
+    "notices": 2249,
     "operations": {
-      "generated": 703,
-      "refused": 0,
+      "generated": 681,
+      "refused": 22,
       "total": 703
     },
     "refusals": {
       "document": 0,
-      "element": 63,
-      "operation": 0
+      "element": 179,
+      "operation": 22
     }
   },
   "coverage": {
@@ -1891,102 +1891,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/business_profile",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/capabilities",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/company",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/controller",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/individual",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1accounts~1{account}/get/parameters/1",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/business_profile",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/capabilities",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/company",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/individual",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts~1{id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2011,22 +1921,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts~1{id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2041,57 +1936,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
       "row": "PRM-27"
     },
     {
@@ -2101,57 +1946,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
       "row": "PRM-27"
     },
     {
@@ -2187,11 +1982,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1application_fees~1{fee}~1refunds~1{id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1application_fees~1{fee}~1refunds~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2306,27 +2096,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
       "row": "PRM-27"
     },
     {
@@ -2426,11 +2196,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1billing~1credit_grants~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1billing~1credit_grants~1{id}~1expire/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -2516,32 +2281,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1charges~1search/get/parameters/0",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1charges~1{charge}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
       "row": "PRM-27"
     },
     {
@@ -2556,17 +2301,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}~1dispute/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1charges~1{charge}~1dispute~1close/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}~1refund/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2576,17 +2311,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}~1refunds/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1charges~1{charge}~1refunds~1{refund}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1charges~1{charge}~1refunds~1{refund}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2706,21 +2431,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1checkout~1sessions~1{session}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/collected_information",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1checkout~1sessions~1{session}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1checkout~1sessions~1{session}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1checkout~1sessions~1{session}~1expire/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -2742,11 +2452,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1climate~1orders~1{order}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1climate~1orders~1{order}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2796,32 +2501,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1coupons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/applies_to",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1coupons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/currency_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1coupons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1coupons~1{coupon}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1coupons~1{coupon}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/currency_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1coupons~1{coupon}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2911,26 +2591,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/cash_balance",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/preferred_locales",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tax_id_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1search/get/parameters/0",
       "row": "PRM-27"
     },
@@ -2941,27 +2601,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/cash_balance",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/preferred_locales",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions/get/parameters/3",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -2971,32 +2611,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions~1{transaction}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/get/parameters/2",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
       "row": "PRM-27"
     },
     {
@@ -3016,22 +2636,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
       "row": "PRM-27"
     },
     {
@@ -3086,22 +2691,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1sources/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
       "row": "PRM-27"
     },
     {
@@ -3121,77 +2711,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -3226,11 +2746,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1disputes~1{dispute}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1disputes~1{dispute}~1close/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -3257,11 +2772,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1entitlements~1features~1{id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1entitlements~1features~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -3296,32 +2806,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1file_links/get/parameters/2",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1file_links/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1file_links~1{link}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1file_links~1{link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -3521,92 +3011,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tax_rates",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/get/parameters/0",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1invoices/get/parameters/6",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/default_tax_rates",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/rendering",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_cost",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/customer_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/schedule_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_details",
       "row": "PRM-27"
     },
     {
@@ -3617,36 +3027,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1invoices~1{invoice}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/rendering",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
       "row": "PRM-27"
     },
     {
@@ -3666,47 +3046,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1mark_uncollectible/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1pay/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1remove_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1remove_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1send/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
       "row": "PRM-27"
     },
     {
@@ -3722,21 +3067,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}~1approve/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}~1decline/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -3806,42 +3136,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lifecycle_controls",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/spending_controls",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1issuing~1cards~1{card}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/spending_controls",
       "row": "PRM-27"
     },
     {
@@ -3857,16 +3152,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1issuing~1disputes~1{dispute}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1disputes~1{dispute}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1disputes~1{dispute}~1submit/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -3887,11 +3172,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -3937,11 +3217,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1issuing~1transactions~1{transaction}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1issuing~1transactions~1{transaction}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -4021,72 +3296,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/excluded_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/transfer_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_intents~1search/get/parameters/0",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_intents~1{intent}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/transfer_data",
       "row": "PRM-27"
     },
     {
@@ -4102,36 +3317,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_intents~1{intent}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1capture/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1capture/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
       "row": "PRM-27"
     },
     {
@@ -4242,41 +3427,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_links~1{payment_link}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/after_completion",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/consent_collection",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_creation",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
       "row": "PRM-27"
     },
     {
@@ -4976,16 +4126,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_methods~1{payment_method}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/card",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_methods~1{payment_method}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_methods~1{payment_method}~1attach/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -5001,72 +4141,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/processor_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payment_records~1{id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_canceled/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_failed/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_guaranteed/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_informational/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post/requestBody/content/application~1x-www-form-urlencoded/encoding/processor_details",
       "row": "PRM-27"
     },
     {
@@ -5086,11 +4161,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1payouts~1{payout}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1payouts~1{payout}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -5106,22 +4176,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1plans/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1plans/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tiers",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1plans~1{plan}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1plans~1{plan}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -5162,11 +4217,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1prices~1{price}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1prices~1{price}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -5246,11 +4296,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1products~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1products~1{product}~1features/get/parameters/1",
       "row": "PRM-27"
     },
@@ -5286,72 +4331,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1promotion_codes~1{promotion_code}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1promotion_codes~1{promotion_code}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/restrictions",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1quotes/get/parameters/3",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1quotes~1{quote}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
       "row": "PRM-27"
     },
     {
@@ -5446,17 +4431,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1refunds/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1refunds~1{refund}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1refunds~1{refund}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -5521,82 +4496,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/excluded_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/flow_directions",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1setup_intents~1{intent}/get/parameters/1",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/flow_directions",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1setup_intents~1{intent}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
       "row": "PRM-27"
     },
     {
@@ -5632,16 +4537,6 @@
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1shipping_rates~1{shipping_rate_token}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1shipping_rates~1{shipping_rate_token}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1shipping_rates~1{shipping_rate_token}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/fixed_amount",
       "row": "PRM-27"
     },
     {
@@ -5686,26 +4581,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/mandate",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/source_order",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1sources~1{source}~1mandate_notifications~1{mandate_notification}/get/parameters/0",
       "row": "PRM-27"
     },
@@ -5736,27 +4611,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1subscription_items~1{item}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
       "row": "PRM-27"
     },
     {
@@ -5766,47 +4621,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/billing_mode",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/default_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/pause_schedules",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/phases",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/default_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/phases",
       "row": "PRM-27"
     },
     {
@@ -5826,92 +4641,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/billing_mode",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/billing_schedules",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1subscriptions~1search/get/parameters/0",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -5981,11 +4716,6 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tax_rates~1{tax_rate}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1tax~1associations~1find/get/parameters/0",
       "row": "PRM-27"
     },
@@ -6041,22 +4771,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/country_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1tax~1registrations~1{id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tax~1registrations~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6106,17 +4821,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6131,17 +4836,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1locations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1terminal~1locations~1{location}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1locations~1{location}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6161,17 +4856,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1readers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1terminal~1readers~1{reader}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1terminal~1readers~1{reader}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6536,57 +5221,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/channel",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/flow_preference",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/future_usage",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1three_d_secure~1authentications~1{authentication}/get/parameters/1",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications~1{authentication}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications~1{authentication}~1submit/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/account",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/person",
       "row": "PRM-27"
     },
     {
@@ -6601,22 +5236,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1topups/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1topups/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1topups~1{topup}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1topups~1{topup}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6641,27 +5261,12 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1transfers~1{id}~1reversals/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1transfers~1{transfer}/get/parameters/0",
       "row": "PRM-27"
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1transfers~1{transfer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1transfers~1{transfer}~1reversals~1{id}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1transfers~1{transfer}~1reversals~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -6701,32 +5306,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/supported_currencies",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1treasury~1financial_accounts~1{financial_account}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts~1{financial_account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts~1{financial_account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
       "row": "PRM-27"
     },
     {
@@ -6876,27 +5456,7 @@
     },
     {
       "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded/encoding/enabled_events",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
       "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/get/parameters/0",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/enabled_events",
-      "row": "PRM-27"
-    },
-    {
-      "choice": "deepObjectBrackets",
-      "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
@@ -9437,51 +7997,6 @@
       "row": "S30-09"
     },
     {
-      "code": "RQB-03/folded",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded",
-      "row": "RQB-03"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/business_profile",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/capabilities",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/company",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/controller",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/individual",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/settings",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/bank_account/anyOf/0/properties/currency/format",
       "row": "S30-26"
@@ -9577,11 +8092,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/settings",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/business_profile/properties/annual_revenue/properties/currency/format",
       "row": "S30-26"
@@ -9625,11 +8135,6 @@
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/tos_acceptance/properties/date/format",
       "row": "S30-26"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -9702,11 +8207,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/bank_account/anyOf/0/properties/currency/format",
       "row": "S30-26"
@@ -9757,26 +8257,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/additional_tos_acceptances/properties/account/properties/date/format",
       "row": "S30-26"
@@ -9802,26 +8282,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/additional_tos_acceptances/properties/account/properties/date/format",
       "row": "S30-26"
@@ -9839,26 +8299,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
       "row": "PRM-27"
     },
     {
@@ -9884,26 +8324,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/additional_tos_acceptances",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/documents",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/us_cfpb_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/verification",
       "row": "PRM-27"
     },
     {
@@ -10213,16 +8633,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/get/parameters/1",
       "row": "PRM-27"
     },
@@ -10230,16 +8640,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
-      "row": "PRM-27"
     },
     {
       "code": "PRM-27/bracket-author-choice",
@@ -10567,16 +8967,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/currency/format",
       "row": "S30-26"
@@ -10604,11 +8994,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1charges~1{charge}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1charges~1{charge}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
       "row": "PRM-27"
     },
     {
@@ -10933,11 +9318,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1climate~1orders~1{order}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1climate~1orders~1{order}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
@@ -11243,26 +9623,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/cash_balance",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/preferred_locales",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tax_id_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1search/get/parameters/0",
       "row": "PRM-27"
     },
@@ -11285,21 +9645,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1customers~1{customer}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/cash_balance",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/preferred_locales",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -11352,11 +9697,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/bank_account/anyOf/0/properties/currency/format",
       "row": "S30-26"
@@ -11383,11 +9723,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}~1verify/post/requestBody/content/application~1x-www-form-urlencoded/encoding/amounts",
       "row": "PRM-27"
     },
@@ -11405,11 +9740,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1customers~1{customer}~1cards/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -11434,11 +9764,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
       "row": "PRM-27"
     },
     {
@@ -11547,11 +9872,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1sources/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1customers~1{customer}~1sources/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/bank_account/anyOf/0/properties/currency/format",
       "row": "S30-26"
@@ -11578,11 +9898,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}~1verify/post/requestBody/content/application~1x-www-form-urlencoded/encoding/amounts",
       "row": "PRM-27"
     },
@@ -11604,36 +9919,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -11719,36 +10004,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -12427,16 +10682,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tax_rates",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/currency/format",
       "row": "S30-26"
@@ -12487,11 +10732,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/period/properties/end/format",
       "row": "S30-26"
@@ -12537,46 +10777,6 @@
       "row": "S30-09"
     },
     {
-      "code": "RQB-03/folded",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded",
-      "row": "RQB-03"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/default_tax_rates",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/rendering",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_cost",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/automatically_finalizes_at/format",
       "row": "S30-26"
@@ -12614,26 +10814,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/customer_details",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/schedule_details",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_details",
       "row": "PRM-27"
     },
     {
@@ -12797,31 +10977,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "RQB-03/folded",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded",
-      "row": "RQB-03"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/rendering",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/automatically_finalizes_at/format",
       "row": "S30-26"
@@ -12849,11 +11004,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
       "row": "PRM-27"
     },
     {
@@ -12902,16 +11052,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/period/properties/end/format",
       "row": "S30-26"
@@ -12953,22 +11093,12 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1remove_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1send/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
     },
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lines",
       "row": "PRM-27"
     },
     {
@@ -13157,11 +11287,6 @@
       "row": "S30-09"
     },
     {
-      "code": "RQB-03/folded",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded",
-      "row": "RQB-03"
-    },
-    {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
       "row": "PRM-27"
@@ -13169,16 +11294,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/lifecycle_controls",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded/encoding/spending_controls",
       "row": "PRM-27"
     },
     {
@@ -13194,16 +11309,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/spending_controls",
       "row": "PRM-27"
     },
     {
@@ -13360,11 +11465,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "PRM-27/bracket-author-choice",
@@ -13617,21 +11717,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/transfer_data",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/currency/format",
       "row": "S30-26"
@@ -13704,26 +11789,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/transfer_data",
       "row": "PRM-27"
     },
     {
@@ -13809,21 +11874,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/allowed_payment_method_types",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/hooks",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
       "row": "PRM-27"
     },
     {
@@ -14014,36 +12064,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/after_completion",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/consent_collection",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_creation",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
       "row": "PRM-27"
     },
     {
@@ -14852,21 +12872,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_details",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/processor_details",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/amount_requested/properties/currency/format",
       "row": "S30-26"
@@ -14904,16 +12909,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_details",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded/encoding/shipping_details",
       "row": "PRM-27"
     },
     {
@@ -14968,17 +12963,7 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_informational/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post/requestBody/content/application~1x-www-form-urlencoded/encoding/processor_details",
       "row": "PRM-27"
     },
     {
@@ -15064,11 +13049,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1plans/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1plans/post/requestBody/content/application~1x-www-form-urlencoded/encoding/tiers",
       "row": "PRM-27"
     },
     {
@@ -15215,11 +13195,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1prices~1{price}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1prices~1{price}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -15373,11 +13348,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1products~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1products~1{product}~1features/get/parameters/1",
       "row": "PRM-27"
     },
@@ -15458,11 +13428,6 @@
     },
     {
       "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1promotion_codes~1{promotion_code}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/restrictions",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1quotes/get/parameters/3",
       "row": "PRM-27"
     },
@@ -15475,31 +13440,6 @@
       "code": "S30-09/not-asserted",
       "pointer": "/paths/~1v1~1quotes/get/responses/200/content/application~1json/schema/properties/url/pattern",
       "row": "S30-09"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -15530,31 +13470,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1quotes~1{quote}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/line_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/subscription_data",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -15932,16 +13847,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/mandate_data/anyOf/0/properties/customer_acceptance/properties/accepted_at/format",
       "row": "S30-26"
@@ -16002,26 +13907,6 @@
       "row": "OPR-10"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/flow_directions",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/payment_method_data/properties/upi/properties/mandate_options/properties/end_date/format",
       "row": "S30-26"
@@ -16074,16 +13959,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
       "row": "PRM-27"
     },
     {
@@ -16307,16 +14182,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/owner",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/source_order",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/mandate/properties/acceptance/properties/date/format",
       "row": "S30-26"
@@ -16392,16 +14257,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/price_data/properties/currency/format",
       "row": "S30-26"
@@ -16435,16 +14290,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1subscription_items~1{item}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/price_data",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -16489,16 +14334,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/pause_schedules",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded/encoding/phases",
       "row": "PRM-27"
     },
     {
@@ -16579,11 +14414,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/phases",
       "row": "PRM-27"
     },
     {
@@ -16669,46 +14499,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/billing_mode",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/billing_schedules",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -16809,36 +14599,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/add_invoice_items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/automatic_tax",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/invoice_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/items",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_settings",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/trial_settings",
       "row": "PRM-27"
     },
     {
@@ -17152,16 +14912,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/country_options",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/active_from/anyOf/1/format",
       "row": "S30-26"
@@ -17180,11 +14930,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1tax~1registrations~1{id}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1tax~1registrations~1{id}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "S30-26/not-asserted",
@@ -17277,11 +15022,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1terminal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/delete/requestBody",
       "row": "OPR-10"
@@ -17295,11 +15035,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "PRM-27/bracket-author-choice",
@@ -17340,11 +15075,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1terminal~1locations~1{location}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1terminal~1locations~1{location}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "PRM-27/bracket-author-choice",
@@ -18067,11 +15797,6 @@
       "row": "PRM-27"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_data",
-      "row": "PRM-27"
-    },
-    {
       "code": "S30-26/not-asserted",
       "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/currency/format",
       "row": "S30-26"
@@ -18099,16 +15824,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/account",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded/encoding/person",
       "row": "PRM-27"
     },
     {
@@ -18164,11 +15879,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1topups/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1topups/post/requestBody/content/application~1x-www-form-urlencoded/encoding/payment_method_options",
       "row": "PRM-27"
     },
     {
@@ -18334,11 +16044,6 @@
     {
       "code": "PRM-27/bracket-author-choice",
       "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/features",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded/encoding/supported_currencies",
       "row": "PRM-27"
     },
     {
@@ -18617,16 +16322,6 @@
       "row": "S30-09"
     },
     {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded/encoding/enabled_events",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
-    },
-    {
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/delete/requestBody",
       "row": "OPR-10"
@@ -18640,16 +16335,6 @@
       "code": "OPR-10/body-ignored",
       "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/get/requestBody",
       "row": "OPR-10"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/enabled_events",
-      "row": "PRM-27"
-    },
-    {
-      "code": "PRM-27/bracket-author-choice",
-      "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded/encoding/expand",
-      "row": "PRM-27"
     },
     {
       "code": "RQB-03/folded",
@@ -19086,7 +16771,73 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1people/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1people~1{person}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1persons/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1accounts~1{account}~1persons~1{person}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1application_fees/get/parameters/1",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1application_fees~1{fee}~1refunds~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19109,8 +16860,68 @@
       "scope": "element"
     },
     {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1billing_portal~1configurations/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1billing_portal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1billing_portal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1billing~1credit_grants~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1charges/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges~1{charge}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges~1{charge}~1dispute/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges~1{charge}~1refund/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges~1{charge}~1refunds/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1charges~1{charge}~1refunds~1{refund}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19122,7 +16933,31 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1checkout~1sessions~1{session}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1climate~1orders~1{order}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1coupons/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1coupons/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1coupons~1{coupon}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19140,7 +16975,85 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1balance_transactions~1{transaction}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1bank_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1cards/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1cards~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1sources/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1sources~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1customers~1{customer}~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19152,13 +17065,49 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1disputes~1{dispute}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1entitlements~1features~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1events/get/parameters/0",
       "row": "PRM-27",
       "scope": "element"
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1external_accounts~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1file_links/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1file_links/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1file_links/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1file_links~1{link}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19200,6 +17149,18 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoiceitems/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoiceitems~1{invoiceitem}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1invoices/get/parameters/1",
       "row": "PRM-27",
       "scope": "element"
@@ -19212,7 +17173,91 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1create_preview/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1add_lines/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1lines~1{line_item_id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1pay/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1remove_lines/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1remove_lines/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1invoices~1{invoice}~1update_lines/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1issuing~1authorizations/get/parameters/2",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}~1approve/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1authorizations~1{authorization}~1decline/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19229,8 +17274,44 @@
       "scope": "element"
     },
     {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1issuing~1cards/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1cards/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1cards~1{card}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1issuing~1disputes/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1disputes~1{dispute}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1disputes~1{dispute}~1submit/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1personalization_designs~1{personalization_design}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19248,13 +17329,139 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1issuing~1transactions~1{transaction}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1payment_intents/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_intents/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_intents/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1capture/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_links~1{payment_link}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
     {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1payment_method_configurations/get/parameters/1",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_methods~1{payment_method}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1report_payment/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1report_payment/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_canceled/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_canceled/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_failed/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_failed/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_guaranteed/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_guaranteed/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_payment_attempt_informational/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payment_records~1{id}~1report_refund/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19272,13 +17479,43 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1payouts~1{payout}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1plans/get/parameters/1",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1plans/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1plans/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1plans~1{plan}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
     {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1prices/get/parameters/1",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1prices~1{price}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19296,7 +17533,31 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1products~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1promotion_codes/get/parameters/3",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1promotion_codes~1{promotion_code}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1quotes/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1quotes~1{quote}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19326,6 +17587,18 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1refunds/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1refunds~1{refund}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1reporting~1report_runs/get/parameters/0",
       "row": "PRM-27",
       "scope": "element"
@@ -19350,7 +17623,55 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1setup_intents/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1setup_intents~1{intent}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1setup_intents~1{intent}~1confirm/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1shipping_rates/get/parameters/1",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1shipping_rates~1{shipping_rate_token}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1sources~1{source}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1subscription_items/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscription_items/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscription_items~1{item}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19380,6 +17701,18 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscription_schedules/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscription_schedules~1{schedule}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1subscriptions/get/parameters/2",
       "row": "PRM-27",
       "scope": "element"
@@ -19398,13 +17731,121 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscriptions/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1subscriptions~1{subscription_exposed_id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1tax_rates/get/parameters/1",
       "row": "PRM-27",
       "scope": "element"
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1tax_rates~1{tax_rate}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1tax~1registrations/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1tax~1registrations/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1tax~1registrations~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1configurations/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1configurations~1{configuration}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1locations/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1locations~1{location}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1terminal~1readers/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1readers/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1terminal~1readers~1{reader}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1three_d_secure~1authentications/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1three_d_secure~1authentications/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1three_d_secure~1authentications~1{authentication}~1cancel/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1three_d_secure~1authentications~1{authentication}~1submit/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1tokens/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19421,6 +17862,24 @@
       "scope": "element"
     },
     {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1topups/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1topups/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1topups~1{topup}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1transfers/get/parameters/0",
       "row": "PRM-27",
@@ -19428,7 +17887,43 @@
     },
     {
       "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1transfers~1{id}~1reversals/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1transfers~1{transfer}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1transfers~1{transfer}~1reversals~1{id}/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1treasury~1financial_accounts/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1treasury~1financial_accounts/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1treasury~1financial_accounts~1{financial_account}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     },
@@ -19453,6 +17948,24 @@
     {
       "code": "PRM-27/non-object-schema",
       "pointer": "/paths/~1v1~1treasury~1transactions/get/parameters/0",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "OPR-09/required-body-refused",
+      "pointer": "/paths/~1v1~1webhook_endpoints/post",
+      "row": "OPR-09",
+      "scope": "operation"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1webhook_endpoints/post/requestBody/content/application~1x-www-form-urlencoded",
+      "row": "PRM-27",
+      "scope": "element"
+    },
+    {
+      "code": "PRM-27/non-object-schema",
+      "pointer": "/paths/~1v1~1webhook_endpoints~1{webhook_endpoint}/post/requestBody/content/application~1x-www-form-urlencoded",
       "row": "PRM-27",
       "scope": "element"
     }
