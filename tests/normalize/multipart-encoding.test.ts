@@ -242,3 +242,82 @@ describe("ENC-41: 3.1 keywords in a 3.0 multipart schema", () => {
     ]);
   });
 });
+
+// Design 8.5 rule 2: ENC-40 on a named part follows the form property rules (field scope when the
+// part is optional, the alternative dropped when it is required); a 3.2 positional entry is not a
+// field and keeps element scope.
+const tagsBody = (required: readonly string[]): Json => ({
+  content: {
+    "multipart/form-data": {
+      encoding: { tags: { style: "spaceDelimited" } },
+      schema: {
+        properties: {
+          note: { type: "string" },
+          tags: { items: { type: "string" }, type: "array" },
+        },
+        required,
+        type: "object",
+      },
+    },
+  },
+});
+
+const implemented = (line: Line, body: Json) => {
+  const outcome = normalize(line, body);
+  if (outcome._tag !== "Implemented") {
+    throw new Error(`expected Implemented, got ${outcome._tag}`);
+  }
+
+  return outcome;
+};
+
+const located = (outcome: BodyOutcome) =>
+  outcome.diagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    pointer: String(diagnostic.pointer),
+    scope: diagnostic.scope,
+  }));
+
+describe("ENC-40: a part style the writer cannot send", () => {
+  for (const line of ["3.1", "3.2"] as const) {
+    test(`ENC-40: ${line} an optional named part is refused at field scope and the alternative stays`, () => {
+      const outcome = implemented(line, tagsBody([]));
+
+      expect(outcome.body.alternatives[0]?.refusedFields?.map(String)).toEqual(["tags"]);
+      expect(located(outcome)).toEqual([
+        {
+          code: "ENC-40/unsupported-part-style",
+          pointer: `${media}/encoding/tags`,
+          scope: "field",
+        },
+      ]);
+    });
+
+    test(`ENC-40: ${line} a required named part drops the alternative`, () => {
+      expect(refusalOf(line, tagsBody(["tags"]))).toEqual([
+        {
+          code: "ENC-40/unsupported-part-style",
+          pointer: media,
+          related: [`${media}/encoding/tags`],
+          row: "ENC-40",
+          scope: "element",
+        },
+      ]);
+    });
+  }
+
+  test("ENC-40: a 3.2 positional entry keeps element scope and is no field", () => {
+    const outcome = implemented("3.2", {
+      content: { "multipart/form-data": { prefixEncoding: [{ style: "spaceDelimited" }] } },
+    });
+
+    expect(outcome.body.alternatives[0]?.refusedFields).toBeUndefined();
+    expect(located(outcome)).toEqual([
+      {
+        code: "ENC-40/unsupported-part-style",
+        pointer: `${media}/prefixEncoding/0`,
+        scope: "element",
+      },
+    ]);
+  });
+});

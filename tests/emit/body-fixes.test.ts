@@ -208,7 +208,7 @@ describe("ENC-40: a style-based multipart part", () => {
       expect(emitted.api).toContain('parts: [["name", "text/plain"]],');
       expect(emitted.cli).not.toContain('Flag.String("tags")');
       expect(emitted.diagnostics.filter(({ code }) => code.startsWith("ENC-40"))).toEqual([
-        { code: "ENC-40/unsupported-part-style", scope: "element", severity: "refusal" },
+        { code: "ENC-40/unsupported-part-style", scope: "field", severity: "refusal" },
       ]);
     });
   }
