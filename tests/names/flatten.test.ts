@@ -486,6 +486,44 @@ describe("flattenBody: multipart and xml", () => {
     expect(run(parts, "form").flags.find(({ name }) => name === "avatar")?.kind).toBe("string");
   });
 
+  describe("format password parts (design 4.5)", () => {
+    const secrets = {
+      Pin: { format: "password", type: "string" },
+      Root: object({
+        keys: { items: { $ref: "#/$defs/Pin" }, type: "array" },
+        names: { items: { type: "string" }, type: "array" },
+        note: { type: "string" },
+        pin: { $ref: "#/$defs/Pin" },
+        secret: { format: "password", type: "string" },
+        secrets: { items: { format: "password", type: "string" }, type: "array" },
+      }),
+    } satisfies Defs;
+
+    test("a password part is a file part and an array of them a repeated file part", () => {
+      const flattened = run(secrets, "multipart");
+      expect(flattened.flags.map(({ kind, name, repeated }) => [name, kind, repeated])).toEqual([
+        ["keys", "file", true],
+        ["names", "string", true],
+        ["note", "string", false],
+        ["pin", "file", false],
+        ["secret", "file", false],
+        ["secrets", "file", true],
+      ]);
+      expect(flattened.skipped).toEqual([]);
+    });
+
+    test("a json or form body's password property is untouched", () => {
+      for (const codec of ["json", "form"] as const) {
+        const kinds = new Map(run(secrets, codec).flags.map(({ kind, name }) => [name, kind]));
+        expect([kinds.get("secret"), kinds.get("pin"), kinds.get("secrets")]).toEqual([
+          "string",
+          "string",
+          "string",
+        ]);
+      }
+    });
+  });
+
   test("a multipart part named like a reserved flag is reported as a clash", () => {
     const flattened = run({ Root: object({ output: { type: "string" } }) }, "multipart");
     expect(flattened.reserved.map(({ flag }) => flag)).toEqual(["output"]);
