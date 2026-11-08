@@ -390,7 +390,7 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     ]);
     expect(outcome.diagnostics.map(({ scope, severity }) => [scope, severity])).toEqual([
       ["element", "notice"],
-      ["element", "refusal"],
+      ["field", "refusal"],
     ]);
     expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13", "ENC-40"]);
   });
@@ -1221,11 +1221,11 @@ describe("ENC-12 a form deepObject with explode false or omitted is exploded wit
   });
 });
 
-const styledForm = (property: Json, encoding: Json): Json => ({
+const styledForm = (property: Json, encoding: Json, required = false): Json => ({
   content: {
     "application/x-www-form-urlencoded": {
       encoding: { a: encoding },
-      schema: object({ a: property }),
+      schema: object({ a: property }, required ? { required: ["a"] } : {}),
     },
   },
 });
@@ -1252,8 +1252,8 @@ describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table
 
   for (const line of lines) {
     for (const [code, property, encoding] of cases) {
-      test(`${code} ${line} refuses the form alternative at element scope`, () => {
-        const outcome = refused(line, styledForm(property, encoding));
+      test(`${code} ${line} on a required property refuses the form alternative at element scope`, () => {
+        const outcome = refused(line, styledForm(property, encoding, true));
         const diagnostic = only(outcome.diagnostics);
 
         expect(diagnostic.code).toBe(code);
@@ -1262,6 +1262,19 @@ describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table
         expect(diagnostic.related?.map((at) => String(at.pointer))).toEqual([
           "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
         ]);
+      });
+
+      test(`${code} ${line} on an optional property is refused at field scope and the alternative stays`, () => {
+        const outcome = implemented(line, styledForm(property, encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe(code);
+        expect(diagnostic.scope).toBe("field");
+        expect(String(diagnostic.pointer)).toBe(
+          "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
+        );
+        expect(diagnostic.related).toBeUndefined();
+        expect(only(outcome.body.alternatives).refusedFields?.map(String)).toEqual(["a"]);
       });
     }
   }

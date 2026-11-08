@@ -620,7 +620,7 @@ describe("ENC rule rows through generate()", () => {
 
   for (const line of ["3.1.2", "3.2.1"] as const) {
     for (const style of ["spaceDelimited", "pipeDelimited", "deepObject"] as const) {
-      test(`ENC-40: a ${style} multipart part is refused alone at element scope (${line})`, async () => {
+      test(`ENC-40: a ${style} multipart part is refused alone at field scope (${line})`, async () => {
         const found = await inProcess(
           withMultipart(line, {
             encoding: { tags: { style } },
@@ -635,7 +635,7 @@ describe("ENC rule rows through generate()", () => {
         );
 
         expect(summary(found)).toEqual([
-          ["ENC-40/unsupported-part-style", "refusal", "element", `${media}/encoding/tags`],
+          ["ENC-40/unsupported-part-style", "refusal", "field", `${media}/encoding/tags`],
         ]);
       });
     }

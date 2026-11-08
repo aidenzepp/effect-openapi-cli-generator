@@ -422,7 +422,7 @@ describe("ENC field rows through generate()", () => {
       ]);
     });
 
-    test(`ENC-02: a form contentType other than the default type refuses the form alternative at element scope (${line})`, async () => {
+    test(`ENC-02: a form contentType other than the default type refuses the optional property at field scope (${line})`, async () => {
       const found = await inProcess(
         withBody(line, urlEncoded, {
           encoding: { a: { contentType: "application/json" } },
@@ -434,8 +434,8 @@ describe("ENC field rows through generate()", () => {
         [
           "ENC-02/form-content-type",
           "refusal",
-          "element",
-          formAt,
+          "field",
+          `${formAt}/encoding/a`,
           `${formAt}/encoding/a/contentType`,
         ],
       ]);

@@ -131,15 +131,23 @@ const MediaTypeObject = Schema.Struct({
 
 type MediaNode = typeof MediaTypeObject.Type;
 
-// Only what the multipart rules read of a schema; a boolean schema decodes to nothing.
+// Only what the part rules read of a schema; a boolean schema decodes to nothing. `required` and
+// the compositions are `Unknown` so a malformed value never hides the node's other members.
 const SchemaNode = Schema.Struct({
   additionalProperties: Schema.optionalKey(Schema.Unknown),
   allOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  anyOf: Schema.optionalKey(Schema.Unknown),
   contentEncoding: Schema.optionalKey(Schema.String),
+  dependentRequired: Schema.optionalKey(Schema.Unknown),
+  dependentSchemas: Schema.optionalKey(Schema.Unknown),
   format: Schema.optionalKey(Schema.String),
+  if: Schema.optionalKey(Schema.Unknown),
   items: Schema.optionalKey(Schema.Unknown),
+  not: Schema.optionalKey(Schema.Unknown),
+  oneOf: Schema.optionalKey(Schema.Unknown),
   prefixItems: Schema.optionalKey(Schema.Array(Schema.Unknown)),
   properties: Schema.optionalKey(ObjectValue),
+  required: Schema.optionalKey(Schema.Unknown),
   type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 });
 
@@ -220,6 +228,10 @@ interface Finding {
   readonly message: string;
   readonly at: CanonicalKey;
   readonly related?: readonly CanonicalKey[];
+  /**
+   * `field`: one property of a kept alternative is refused (design 8.5); absent, `element`.
+   */
+  readonly scope?: "field";
   readonly severity: "notice" | "refusal";
 }
 
@@ -255,6 +267,17 @@ const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly
       ? { ...finding, at: home, related: [finding.at, ...(finding.related ?? [])] }
       : finding,
   );
+
+// A dropping refusal of an optional property whose alternative stays is refused at `field` scope,
+// anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4).
+const fieldRefusal = (entry: CanonicalKey, finding: Finding): Finding => {
+  const { drops: _drops, ...kept } = finding;
+  const field: Finding = { ...kept, at: entry, scope: "field" };
+
+  return keyOf(finding.at) === keyOf(entry)
+    ? field
+    : { ...field, related: [finding.at, ...(finding.related ?? [])] };
+};
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -402,6 +425,81 @@ const memberSchema = (members: Members, target: Target): CanonicalKey | undefine
   target.kind === "property"
     ? members.properties.find(([name]) => name === target.name)?.[1]
     : members.prefixItems[target.index];
+
+/**
+ * Which properties of an alternative schema are required (design 8.5 rule 3): `names` gathers every
+ * `required` array on the path `membersOf` walks, the root, `$ref` targets and `allOf` members.
+ * `sure` is false when that walk cannot be complete: a cycle, a reference it cannot follow, or a
+ * composition it does not resolve; then every property counts as required.
+ */
+interface Requirement {
+  readonly names: ReadonlySet<string>;
+  readonly sure: boolean;
+}
+
+// Keywords that can make a property required on a path `membersOf` does not follow; `then` and
+// `else` apply only under `if`.
+const unresolved = [
+  "anyOf",
+  "dependentRequired",
+  "dependentSchemas",
+  "if",
+  "not",
+  "oneOf",
+] as const;
+
+const requiredStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String));
+
+const requirementOf = (
+  walk: Walk,
+  schema: CanonicalKey,
+): Effect.Effect<Requirement, BodyNodeBudget> =>
+  Effect.gen(function* requirement() {
+    const names = new Set<string>();
+    const done = new Set<string>();
+    const path = new Set<string>();
+    let sure = true;
+    // A schema already on the path is a cycle, and a reference `settle` left unfollowed is not
+    // resolved: either leaves the walk unsure. A schema reached twice otherwise is read once.
+    const visit = (start: CanonicalKey): Effect.Effect<void, BodyNodeBudget> =>
+      Effect.gen(function* member() {
+        const at = settle(walk.resolution, start);
+        walk.spent += 1;
+        if (walk.spent > walk.maxNodes) {
+          yield* budgetFailure(walk);
+        }
+
+        const key = keyOf(at);
+        if (path.has(key) || referenceIn(walk.resolution, at)?.kind === "schema") {
+          sure = false;
+        } else if (!done.has(key)) {
+          done.add(key);
+
+          const node = yield* nodeAt(walk.resolution, at);
+          for (const name of Option.getOrElse(requiredStrings(node.required), () => [])) {
+            names.add(name);
+          }
+
+          if (unresolved.some((keyword) => node[keyword] !== undefined)) {
+            sure = false;
+          }
+
+          path.add(key);
+          for (const index of (node.allOf ?? []).keys()) {
+            yield* visit(childKey(at, "allOf", String(index)));
+          }
+
+          path.delete(key);
+        }
+      });
+
+    yield* visit(schema);
+
+    return { names, sure };
+  });
+
+const isRequired = (requirement: Requirement, name: string): boolean =>
+  !requirement.sure || requirement.names.has(name);
 
 interface Facts {
   readonly contentEncoding: { readonly at: CanonicalKey; readonly value: string } | undefined;
@@ -636,9 +734,11 @@ export const sendsFormPairs = (serialization: {
 
 const formPairsType = "text/plain";
 
+const unsupportedPartStyleCode = "ENC-40/unsupported-part-style";
+
 const unsupportedPartStyle = (input: RuleInput): Finding =>
   refusal(
-    "ENC-40/unsupported-part-style",
+    unsupportedPartStyleCode,
     "appendix-c-using-rfc6570-based-serialization",
     "Encoding style, explode or allowReserved",
     `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
@@ -1276,6 +1376,7 @@ interface PlainAlternative {
   readonly mediaType: string;
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly prefixEncoding: readonly PlainRule[];
+  refusedFields?: readonly string[];
   readonly rows: readonly string[];
   schema?: { readonly key: string };
 }
@@ -1402,6 +1503,10 @@ interface Parts {
   readonly itemEncoding: PlainRule | undefined;
   readonly prefixEncoding: readonly PlainRule[];
   readonly refused: boolean;
+  /**
+   * The properties refused at `field` scope, in property order (design 8.5).
+   */
+  readonly refusedFields: readonly string[];
 }
 
 const noParts: Parts = {
@@ -1410,6 +1515,7 @@ const noParts: Parts = {
   itemEncoding: undefined,
   prefixEncoding: [],
   refused: false,
+  refusedFields: [],
 };
 
 const refusedParts = (findings: readonly Finding[]): Parts => ({
@@ -1607,6 +1713,48 @@ const isObjectBody = (
     );
   });
 
+interface PartStyles {
+  readonly drops: boolean;
+  readonly findings: readonly Finding[];
+  readonly refusedFields: readonly string[];
+}
+
+// ENC-40 on a named part follows the form property rules (design 8.5 rules 2, 3 and 11): refused
+// at `field` scope when every named part it refuses is optional, otherwise every one of them drops
+// the alternative. A 3.2 positional entry has no name, so its refusal keeps `element` scope.
+const partStyles = (
+  ctx: Context,
+  schema: CanonicalKey | undefined,
+  inputs: readonly RuleInput[],
+  findings: readonly Finding[],
+): Effect.Effect<PartStyles, BodyNodeBudget> =>
+  Effect.gen(function* styles() {
+    const named = new Map(
+      inputs.flatMap((input) =>
+        input.target.kind === "property" ? [[keyOf(input.actual), input.target.name] as const] : [],
+      ),
+    );
+    const nameOf = (finding: Finding): string | undefined =>
+      finding.code === unsupportedPartStyleCode ? named.get(keyOf(finding.at)) : undefined;
+    const refusedFields = findings.flatMap((finding) => nameOf(finding) ?? []);
+    if (schema === undefined || refusedFields.length === 0) {
+      return { drops: false, findings, refusedFields: [] };
+    }
+
+    const requirement = yield* requirementOf(ctx.walk, schema);
+    const drops = refusedFields.some((name) => isRequired(requirement, name));
+    const moved = (finding: Finding): Finding =>
+      drops ? dropping(finding) : fieldRefusal(finding.at, finding);
+
+    return {
+      drops,
+      findings: findings.map((finding) =>
+        nameOf(finding) === undefined ? finding : moved(finding),
+      ),
+      refusedFields: drops ? [] : refusedFields,
+    };
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1648,8 +1796,13 @@ const multipartParts = (
     const honorsStyle = base === "multipart/form-data" && line !== "3.0";
     const inputs = partInputs(line, media, members, honorsStyle, base === "multipart/form-data");
     const built = yield* buildAll(ctx, inputs);
-    const findings = [...extra, ...keys.findings, ...built.findings];
     if (built.refused) {
+      return refusedParts([...extra, ...keys.findings, ...built.findings]);
+    }
+
+    const styled = yield* partStyles(ctx, schema, inputs, built.findings);
+    const findings = [...extra, ...keys.findings, ...styled.findings];
+    if (styled.drops) {
       return refusedParts(findings);
     }
 
@@ -1663,6 +1816,7 @@ const multipartParts = (
       itemEncoding: positioned[prefixCount],
       prefixEncoding: positioned.slice(0, prefixCount),
       refused: false,
+      refusedFields: styled.refusedFields,
     };
   });
 
@@ -1953,7 +2107,15 @@ const refusedFormParts = (findings: readonly Finding[]): Parts =>
   refusedParts(findings.filter((finding) => finding.code !== bracketChoiceCode));
 
 // Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
-const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBudget> =>
+// With `fields` (a request body, design 8.5 rules 2, 3 and 11), a property whose rule refuses is
+// refused at `field` scope when it is optional, and the alternative stays; a required one drops
+// the alternative with every entry's dropping refusals, so no `field` record outlives it. Without
+// (a `querystring` content entry, design 6.1), the first refusing rule refuses the entry.
+const formParts = (
+  ctx: Context,
+  media: Media,
+  fields: boolean,
+): Effect.Effect<Parts, BodyNodeBudget> =>
   Effect.gen(function* parts() {
     const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
     const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
@@ -1964,17 +2126,44 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
 
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
+    const refusedFields: string[] = [];
+    const entries = new Map<Finding, CanonicalKey>();
+    let requirement: Requirement | undefined;
     for (const input of propertyInputs(media, members, true, false)) {
       const result = yield* formRule(ctx, input);
       findings.push(...result.findings);
-      if (result.rule === undefined) {
+      if (result.rule !== undefined) {
+        rules.push(result.rule);
+        continue;
+      }
+
+      if (!fields || schema === undefined || input.target.kind !== "property") {
         return refusedFormParts(findings);
       }
 
-      rules.push(result.rule);
+      requirement ??= yield* requirementOf(ctx.walk, schema);
+      if (isRequired(requirement, input.target.name)) {
+        return refusedFormParts(findings);
+      }
+
+      refusedFields.push(input.target.name);
+      for (const finding of result.findings) {
+        if (finding.drops === true) {
+          entries.set(finding, input.actual);
+        }
+      }
     }
 
-    return { ...noParts, encoding: rules, findings };
+    return {
+      ...noParts,
+      encoding: rules,
+      findings: findings.map((finding) => {
+        const entry = entries.get(finding);
+
+        return entry === undefined ? finding : fieldRefusal(entry, finding);
+      }),
+      refusedFields,
+    };
   });
 
 const ignoredParts = (line: Line, media: Media): Parts => {
@@ -1998,7 +2187,9 @@ const partsOf = (
     return multipartParts(ctx, media, base);
   }
 
-  return codec === "form" ? formParts(ctx, media) : Effect.succeed(ignoredParts(ctx.line, media));
+  return codec === "form"
+    ? formParts(ctx, media, true)
+    : Effect.succeed(ignoredParts(ctx.line, media));
 };
 
 const normalizeAlternative = (
@@ -2064,6 +2255,10 @@ const normalizeAlternative = (
       result.itemEncoding = parts.itemEncoding;
     }
 
+    if (parts.refusedFields.length > 0) {
+      result.refusedFields = parts.refusedFields;
+    }
+
     const described = line === "3.2" && node.description !== undefined;
 
     return {
@@ -2085,7 +2280,7 @@ interface DiagnosticFields {
   pointer: string;
   related?: readonly { readonly document: string; readonly pointer: string }[];
   row: string;
-  scope: "element";
+  scope: "element" | "field";
   severity: "notice" | "refusal";
   specSection: string;
 }
@@ -2107,7 +2302,7 @@ const toDiagnostics = (
         openapi: ctx.site.openapi,
         pointer: ctx.reference === undefined ? item.at.pointer : ctx.site.pointer,
         row: item.code.slice(0, item.code.indexOf("/")),
-        scope: "element",
+        scope: item.scope ?? "element",
         severity: item.severity,
         specSection: specSectionUrl(ctx.line, item.anchor),
       };
@@ -2401,7 +2596,7 @@ export const formContentRules = (
       resolution,
       childKey(follow(resolution, use), "content", mediaType),
     );
-    const parts = yield* formParts(ctx, media);
+    const parts = yield* formParts(ctx, media, false);
     if (parts.refused) {
       return {
         _tag: "Refused",
