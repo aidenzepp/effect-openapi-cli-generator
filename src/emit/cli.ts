@@ -819,6 +819,12 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return yield* partOptionEntry(flag, source, operation, context);
     }
 
+    // A `format: password` property's secret-file flag (design 13.1 R4): the m3-pw2 helper carries
+    // its presence and its help note, which a schema description would replace.
+    if (source.kind === "secret-file") {
+      return [flag.identifier, fn("Input.secretFileFlag", str(flag.name))] as const;
+    }
+
     const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
@@ -926,6 +932,28 @@ const alternativeBody = (
       }
 
       const value = yield* flagValue(flag.identifier);
+      // The secret-file flag stays a path string at parse; the runtime reads it, bounded, and
+      // scrubs it from every error path (m3-pw2).
+      if (source.kind === "secret-file") {
+        fields.push([
+          source.wireName,
+          fn(
+            "Option.map",
+            value,
+            arrow(
+              [{ name: I("path") }],
+              newExpr(path("Input.SecretField"), [
+                obj([
+                  ["flag", str(flag.name)],
+                  ["path", ident(I("path"))],
+                ]),
+              ]),
+            ),
+          ),
+        ]);
+        continue;
+      }
+
       if (!isEncodedField(flag, alternative)) {
         fields.push([source.wireName, value]);
         continue;
