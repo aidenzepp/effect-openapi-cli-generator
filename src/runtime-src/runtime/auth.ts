@@ -5,11 +5,13 @@ import {
   FileSystem,
   Layer,
   Option,
+  Path,
   Redacted,
   Stdio,
   Stream,
+  Terminal,
 } from "effect";
-import { Flag, GlobalFlag } from "effect/cli";
+import { Flag, GlobalFlag, Prompt, TerminalCapabilities } from "effect/cli";
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
@@ -253,6 +255,51 @@ const noticeDeprecated = (
     }
   }).pipe(Effect.ignore);
 
+interface PromptServices {
+  readonly path: Path.Path;
+  readonly terminal: Terminal.Terminal;
+}
+
+// `Terminal` and `Path` are read optionally, so `evaluate` adds no requirement: `Command.run`
+// provides both, and without them the prompt is skipped as off a TTY.
+const promptServices: Effect.Effect<Option.Option<PromptServices>> = Effect.gen(
+  function* promptServicesOf() {
+    const { canPrompt } = yield* TerminalCapabilities.TerminalCapabilities;
+    const terminal = yield* Effect.serviceOption(Terminal.Terminal);
+    const path = yield* Effect.serviceOption(Path.Path);
+
+    return canPrompt && Option.isSome(terminal) && Option.isSome(path)
+      ? Option.some({ path: path.value, terminal: terminal.value })
+      : Option.none();
+  },
+);
+
+/**
+ * Ask for one scheme's credential with `Prompt.Password`, which masks the input and returns it
+ * `Redacted`. An empty answer is no credential; a quit prompt interrupts the run.
+ */
+const ask = (
+  scheme: string,
+  { path, terminal }: PromptServices,
+): Effect.Effect<Option.Option<Redacted.Redacted>, never, FileSystem.FileSystem> =>
+  Prompt.run(
+    Prompt.Password({ message: `Credential for ${scheme.replaceAll(unsafeName, "")}` }),
+  ).pipe(
+    Effect.provideService(Terminal.Terminal, terminal),
+    Effect.provideService(Path.Path, path),
+    Effect.map(Option.liftPredicate((value) => Redacted.value(value) !== "")),
+    Effect.catchTag("QuitError", () => Effect.interrupt),
+  );
+
+// The prompt reads stdin, so it takes the one stdin claim; `false` when a `-` consumer holds it.
+const claimStdin = (scheme: string): Effect.Effect<boolean, never, StdinClaim> =>
+  Effect.flatMap(Effect.service(StdinClaim), (stdin) =>
+    stdin.claim(`${schemeSlug(scheme)}-file`),
+  ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  );
+
 const describeAlternative = (
   envPrefix: string,
   table: SecurityTable,
@@ -275,6 +322,15 @@ const describeAlternative = (
  * be configured. A chosen deprecated scheme is named once on stderr before the request. Each scheme
  * is resolved once, so stdin is claimed at most once, shared with the body flags through
  * `StdinClaim`.
+ *
+ * The TTY prompt is the last credential source (design 6.5, D-SEC5: file flag > env > prompt).
+ * It is asked only when no alternative qualifies from the file flags and the environment and no
+ * `{}` allows anonymous access, so a configured alternative is never preceded by a prompt. It
+ * fills the first alternative, in document order, whose schemes are all defined, asking for each
+ * scheme with no configured credential. It runs only when stdin and stdout are TTYs
+ * (`TerminalCapabilities.canPrompt`, the check `Flag.withFallbackPrompt` makes) and stdin is
+ * unclaimed: the prompt reads stdin, so it takes the one stdin claim (design 4.5), and a `-`
+ * consumer that holds it skips the prompt. A skipped or unanswered prompt is `CredentialMissing`.
  */
 export const evaluate = (
   operation: string,
@@ -327,6 +383,48 @@ export const evaluate = (
 
     if (requirement.length === 0 || requirement.some((alternative) => alternative.length === 0)) {
       return [];
+    }
+
+    const target = requirement.find((alternative) =>
+      alternative.every((scheme) => Object.hasOwn(table.schemes, scheme)),
+    );
+    const services = target === undefined ? Option.none() : yield* promptServices;
+    if (target !== undefined && Option.isSome(services)) {
+      // Every file flag is read before the first prompt, so a `--<scheme>-file -` keeps stdin.
+      const configured: (readonly [string, Option.Option<Credential>])[] = [];
+      for (const scheme of target) {
+        configured.push([scheme, yield* resolve(scheme)]);
+      }
+
+      const credentials: Credential[] = [];
+      let claimed = false;
+      for (const [scheme, found] of configured) {
+        const definition = table.schemes[scheme];
+        if (Option.isSome(found)) {
+          credentials.push(found.value);
+        } else if (definition !== undefined) {
+          if (!claimed) {
+            claimed = yield* claimStdin(scheme);
+          }
+
+          if (!claimed) {
+            break;
+          }
+
+          const answer = yield* ask(scheme, services.value);
+          if (Option.isNone(answer)) {
+            break;
+          }
+
+          credentials.push({ definition, scheme, value: answer.value });
+        }
+      }
+
+      if (credentials.length === target.length) {
+        yield* noticeDeprecated(credentials);
+
+        return credentials;
+      }
     }
 
     return yield* new CredentialMissing({
