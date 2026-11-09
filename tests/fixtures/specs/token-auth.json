@@ -1,0 +1,68 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "Token auth fixture", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": { "port": { "default": "80" } }
+    }
+  ],
+  "paths": {
+    "/pets/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["pets"],
+        "operationId": "pets-get",
+        "security": [{ "oauth": ["pets:read", "pets:write"] }],
+        "responses": {
+          "200": {
+            "description": "The pet.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/profiles/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["profiles"],
+        "operationId": "profiles-get",
+        "security": [{ "oidc": ["openid", "profile:read"] }],
+        "responses": {
+          "200": {
+            "description": "The profile.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "oauth2MetadataUrl": "https://auth.invalid/.well-known/oauth-authorization-server",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://auth.invalid/token",
+            "scopes": { "pets:admin": "Administer pets" }
+          },
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.invalid/authorize",
+            "tokenUrl": "https://auth.invalid/token",
+            "refreshUrl": "https://auth.invalid/refresh",
+            "scopes": { "pets:read": "Read pets", "pets:write": "Write pets" }
+          }
+        }
+      },
+      "oidc": {
+        "type": "openIdConnect",
+        "openIdConnectUrl": "https://auth.invalid/.well-known/openid-configuration"
+      }
+    }
+  }
+}
