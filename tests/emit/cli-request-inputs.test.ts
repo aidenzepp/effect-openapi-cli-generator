@@ -228,7 +228,9 @@ describe("emitCli: cookie and querystring parameters", () => {
     const { users } = await cliOf(optional);
     const readCommand = statement(users, "sessionsRead");
 
-    expect(readCommand).toContain('filter: Input.jsonFlag("filter").pipe(Flag.optional');
+    expect(readCommand).toContain(
+      'filter: Input.jsonFlag("filter").pipe(Flag.withMetavar("json"), Flag.optional',
+    );
     expect(readCommand).toContain("filter: Option.getOrUndefined(flags.filter)");
   });
 
