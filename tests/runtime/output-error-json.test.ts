@@ -35,6 +35,7 @@ import type * as Client from "../../src/runtime-src/runtime/client.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
 import type { ScrubEntry } from "../../src/runtime-src/runtime/redact.ts";
+import { RunCredentials, runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 const PREFIX = "EXAMPLE";
@@ -124,7 +125,7 @@ const sendLayer = Layer.mergeAll(
 
 type TestServices =
   | Layer.Success<typeof sendLayer>
-  | Output.RunCredentials
+  | RunCredentials
   | Stdio.Stdio
   | GlobalFlag.Setting.Identifier<"error-format">;
 
@@ -146,7 +147,7 @@ const runCatch = async <A, E>(
   const environment = Layer.mergeAll(
     sendLayer,
     Stdio.layerTest({ stderr: capture(stderr), stdout: capture([]) }),
-    Layer.effect(Output.RunCredentials)(Ref.make<readonly ScrubEntry[]>(options.recorded ?? [])),
+    Layer.effect(RunCredentials)(Ref.make<readonly ScrubEntry[]>(options.recorded ?? [])),
     ConfigProvider.layer(ConfigProvider.fromEnvRecord(options.env ?? {})),
   );
   const caught = Output.finalCatch(
@@ -575,7 +576,7 @@ const parseRun = async (args: readonly string[], env: Record<string, string> = {
               ),
             stdout: capture([]),
           }),
-          Output.runCredentialsLayer,
+          runCredentialsLayer,
           Output.runRecordLayer,
           ConfigProvider.layer(ConfigProvider.fromEnvRecord(env)),
           CliOutput.layer(Output.valueFreeFormatter),

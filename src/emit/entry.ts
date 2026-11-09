@@ -273,7 +273,7 @@ const clientCertificateStatements = (config: AuthorConfig): readonly Statement[]
     ),
     fn(
       "Layer.provide",
-      fn("Layer.mergeAll", path("BunServices.layer"), path("Output.runCredentialsLayer")),
+      fn("Layer.mergeAll", path("BunServices.layer"), path("Redact.runCredentialsLayer")),
     ),
   );
 
@@ -337,7 +337,7 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
     path("clientPolicy"),
     path("fileBody"),
     ...(mutualTls ? [path("clientCertificate")] : []),
-    path("Output.runCredentialsLayer"),
+    path("Redact.runCredentialsLayer"),
     path("Output.runRecordLayer"),
     path("Output.runWarningsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
@@ -365,6 +365,7 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
       namespace("./runtime/client.ts", "Client"),
       namespace("./runtime/file-body.ts", "FileBody"),
       namespace("./runtime/output.ts", "Output"),
+      namespace("./runtime/redact.ts", "Redact"),
     ],
     shebang: Schema.decodeSync(Shebang)("/usr/bin/env bun"),
     statements: [

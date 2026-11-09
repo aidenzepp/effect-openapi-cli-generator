@@ -7,6 +7,7 @@ import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Multipart from "../../src/runtime-src/runtime/multipart.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
 import type { ScrubEntry } from "../../src/runtime-src/runtime/redact.ts";
+import { RunCredentials } from "../../src/runtime-src/runtime/redact.ts";
 
 // m3-pwmh: a multipart `format: password` part is a file part (ruling DR4), its flag a path or `-`.
 // An operator may pass the secret itself as the value; a read failure for that flag (missing file,
@@ -49,7 +50,7 @@ const runPart = async (
     BunPath.layer,
     Stdio.layerTest({ stderr: capture(stderr), stdout: capture(stdout) }),
     Input.stdinClaimLayer,
-    Layer.effect(Output.RunCredentials)(Ref.make<readonly ScrubEntry[]>([])),
+    Layer.effect(RunCredentials)(Ref.make<readonly ScrubEntry[]>([])),
   );
   const exit = await Effect.runPromise(Effect.exit(program).pipe(Effect.provide(environment)));
 

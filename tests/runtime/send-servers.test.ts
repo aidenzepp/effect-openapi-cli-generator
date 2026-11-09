@@ -22,6 +22,7 @@ import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // Each operation's bound origin set comes from its own effective servers (operation, else path
@@ -188,7 +189,7 @@ const run = async (meta: Output.OperationMeta, world: World = {}) => {
     Path.layer,
     Stdio.layerTest({ stderr: sink, stdout: sink, stdoutIsTerminal: Effect.succeed(false) }),
     Input.stdinClaimLayer,
-    Output.runCredentialsLayer,
+    runCredentialsLayer,
     Layer.succeed(HttpClient.HttpClient, client),
     Layer.succeed(Output.ClientPolicy, {
       allowed: new Set(["GET"]),

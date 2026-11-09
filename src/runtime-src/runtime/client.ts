@@ -536,17 +536,23 @@ export const redirectLoop =
   };
 
 /**
- * Sets `User-Agent: <binName>/<version>` (design 6.2) in place of Bun's implicit `Bun/<v>`. It
- * replaces a caller-set value. Apply it outermost: every redirect hop starts from the caller's
- * headers, so the value reaches each hop.
+ * Sets `User-Agent: <binName>/<version>` (design 6.2) on one request, replacing a caller-set
+ * value. `withUserAgent` and the `--dry-run` preview both use it, so they print the same value.
+ */
+export const setUserAgent = (
+  binName: string,
+  version: string,
+): ((request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) =>
+  HttpClientRequest.setHeader("user-agent", `${binName}/${version}`);
+
+/**
+ * Sets `User-Agent` (`setUserAgent`) in place of Bun's implicit `Bun/<v>`. Apply it outermost:
+ * every redirect hop starts from the caller's headers, so the value reaches each hop.
  */
 export const withUserAgent =
   (binName: string, version: string) =>
   <E, R>(client: HttpClient.HttpClient.With<E, R>): HttpClient.HttpClient.With<E, R> =>
-    HttpClient.mapRequestInput(
-      client,
-      HttpClientRequest.setHeader("user-agent", `${binName}/${version}`),
-    );
+    HttpClient.mapRequestInput(client, setUserAgent(binName, version));
 
 /**
  * The methods retried without `--retry-unsafe` (design D-AD7): RFC 9110 9.2.2's idempotent
@@ -674,7 +680,9 @@ export class CappedResponse extends OwnedResponse {
 
 /**
  * The server's `Retry-After` delay in seconds when retrying stopped at the cap; `None` for every
- * other response, including one whose retries ran out or ended for another reason.
+ * other response, including one whose retries ran out or ended for another reason. The match is by
+ * class, so it holds only while no transform outside `retryTransform` wraps the response (a tagged
+ * field would be lost to such a wrapper too).
  */
 export const retryAfterCapSeconds = (
   response: HttpClientResponse.HttpClientResponse,

@@ -22,6 +22,7 @@ import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { RunCredentials, runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // A quote and a kept trailing LF, so the raw form and the JSON-escaped form differ.
@@ -81,21 +82,21 @@ const withTempFile = <A, E, R>(content: string, use: (path: string) => Effect.Ef
 const textOf = (body: HttpBody.HttpBody): string =>
   body._tag === "Uint8Array" ? decoder.decode(body.body) : `<${body._tag}>`;
 
-const recorded = Effect.flatMap(Effect.service(Output.RunCredentials), Ref.get);
+const recorded = Effect.flatMap(Effect.service(RunCredentials), Ref.get);
 
 const inputLayer = (stdin: string, stderr: Buffer[] = []) =>
   Layer.mergeAll(
     BunFileSystem.layer,
     stdioOf(stdin, stderr),
     Input.stdinClaimLayer,
-    Output.runCredentialsLayer,
+    runCredentialsLayer,
   );
 
 const runInput = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    FileSystem.FileSystem | Stdio.Stdio | Input.StdinClaim | Output.RunCredentials
+    FileSystem.FileSystem | Stdio.Stdio | Input.StdinClaim | RunCredentials
   >,
   stdin = "",
 ) => Effect.runPromise(Effect.exit(effect).pipe(Effect.provide(inputLayer(stdin))));
@@ -261,7 +262,7 @@ describe("a secret recorded before send", () => {
       Path.layer,
       stdioOf(SECRET, stderr),
       Input.stdinClaimLayer,
-      Output.runCredentialsLayer,
+      runCredentialsLayer,
       Layer.succeed(HttpClient.HttpClient, client),
       Layer.succeed(Output.ClientPolicy, {
         allowed: new Set(["POST"]),

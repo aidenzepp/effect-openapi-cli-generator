@@ -4,6 +4,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Cause, Console, Effect, Exit, Layer, Runtime, Sink, Stdio } from "effect";
 import { CliError, CliOutput, Command, Flag } from "effect/cli";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 const canary = "CANARY-SECRET-123";
 
@@ -68,7 +69,7 @@ const run = (args: readonly string[], options: Options = {}): Promise<Run> =>
       })(args).pipe(
         Output.exitForHelp,
         Output.finalCatch([]),
-        Effect.provide(Layer.merge(stdio, Output.runCredentialsLayer)),
+        Effect.provide(Layer.merge(stdio, runCredentialsLayer)),
         Effect.provide(CliOutput.layer(options.formatter ?? Output.valueFreeFormatter)),
         Effect.provide(CliOutput.layerPresenter(Output.presenter)),
         Effect.provide(BunServices.layer),

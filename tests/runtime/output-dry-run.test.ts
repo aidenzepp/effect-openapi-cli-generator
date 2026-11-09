@@ -26,6 +26,7 @@ import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Multipart from "../../src/runtime-src/runtime/multipart.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
 import type { ScrubEntry } from "../../src/runtime-src/runtime/redact.ts";
+import { RunCredentials } from "../../src/runtime-src/runtime/redact.ts";
 
 // `--dry-run` (m3-dr1): `Output.send` builds the request as for sending, prints it to stdout with
 // every credential replaced by `<redacted:<scheme>>`, and sends nothing.
@@ -119,7 +120,7 @@ const run = async (world: World) => {
     stdout: capture(stdout),
     stdoutIsTerminal: Effect.succeed(tty),
   });
-  const recorded = Layer.effect(Output.RunCredentials)(Ref.make(world.recorded ?? []));
+  const recorded = Layer.effect(RunCredentials)(Ref.make(world.recorded ?? []));
   const environment = Layer.mergeAll(
     BaseUrl.layer(servers, "EXAMPLE"),
     Auth.layer(security, "EXAMPLE"),
