@@ -1,0 +1,62 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "Token auth help fixture", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": { "port": { "default": "80" } }
+    }
+  ],
+  "paths": {
+    "/users/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["users"],
+        "operationId": "users-get",
+        "security": [
+          { "oauth": ["users:read", "users:audit"] },
+          { "oidc": ["openid", "users:profile"] },
+          { "key": ["role-auditor", "role-operator"] }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "oauth2MetadataUrl": "http://capture.invalid/.well-known/oauth-authorization-server",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "http://capture.invalid/oauth/token",
+            "scopes": { "users:admin": "Administer users" }
+          },
+          "authorizationCode": {
+            "authorizationUrl": "http://capture.invalid/oauth/authorize",
+            "tokenUrl": "http://capture.invalid/oauth/token",
+            "refreshUrl": "http://capture.invalid/oauth/refresh",
+            "scopes": { "users:read": "Read users", "users:audit": "Audit users" }
+          },
+          "deviceAuthorization": {
+            "deviceAuthorizationUrl": "http://capture.invalid/oauth/device",
+            "tokenUrl": "http://capture.invalid/oauth/token",
+            "scopes": { "users:device": "Use a device" }
+          }
+        }
+      },
+      "oidc": {
+        "type": "openIdConnect",
+        "openIdConnectUrl": "http://capture.invalid/.well-known/openid-configuration"
+      },
+      "key": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+    }
+  }
+}
