@@ -1898,6 +1898,7 @@ const present = (name: string, value: string | undefined): readonly (readonly [s
 const flowExpr = (flow: OAuthFlow): Expr =>
   obj([
     ...present("authorizationUrl", flow.authorizationUrl),
+    ...present("deviceAuthorizationUrl", flow.deviceAuthorizationUrl),
     ...present("refreshUrl", flow.refreshUrl),
     [
       "scopes",

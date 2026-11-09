@@ -127,6 +127,35 @@ describe("scheme kinds", () => {
     expect(result).toEqual(["mutualTls", "oauth2Token", "oidcToken"]);
   });
 
+  test("a 3.2 deviceAuthorization flow keeps its sanitized deviceAuthorizationUrl", () => {
+    const [kind] = kinds(
+      {
+        o: {
+          flows: {
+            deviceAuthorization: {
+              deviceAuthorizationUrl: "https://a.example/device\u0007\u202E",
+              scopes: {},
+              tokenUrl: "https://a.example/t",
+            },
+          },
+          type: "oauth2",
+        },
+      },
+      "3.2",
+    );
+
+    expect(kind).toEqual({
+      flows: {
+        deviceAuthorization: {
+          deviceAuthorizationUrl: "https://a.example/device",
+          scopes: [],
+          tokenUrl: "https://a.example/t",
+        },
+      },
+      type: "oauth2Token",
+    });
+  });
+
   test("a 3.2 deprecated scheme keeps its flag", () => {
     const { schemes } = run(
       "3.2",

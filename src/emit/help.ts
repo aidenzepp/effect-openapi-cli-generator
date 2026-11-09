@@ -310,7 +310,9 @@ const acquisition = "token acquisition is not supported; supply an access token"
 
 // One flow: its URLs when the spec gives them, then its scope names and descriptions (OAF-01, OAF-12).
 const flowText = (kind: string, flow: NonNullable<Flows[keyof Flows]>): string => {
-  const urls = (["authorizationUrl", "tokenUrl", "refreshUrl"] as const).flatMap((field) => {
+  const urls = (
+    ["authorizationUrl", "deviceAuthorizationUrl", "tokenUrl", "refreshUrl"] as const
+  ).flatMap((field) => {
     const url = flow[field];
 
     return url === undefined ? [] : [`${field} ${line(url)}`];

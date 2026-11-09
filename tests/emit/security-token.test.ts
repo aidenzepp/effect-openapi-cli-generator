@@ -9,6 +9,7 @@ import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Server } from "../../src/model/entities.ts";
 import type { Json } from "../../src/model/pointer.ts";
+import type { Line } from "../../src/validate/index.ts";
 import { planNames } from "../../src/names/index.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import { boundOrigins } from "../../src/normalize/servers.ts";
@@ -64,9 +65,34 @@ const spec: Json = {
   servers: [{ url: "https://api.example" }],
 };
 
-const emitted = await Effect.runPromise(
+// A 3.2 `deviceAuthorization` flow: its `deviceAuthorizationUrl` is help-only data like the other
+// flow URLs (OAF-09, design 9 I3).
+const deviceSpec: Json = {
+  components: {
+    securitySchemes: {
+      deviceAuth: {
+        flows: {
+          deviceAuthorization: {
+            deviceAuthorizationUrl: "https://a.example/device",
+            scopes: { "pets:read": "Read pets" },
+            tokenUrl: "https://a.example/token",
+          },
+        },
+        type: "oauth2",
+      },
+    },
+  },
+  info: { title: "t", version: "1" },
+  openapi: "3.2.0",
+  paths: {
+    "/me": { get: { ...ok, operationId: "me", security: [{ deviceAuth: ["pets:read"] }] } },
+  },
+  servers: [{ url: "https://api.example" }],
+};
+
+const emitSecurity = (value: Json, line: Line) =>
   Effect.gen(function* generate() {
-    const resolution = yield* resolve({ document, line: "3.1", value: spec });
+    const resolution = yield* resolve({ document, line, value });
     const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
     const plan = yield* planNames(api, { config, configDocument, strict: false });
     const context = { config, configDocument, document, openapi: api.openapi };
@@ -74,8 +100,11 @@ const emitted = await Effect.runPromise(
     const files = yield* emitApi({ api, boundOrigins: bound, plan });
 
     return { content: files.find((file) => file.path === "src/api/security.ts")?.content, plan };
-  }),
-);
+  });
+
+const emitted = await Effect.runPromise(emitSecurity(spec, "3.1"));
+
+const emittedDevice = await Effect.runPromise(emitSecurity(deviceSpec, "3.2"));
 
 const scratch = nodePath.join(root, "work");
 
@@ -87,8 +116,8 @@ afterAll(() => {
   nodeFs.rmSync(work, { force: true, recursive: true });
 });
 
-// The emitted package's runtime sources and `api/security.ts`, in a scratch directory.
-const writePackage = (content: string): string => {
+// The emitted package's runtime sources and its security tables, in a scratch directory.
+const writePackage = (tables: Readonly<Record<string, string>>): string => {
   const dir = nodePath.join(work, "package");
   for (const [path, text] of Object.entries(runtimeFiles)) {
     nodeFs.mkdirSync(nodePath.dirname(nodePath.join(dir, "src", path)), { recursive: true });
@@ -96,7 +125,10 @@ const writePackage = (content: string): string => {
   }
 
   nodeFs.mkdirSync(nodePath.join(dir, "src/api"), { recursive: true });
-  nodeFs.writeFileSync(nodePath.join(dir, "src/api/security.ts"), content);
+  for (const [path, content] of Object.entries(tables)) {
+    nodeFs.writeFileSync(nodePath.join(dir, "src/api", path), content);
+  }
+
   nodeFs.writeFileSync(
     nodePath.join(dir, "tsconfig.json"),
     JSON.stringify({ compilerOptions: generatorTsconfig.compilerOptions, include: ["src"] }),
@@ -104,6 +136,31 @@ const writePackage = (content: string): string => {
   nodeFs.symlinkSync(nodePath.join(root, "node_modules"), nodePath.join(dir, "node_modules"));
 
   return dir;
+};
+
+// One package holding both tables, type-checked once for every test that reads it.
+let checked:
+  | { readonly dir: string; readonly exitCode: number; readonly stdout: string }
+  | undefined;
+
+const typecheckedPackage = () => {
+  if (checked === undefined) {
+    const dir = writePackage({
+      "security-device.ts": emittedDevice.content ?? "",
+      "security.ts": emitted.content ?? "",
+    });
+    const typecheck = Bun.spawnSync(
+      [nodePath.join(root, "node_modules/.bin/tsc"), "--noEmit", "-p", "tsconfig.json"],
+      { cwd: dir },
+    );
+    checked = {
+      dir,
+      exitCode: typecheck.exitCode,
+      stdout: new TextDecoder().decode(typecheck.stdout),
+    };
+  }
+
+  return checked;
 };
 
 describe("api/security.ts: oauth2 and openIdConnect token schemes", () => {
@@ -117,14 +174,10 @@ describe("api/security.ts: oauth2 and openIdConnect token schemes", () => {
   test("the table carries the kinds, names and help-only data, and satisfies SecurityTable", async () => {
     expect(emitted.content).toBeString();
 
-    const dir = writePackage(emitted.content ?? "");
-    const typecheck = Bun.spawnSync(
-      [nodePath.join(root, "node_modules/.bin/tsc"), "--noEmit", "-p", "tsconfig.json"],
-      { cwd: dir },
-    );
+    const { dir, exitCode, stdout } = typecheckedPackage();
 
-    expect(new TextDecoder().decode(typecheck.stdout)).toBe("");
-    expect(typecheck.exitCode).toBe(0);
+    expect(stdout).toBe("");
+    expect(exitCode).toBe(0);
 
     const loaded: unknown = await import(nodePath.join(dir, "src/api/security.ts"));
 
@@ -149,6 +202,33 @@ describe("api/security.ts: oauth2 and openIdConnect token schemes", () => {
             },
             clientCredentials: {
               scopes: [{ description: "Administer the store", name: "admin" }],
+              tokenUrl: "https://a.example/token",
+            },
+          },
+          kind: "oauth2",
+        },
+      },
+    });
+  }, 120_000);
+
+  test("a 3.2 deviceAuthorization flow carries its deviceAuthorizationUrl and type-checks", async () => {
+    expect(emittedDevice.content).toBeString();
+
+    const { dir, exitCode, stdout } = typecheckedPackage();
+
+    expect(stdout).toBe("");
+    expect(exitCode).toBe(0);
+
+    const loaded: unknown = await import(nodePath.join(dir, "src/api/security-device.ts"));
+
+    expect(loaded).toHaveProperty("security", {
+      schemes: {
+        deviceAuth: {
+          env: "EXAMPLE_DEVICE_AUTH",
+          flows: {
+            deviceAuthorization: {
+              deviceAuthorizationUrl: "https://a.example/device",
+              scopes: [{ description: "Read pets", name: "pets:read" }],
               tokenUrl: "https://a.example/token",
             },
           },
