@@ -253,6 +253,86 @@ describe("help marks a querystring parameter by its form Encoding rules", () => 
   });
 });
 
+// The scalar switch (design 6.1 Scalar switch): its marker sits beside the bracket marker, and a
+// flag marked by both carries both notes.
+const scalarNote =
+  "non-standard: a scalar value is sent as name=value (author config nonStandard.deepObjectScalars)";
+
+const scalars = { nonStandardScalars: "deepObjectScalars" } as const;
+
+const bothMarks = { nonStandard: "deepObjectBrackets", ...scalars } as const;
+
+const scalarOperation = () => {
+  const plain = operationPlain(false);
+  const [alternative] = plain.body.alternatives;
+  const [q, other] = plain.parameters;
+
+  return {
+    ...plain,
+    body: {
+      ...plain.body,
+      alternatives: [
+        {
+          ...alternative,
+          encoding: [
+            { ...rule("filter"), ...scalars },
+            { ...rule("both"), ...bothMarks },
+            rule("sort"),
+          ],
+        },
+      ],
+    },
+    parameters: [{ ...q, serialization: { ...q?.serialization, ...scalars } }, other],
+  };
+};
+
+const scalarHelp = () => {
+  const operation = Schema.decodeUnknownSync(Operation)(scalarOperation());
+  const parameterFlag = (name: string): HelpFlag => {
+    const found = operation.parameters.find((candidate) => candidate.wireName === name);
+    if (found === undefined) {
+      throw new Error(`fixture parameter ${name} is missing`);
+    }
+
+    return { name, source: { _tag: "Parameter", negatable: false, parameter: found } };
+  };
+
+  return operationHelp({
+    credentials: [],
+    diagnostics: [],
+    flags: [
+      parameterFlag("q"),
+      parameterFlag("plain"),
+      { name: "filter", source: { _tag: "Body", pointer: "/filter" } },
+      { name: "both", source: { _tag: "Body", pointer: "/both" } },
+      { name: "sort", source: { _tag: "Body", pointer: "/sort" } },
+    ],
+    operation,
+    schemes: [],
+  });
+};
+
+describe("help marks the scalar switch's flags", () => {
+  test("a scalar-marked flag carries the scalar note, a doubly marked one carries both", () => {
+    expect(scalarHelp().flags).toEqual({
+      both: `body /both; ${note}; ${scalarNote}`,
+      filter: `body /filter; ${scalarNote}`,
+      plain: "query plain",
+      q: `query q; ${scalarNote}`,
+      sort: "body /sort",
+    });
+  });
+
+  test("the NON-STANDARD line names each choice beside its flags", () => {
+    const help = scalarHelp();
+
+    expect(titles(help)).toEqual(["REQUEST", "AUTH", "RESPONSES", "NON-STANDARD"]);
+    expect(help.sections.at(-1)?.[1]).toBe(
+      "--both (deepObjectBrackets); --q, --filter, --both (deepObjectScalars)",
+    );
+  });
+});
+
 const fixture = nodePath.resolve(import.meta.dir, "../fixtures/golden/users-update");
 
 const readJson = (relative: string) =>

@@ -237,3 +237,104 @@ describe("the report's nonStandard list", () => {
     expect(nonStandardEntries(strict, documents)).toEqual([]);
   });
 });
+
+// The scalar switch's marker (`nonStandardScalars: "deepObjectScalars"`, design 6.1 Scalar switch)
+// is set on the model directly: the bracket-marked model with the `filter` query parameter moved to
+// the scalar marker, the `/forms` rule moved to it, and the `/choices` rule carrying both markers.
+interface Marks {
+  readonly nonStandard?: string;
+  readonly nonStandardScalars?: string;
+}
+
+// The scalar marker alone, in place of the bracket marker.
+const scalarOnly = ({ nonStandard: _brackets, ...rest }: Marks): Marks => ({
+  ...rest,
+  nonStandardScalars: "deepObjectScalars",
+});
+
+// The scalar marker beside the bracket marker.
+const bothMarked = (element: Marks): Marks => ({
+  ...element,
+  nonStandardScalars: "deepObjectScalars",
+});
+
+const encodedMarked: Encoded = Schema.encodeSync(Api)(marked);
+
+type EncodedBody = NonNullable<Encoded["operations"][number]["body"]>;
+
+const remarkBody = (body: EncodedBody, marks: (element: Marks) => Marks) => ({
+  ...body,
+  alternatives: body.alternatives.map((alternative) => ({
+    ...alternative,
+    encoding: alternative.encoding.map((rule) =>
+      rule.nonStandard === undefined ? rule : marks(rule),
+    ),
+  })),
+});
+
+const scalarMarked = Schema.decodeUnknownSync(Api)({
+  ...encodedMarked,
+  operations: encodedMarked.operations.map((operation) => {
+    const marks = operation.operationId === "choices-create" ? bothMarked : scalarOnly;
+    const parameters = operation.parameters.map((parameter) =>
+      parameter.serialization.kind === "style" && parameter.serialization.nonStandard !== undefined
+        ? { ...parameter, serialization: marks(parameter.serialization) }
+        : parameter,
+    );
+
+    return operation.body === undefined
+      ? { ...operation, parameters }
+      : { ...operation, body: remarkBody(operation.body, marks), parameters };
+  }),
+});
+
+describe("the report's nonStandard list under the scalar switch", () => {
+  test("one entry per marked use site and choice, in diagnostic order then choice", () => {
+    const entries = nonStandardEntries(scalarMarked, documents);
+    const listed = entries.map(({ choice, configKey, pointer }) => ({
+      choice,
+      configKey,
+      operation: pointer.split("/").slice(0, 4).join("/"),
+    }));
+
+    expect(listed).toEqual([
+      {
+        choice: "deepObjectBrackets",
+        configKey: "nonStandard.deepObjectBrackets",
+        operation: "/paths/~1choices/post",
+      },
+      {
+        choice: "deepObjectScalars",
+        configKey: "nonStandard.deepObjectScalars",
+        operation: "/paths/~1choices/post",
+      },
+      {
+        choice: "deepObjectScalars",
+        configKey: "nonStandard.deepObjectScalars",
+        operation: "/paths/~1forms/post",
+      },
+      {
+        choice: "deepObjectScalars",
+        configKey: "nonStandard.deepObjectScalars",
+        operation: "/paths/~1items/get",
+      },
+    ]);
+    expect(entries[0]?.pointer).toBe(entries[1]?.pointer);
+    for (const entry of entries) {
+      expect(entry).toMatchObject({ document, row: "PRM-27" });
+    }
+  });
+
+  test("the printed report carries the scalar entries and decodes against the schema", () => {
+    const text = Effect.runSync(printGenerationReport(reportOf(scalarMarked)));
+    const report = Schema.decodeUnknownSync(GenerationReport)(JSON.parse(text));
+
+    expect(report.nonStandard).toEqual(nonStandardEntries(scalarMarked, documents));
+    expect(report.nonStandard.map((entry) => entry.choice)).toEqual([
+      "deepObjectBrackets",
+      "deepObjectScalars",
+      "deepObjectScalars",
+      "deepObjectScalars",
+    ]);
+  });
+});

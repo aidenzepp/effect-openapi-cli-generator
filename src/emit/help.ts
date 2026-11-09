@@ -2,7 +2,8 @@ import { Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
-import { isNonStandard } from "../model/non-standard.ts";
+import type { NonStandardChoice, NonStandardUse } from "../model/non-standard.ts";
+import { markedUses, nonStandardUses } from "../model/non-standard.ts";
 import type { Json } from "../model/pointer.ts";
 
 /**
@@ -123,38 +124,47 @@ export const sanitizeProse = (text: string): SafeTextValue =>
 // A single-line generated field: sanitized, with LF and TAB runs folded to one space.
 const line = (text: string): string => sanitizeProse(text).replaceAll(/[\n\t]+/gu, " ");
 
-const bracketNote =
-  "non-standard: sent as name[a][b]=v (author config nonStandard.deepObjectBrackets)";
+// Each switch's flag note (design 6.1 Scalar switch, Marking).
+const choiceNotes: Readonly<Record<NonStandardChoice, string>> = {
+  deepObjectBrackets:
+    "non-standard: sent as name[a][b]=v (author config nonStandard.deepObjectBrackets)",
+  deepObjectScalars:
+    "non-standard: a scalar value is sent as name=value (author config nonStandard.deepObjectScalars)",
+};
+
+const choices: readonly NonStandardChoice[] = ["deepObjectBrackets", "deepObjectScalars"];
+
+// The distinct choices among use sites, bracket choice first.
+const choicesOf = (uses: readonly NonStandardUse[]): readonly NonStandardChoice[] =>
+  choices.filter((choice) => uses.some((use) => use.choice === choice));
 
 // The first pointer token, unescaped: the form property a body flag writes.
 const propertyOf = (pointer: string): string =>
   (pointer.split("/")[1] ?? "").replaceAll("~1", "/").replaceAll("~0", "~");
 
-// Whether the author config marked the form property a body flag writes (design 6.1).
-const bodyMarked = (operation: Operation, pointer: string): boolean => {
+// The use sites the author config marked on the form property a body flag writes (design 6.1).
+const bodyMarked = (operation: Operation, pointer: string): readonly NonStandardUse[] => {
   const name = propertyOf(pointer);
 
-  return (operation.body?.alternatives ?? []).some((alternative) =>
-    alternative.encoding.some(
-      (rule) =>
-        rule.nonStandard === "deepObjectBrackets" &&
-        rule.target.kind === "property" &&
-        rule.target.name === name,
+  return (operation.body?.alternatives ?? []).flatMap((alternative) =>
+    alternative.encoding.flatMap((rule) =>
+      rule.target.kind === "property" && rule.target.name === name ? markedUses(rule) : [],
     ),
   );
 };
 
-const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
+// The switches that marked the element a flag writes, bracket choice first; empty when unmarked.
+const markedChoices = (operation: Operation, flag: HelpFlag): readonly NonStandardChoice[] => {
   const { source } = flag;
   if (source._tag === "Body") {
-    return bodyMarked(operation, source.pointer);
+    return choicesOf(bodyMarked(operation, source.pointer));
   }
 
   if (source._tag === "PartOption" || source._tag === "Parts") {
-    return false;
+    return [];
   }
 
-  return isNonStandard(source.parameter.serialization);
+  return choicesOf(nonStandardUses(source.parameter.serialization));
 };
 
 // Each position's content type, then every later part's (HT:B15): `part 1: a; parts 2+: b`.
@@ -522,14 +532,14 @@ const fieldNotes = (source: HelpFlagSource): readonly string[] => {
   ];
 };
 
-// A flag's annotation: its location, then the bracket note, the body field's schema notes and
+// A flag's annotation: its location, then each switch's note, the body field's schema notes and
 // `deprecated` when they apply.
 const noted =
   (operation: Operation) =>
   (flag: HelpFlag): readonly [string, string] => {
     const notes = [
       locationNote(flag.source, flag.name),
-      ...(isMarked(operation, flag) ? [bracketNote] : []),
+      ...markedChoices(operation, flag).map((choice) => choiceNotes[choice]),
       ...fieldNotes(flag.source),
       ...(isDeprecated(flag) ? ["deprecated"] : []),
     ];
@@ -537,13 +547,19 @@ const noted =
     return [line(flag.name), notes.join("; ")];
   };
 
-// The NON-STANDARD line: the marked flags of the command, by visible name.
+// The NON-STANDARD line: for each switch, the flags it marked by visible name, then its choice.
 const nonStandardLine = (input: HelpInput): string | undefined => {
-  const marked = input.flags.filter((flag) => isMarked(input.operation, flag));
+  const groups = choices.flatMap((choice) => {
+    const marked = input.flags.filter((flag) =>
+      markedChoices(input.operation, flag).includes(choice),
+    );
 
-  return marked.length === 0
-    ? undefined
-    : `${marked.map((flag) => `--${line(flag.name)}`).join(", ")} (deepObjectBrackets)`;
+    return marked.length === 0
+      ? []
+      : [`${marked.map((flag) => `--${line(flag.name)}`).join(", ")} (${choice})`];
+  });
+
+  return groups.length === 0 ? undefined : groups.join("; ");
 };
 
 /**
