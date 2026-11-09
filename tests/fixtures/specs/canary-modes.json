@@ -1,0 +1,103 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "Canary output-modes fixture", "version": "1.0.0" },
+  "servers": [{ "url": "http://127.0.0.1:80" }],
+  "security": [{ "oauth": [], "key": [] }],
+  "paths": {
+    "/accounts": {
+      "post": {
+        "tags": ["accounts"],
+        "operationId": "accounts-create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "secret": { "type": "string", "format": "password" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created." },
+          "401": { "description": "The canary server echoes Authorization and the body." },
+          "500": { "description": "The canary server echoes Authorization and the body." },
+          "503": { "description": "The canary server echoes Authorization and the body." }
+        }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "tags": ["items"],
+        "operationId": "items-get",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "The item." },
+          "401": { "description": "The canary server echoes Authorization." },
+          "500": { "description": "The canary server echoes Authorization." },
+          "503": { "description": "The canary server echoes Authorization." }
+        }
+      }
+    },
+    "/notes": {
+      "post": {
+        "tags": ["notes"],
+        "operationId": "notes-create",
+        "requestBody": {
+          "required": true,
+          "content": { "text/plain": { "schema": { "type": "string" } } }
+        },
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/events": {
+      "post": {
+        "tags": ["events"],
+        "operationId": "events-send",
+        "requestBody": {
+          "required": true,
+          "content": { "application/jsonl": { "itemSchema": { "type": "object" } } }
+        },
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    },
+    "/uploads": {
+      "post": {
+        "tags": ["uploads"],
+        "operationId": "uploads-create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": { "type": "string" },
+                  "secret": { "type": "string", "format": "password" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Recorded." } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": { "tokenUrl": "https://auth.invalid/token", "scopes": {} }
+        }
+      },
+      "key": { "type": "apiKey", "in": "query", "name": "api_key" }
+    }
+  }
+}
