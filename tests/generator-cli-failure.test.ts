@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { PrinterError } from "../src/emit/printer.ts";
 import { Effect, Result, Schema } from "effect";
+import { RunLockHeld } from "../src/write/lock.ts";
+import { WriteRefused } from "../src/write/index.ts";
 import { failureLine } from "../src/main.ts";
 
 describe("failureLine", () => {
@@ -25,6 +27,18 @@ describe("failureLine", () => {
 
     expect(Result.isFailure(failed) ? failureLine(failed.failure) : undefined).toBe(
       "error: generation failed (SchemaError)",
+    );
+  });
+
+  test("a held run lock prints the lock line", () => {
+    expect(failureLine(new RunLockHeld({ lockPath: "x" }))).toBe(
+      "error: another run holds the output directory's lock",
+    );
+  });
+
+  test("a refused write prints its reason", () => {
+    expect(failureLine(new WriteRefused({ reason: "io", subject: "out" }))).toBe(
+      "error: the output was not written (io)",
     );
   });
 });
