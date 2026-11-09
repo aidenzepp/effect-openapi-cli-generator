@@ -11,6 +11,7 @@ import {
   Layer,
   Option,
   Path,
+  Redacted,
   Ref,
   Runtime,
   Schema,
@@ -20,7 +21,7 @@ import {
 } from "effect";
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
-import { Headers, HttpClient, HttpClientRequest } from "effect/http";
+import { Headers, HttpClient, HttpClientRequest, UrlParams } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
@@ -31,15 +32,20 @@ import {
   TransportError,
   UsageError,
 } from "../domain/errors.ts";
-import type { Credential, SecurityRequirement } from "./auth.ts";
+import type { Credential, Placeholder, SecurityRequirement } from "./auth.ts";
 import {
   allowCredentialsForBaseUrl,
   attach,
+  attachPlaceholders,
+  certificateInitFor,
   credentialOrigins,
   evaluate,
+  placeholder,
   plaintextWarning,
+  preview,
   redactedNames,
   Schemes,
+  withheldCertificateClause,
 } from "./auth.ts";
 import {
   baseUrlSetting,
@@ -64,7 +70,14 @@ import {
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import type { ScrubEntry } from "./redact.ts";
-import { dropTrailingFragment, longestFormBytes, RunCredentials, scrubAround } from "./redact.ts";
+import {
+  dropTrailingFragment,
+  longestFormBytes,
+  queryWireForm,
+  RunCredentials,
+  scrub as scrubValues,
+  scrubAround,
+} from "./redact.ts";
 import {
   classify,
   isBodiless,
@@ -169,6 +182,17 @@ export const errorFormatSetting = GlobalFlag.Setting("error-format")({
   flag: Flag.Literals("error-format", errorFormats).pipe(
     Flag.withDescription("Print errors as text lines or as one JSON object"),
     Flag.optional,
+  ),
+});
+
+/**
+ * `--dry-run` prints the request `send` would send, with every credential replaced, and sends
+ * nothing (design 4.6, D-OUT3).
+ */
+export const dryRunSetting = GlobalFlag.Setting("dry-run")({
+  flag: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("Print the request with credentials replaced instead of sending it"),
+    Flag.withDefault(false),
   ),
 });
 
@@ -1335,16 +1359,24 @@ const splitTarget = (target: string): readonly [path: string, query: string] => 
 };
 
 /**
- * The one stderr notice of design 6.4 (F:R1): a configured credential is withheld from an unbound
- * operator-chosen base URL. It names schemes and the flag, never a value.
+ * The one stderr notice of design 6.4 (F:R1): a configured header credential or the `mutualTLS`
+ * client certificate is withheld from an unbound operator-chosen base URL. One line: the withheld
+ * header schemes with the flag that sends them, then the certificate clause, which says the flag
+ * does not extend to it (m3.md P19). It never names a value, a path or certificate material.
  */
-const withheldNotice = (credentials: readonly Credential[]): string => {
-  const schemes = [...new Set(credentials.map((credential) => credential.scheme))].join(", ");
+const withheldNotice = (headers: readonly Credential[], certificate: boolean): string => {
+  const schemes = [...new Set(headers.map((credential) => credential.scheme))].join(", ");
+  const clauses = [
+    ...(headers.length > 0
+      ? [
+          `not sending credentials (${schemes}) to an unbound base URL; ` +
+            "--allow-credentials-for-base-url sends them",
+        ]
+      : []),
+    ...(certificate ? [withheldCertificateClause] : []),
+  ];
 
-  return sanitize(
-    `Notice: not sending credentials (${schemes}) to an unbound base URL; ` +
-      "--allow-credentials-for-base-url sends them",
-  );
+  return sanitize(`Notice: ${clauses.join("; ")}`);
 };
 
 /**
@@ -1476,6 +1508,484 @@ const undeclaredMediaNotice = (
     );
   });
 
+const encoder = new TextEncoder();
+
+const crlf = encoder.encode("\r\n");
+
+const headEnd = encoder.encode("\r\n\r\n");
+
+// The longest part head the dry-run summary holds while it looks for the head's end. The writer's
+// heads are a few lines; a longer one ends the summary (`MultipartSummary`), so memory stays bound.
+const maxPartHeadBytes = 65_536;
+
+// Whether `needle` occurs in `haystack` at `at`.
+const matchesAt = (haystack: Uint8Array, needle: Uint8Array, at: number): boolean =>
+  needle.every((byte, offset) => haystack[at + offset] === byte);
+
+// The first index of `needle` in `haystack`, or -1.
+const indexOfBytes = (haystack: Uint8Array, needle: Uint8Array): number => {
+  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
+    if (matchesAt(haystack, needle, at)) {
+      return at;
+    }
+  }
+
+  return -1;
+};
+
+const multipartBoundary =
+  /^multipart\/[^;]+;\s*boundary=(?<quote>"?)(?<boundary>[^";\r\n]+)\k<quote>/iu;
+
+const boundaryOf = (mediaType: string | undefined): string | undefined =>
+  multipartBoundary.exec(mediaType?.trim() ?? "")?.groups?.boundary;
+
+const partFilename = /;\s*filename="(?<filename>[^"]*)"/u;
+
+const partContentType = /^content-type:\s*(?<type>[^\r\n]*)$/imu;
+
+const unchanged = (text: string): string => text;
+
+/**
+ * The recorded-value scrub over text that arrives in chunks, for the `--dry-run` body: each piece
+ * is emitted scrubbed (`scrub`) once it ends with no proper prefix of any recorded form, found by
+ * `dropTrailingFragment` repeated until it holds, so every occurrence lies whole inside one emitted
+ * piece, as a scrub of the whole text would find it. What it holds back is shorter than the longest
+ * form, so memory stays bound. The text is decoded as UTF-8 across chunk ends.
+ */
+class StreamScrubber {
+  private readonly decoder = new TextDecoder();
+  private pending = "";
+  private readonly recorded: readonly ScrubEntry[];
+
+  constructor(recorded: readonly ScrubEntry[]) {
+    this.recorded = recorded;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    const text = this.pending + this.decoder.decode(chunk, { stream: true });
+    let safe = text;
+    let shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    while (shorter.length < safe.length) {
+      safe = shorter;
+      shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    }
+
+    this.pending = text.slice(safe.length);
+
+    return this.emit(safe);
+  }
+
+  end(): readonly Uint8Array[] {
+    const rest = this.pending + this.decoder.decode();
+    this.pending = "";
+
+    return this.emit(rest);
+  }
+
+  private emit(text: string): readonly Uint8Array[] {
+    return text === "" ? [] : [encoder.encode(scrubValues(text, this.recorded))];
+  }
+}
+
+const scrubStream =
+  (recorded: readonly ScrubEntry[]) =>
+  <E, R>(body: Stream.Stream<Uint8Array, E, R>): Stream.Stream<Uint8Array, E, R> =>
+    body.pipe(
+      Stream.mapAccum(
+        () => new StreamScrubber(recorded),
+        (scrubber, chunk: Uint8Array) => [scrubber, scrubber.push(chunk)] as const,
+        { onHalt: (scrubber) => scrubber.end() },
+      ),
+    );
+
+/**
+ * The `--dry-run` view of a multipart body (design 4.6), as a streaming state machine over the
+ * bytes the writer produced: delimiters, part heads and text parts as given, the heads and text
+ * through the recorded-value scrub (`StreamScrubber`); a file part's content
+ * (one with a `filename`) as `<file <basename>, N bytes>`, and any other part with a binary content
+ * type as `<binary part, N bytes>`, counted, never held. One nested multipart level is walked with
+ * its own boundary. Every delimiter is read as CRLF `--<boundary>`, so a CRLF is put before the
+ * first one and left out of the output.
+ */
+class MultipartSummary {
+  private readonly boundaries: string[];
+  private counted = 0;
+  private first = true;
+  private mode: "content" | "epilogue" | "head" | "opaque" = "content";
+  private pending: Uint8Array = crlf;
+  private readonly recorded: readonly ScrubEntry[];
+  private summary: string | undefined = undefined;
+  private text: StreamScrubber | undefined = undefined;
+
+  constructor(boundary: string, recorded: readonly ScrubEntry[]) {
+    this.boundaries = [boundary];
+    this.recorded = recorded;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    this.pending = concatBytes([this.pending, chunk]);
+
+    return this.drain(false);
+  }
+
+  end(): readonly Uint8Array[] {
+    const out = [...this.drain(true)];
+    this.flushText(out);
+
+    return out;
+  }
+
+  // Text is emitted through the recorded-value scrub; a summarized part is only counted.
+  private content(bytes: Uint8Array, out: Uint8Array[]): void {
+    if (this.summary === undefined) {
+      this.text ??= new StreamScrubber(this.recorded);
+      out.push(...this.text.push(bytes));
+    } else {
+      this.counted += bytes.length;
+    }
+  }
+
+  private flushText(out: Uint8Array[]): void {
+    if (this.text !== undefined) {
+      out.push(...this.text.end());
+      this.text = undefined;
+    }
+  }
+
+  private closePart(out: Uint8Array[]): void {
+    this.flushText(out);
+    if (this.summary !== undefined) {
+      out.push(this.scrubbed(`<${this.summary}, ${this.counted} bytes>`));
+    }
+
+    this.summary = undefined;
+    this.counted = 0;
+  }
+
+  private scrubbed(text: string): Uint8Array {
+    return encoder.encode(scrubValues(text, this.recorded));
+  }
+
+  private drain(final: boolean): readonly Uint8Array[] {
+    const out: Uint8Array[] = [];
+    while (this.step(final, out)) {
+      // Each step consumes input or changes mode; it returns false when it needs more bytes.
+    }
+
+    return out;
+  }
+
+  private step(final: boolean, out: Uint8Array[]): boolean {
+    if (this.mode === "epilogue") {
+      this.content(this.pending, out);
+      this.pending = new Uint8Array(0);
+
+      return false;
+    }
+
+    if (this.mode === "opaque") {
+      this.counted += this.pending.length;
+      this.pending = new Uint8Array(0);
+      if (final) {
+        out.push(encoder.encode(`<multipart body, ${this.counted} more bytes>`));
+      }
+
+      return false;
+    }
+
+    return this.mode === "head" ? this.head(final, out) : this.body(final, out);
+  }
+
+  private head(final: boolean, out: Uint8Array[]): boolean {
+    const at = indexOfBytes(this.pending, headEnd);
+    if (at === -1) {
+      if (final) {
+        this.content(this.pending, out);
+        this.pending = new Uint8Array(0);
+      } else if (this.pending.length > maxPartHeadBytes) {
+        this.mode = "opaque";
+
+        return true;
+      }
+
+      return false;
+    }
+
+    const head = new TextDecoder().decode(this.pending.subarray(0, at));
+    const contentType = partContentType.exec(head)?.groups?.type;
+    const nested = boundaryOf(contentType);
+    if (nested === undefined) {
+      out.push(this.scrubbed(`${head}\r\n\r\n`));
+      this.pending = this.pending.subarray(at + headEnd.length);
+      const filename = partFilename.exec(head)?.groups?.filename;
+      if (filename !== undefined) {
+        this.summary = `file ${filename}`;
+      } else if (contentType !== undefined && !isText(contentType)) {
+        this.summary = "binary part";
+      }
+    } else {
+      // The head's last CRLF starts the nested body's first delimiter.
+      out.push(this.scrubbed(`${head}\r\n`));
+      this.pending = this.pending.subarray(at + 2);
+      this.boundaries.push(nested);
+    }
+
+    this.mode = "content";
+
+    return true;
+  }
+
+  private body(final: boolean, out: Uint8Array[]): boolean {
+    const boundary = this.boundaries.at(-1) ?? "";
+    const delimiter = encoder.encode(`\r\n--${boundary}`);
+    const at = indexOfBytes(this.pending, delimiter);
+    const after = at === -1 ? -1 : at + delimiter.length;
+    if (at === -1 || after + 2 > this.pending.length) {
+      // Keep a tail that may hold the start of a delimiter and the two bytes after it.
+      let safe = at;
+      if (final) {
+        safe = this.pending.length;
+      } else if (at === -1) {
+        safe = Math.max(0, this.pending.length - delimiter.length - 1);
+      }
+
+      this.content(this.pending.subarray(0, safe), out);
+      this.pending = this.pending.subarray(safe);
+      if (final) {
+        this.closePart(out);
+      }
+
+      return false;
+    }
+
+    const next = new TextDecoder().decode(this.pending.subarray(after, after + 2));
+    if (next !== "\r\n" && next !== "--") {
+      // The boundary text inside a part's content, not a delimiter.
+      this.content(this.pending.subarray(0, after), out);
+      this.pending = this.pending.subarray(after);
+
+      return true;
+    }
+
+    this.content(this.pending.subarray(0, at), out);
+    this.closePart(out);
+    out.push(encoder.encode(`${this.first ? "" : "\r\n"}--${boundary}${next}`));
+    this.first = false;
+    this.pending = this.pending.subarray(after + 2);
+    if (next === "--") {
+      this.boundaries.pop();
+    }
+
+    if (next === "\r\n") {
+      this.mode = "head";
+    } else {
+      this.mode = this.boundaries.length > 0 ? "content" : "epilogue";
+    }
+
+    return true;
+  }
+}
+
+const summarizeMultipart = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+  boundary: string,
+  recorded: readonly ScrubEntry[],
+): Stream.Stream<Uint8Array, E, R> =>
+  body.pipe(
+    Stream.mapAccum(
+      () => new MultipartSummary(boundary, recorded),
+      (summary, chunk: Uint8Array) => [summary, summary.push(chunk)] as const,
+      { onHalt: (summary) => summary.end() },
+    ),
+  );
+
+const newline = encoder.encode("\n");
+
+// End a non-empty body with a newline, so the next prompt starts on its own line.
+const endWithNewline = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+): Stream.Stream<Uint8Array, E, R> =>
+  body.pipe(
+    Stream.mapAccum(
+      () => true,
+      (ended: boolean, chunk: Uint8Array) =>
+        [chunk.length === 0 ? ended : chunk.at(-1) === newline[0], [chunk]] as const,
+      { onHalt: (ended) => (ended ? [] : [newline]) },
+    ),
+  );
+
+const line = (text: string): Stream.Stream<Uint8Array> => Stream.succeed(encoder.encode(text));
+
+/**
+ * The `--dry-run` body (design 4.6, DM3-8): a text-family body as given, with every recorded value
+ * replaced (`scrub`, or `StreamScrubber` for a streamed one); a multipart body summarized by
+ * `MultipartSummary`; a binary body as `<binary body, N bytes>` from its declared length, or, with
+ * no length, which is stdin, as `<binary body from stdin>` (`<body from stdin>` for a text-family
+ * one) without reading it. A file the runtime streams arrives with its size only, so its path
+ * cannot be named here.
+ */
+const dryRunBody = (
+  request: HttpClientRequest.HttpClientRequest,
+  recorded: readonly ScrubEntry[],
+): Stream.Stream<Uint8Array, UsageError> => {
+  const { body } = request;
+  if (body._tag === "Empty") {
+    return Stream.empty;
+  }
+
+  const mediaType = Option.getOrElse(
+    Headers.get(request.headers, "content-type"),
+    (): string | undefined => body.contentType,
+  );
+
+  if (body._tag === "Uint8Array") {
+    return isText(mediaType)
+      ? line(scrubValues(new TextDecoder().decode(body.body), recorded))
+      : line(`<binary body, ${body.body.length} bytes>`);
+  }
+
+  if (body._tag !== "Stream") {
+    return line("<binary body>");
+  }
+
+  const boundary = boundaryOf(mediaType);
+  if (boundary !== undefined) {
+    return summarizeMultipart(
+      body.stream.pipe(
+        Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
+      ),
+      boundary,
+      recorded,
+    );
+  }
+
+  if (body.contentLength === undefined) {
+    return line(isText(mediaType) ? "<body from stdin>" : "<binary body from stdin>");
+  }
+
+  return isText(mediaType)
+    ? body.stream.pipe(
+        Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
+        scrubStream(recorded),
+      )
+    : line(`<binary body, ${body.contentLength} bytes>`);
+};
+
+const querySeparator = (url: string): string => {
+  if (/[?&]$/u.test(url)) {
+    return "";
+  }
+
+  return url.includes("?") ? "&" : "?";
+};
+
+// A query name as a server decodes it.
+const decodedQueryName = (raw: string): string =>
+  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
+
+/**
+ * The request target as the redirect loop sends it: `urlParams` folded in their `queryWireForm`,
+ * a placeholder written as itself, no fragment. A query value whose decoded name
+ * `UrlParams.CurrentRedactedNames` lists is `<redacted>`, unless it is a placeholder.
+ */
+const dryRunUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+  placeholders: ReadonlySet<string>,
+  names: readonly (string | RegExp)[],
+): string => {
+  // A `Redacted` param is a value the runtime holds secret; it prints as `<redacted>`.
+  const wire = (value: string | Redacted.Redacted): string => {
+    if (Redacted.isRedacted(value)) {
+      return "<redacted>";
+    }
+
+    return placeholders.has(value) ? value : queryWireForm(value);
+  };
+  const pairs = UrlParams.fromInput(request.urlParams).params.map(
+    ([name, value]) => `${queryWireForm(name)}=${wire(value)}`,
+  );
+  const url =
+    pairs.length === 0
+      ? request.url
+      : `${request.url}${querySeparator(request.url)}${pairs.join("&")}`;
+  const at = url.indexOf("?");
+  if (at === -1) {
+    return url;
+  }
+
+  const query = url
+    .slice(at + 1)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+      const redacted =
+        equals !== -1 &&
+        !placeholders.has(part.slice(equals + 1)) &&
+        UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names);
+
+      return redacted ? `${part.slice(0, equals + 1)}<redacted>` : part;
+    });
+
+  return `${url.slice(0, at + 1)}${query.join("&")}`;
+};
+
+/**
+ * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
+ * `METHOD <absolute URL> HTTP/1.1`, the headers in send order, a blank line and `dryRunBody`. The
+ * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
+ * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
+ * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
+ * the run recorded, secret-file values among them, and sanitized.
+ */
+const printDryRun = (
+  request: HttpClientRequest.HttpClientRequest,
+  placeholders: readonly Placeholder[],
+  recorded: readonly ScrubEntry[],
+): Effect.Effect<void, OutputError | UsageError, Stdio.Stdio> =>
+  Effect.gen(function* dryRun() {
+    const written = new Set(placeholders.map(({ scheme }) => placeholder(scheme)));
+    const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+    const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
+    const exact = new Set(
+      [...written].flatMap((text) => [text, `Bearer ${text}`, `Basic ${text}`]),
+    );
+    // A redacted header keeps only an exact placeholder form; a `Cookie` keeps each pair whose
+    // value is exactly a placeholder and redacts the value of every other pair.
+    const shownValue = (name: string, value: string): string => {
+      if (!Headers.isRedactedName(name, headerNames)) {
+        return value;
+      }
+
+      if (name.toLowerCase() !== "cookie") {
+        return exact.has(value) ? value : "<redacted>";
+      }
+
+      return value
+        .split(";")
+        .map((pair) => pair.trim())
+        .filter((pair) => pair !== "")
+        .map((pair) => {
+          const equals = pair.indexOf("=");
+          if (equals === -1) {
+            return "<redacted>";
+          }
+
+          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=<redacted>`;
+        })
+        .join("; ");
+    };
+    const lines = [
+      `${request.method} ${dryRunUrl(request, written, queryNames)} HTTP/1.1`,
+      ...Object.entries(request.headers).map(
+        ([name, value]) => `${name}: ${shownValue(name, value)}`,
+      ),
+    ].map((text) => scrubbedAndSanitized(text, recorded));
+
+    yield* toStdout(
+      Stream.concat(line(`${lines.join("\n")}\n\n`), endWithNewline(dryRunBody(request, recorded))),
+    );
+  });
+
 /**
  * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a typed
  * error, and the only runtime function that sends. In order: the base URL (`--base-url`,
@@ -1496,7 +2006,8 @@ const undeclaredMediaNotice = (
  * The policy client, innermost first (design D-AD7; audit ad9f808b F5): `verboseTransform` on the
  * inner client the redirect loop receives, so `--verbose` sees each hop of each attempt as sent;
  * `redirectLoop` (per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, the per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
+ * loopback hops, the per-hop client certificate for the operation's bound origins only, the
+ * per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
  * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
  * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
  * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
@@ -1507,6 +2018,10 @@ const undeclaredMediaNotice = (
  * run in one scope. Before the client runs, `send` adds the retry-hint input (the method and
  * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. Errors are
  * not rendered here: `finalCatch` does.
+ *
+ * Under `--dry-run` (`dryRunSetting`) the requirement is evaluated by `preview`, which never fails
+ * for a missing credential and never prompts, and the built request, with its `User-Agent` and the
+ * chosen alternative's placeholders, is printed by `printDryRun` instead of entering the client.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -1536,7 +2051,13 @@ export const send =
         onSome: (value) => HttpClientRequest.setHeader(located, "accept", value),
       });
 
-      const credentials = yield* evaluate(operation, meta.security);
+      // `--dry-run` shows the chosen alternative's placeholders and never fails for a missing
+      // credential or prompts for one.
+      const dryRun = Option.getOrElse(yield* Effect.serviceOption(dryRunSetting), () => false);
+      const chosen = dryRun
+        ? yield* preview(meta.security)
+        : { credentials: yield* evaluate(operation, meta.security), placeholders: [] };
+      const { credentials } = chosen;
       // Merged, never replaced: a secret-file value the body recorded before `send` stays
       // recorded, and the error excerpt below scrubs it (audit ad9f808b F3).
       const recorded = yield* Effect.service(RunCredentials);
@@ -1551,24 +2072,50 @@ export const send =
         provenance: selection.provenance,
       };
       const origins = credentialOrigins(gate);
-      const sendsToBase = credentials.length > 0 && origins.includes(baseOrigin);
+      // The bound origins alone: the certificate's set, which the flag never widens.
+      const bound = credentialOrigins({ ...gate, allowUnboundBase: false });
+      const headers = credentials.filter(({ definition }) => definition.kind !== "mutualTLS");
+      // Only header credentials reach the base; the certificate never rides the flag.
+      const sendsToBase = headers.length > 0 && origins.includes(baseOrigin);
+      const headersWithheld = headers.length > 0 && !sendsToBase;
+      const certificateWithheld =
+        headers.length < credentials.length && !bound.includes(baseOrigin);
 
-      if (credentials.length > 0 && !sendsToBase) {
-        yield* printStderr(withheldNotice(credentials));
+      if (headersWithheld || certificateWithheld) {
+        yield* printStderr(withheldNotice(headersWithheld ? headers : [], certificateWithheld));
       }
 
       // The flag let them through only when the base is not bound without it.
-      const allowedByFlag =
-        sendsToBase &&
-        !credentialOrigins({ ...gate, allowUnboundBase: false }).includes(baseOrigin);
+      const allowedByFlag = sendsToBase && !bound.includes(baseOrigin);
       yield* warnOncePerRun(plaintextWarning(baseUrl, allowedByFlag));
 
-      const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
       const policy = yield* ClientPolicy;
+      if (dryRun) {
+        // The `User-Agent` `withUserAgent` sets, then the attach step, in the policy client's order.
+        const agent = HttpClientRequest.setHeader(
+          built,
+          "user-agent",
+          `${policy.binName}/${policy.version}`,
+        );
+        const shown = yield* attachPlaceholders(security, chosen.placeholders, origins)(agent);
+        yield* printDryRun(shown, chosen.placeholders, scrubbed).pipe(
+          Effect.provide(redactedNames(security)),
+        );
+
+        return;
+      }
+
+      const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
       const scrub = (text: string): string => scrubbedAndSanitized(text, scrubbed);
       const client = (yield* HttpClient.HttpClient).pipe(
         verboseTransform(scrub),
-        redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        redirectLoop(
+          attach(security, { credentials, origins }),
+          policy.direct,
+          policy.allowed,
+          // Per hop, from the operation's bound origins: the flag never extends the certificate.
+          (url) => certificateInitFor(url, servers.boundOrigins),
+        ),
         retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );

@@ -123,11 +123,11 @@ describe("the client certificate per hop", () => {
     expect(inits).toEqual([{ ...certificate, ...direct }, direct]);
   });
 
-  test("without a decision a loopback hop keeps the direct-route init alone", async () => {
+  test("deciding no certificate, a loopback hop keeps the direct-route init alone", async () => {
     const { client, hops } = recording();
     await Effect.runPromise(
       client
-        .pipe(Client.redirectLoop(Effect.succeed, direct, everyMethod))
+        .pipe(Client.redirectLoop(Effect.succeed, direct, everyMethod, Client.noCertificate))
         .execute(HttpClientRequest.get(`${BOUND_LOOPBACK}/final`))
         .pipe(
           Effect.flatMap((response) => response.text),

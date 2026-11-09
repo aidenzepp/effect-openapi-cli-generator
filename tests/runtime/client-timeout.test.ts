@@ -85,7 +85,7 @@ const send = (
   } = {},
 ) => {
   const client = scripted(headersAfter, options.chunkEvery).pipe(
-    Client.redirectLoop(noAttach, sentinel, allowed),
+    Client.redirectLoop(noAttach, sentinel, allowed, Client.noCertificate),
   );
   const exchange = Effect.scoped(
     client.execute(HttpClientRequest.get(`${origin}/slow`)).pipe(

@@ -152,7 +152,10 @@ export const directRoute: DirectRoute = { proxy: false } as RequestInit;
  */
 export type CertificateDecision = (url: string) => Effect.Effect<Option.Option<CertificateInit>>;
 
-const noCertificate: CertificateDecision = () => Effect.succeedNone;
+/**
+ * The decision that sends no hop with a client certificate, for callers that mean none.
+ */
+export const noCertificate: CertificateDecision = () => Effect.succeedNone;
 
 /**
  * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
@@ -452,7 +455,8 @@ const foldUrlParams = (
  *
  * `certificate` is the per-hop client-certificate decision (design 6.5 `mutualTLS` row): asked
  * with each hop's URL, so on every hop of every retry attempt, its init is the hop's request init,
- * merged with `direct` on a loopback hop. Without one, no hop carries a certificate.
+ * merged with `direct` on a loopback hop. It is required like `allowed`: a caller that means no
+ * certificate passes `noCertificate`.
  *
  * `allowed` is the method allowlist `bin.ts` provides with the client layer (design 6.7), required
  * like `direct`. It is asserted on every attached hop before it is sent, including one a redirect
@@ -473,7 +477,7 @@ export const redirectLoop =
     attach: Attach,
     direct: DirectRoute,
     allowed: ReadonlySet<string>,
-    certificate: CertificateDecision = noCertificate,
+    certificate: CertificateDecision,
   ) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,

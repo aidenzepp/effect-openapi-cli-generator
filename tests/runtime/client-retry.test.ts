@@ -115,7 +115,7 @@ const run = async (
   const seen: Seen[] = [];
   const stderr: Buffer[] = [];
   const client = scripted(answers, seen).pipe(
-    Client.redirectLoop(Effect.succeed, sentinel, allowed),
+    Client.redirectLoop(Effect.succeed, sentinel, allowed, Client.noCertificate),
     Client.retryTransform(scrub),
   );
   const exchange = Effect.scoped(
