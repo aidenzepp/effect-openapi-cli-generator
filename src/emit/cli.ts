@@ -531,6 +531,13 @@ const isObjectParameter = ({ serialization }: Pick<Typed, "serialization">): boo
   serialization.kind === "style" &&
   (serialization.objectValued || serialization.nonStandardScalars !== undefined);
 
+// Whether a parameter flag takes JSON text: an object parameter, or a JSON content one. Its help
+// names the value json; the callers add that metavar as a step of the flag's one chain.
+const takesJsonText = (parameter: Typed): boolean =>
+  isObjectParameter(parameter) ||
+  (parameter.serialization.kind === "content" &&
+    takesJsonContent(parameter.location, parameter.serialization.mediaType));
+
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
 // `content` parameter is one value whatever its schema, so it has none.
@@ -718,10 +725,9 @@ const parameterFlagHead = (
   numeric: NumericKind | undefined,
 ): Expr => {
   const { location, serialization } = parameter;
-  // A JSON content flag takes JSON text, named in help as an object parameter's is.
   if (serialization.kind === "content") {
     return takesJsonContent(location, serialization.mediaType)
-      ? pipe(fn("Input.jsonFlag", str(flag.name)), [fn("Flag.withMetavar", str("json"))])
+      ? fn("Input.jsonFlag", str(flag.name))
       : fn("Flag.String", str(flag.name));
   }
 
@@ -783,7 +789,7 @@ const partOptionEntry = (
     const object = isObjectParameter(typed);
     const head = parameterFlagHead(flag, typed, object, yield* numericKindOf(typed, context));
     const steps = [
-      ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
+      ...(takesJsonText(typed) ? [fn("Flag.withMetavar", str("json"))] : []),
       array ? fn("Flag.atLeast", num(0)) : path("Flag.optional"),
       ...(header.deprecated ? [fn("Input.deprecated", str(flag.name))] : []),
     ];
@@ -875,7 +881,7 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       // A deprecated parameter's notice goes outside the presence wrapper, which settles whether
       // the operator gave the flag (PRM-07).
       const steps = [
-        ...(object ? [fn("Flag.withMetavar", str("json"))] : []),
+        ...(takesJsonText(parameter) ? [fn("Flag.withMetavar", str("json"))] : []),
         ...(array ? [fn("Flag.atLeast", num(parameter.required ? 1 : 0))] : presence),
         ...deprecation(parameter, "Input.deprecated", flag.name),
         ...describedBy(parameterDescription(parameter)).map((text) =>
