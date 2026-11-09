@@ -220,8 +220,27 @@ describe("--dry-run through a generated CLI", () => {
     expect(printedNames.filter((name) => !receivedNames.has(name))).toEqual([]);
   }, 30_000);
 
-  // Product defect, kept as found (C14): the server records the headers sorted by name.
-  test.todo("dry-run: headers in send order on the wire: the server received accept, authorization, user-agent, x-trace (sorted) vs the printed and --verbose order x-trace, accept, user-agent, authorization", () => {});
+  // Found by the witness (C14): the server records the headers sorted by name, the order fetch
+  // sends them, so --dry-run and --verbose must print that order.
+  test("dry-run: headers in send order on the wire: the server received accept, authorization, user-agent, x-trace (sorted), the printed and --verbose order", async () => {
+    capture.script("/widgets/w-order", json(200, { id: "w-order" }));
+
+    const args = ["--base-url", base, "widgets", "get", "w-order", "--x-trace", "trace-order"];
+    const dry = await run(["--dry-run", ...args], credential);
+    const sent = await run(["--verbose", ...args], credential);
+    const printedNames = dryRunParts(dry.stdout).headerLines.map(headerName);
+    const verboseNames = verboseRequestHeaders(sent.stderr).map(headerName);
+    const [request] = sent.requests;
+    const printed = new Set(printedNames);
+    const receivedNames = (request?.headers ?? [])
+      .map(([name]) => name.toLowerCase())
+      .filter((name) => printed.has(name));
+
+    expect(sent.exitCode).toBe(0);
+    expect(receivedNames).toEqual(["accept", "authorization", "user-agent", "x-trace"]);
+    expect(printedNames).toEqual(receivedNames);
+    expect(verboseNames).toEqual(receivedNames);
+  }, 30_000);
 
   test("dry-run: POST with a required JSON body and no body input prints {} as the body", async () => {
     const cli = await run(["--base-url", base, "--dry-run", "widgets", "create"]);

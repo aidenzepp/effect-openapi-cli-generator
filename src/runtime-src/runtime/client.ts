@@ -937,17 +937,29 @@ const redactHeaderUrls = (
 };
 
 /**
- * One block's header lines in the order the record holds them, which is the order they were set.
- * A value whose name `names` lists is `<redacted>`; a URL a header carries is redacted by
- * `redactHeaderUrls` with `queryNames`; the caller scrubs each whole line.
+ * A request's headers in send order (design 4.6): the iteration order of the WHATWG `Headers`
+ * fetch builds from the record, sorted by name, not the order the builder set them. `--verbose`
+ * and `--dry-run` both print this order. A record that `Headers` rejects (a value with a control
+ * character) is never sent, so it keeps the record's order rather than failing the print.
+ */
+export const sendOrder = (headers: Headers.Headers): readonly (readonly [string, string])[] =>
+  Result.getOrElse(
+    Result.try(() => [...new globalThis.Headers(headers)]),
+    () => Object.entries(headers),
+  );
+
+/**
+ * One block's header lines, in the order `entries` lists them. A value whose name `names` lists is
+ * `<redacted>`; a URL a header carries is redacted by `redactHeaderUrls` with `queryNames`; the
+ * caller scrubs each whole line.
  */
 const headerLines = (
   prefix: "<" | ">",
-  headers: Headers.Headers,
+  entries: readonly (readonly [string, string])[],
   names: readonly (string | RegExp)[],
   queryNames: readonly (string | RegExp)[],
 ): readonly string[] =>
-  Object.entries(headers).map(
+  entries.map(
     ([name, value]) =>
       `${prefix} ${name}: ${
         Headers.isRedactedName(name, names)
@@ -962,7 +974,7 @@ const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =
 
 /**
  * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it
- * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in send order) before
+ * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in `sendOrder`) before
  * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
  * arrive; no bodies. A send that fails writes only its request block. Header and query values
  * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
@@ -989,13 +1001,13 @@ export const verboseTransform =
         const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
         yield* printBlock(scrub, [
           `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
-          ...headerLines(">", request.headers, headerNames, queryNames),
+          ...headerLines(">", sendOrder(request.headers), headerNames, queryNames),
         ]);
 
         const response = yield* send;
         yield* printBlock(scrub, [
           `< ${response.status}`,
-          ...headerLines("<", response.headers, headerNames, queryNames),
+          ...headerLines("<", Object.entries(response.headers), headerNames, queryNames),
         ]);
 
         return response;

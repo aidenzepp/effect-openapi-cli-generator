@@ -62,6 +62,7 @@ import {
   redirectLoop,
   retryAfterCapSeconds,
   retryTransform,
+  sendOrder,
   verboseSetting,
   verboseTransform,
   withUserAgent,
@@ -1985,7 +1986,7 @@ const dryRunUrl = (
 
 /**
  * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
- * `METHOD <absolute URL> HTTP/1.1`, the headers in send order, a blank line and `dryRunBody`. The
+ * `METHOD <absolute URL> HTTP/1.1`, the headers in `sendOrder`, a blank line and `dryRunBody`. The
  * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
  * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
  * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
@@ -2030,9 +2031,7 @@ const printDryRun = (
     };
     const lines = [
       `${request.method} ${dryRunUrl(request, written, queryNames)} HTTP/1.1`,
-      ...Object.entries(request.headers).map(
-        ([name, value]) => `${name}: ${shownValue(name, value)}`,
-      ),
+      ...sendOrder(request.headers).map(([name, value]) => `${name}: ${shownValue(name, value)}`),
     ].map((text) => scrubbedAndSanitized(text, recorded));
 
     yield* toStdout(
