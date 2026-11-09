@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { diagnosticOf } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Line } from "./dispatch.ts";
 import type { ErrorGroup, ErrorUnit } from "./locations.ts";
@@ -132,14 +133,13 @@ export const noticeFor = (
   pointer: string,
   schemaSide: string,
 ): Effect.Effect<Diagnostic, Schema.SchemaError> =>
-  Schema.decodeUnknownEffect(Diagnostic)({
+  diagnosticOf({
     code: entry.code,
     document: where.document,
     element: entry.element,
     message: `The text says ${JSON.stringify(entry.text)}; ${schemaSide} (${entry.research.join(", ")}). Accepted per the text.`,
     openapi: where.openapi,
     pointer,
-    row: entry.row,
     scope: "element",
     severity: "notice",
     specSection: specSectionUrl(where.line, entry.anchor),
@@ -167,14 +167,13 @@ export const refusalFor = (
   const { anchor, row } = refusalRows[where.line];
   const locations = group.deepest.map((unit) => unit.absoluteKeywordLocation);
 
-  return Schema.decodeUnknownEffect(Diagnostic)({
+  return diagnosticOf({
     code: `${row}/schema-invalid`,
     document: where.document,
     element: "OpenAPI document",
     message: `The official schema rejects the value at this pointer: ${JSON.stringify(locations)}.`,
     openapi: where.openapi,
     pointer: group.pointer,
-    row,
     scope: "document",
     severity: "refusal",
     specSection: specSectionUrl(where.line, anchor),
