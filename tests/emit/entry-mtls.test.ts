@@ -1,9 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import nodePath from "node:path";
-import { Effect, Schema } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { emitEntryFiles } from "../../src/emit/entry.ts";
 import { AuthorConfig } from "../../src/model/author-config.ts";
 import { SecurityScheme } from "../../src/model/entities.ts";
+import { maxCertificateBytes } from "../../src/runtime-src/runtime/auth.ts";
+import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
+import type { GeneratedPackage } from "../support/generated-cli.ts";
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -138,10 +144,14 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
     expect(bin).toContain('Match.when({ kind: "mutualTLS" }, certificateInit)');
   });
 
-  test("each configured path is checked readable and read through Bun.file", () => {
+  test("each configured path is a regular file read through FileSystem within the bound", () => {
     const bin = contentOf([client], "src/bin.ts");
-    expect(bin).toContain("fs.access(path, { readable: true })");
-    expect(bin).toContain("Effect.as(Bun.file(path))");
+    expect(bin).toContain("fs.stat(path)");
+    expect(bin).toContain('Match.when({ type: "File" }');
+    expect(bin).toContain("Stream.limitBytes(Auth.maxCertificateBytes");
+    expect(bin).toContain("Stream.mkUint8Array");
+    expect(bin).not.toContain("Effect.as(Bun.file(path))");
+    expect(bin).not.toContain("fs.access");
     expect(bin).toContain("new UsageError({ message");
     for (const named of [
       "certificateFile(scheme.caEnv, ca)",
@@ -166,7 +176,7 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
     expect(bin).toContain('Output.finalCatch([], { envPrefix: "EXAMPLE_CLI" })');
     expect(bin).not.toContain("Output.finalCatch([])");
     expect(bin).toContain(
-      "Layer.provide(Layer.mergeAll(BunServices.layer, Output.runCredentialsLayer))",
+      "Layer.provide(Layer.mergeAll(BunServices.layer, Redact.runCredentialsLayer))",
     );
     expect(bin).toContain("  clientCertificate,\n");
     expect(
@@ -206,4 +216,101 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
     },
     fmtTimeout,
   );
+});
+
+// A start-up rejection: exit 2 with one error line that names no path, in time.
+const rejected = (stderr: string) => ({ exitCode: 2, leaksPath: false, stderr, timedOut: false });
+
+// Through a generated CLI (design 9 I5, M3-MT2; merit HB2): a certificate path that is not a
+// regular file, or holds more than `maxCertificateBytes`, is the start-up UsageError naming its
+// variable, exit 2, and the request is never attempted. No case uses `/dev/zero`: a regression
+// would read it without bound. The FIFO case would hang if the bin opened it, so the timeout
+// catches that regression. The valid PEM pair reaching the TLS fixture is tests/generated/mtls.
+describe("a generated mutualTLS CLI rejects an unusable certificate file at start-up", () => {
+  const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+  const work = mkdtempSync(nodePath.join(tmpdir(), "entry-mtls-"));
+  const scope = Effect.runSync(Scope.make());
+  const ready = Promise.withResolvers<GeneratedPackage>();
+  const pem = nodePath.join(work, "client.pem");
+  const directory = nodePath.join(work, "a-directory");
+  const fifo = nodePath.join(work, "a-fifo");
+  const atBound = nodePath.join(work, "at-bound.pem");
+  const overBound = nodePath.join(work, "over-bound.pem");
+
+  beforeAll(async () => {
+    const configPath = nodePath.join(work, "author-config.json");
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({ binName: "mtls", envPrefix: "MTLS", package: { name: "mtls-cli", version: "0.1.0" } })}\n`,
+    );
+    writeFileSync(pem, "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n");
+    mkdirSync(directory);
+    expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+    // Sparse: the size is set, no bytes are written.
+    writeFileSync(atBound, "");
+    truncateSync(atBound, maxCertificateBytes);
+    writeFileSync(overBound, "");
+    truncateSync(overBound, maxCertificateBytes + 1);
+
+    const specPath = nodePath.resolve(root, "tests/fixtures/specs/mtls.json");
+    const prepare = Effect.gen(function* prepareGen() {
+      const generated = yield* generateFixture({ configPath, specPath });
+      yield* preparePackage(generated);
+
+      return generated;
+    }).pipe(Scope.provide(scope), Effect.provide(layer));
+    ready.resolve(await Effect.runPromise(prepare));
+  }, 600_000);
+
+  afterAll(async () => {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    rmSync(work, { force: true, recursive: true });
+  });
+
+  const run = async (env: Record<string, string>) => {
+    const generated = await ready.promise;
+    const result = await Effect.runPromise(
+      runBin(generated, {
+        args: ["--base-url", "http://127.0.0.1:9", "--dry-run", "pets", "get", "1"],
+        env: { MTLS_CLIENT_CERT: pem, MTLS_CLIENT_KEY: pem, ...env },
+        timeoutMs: 30_000,
+      }).pipe(Effect.provide(layer)),
+    );
+    const stderr = decoder.decode(result.stderr);
+
+    return {
+      exitCode: result.exitCode,
+      leaksPath: [work, ...Object.values(env)].some((value) => stderr.includes(value)),
+      stderr: stderr.trim(),
+      timedOut: result.timedOut,
+    };
+  };
+
+  test("a directory named by MTLS_CLIENT_CERT is not a regular file", async () => {
+    expect(await run({ MTLS_CLIENT_CERT: directory })).toEqual(
+      rejected("Error: the file named by MTLS_CLIENT_CERT is not a regular file"),
+    );
+  }, 60_000);
+
+  test("a FIFO named by MTLS_CLIENT_KEY is refused without being opened", async () => {
+    expect(await run({ MTLS_CLIENT_KEY: fifo })).toEqual(
+      rejected("Error: the file named by MTLS_CLIENT_KEY is not a regular file"),
+    );
+  }, 60_000);
+
+  test("a CA file one byte over the bound is too large", async () => {
+    expect(await run({ MTLS_CLIENT_CA: overBound })).toEqual(
+      rejected(
+        `Error: the file named by MTLS_CLIENT_CA is larger than ${maxCertificateBytes} bytes`,
+      ),
+    );
+  }, 60_000);
+
+  test("a CA file exactly at the bound is read", async () => {
+    const observed = await run({ MTLS_CLIENT_CA: atBound });
+    expect({ exitCode: observed.exitCode, leaksPath: observed.leaksPath }).toEqual({
+      exitCode: 0,
+      leaksPath: false,
+    });
+  }, 60_000);
 });

@@ -69,6 +69,15 @@ describe("humanLine", () => {
     expect(between).toContain("application/x-www-form-urlencoded");
   });
 
+  test("a field refusal off an Encoding entry falls back to its element, with no media type", () => {
+    const pointer = "/paths/~1x/post/requestBody/content/application~1json/schema";
+    const line = humanLine(make({ element: "Request body field", pointer, scope: "field" }));
+
+    expect(
+      line.startsWith(`refused PRM-27/compound-nested at #${pointer} field "Request body field": `),
+    ).toBe(true);
+  });
+
   test("a hostile field name and media type render inert", () => {
     const line = humanLine(
       make({

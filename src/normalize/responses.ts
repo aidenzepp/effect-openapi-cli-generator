@@ -8,6 +8,7 @@ import { defsKey } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { sequentialCodecOf } from "../runtime-src/runtime/sequential.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
 import { headerPercentEncoding } from "./parameters.ts";
@@ -154,22 +155,15 @@ const classifyKey = (text: string): Key => {
 
 type Codec = (typeof MediaAlternative.Type)["codec"];
 
-const sequential: ReadonlyMap<string, Codec> = new Map([
-  ["application/json-seq", "jsonseq"],
-  ["application/jsonl", "ndjson"],
-  ["application/ndjson", "ndjson"],
-  ["application/x-ndjson", "ndjson"],
-  ["text/event-stream", "sse"],
-]);
-
 // The codec follows the media type alone, never the schema (design 2.2). A range, or a type no
 // other family claims, is bytes.
 const codecOf = (mediaType: string): Codec => {
-  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
-  const known = sequential.get(essence);
-  if (known !== undefined) {
-    return known;
+  const sequential = sequentialCodecOf(mediaType);
+  if (sequential !== undefined) {
+    return sequential;
   }
+
+  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
 
   if (essence === "application/json" || essence.endsWith("+json")) {
     return "json";

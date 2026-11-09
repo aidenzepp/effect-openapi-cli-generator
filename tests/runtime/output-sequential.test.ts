@@ -130,6 +130,8 @@ describe("sequential output dispatch", () => {
   test("each sequential media type routes to its framer", async () => {
     const cases = [
       ["application/x-ndjson", ndjson, '{"a":1}\n{"b":[1,2]}\n'],
+      ["application/ndjson", ndjson, '{"a":1}\n{"b":[1,2]}\n'],
+      ["application/x-ndjson; charset=utf-8", ndjson, '{"a":1}\n{"b":[1,2]}\n'],
       ["application/jsonl", ndjson, '{"a":1}\n{"b":[1,2]}\n'],
       ["application/json-seq", jsonSeq, '{"a":1}\n{"b":[1,2]}\n'],
       ["application/geo+json-seq", jsonSeq, '{"a":1}\n{"b":[1,2]}\n'],

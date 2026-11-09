@@ -5,6 +5,7 @@ import { Cause, Console, Effect, Exit, Layer, Option, Runtime, Sink, Stdio, Stre
 import { Argument, CliOutput, Command, Flag } from "effect/cli";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 // A deprecated parameter (PRM-07): when the operator gives its flag, one stderr notice names the
 // flag, never the value, and the value reaches the request unchanged. An absent flag prints nothing,
@@ -74,7 +75,7 @@ const run = (
         Effect.provide(
           Layer.merge(
             Stdio.layerTest({ stderr: into(err), stdout: into(out) }),
-            Output.runCredentialsLayer,
+            runCredentialsLayer,
           ),
         ),
         Effect.provide(CliOutput.layer(Output.valueFreeFormatter)),

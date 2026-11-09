@@ -20,6 +20,7 @@ import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // Output.send composes the Milestone 3 client policy (m3-wire): retries outermost, the redirect
@@ -147,7 +148,7 @@ const run = async (world: World) => {
       stdoutIsTerminal: Effect.succeed(false),
     }),
     Input.stdinClaimLayer,
-    Output.runCredentialsLayer,
+    runCredentialsLayer,
     Output.runWarningsLayer,
     Layer.succeed(HttpClient.HttpClient, client),
     Layer.succeed(Output.ClientPolicy, {

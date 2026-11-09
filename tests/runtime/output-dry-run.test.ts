@@ -12,6 +12,8 @@ import {
   Queue,
   Redacted,
   Ref,
+  Runtime,
+  Schema,
   Sink,
   Stdio,
   Stream,
@@ -26,6 +28,7 @@ import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Multipart from "../../src/runtime-src/runtime/multipart.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
 import type { ScrubEntry } from "../../src/runtime-src/runtime/redact.ts";
+import { RunCredentials } from "../../src/runtime-src/runtime/redact.ts";
 
 // `--dry-run` (m3-dr1): `Output.send` builds the request as for sending, prints it to stdout with
 // every credential replaced by `<redacted:<scheme>>`, and sends nothing.
@@ -74,8 +77,10 @@ interface World {
   readonly env?: Record<string, string>;
   readonly operation: Output.OperationMeta;
   readonly recorded?: readonly ScrubEntry[];
+  readonly reply?: () => Response;
   readonly request: HttpClientRequest.HttpClientRequest;
   readonly tty?: boolean;
+  readonly verbose?: boolean;
 }
 
 const capture = (into: Buffer[]) => () =>
@@ -94,7 +99,10 @@ const run = async (world: World) => {
     Effect.sync(() => {
       sent += 1;
 
-      return HttpClientResponse.fromWeb(request, new Response("[]", { status: 200 }));
+      return HttpClientResponse.fromWeb(
+        request,
+        world.reply?.() ?? new Response("[]", { status: 200 }),
+      );
     }),
   );
   const terminal = Terminal.make({
@@ -119,7 +127,7 @@ const run = async (world: World) => {
     stdout: capture(stdout),
     stdoutIsTerminal: Effect.succeed(tty),
   });
-  const recorded = Layer.effect(Output.RunCredentials)(Ref.make(world.recorded ?? []));
+  const recorded = Layer.effect(RunCredentials)(Ref.make(world.recorded ?? []));
   const environment = Layer.mergeAll(
     BaseUrl.layer(servers, "EXAMPLE"),
     Auth.layer(security, "EXAMPLE"),
@@ -146,13 +154,13 @@ const run = async (world: World) => {
     Layer.succeed(BaseUrl.serverSetting, Option.none()),
     Layer.succeed(BaseUrl.serverVariableSetting, []),
     Layer.succeed(Auth.allowCredentialsForBaseUrl, false),
-    Layer.succeed(Client.verboseSetting, false),
+    Layer.succeed(Client.verboseSetting, world.verbose ?? false),
     Layer.succeed(Output.dryRunSetting, world.dryRun ?? true),
   );
   const exit = await Effect.runPromise(
-    Effect.exit(Output.finalCatch([])(Output.send(world.operation)(world.request))).pipe(
-      Effect.provide(environment),
-    ),
+    Effect.exit(
+      Output.finalCatch([], { envPrefix: "EXAMPLE" })(Output.send(world.operation)(world.request)),
+    ).pipe(Effect.provide(environment)),
   );
   const failure = Exit.isFailure(exit)
     ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
@@ -166,6 +174,24 @@ const run = async (world: World) => {
     stderr: Buffer.concat(stderr).toString("utf-8"),
     stdout: Buffer.concat(stdout).toString("utf-8"),
   };
+};
+
+// m3-hb5: the preview of a request that cannot be built is wrong (M3-DR1), so a configured value
+// the real run refuses is refused under `--dry-run` with the same `UsageError`.
+const refusedLikeTheRealRun = async (world: World) => {
+  const dry = await run({ ...world, dryRun: true });
+  const real = await run({ ...world, dryRun: false });
+
+  expect(dry.failure).toMatchObject({ _tag: "UsageError" });
+  expect(dry.failure?.[Runtime.errorExitCode]).toBe(2);
+  expect(real.failure).toMatchObject({ _tag: "UsageError" });
+  expect(dry.stderr).toBe(real.stderr);
+  expect(dry.stderr).not.toBe("");
+  expect(dry.stdout).toBe("");
+  expect(dry.sent).toBe(0);
+  expect(real.sent).toBe(0);
+
+  return dry;
 };
 
 describe("Output.send --dry-run", () => {
@@ -497,5 +523,148 @@ describe("Output.send --dry-run", () => {
     expect(result.stdout).not.toContain(canary);
     expect(result.stdout).toContain("cookie: a=<redacted:bearerAuth>; session=<redacted>\n");
     expect(result.stdout).toContain("authorization: Bearer <redacted:bearerAuth>\n");
+  });
+
+  test("a configured bearer credential holding CR LF is refused as the real run refuses it", async () => {
+    const result = await refusedLikeTheRealRun({
+      env: { EXAMPLE_BEARER_AUTH: "tok\r\nX-Evil: 1" },
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(result.stderr).toContain("the credential for bearerAuth has a CR, LF, NUL");
+    expect(result.stderr).not.toContain("X-Evil");
+  });
+
+  test("a configured apiKey holding U+0100 is refused as the real run refuses it", async () => {
+    const result = await refusedLikeTheRealRun({
+      env: { EXAMPLE_API_KEY: "key\u0100" },
+      operation: meta("GET", [["apiKey"]]),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(result.stderr).toContain("the credential for apiKey has a CR, LF, NUL");
+  });
+
+  test("a valid configured apiKey still prints its placeholder", async () => {
+    const result = await run({
+      env: { EXAMPLE_API_KEY: KEY },
+      operation: meta("GET", [["apiKey"]]),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout).toContain("x-key: <redacted:apiKey>\n");
+    expect(result.stdout).not.toContain(KEY);
+  });
+});
+
+// Hater m3 HB1: a credential shorter than a placeholder is never spelled out inside one. Removing
+// every placeholder token leaves no character of the credential, and no marker nests in another.
+describe("a one-character credential is never recoverable from output (HB1)", () => {
+  const placeholderToken = /<redacted(?::[^<>]*)?>/gu;
+
+  const decodeErrorJson = Schema.decodeUnknownSync(
+    Schema.Struct({
+      error: Schema.Struct({
+        body: Schema.String,
+        kind: Schema.String,
+        message: Schema.String,
+        operation: Schema.String,
+        status: Schema.Number,
+      }),
+    }),
+  );
+
+  const expectOpaque = (text: string) => {
+    expect(text).not.toContain("<red<");
+    expect(text.replaceAll(placeholderToken, "")).not.toContain("a");
+  };
+
+  test("--dry-run", async () => {
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: "a" },
+      operation: meta("POST"),
+      request: jsonPost,
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout.split("\n").find((line) => line.includes("thoriz"))).toMatch(
+      /rer <redacted:bearerAuth>$/u,
+    );
+    expectOpaque(result.stdout);
+    expectOpaque(result.stderr);
+  });
+
+  test("--verbose", async () => {
+    const result = await run({
+      dryRun: false,
+      env: { EXAMPLE_BEARER_AUTH: "a" },
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items"),
+      verbose: true,
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(1);
+
+    // The `> ` and `< ` blocks; the undeclared-media notice carries only the operation id.
+    const blocks = result.stderr
+      .split("\n")
+      .filter((line) => line.startsWith("> ") || line.startsWith("< "))
+      .join("\n");
+
+    expect(blocks).toContain("thoriz<redacted:bearerAuth>tion: <redacted>");
+    expectOpaque(blocks);
+  });
+
+  test("an error under <PREFIX>_ERROR_FORMAT=json", async () => {
+    const result = await run({
+      dryRun: false,
+      env: { EXAMPLE_BEARER_AUTH: "a", EXAMPLE_ERROR_FORMAT: "json" },
+      operation: meta("GET"),
+      reply: () =>
+        new Response('{"error":"bad token a","hint":"<redacted:bearerAuth>"}', {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        }),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+
+    // The scrubbed fields; the keys and `kind` and `matched` are the runtime's own vocabulary.
+    const { error } = decodeErrorJson(JSON.parse(result.stderr));
+
+    expect(error).toMatchObject({ kind: "ApiResponseError", status: 400 });
+    expect(error.body).toContain('"hint":"<redacted:bearerAuth>"');
+    expectOpaque(result.stdout);
+    for (const field of [error.body, error.message, error.operation]) {
+      expectOpaque(field);
+    }
+  });
+});
+
+// Security review of m3-hb1: a server that wraps the credential in placeholder-shaped text cannot
+// make it print in an error body.
+describe("a credential echoed inside placeholder-shaped text is scrubbed (HB1b)", () => {
+  const echo = `{"echo":"<redacted:${SECRET}>","open":"<redacted:${SECRET} tail>"}`;
+
+  test("an error body under <PREFIX>_ERROR_FORMAT=json", async () => {
+    const result = await run({
+      dryRun: false,
+      env: { EXAMPLE_BEARER_AUTH: SECRET, EXAMPLE_ERROR_FORMAT: "json" },
+      operation: meta("GET"),
+      reply: () =>
+        new Response(echo, { headers: { "content-type": "application/json" }, status: 400 }),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+    expect(result.stderr).toContain("<redacted:bearerAuth>");
+    expect(result.stdout).not.toContain(SECRET);
+    expect(result.stderr).not.toContain(SECRET);
   });
 });

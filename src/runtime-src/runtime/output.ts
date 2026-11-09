@@ -63,6 +63,7 @@ import {
   retryAfterCapSeconds,
   retryTransform,
   sendOrder,
+  setUserAgent,
   verboseSetting,
   verboseTransform,
   withUserAgent,
@@ -86,7 +87,8 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
-import { jsonSeqRecords, ndjsonRecords, sseRecords } from "./sequential.ts";
+import { jsonSeqRecords, ndjsonRecords, sequentialCodecOf, sseRecords } from "./sequential.ts";
+import type { SequentialCodec } from "./sequential.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -286,6 +288,20 @@ const toStdout = <E, R>(
 
 const writeError = (path: string) => () => new OutputError({ path, reason: "write" });
 
+/**
+ * Refuse an existing `--output` target with `OutputError` exists. `send` runs it before the
+ * request is sent, so a refusal never discards the answer of a request that took effect; `toFile`
+ * runs it again, and its `link` still refuses a path created after both checks.
+ */
+const refuseExisting = (target: string): Effect.Effect<void, OutputError, FileSystem.FileSystem> =>
+  Effect.gen(function* checkTarget() {
+    const fs = yield* FileSystem.FileSystem;
+
+    if (yield* fs.exists(target).pipe(Effect.mapError(writeError(target)))) {
+      yield* new OutputError({ path: target, reason: "exists" });
+    }
+  });
+
 const toFile = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
   target: string,
@@ -296,8 +312,8 @@ const toFile = <E, R>(
     const path = yield* Path.Path;
     const failWrite = writeError(target);
 
-    if (!force && (yield* fs.exists(target).pipe(Effect.mapError(failWrite)))) {
-      return yield* new OutputError({ path: target, reason: "exists" });
+    if (!force) {
+      yield* refuseExisting(target);
     }
 
     const temp = yield* fs
@@ -336,25 +352,20 @@ type Framer = (
   body: Stream.Stream<Uint8Array, E, R>,
 ) => Stream.Stream<string, E | ResponseStreamError, R>;
 
-const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
+const framers: Readonly<Record<SequentialCodec, Framer>> = {
+  jsonseq: jsonSeqRecords,
+  ndjson: ndjsonRecords,
+  sse: sseRecords,
+};
 
 /**
  * The framer the matched response media key selects (design 4.6, 5), or `undefined` for raw
- * bytes: NDJSON for `application/x-ndjson` and `application/jsonl`, JSON-seq for
- * `application/json-seq` and any `+json-seq` type, SSE for `text/event-stream`.
+ * bytes. The codec comes from `sequentialCodecOf`, the rule the generator assigns codecs by.
  */
 const framerFor = (mediaType: string | undefined): Framer | undefined => {
-  const key = mediaType?.trim().toLowerCase();
+  const codec = mediaType === undefined ? undefined : sequentialCodecOf(mediaType);
 
-  if (key === "application/x-ndjson" || key === "application/jsonl") {
-    return ndjsonRecords;
-  }
-
-  if (key === "application/json-seq" || (key !== undefined && jsonSeqSuffix.test(key))) {
-    return jsonSeqRecords;
-  }
-
-  return key === "text/event-stream" ? sseRecords : undefined;
+  return codec === undefined ? undefined : framers[codec];
 };
 
 /**
@@ -754,11 +765,6 @@ const reportOnce = <E extends object>(
   printStderr(text).pipe(
     Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
   );
-
-// `RunCredentials` lives in `redact.ts`, beside the entries it holds, so `input.ts` records a
-// secret-file value without an import cycle (this module imports `auth.ts`, which imports
-// `input.ts`).
-export { RunCredentials, runCredentialsLayer } from "./redact.ts";
 
 /**
  * What the run recorded for its error rendering (design 7.4 revision 31b): the effective format,
@@ -2069,8 +2075,9 @@ const printDryRun = (
  * values). Every body read, the excerpt's included, is bounded by the stream idle timeout
  * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
  * run in one scope. Before the client runs, `send` adds the retry-hint input (the method and
- * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. Errors are
- * not rendered here: `finalCatch` does.
+ * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. An existing
+ * `--output <path>` without `--force` is refused before the client runs, so the server never acts
+ * on a request whose answer would be discarded. Errors are not rendered here: `finalCatch` does.
  *
  * Under `--dry-run` (`dryRunSetting`) the requirement is evaluated by `preview`, which never fails
  * for a missing credential and never prompts, and the built request, with its `User-Agent` and the
@@ -2145,17 +2152,20 @@ export const send =
       const policy = yield* ClientPolicy;
       if (dryRun) {
         // The `User-Agent` `withUserAgent` sets, then the attach step, in the policy client's order.
-        const agent = HttpClientRequest.setHeader(
-          built,
-          "user-agent",
-          `${policy.binName}/${policy.version}`,
-        );
+        const agent = setUserAgent(policy.binName, policy.version)(built);
         const shown = yield* attachPlaceholders(security, chosen.placeholders, origins)(agent);
         yield* printDryRun(shown, chosen.placeholders, scrubbed).pipe(
           Effect.provide(redactedNames(security)),
         );
 
         return;
+      }
+
+      // Before the request is sent: a refused target must not discard the answer of a request
+      // that took effect (a POST's one-time id or secret).
+      const target = Option.getOrUndefined(yield* OutputPath);
+      if (target !== undefined && target !== stdoutPath && !(yield* Force)) {
+        yield* refuseExisting(target);
       }
 
       const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);

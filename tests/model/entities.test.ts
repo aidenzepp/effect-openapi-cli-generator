@@ -16,7 +16,7 @@ import {
   Server,
   ResponseCase,
 } from "../../src/model/entities.ts";
-import { isNonStandard, nonStandardUses } from "../../src/model/non-standard.ts";
+import { nonStandardUses } from "../../src/model/non-standard.ts";
 
 type Plain = Record<string, Schema.Json>;
 
@@ -347,7 +347,6 @@ describe("non-standard use sites", () => {
     expect(nonStandardUses(marked)).toEqual([
       { choice: "deepObjectScalars", origin: Schema.decodeUnknownSync(Origin)(origin) },
     ]);
-    expect(isNonStandard(marked)).toBe(true);
   });
 
   test("each marker is its own use site, bracket choice first", () => {
@@ -356,7 +355,6 @@ describe("non-standard use sites", () => {
       choices({ nonStandard: "deepObjectBrackets", nonStandardScalars: "deepObjectScalars" }),
     ).toEqual(["deepObjectBrackets", "deepObjectScalars"]);
     expect(choices({})).toEqual([]);
-    expect(isNonStandard(style({}))).toBe(false);
   });
 
   test("querystring form rules give one use site per marker, at each rule's origin", () => {
@@ -384,6 +382,5 @@ describe("non-standard use sites", () => {
     expect(nonStandardUses(content)).toEqual([
       { choice: "deepObjectScalars", origin: Schema.decodeUnknownSync(Origin)(ruleOrigin) },
     ]);
-    expect(isNonStandard(content)).toBe(true);
   });
 });
