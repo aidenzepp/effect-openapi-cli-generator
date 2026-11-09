@@ -87,7 +87,8 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
-import { jsonSeqRecords, ndjsonRecords, sseRecords } from "./sequential.ts";
+import { jsonSeqRecords, ndjsonRecords, sequentialCodecOf, sseRecords } from "./sequential.ts";
+import type { SequentialCodec } from "./sequential.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -337,25 +338,20 @@ type Framer = (
   body: Stream.Stream<Uint8Array, E, R>,
 ) => Stream.Stream<string, E | ResponseStreamError, R>;
 
-const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
+const framers: Readonly<Record<SequentialCodec, Framer>> = {
+  jsonseq: jsonSeqRecords,
+  ndjson: ndjsonRecords,
+  sse: sseRecords,
+};
 
 /**
  * The framer the matched response media key selects (design 4.6, 5), or `undefined` for raw
- * bytes: NDJSON for `application/x-ndjson` and `application/jsonl`, JSON-seq for
- * `application/json-seq` and any `+json-seq` type, SSE for `text/event-stream`.
+ * bytes. The codec comes from `sequentialCodecOf`, the rule the generator assigns codecs by.
  */
 const framerFor = (mediaType: string | undefined): Framer | undefined => {
-  const key = mediaType?.trim().toLowerCase();
+  const codec = mediaType === undefined ? undefined : sequentialCodecOf(mediaType);
 
-  if (key === "application/x-ndjson" || key === "application/jsonl") {
-    return ndjsonRecords;
-  }
-
-  if (key === "application/json-seq" || (key !== undefined && jsonSeqSuffix.test(key))) {
-    return jsonSeqRecords;
-  }
-
-  return key === "text/event-stream" ? sseRecords : undefined;
+  return codec === undefined ? undefined : framers[codec];
 };
 
 /**

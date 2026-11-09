@@ -283,6 +283,7 @@ describe("media alternatives", () => {
           "text/event-stream",
           "application/x-ndjson",
           "application/json-seq",
+          "application/geo+json-seq",
           "image/*",
         ),
       ),
@@ -297,6 +298,7 @@ describe("media alternatives", () => {
       ["text/event-stream", "sse"],
       ["application/x-ndjson", "ndjson"],
       ["application/json-seq", "jsonseq"],
+      ["application/geo+json-seq", "jsonseq"],
       ["image/*", "binary"],
     ]);
   });

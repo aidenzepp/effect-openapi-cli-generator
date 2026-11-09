@@ -2,6 +2,44 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { ResponseStreamError } from "../domain/errors.ts";
 
 /**
+ * A sequential body's framing: NDJSON or JSONL lines, RFC 7464 JSON-seq records, or Server-Sent
+ * Events.
+ */
+export type SequentialCodec = "jsonseq" | "ndjson" | "sse";
+
+/**
+ * The sequential codec each media type essence selects. With the `+json-seq` suffix rule in
+ * `sequentialCodecOf`, the one owner of these facts: the generator assigns a response alternative
+ * its codec through it (`src/normalize/responses.ts`) and the runtime frames a body by it
+ * (`framerFor` in `output.ts`), so the two cannot disagree.
+ */
+export const sequentialMediaTypes: ReadonlyMap<string, SequentialCodec> = new Map([
+  ["application/json-seq", "jsonseq"],
+  ["application/jsonl", "ndjson"],
+  ["application/ndjson", "ndjson"],
+  ["application/x-ndjson", "ndjson"],
+  ["text/event-stream", "sse"],
+]);
+
+/**
+ * A structured syntax suffix essence for JSON text sequences (RFC 8091), such as
+ * `application/geo+json-seq`.
+ */
+const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
+
+/**
+ * The sequential codec a media type selects, or `undefined` for a non-sequential type: its essence
+ * (lowercased, parameters dropped) is looked up in `sequentialMediaTypes`, and any other
+ * `+json-seq` essence is JSON-seq.
+ */
+export const sequentialCodecOf = (mediaType: string): SequentialCodec | undefined => {
+  const [head = ""] = mediaType.split(";", 1);
+  const essence = head.trim().toLowerCase();
+
+  return sequentialMediaTypes.get(essence) ?? (jsonSeqSuffix.test(essence) ? "jsonseq" : undefined);
+};
+
+/**
  * The RFC 7464 record separator that opens every JSON-seq record.
  */
 const recordSeparator = "\u001E";
@@ -268,7 +306,8 @@ const boundLines = (maxRecordBytes: number) =>
   );
 
 /**
- * Frame an NDJSON or JSONL response body (`application/x-ndjson`, `application/jsonl`) as one
+ * Frame an NDJSON or JSONL response body (`application/x-ndjson`, `application/ndjson`,
+ * `application/jsonl`) as one
  * compacted JSON text per record, without a line terminator, emitted as each line arrives.
  *
  * The body is decoded as UTF-8 and split by `Stream.splitLines`, so LF, CRLF and CR end a line and
