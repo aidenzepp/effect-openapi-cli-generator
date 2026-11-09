@@ -325,6 +325,9 @@ const refuse = (
     ),
   );
 
+const refuseIssueOf = (context: AuthorConfigContext) => (error: Schema.SchemaError) =>
+  Effect.flatMap(refuse(error.issue, context), Effect.fail);
+
 /**
  * Decodes untrusted author config JSON into an `AuthorConfig` or the refusals that explain why not.
  * Every problem is reported at once; unknown keys are refused.
@@ -336,7 +339,7 @@ export const decodeAuthorConfig = (
   Schema.decodeUnknownEffect(AuthorConfig)(input, {
     errors: "all",
     onExcessProperty: "error",
-  }).pipe(Effect.catch((failure) => Effect.flatMap(refuse(failure.issue, context), Effect.fail)));
+  }).pipe(Effect.catchTag("SchemaError", refuseIssueOf(context)));
 
 /**
  * The runtime settings a generated CLI starts from, every field resolved.

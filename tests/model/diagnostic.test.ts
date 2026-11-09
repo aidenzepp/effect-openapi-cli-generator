@@ -25,6 +25,9 @@ const base: typeof Diagnostic.Encoded = {
   specSection: "https://spec.openapis.org/oas/v3.0.4.html#style-values",
 };
 
+const at = (severity: "refusal" | "notice", scope: "document" | "element") =>
+  Schema.decodeUnknownSync(Diagnostic)({ ...base, scope, severity });
+
 const keys = (list: readonly Diagnostic[]) =>
   list.map((d) => `${d.document}${d.pointer}|${d.code}`);
 
@@ -210,9 +213,11 @@ describe("diagnosticOf and makeDiagnostic", () => {
     const bad = { ...input, code: "nonsense" };
 
     expect(Exit.isFailure(await Effect.runPromiseExit(makeDiagnostic(bad)))).toBe(true);
+
     const failed = await Effect.runPromise(Effect.flip(diagnosticOf(bad)));
 
     expect(Schema.isSchemaError(failed)).toBe(true);
+
     const exit = await Effect.runPromiseExit(makeDiagnostic(bad));
 
     expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
@@ -229,9 +234,6 @@ describe("diagnosticOf and makeDiagnostic", () => {
   });
 
   test("refusal predicates read severity and scope", () => {
-    const at = (severity: "refusal" | "notice", scope: "document" | "element") =>
-      Schema.decodeUnknownSync(Diagnostic)({ ...base, scope, severity });
-
     expect(isRefusal(at("refusal", "element"))).toBe(true);
     expect(isRefusal(at("notice", "document"))).toBe(false);
     expect(isDocumentRefusal(at("refusal", "document"))).toBe(true);

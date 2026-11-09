@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
+import type { Schema } from "effect";
 import { diagnosticOf } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { DocumentUri } from "../model/brands.ts";

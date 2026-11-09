@@ -35,6 +35,20 @@ const doc: Json = {
 
 const run = <A, E>(e: Effect.Effect<A, E>) => Effect.runSync(e);
 
+const agree = <A, E extends { readonly _tag: string }>(
+  result: Result.Result<A, E>,
+  effect: Effect.Effect<A, E>,
+) => {
+  const exit = Effect.runSyncExit(effect);
+  if (Result.isSuccess(result)) {
+    expect(exit._tag).toBe("Success");
+    expect(exit._tag === "Success" && exit.value).toEqual(result.success);
+  } else {
+    expect(exit._tag).toBe("Failure");
+    expect(Effect.runSync(Effect.flip(effect))).toEqual(result.failure);
+  }
+};
+
 const tagOf = <A, E extends { readonly _tag: string }>(e: Effect.Effect<A, E>): string =>
   run(Effect.flip(e))._tag;
 
@@ -153,20 +167,6 @@ describe("evaluation failures", () => {
 });
 
 describe("Result functions agree with their Effect forms", () => {
-  const agree = <A, E extends { readonly _tag: string }>(
-    result: Result.Result<A, E>,
-    effect: Effect.Effect<A, E>,
-  ) => {
-    const exit = Effect.runSyncExit(effect);
-    if (Result.isSuccess(result)) {
-      expect(exit._tag).toBe("Success");
-      expect(exit._tag === "Success" && exit.value).toEqual(result.success);
-    } else {
-      expect(exit._tag).toBe("Failure");
-      expect(Effect.runSync(Effect.flip(effect))).toEqual(result.failure);
-    }
-  };
-
   const pointers = ["", "/", "a", "/foo/0", "/a~1b", "/m~0n", "/~", "/~2", "/foo/9", "/foo/0/x"];
   for (const pointer of pointers) {
     test(`pointer ${JSON.stringify(pointer)}`, () => {

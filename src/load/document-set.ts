@@ -110,6 +110,8 @@ const withPath = (refusal: LoadRefusal, path: string): Effect.Effect<never, Load
     ),
   );
 
+const withPathOf = (path: string) => (refusal: LoadRefusal) => withPath(refusal, path);
+
 /**
  * The members loaded so far and the entry's retrieval URI, when the caller names it.
  */
@@ -182,7 +184,7 @@ const loadPair = (
         ),
       ),
     ),
-    Effect.catch((refusal) => withPath(refusal, pair.path)),
+    Effect.catchTag("LoadRefusal", withPathOf(pair.path)),
   );
 };
 

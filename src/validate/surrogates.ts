@@ -1,4 +1,5 @@
-import { Effect, Predicate, Record, Schema } from "effect";
+import { Effect, Predicate, Record } from "effect";
+import type { Schema } from "effect";
 import { diagnosticOf } from "../model/diagnostic.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";

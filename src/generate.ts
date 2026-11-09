@@ -20,8 +20,8 @@ import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { decodeAuthorConfig } from "./model/author-config.ts";
 import type { AuthorConfig } from "./model/author-config.ts";
 import type { DocumentUri } from "./model/brands.ts";
+import type { Diagnostic } from "./model/diagnostic.ts";
 import {
-  Diagnostic,
   isDocumentRefusal,
   isRefusal,
   makeDiagnostic,

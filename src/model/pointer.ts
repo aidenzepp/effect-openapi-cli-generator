@@ -144,18 +144,16 @@ export const parseFragmentResult = (
     return Result.fail(new PointerSyntaxError({ pointer: fragment, reason: "missing-hash" }));
   }
 
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(fragment.slice(1));
-  } catch {
-    return Result.fail(
-      new PointerSyntaxError({ pointer: fragment, reason: "invalid-percent-escape" }),
-    );
-  }
-
-  return Result.mapError(
-    parsePointerResult(decoded),
-    (failure) => new PointerSyntaxError({ pointer: fragment, reason: failure.reason }),
+  return Result.try({
+    catch: () => new PointerSyntaxError({ pointer: fragment, reason: "invalid-percent-escape" }),
+    try: () => decodeURIComponent(fragment.slice(1)),
+  }).pipe(
+    Result.flatMap((decoded) =>
+      Result.mapError(
+        parsePointerResult(decoded),
+        (failure) => new PointerSyntaxError({ pointer: fragment, reason: failure.reason }),
+      ),
+    ),
   );
 };
 
@@ -166,6 +164,8 @@ export const parseFragment = (
   fragment: string,
 ): Effect.Effect<readonly string[], PointerSyntaxError> =>
   Effect.suspend(() => Effect.fromResult(parseFragmentResult(fragment)));
+
+const isJsonArray = (value: Json): value is readonly Json[] => Array.isArray(value);
 
 const arrayIndex = /^(?:0|[1-9][0-9]*)$/u;
 
@@ -179,7 +179,7 @@ export const evaluateTokensResult = (
   let current = value;
   for (const [index, token] of tokens.entries()) {
     const pointer = formatPointer(tokens.slice(0, index + 1));
-    if (Array.isArray(current)) {
+    if (isJsonArray(current)) {
       const item = arrayIndex.test(token) ? current[Number(token)] : undefined;
       if (item === undefined) {
         return Result.fail(new PointerIndexOutOfRange({ pointer, token }));
