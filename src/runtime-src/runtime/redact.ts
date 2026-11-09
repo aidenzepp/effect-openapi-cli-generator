@@ -170,26 +170,53 @@ const byStartThenLongest = Order.combine(
 );
 
 /**
+ * Every occurrence of a placeholder this run's runtime emits (security review of m3-hb1): exactly
+ * `<redacted>`, or `<redacted:<label>>` for the scheme or secret label of a scrubbed entry. Each is
+ * matched as a literal string, so no label is read as a pattern. Other placeholder-shaped text,
+ * such as a server echoing `<redacted:` + credential + `>`, is ordinary input.
+ */
+const placeholderTokens = (text: string, entries: readonly ScrubEntry[]): readonly Covered[] =>
+  [...new Set(["<redacted>", ...entries.map(placeholderOf)])].flatMap((placeholder) => {
+    const found: Covered[] = [];
+
+    for (let at = text.indexOf(placeholder); at !== -1; at = text.indexOf(placeholder, at + 1)) {
+      found.push({ end: at + placeholder.length, placeholder, start: at });
+    }
+
+    return found;
+  });
+
+/**
  * Every occurrence of every wire form of every credential as a character range, overlapping
- * occurrences included.
+ * occurrences included, except one that lies wholly inside a placeholder the runtime emits already
+ * in the text (hater m3 HB1, `placeholderTokens`): such a placeholder is opaque, so a credential
+ * shorter than one, such as `a`, is never spelled out inside it. An occurrence that only overlaps
+ * one is kept and merged, so no character of a form survives.
  */
 const occurrences = (
   text: string,
   entries: readonly ScrubEntry[],
   formsOf: (entry: ScrubEntry) => readonly string[],
-): readonly Covered[] =>
-  entries.flatMap((entry) =>
+): readonly Covered[] => {
+  const tokens = placeholderTokens(text, entries);
+  const insideToken = (start: number, end: number): boolean =>
+    tokens.some((token) => token.start <= start && end <= token.end);
+
+  return entries.flatMap((entry) =>
     formsOf(entry).flatMap((form) => {
       const placeholder = placeholderOf(entry);
       const found: Covered[] = [];
 
       for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
-        found.push({ end: at + form.length, placeholder, start: at });
+        if (!insideToken(at, at + form.length)) {
+          found.push({ end: at + form.length, placeholder, start: at });
+        }
       }
 
       return found;
     }),
   );
+};
 
 /**
  * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,
