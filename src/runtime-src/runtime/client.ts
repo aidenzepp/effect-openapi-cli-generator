@@ -1,6 +1,7 @@
 import {
   Clock,
   Config,
+  Context,
   Duration,
   Effect,
   Exit,
@@ -9,6 +10,7 @@ import {
   Pipeable,
   Pull,
   Redacted,
+  Ref,
   Result,
   Schedule,
   Scope,
@@ -664,30 +666,16 @@ export const effectiveRetries = (envPrefix: string): Effect.Effect<number, Usage
 const backoff = Schedule.jittered(Schedule.exponential("500 millis"));
 
 /**
- * The final response of a request whose retrying stopped at the `Retry-After` cap (design D-AD7):
- * the server asked for a longer wait than the effective `--timeout`, so that wait was not taken.
- * `retryAfterSeconds` is the server's delay in whole seconds, rounded up; `send` passes it to
- * `ApiResponseError.retryAfterSeconds` (m3 P14). The response itself is the last one, unchanged.
+ * The run's record of a `Retry-After` cap (design D-AD7): when retrying stops because the server
+ * asked for a longer wait than the effective `--timeout`, `retryTransform` writes the server's
+ * delay here, in whole seconds rounded up, and `send` passes it to
+ * `ApiResponseError.retryAfterSeconds` (m3 P14). `send` creates the `Ref` and provides it around
+ * the request. `retryTransform` reads it with `Effect.serviceOption`, so it has no requirement
+ * and a caller that provides none simply records nothing.
  */
-export class CappedResponse extends OwnedResponse {
-  readonly retryAfterSeconds: number;
-
-  constructor(response: HttpClientResponse.HttpClientResponse, retryAfterSeconds: number) {
-    super(response, Effect.void);
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-/**
- * The server's `Retry-After` delay in seconds when retrying stopped at the cap; `None` for every
- * other response, including one whose retries ran out or ended for another reason. The match is by
- * class, so it holds only while no transform outside `retryTransform` wraps the response (a tagged
- * field would be lost to such a wrapper too).
- */
-export const retryAfterCapSeconds = (
-  response: HttpClientResponse.HttpClientResponse,
-): Option.Option<number> =>
-  response instanceof CappedResponse ? Option.some(response.retryAfterSeconds) : Option.none();
+export class RetryAfterCap extends Context.Service<RetryAfterCap, Ref.Ref<Option.Option<number>>>()(
+  "openapi-cli/runtime/client/RetryAfterCap",
+) {}
 
 /**
  * The response's `Retry-After` as a delay from `nowMillis`: whole seconds, or an HTTP date (a past
@@ -765,10 +753,9 @@ const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
  * passes), the cause, the attempt and the delay: the response's `Retry-After` (seconds or an HTTP
  * date) when it carries one that parses, else exponential from 500 ms, jittered. A `Retry-After`
  * longer than the effective `--timeout` is not waited (design D-AD7): retrying stops and the last
- * response is returned as a `CappedResponse` carrying the server's delay, which
- * `retryAfterCapSeconds` reads. Every other last outcome is returned or failed unchanged. An
- * invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT` fails with a `UsageError` before anything is
- * sent.
+ * response is returned unchanged and the server's delay is recorded in `RetryAfterCap`. Every other
+ * last outcome is returned or failed unchanged. An invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT`
+ * fails with a `UsageError` before anything is sent.
  */
 export const retryTransform =
   (scrub: (text: string) => string) =>
@@ -814,7 +801,15 @@ export const retryTransform =
                 Option.isSome(server) &&
                 exceedsCap(server.value, timeout)
               ) {
-                return new CappedResponse(exit.value, Math.ceil(Duration.toSeconds(server.value)));
+                const record = yield* Effect.serviceOption(RetryAfterCap);
+                if (Option.isSome(record)) {
+                  yield* Ref.set(
+                    record.value,
+                    Option.some(Math.ceil(Duration.toSeconds(server.value))),
+                  );
+                }
+
+                return exit.value;
               }
 
               yield* Scope.close(scope, Exit.void);

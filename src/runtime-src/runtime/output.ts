@@ -59,7 +59,7 @@ import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import {
   redirectLoop,
-  retryAfterCapSeconds,
+  RetryAfterCap,
   retryTransform,
   sendOrder,
   setUserAgent,
@@ -2067,7 +2067,7 @@ const printDryRun = (
  * loopback hops, the per-hop client certificate for the operation's bound origins only, the
  * per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
  * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
- * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
+ * response is the one `send` reads the `RetryAfterCap` record for. `retryTransform` sees the
  * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
  * operation declares and the operator supplied, never a credential (design D-AD7). Every line the
  * transforms print passes through the run's scrubber (`scrubbedAndSanitized` over the recorded
@@ -2187,6 +2187,7 @@ export const send =
         retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );
+      const cap = yield* Ref.make(Option.none<number>());
       const table = {
         operation,
         requestIdHeader: meta.requestIdHeader,
@@ -2208,13 +2209,9 @@ export const send =
                     () => Effect.succeed(""),
                   ),
                   Effect.flatMap((excerpt) =>
-                    Effect.fail(
-                      toApiResponseError(
-                        table,
-                        response,
-                        excerpt,
-                        scrubbed,
-                        retryAfterCapSeconds(response),
+                    Ref.get(cap).pipe(
+                      Effect.flatMap((capped) =>
+                        Effect.fail(toApiResponseError(table, response, excerpt, scrubbed, capped)),
                       ),
                     ),
                   ),
@@ -2236,6 +2233,7 @@ export const send =
             }),
           ),
         ),
+        Effect.provideService(RetryAfterCap, cap),
         Effect.scoped,
         Effect.provide(redactedNames(security)),
       );

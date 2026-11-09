@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Clock, DateTime, Effect, Exit, Fiber, Option, Sink, Stdio } from "effect";
+import { Clock, DateTime, Effect, Exit, Fiber, Option, Ref, Sink, Stdio } from "effect";
 import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
 import * as Client from "../../src/runtime-src/runtime/client.ts";
@@ -46,14 +46,14 @@ interface Outcome {
 const run = async (answers: readonly Answer[], timeout: number): Promise<Outcome> => {
   const arrivals: number[] = [];
   const client = scripted(answers, arrivals).pipe(Client.retryTransform((text) => text));
-  const exchange = Effect.scoped(
-    client.execute(HttpClientRequest.get(url)).pipe(
-      Effect.map((response) => ({
-        capped: Client.retryAfterCapSeconds(response),
-        status: response.status,
-      })),
-    ),
-  ).pipe(Effect.provideService(Client.timeoutSetting, Option.some(timeout)));
+  const exchange = Effect.gen(function* exchanging() {
+    const record = yield* Ref.make(Option.none<number>());
+    const status = yield* Effect.scoped(
+      client.execute(HttpClientRequest.get(url)).pipe(Effect.map((response) => response.status)),
+    ).pipe(Effect.provideService(Client.RetryAfterCap, record));
+
+    return { capped: yield* Ref.get(record), status };
+  }).pipe(Effect.provideService(Client.timeoutSetting, Option.some(timeout)));
   const exit = await Effect.runPromiseExit(
     Effect.gen(function* drive() {
       const fiber = yield* Effect.forkChild(exchange);
