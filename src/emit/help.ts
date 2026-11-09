@@ -18,13 +18,16 @@ export interface HelpBodyField {
 
 /**
  * Where a flag's value lands: a parameter (`negatable` for a three-state boolean), a body property
- * at an RFC 6901 pointer inside the body, with that property's annotations, or the `Content-Type`
- * of the multipart part at `part`, one of `choices`.
+ * at an RFC 6901 pointer inside the body, with that property's annotations, the `Content-Type`
+ * of the multipart part at `part`, one of `choices`, or the ordered parts of a positional
+ * `multipart/mixed` body, `prefix[i]` the content type of part `i + 1` and `item` that of every
+ * later part.
  */
 export type HelpFlagSource =
   | { readonly _tag: "Body"; readonly field?: HelpBodyField; readonly pointer: string }
   | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter }
-  | { readonly _tag: "PartOption"; readonly option: HelpPartOption; readonly part: string };
+  | { readonly _tag: "PartOption"; readonly option: HelpPartOption; readonly part: string }
+  | { readonly _tag: "Parts"; readonly item?: string; readonly prefix: readonly string[] };
 
 /**
  * What a multipart part option sets: the part's content type, one of `choices`, or the value of
@@ -147,16 +150,28 @@ const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
     return bodyMarked(operation, source.pointer);
   }
 
-  if (source._tag === "PartOption") {
+  if (source._tag === "PartOption" || source._tag === "Parts") {
     return false;
   }
 
   return isNonStandard(source.parameter.serialization);
 };
 
+// Each position's content type, then every later part's (HT:B15): `part 1: a; parts 2+: b`.
+const partsNote = (prefix: readonly string[], item: string | undefined): string => {
+  const positions = prefix.map((type, index) => `part ${index + 1}: ${line(type)}`);
+  const rest = item === undefined ? [] : [`parts ${prefix.length + 1}+: ${line(item)}`];
+
+  return [...positions, ...rest].join("; ");
+};
+
 const locationNote = (source: HelpFlagSource, name: string): string => {
   if (source._tag === "Body") {
     return `body ${line(source.pointer)}`;
+  }
+
+  if (source._tag === "Parts") {
+    return partsNote(source.prefix, source.item);
   }
 
   if (source._tag === "PartOption") {
@@ -468,6 +483,10 @@ const isArgument = (flag: HelpFlag): boolean =>
 const isDeprecated = ({ source }: HelpFlag): boolean => {
   if (source._tag === "PartOption") {
     return source.option.kind === "header" && source.option.deprecated;
+  }
+
+  if (source._tag === "Parts") {
+    return false;
   }
 
   return source._tag === "Parameter"

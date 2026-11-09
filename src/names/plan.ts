@@ -899,7 +899,9 @@ interface Merged {
 const sameFlag = (left: PlannedBodyFlag, right: PlannedBodyFlag): boolean =>
   left.pointer === right.pointer && left.kind === right.kind && left.repeated === right.repeated;
 
-const isWholeBody = (kind: BodyKind): boolean => kind === "body" || kind === "body-file";
+// `--part` is the whole input of a positional body (HT:B15), so it is never renamed.
+const isWholeBody = (kind: BodyKind): boolean =>
+  kind === "body" || kind === "body-file" || kind === "part";
 
 const maxSchemaVisits = 10_000;
 
@@ -1379,6 +1381,12 @@ const draftBody = (
     const headers = yield* draftPartHeaders(subject, context, [...merged.values()], owners);
     const fieldFlags = [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
+      // `--part` is no reserved name, so a field or parameter flag of that name collides with it
+      // here rather than shadowing it; the flag cannot be renamed, so only a skip resolves it.
+      if (flag.kind === "part") {
+        addOwner(owners, flag.name, { hint: skipHint(site), kind: "body", pointer });
+      }
+
       if (!isWholeBody(flag.kind)) {
         const owner: Owner = {
           field: flag.pointer,

@@ -416,8 +416,9 @@ const membersOf = (walk: Walk, schema: CanonicalKey): Effect.Effect<Members, Bod
     const prefix = firstLocated(nodes, (node) => node.prefixItems);
     const items = firstLocated(nodes, (node) => node.items);
 
+    // `items: false` admits no item beyond `prefixItems`, so it has no item schema.
     return {
-      items: items === undefined ? undefined : childKey(items.at, "items"),
+      items: items === undefined || items.value === false ? undefined : childKey(items.at, "items"),
       prefixItems:
         prefix === undefined
           ? []
@@ -1639,43 +1640,70 @@ const propertyInputs = (
   });
 };
 
-// One input per declared property, then per prefixEncoding entry, then the itemEncoding rule.
+interface PartInputs {
+  readonly inputs: readonly RuleInput[];
+  /**
+   * How many of `inputs`, after the properties, are `prefixEncoding` positions; an item rule
+   * follows.
+   */
+  readonly prefixCount: number;
+}
+
+// One input per declared property, then per position, then the item rule. A 3.2 positional
+// `multipart/mixed` body (HT:B15) gives every `prefixItems` position a rule, its Encoding Object or
+// else the default table, and `items` or `itemSchema` an item rule; elsewhere only the declared
+// `prefixEncoding` entries and `itemEncoding` become rules.
 const partInputs = (
   line: Line,
   media: Media,
   members: Members,
-  honorsStyle: boolean,
-  formData: boolean,
-): readonly RuleInput[] => {
+  options: { readonly formData: boolean; readonly honorsStyle: boolean; readonly mixed: boolean },
+): PartInputs => {
   const { home, node } = media;
+  const { formData, honorsStyle, mixed } = options;
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
+  const positional = line === "3.2" && mixed;
+  const count = positional ? Math.max(prefix.length, members.prefixItems.length) : prefix.length;
   const properties = propertyInputs(media, members, honorsStyle, formData);
-  const positions = prefix.map((entry, index): RuleInput => ({
-    actual: childKey(home, "prefixEncoding", String(index)),
-    depth: 0,
-    formData,
-    honorsStyle,
-    node: entry,
-    schema: members.prefixItems[index],
-    target: { index, kind: "position" },
-  }));
+  const positions = Array.from({ length: count }, (_, index): RuleInput => {
+    const entry = prefix[index];
+    const schema = members.prefixItems[index];
+
+    return {
+      actual:
+        entry === undefined && schema !== undefined
+          ? schema
+          : childKey(home, "prefixEncoding", String(index)),
+      depth: 0,
+      formData,
+      honorsStyle,
+      node: entry,
+      schema,
+      target: { index, kind: "position" },
+    };
+  });
+  const itemSchema = node.itemSchema === undefined ? members.items : childKey(home, "itemSchema");
+  const defaulted = positional && itemSchema !== undefined;
   const remaining: RuleInput[] =
-    item === undefined
+    item === undefined && !defaulted
       ? []
       : [
           {
-            actual: childKey(home, "itemEncoding"),
+            actual:
+              item === undefined && itemSchema !== undefined
+                ? itemSchema
+                : childKey(home, "itemEncoding"),
             depth: 0,
             formData,
             honorsStyle,
             node: item,
-            schema: node.itemSchema === undefined ? members.items : childKey(home, "itemSchema"),
-            target: { index: prefix.length, kind: "position" },
+            schema: itemSchema,
+            target: { index: count, kind: "position" },
           },
         ];
 
-  return [...properties, ...positions, ...remaining];
+  return { inputs: [...properties, ...positions, ...remaining], prefixCount: count };
 };
 
 // Multipart part rules: the declared properties by name, then 3.2 positions (design 6.3).
@@ -1800,8 +1828,11 @@ const multipartParts = (
       return refusedParts([...extra, ...keys.findings]);
     }
 
-    const honorsStyle = base === "multipart/form-data" && line !== "3.0";
-    const inputs = partInputs(line, media, members, honorsStyle, base === "multipart/form-data");
+    const { inputs, prefixCount } = partInputs(line, media, members, {
+      formData: base === "multipart/form-data",
+      honorsStyle: base === "multipart/form-data" && line !== "3.0",
+      mixed: base === "multipart/mixed",
+    });
     const built = yield* buildAll(ctx, inputs);
     if (built.refused) {
       return refusedParts([...extra, ...keys.findings, ...built.findings]);
@@ -1813,7 +1844,6 @@ const multipartParts = (
       return refusedParts(findings);
     }
 
-    const prefixCount = line === "3.2" ? (media.node.prefixEncoding ?? []).length : 0;
     const propertyCount = members.properties.length;
     const positioned = built.rules.slice(propertyCount);
 

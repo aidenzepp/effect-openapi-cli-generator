@@ -655,6 +655,47 @@ describe("MED-07 MED-08 MED-13 3.2 positional and nested encoding", () => {
     expect(alternative.rows.map(String)).toEqual(["MED-01", "MED-03", "MED-08"]);
   });
 
+  test("M3-MP1: a multipart/mixed array body gives every prefixItems position a rule and items an item rule, by the default table", () => {
+    const alternative = alternativeOf("3.2", "multipart/mixed", {
+      prefixEncoding: [{ contentType: "text/csv" }],
+      schema: {
+        items: { type: "integer" },
+        prefixItems: [string, { type: "object" }],
+        type: "array",
+      },
+    });
+
+    expect(typesOf(alternative.prefixEncoding)).toEqual({
+      "#0": ["text/csv"],
+      "#1": ["application/json"],
+    });
+    expect(
+      alternative.itemEncoding === undefined ? undefined : targetOf(alternative.itemEncoding),
+    ).toBe("#2");
+    expect(alternative.itemEncoding?.contentType.map(String)).toEqual(["text/plain"]);
+  });
+
+  test("M3-MP1: items false gives no item rule, and itemSchema alone gives one", () => {
+    const closed = alternativeOf("3.2", "multipart/mixed", {
+      schema: { items: false, prefixItems: [string], type: "array" },
+    });
+    const streamed = alternativeOf("3.2", "multipart/mixed", { itemSchema: { type: "object" } });
+
+    expect(typesOf(closed.prefixEncoding)).toEqual({ "#0": ["text/plain"] });
+    expect(closed.itemEncoding).toBeUndefined();
+    expect(streamed.prefixEncoding).toEqual([]);
+    expect(streamed.itemEncoding?.contentType.map(String)).toEqual(["application/json"]);
+  });
+
+  test("M3-MP1: an array body on another multipart subtype gets no default position rules", () => {
+    const alternative = alternativeOf("3.2", "multipart/related", {
+      schema: { items: string, prefixItems: [string], type: "array" },
+    });
+
+    expect(alternative.prefixEncoding).toEqual([]);
+    expect(alternative.itemEncoding).toBeUndefined();
+  });
+
   test("MED-13 encoding beside prefixEncoding or itemEncoding refuses the alternative", () => {
     const outcome = refused(
       "3.2",
