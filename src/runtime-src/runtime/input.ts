@@ -861,14 +861,22 @@ const record = (secret: Secret): Effect.Effect<void> =>
     ),
   );
 
-// A secret-file value: the bytes as given (a trailing LF kept), bounded and UTF-8, recorded for
-// the run before anything else can fail, and held `Redacted` until the merge writes it.
+/**
+ * Strips one trailing `\r?\n`: the line end `echo value > file` writes. The one rule for a secret
+ * read from a file, shared by credential files (`auth.ts`) and secret-file field flags; a second
+ * line end is the value's own.
+ */
+export const stripLineEnd = (text: string): string => text.replace(/\r?\n$/u, "");
+
+// A secret-file value: the text, bounded and UTF-8, with one trailing line end stripped (as a
+// credential file), recorded for the run before anything else can fail, and held `Redacted` until
+// the merge writes it.
 const readSecret = (
   field: SecretField,
 ): Effect.Effect<Redacted.Redacted, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
   readFlagFile(field.path, field.flag, { limit: maxSecretBytes, subject: "the value" }).pipe(
     Effect.flatMap((bytes) => decodeText(bytes, field.flag)),
-    Effect.map((text) => Redacted.make(text)),
+    Effect.map((text) => Redacted.make(stripLineEnd(text))),
     Effect.tap((value) => record({ kind: "secret", label: field.flag, value })),
   );
 

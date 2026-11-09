@@ -16,7 +16,7 @@ import type { FetchHttpClient } from "effect/http";
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
-import { StdinClaim } from "./input.ts";
+import { StdinClaim, stripLineEnd } from "./input.ts";
 
 /**
  * A scheme's security requirement list: alternatives in document order, each the scheme names that
@@ -193,8 +193,6 @@ const decodeUtf8 = (scheme: string, bytes: Uint8Array): Effect.Effect<string, Us
     catch: () => usage(scheme, `the credential for ${scheme} is not valid UTF-8`),
     try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
   });
-
-const stripLineEnd = (text: string): string => text.replace(/\r?\n$/u, "");
 
 const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
   let size = 0;

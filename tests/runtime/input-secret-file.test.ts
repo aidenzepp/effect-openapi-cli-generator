@@ -25,10 +25,13 @@ import * as Output from "../../src/runtime-src/runtime/output.ts";
 import { RunCredentials, runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
-// A quote and a kept trailing LF, so the raw form and the JSON-escaped form differ.
-const SECRET = 'pa55"word\n';
+// A quote, so the raw form and the JSON-escaped form differ. The file holds it with a line end,
+// which the reader strips (one `\r?\n`, as a credential file).
+const SECRET = 'pa55"word';
 
-const ESCAPED = 'pa55\\"word\\n';
+const FILE_TEXT = `${SECRET}\n`;
+
+const ESCAPED = 'pa55\\"word';
 
 const LABEL = "<redacted:password-file>";
 
@@ -82,6 +85,10 @@ const withTempFile = <A, E, R>(content: string, use: (path: string) => Effect.Ef
 const textOf = (body: HttpBody.HttpBody): string =>
   body._tag === "Uint8Array" ? decoder.decode(body.body) : `<${body._tag}>`;
 
+// The merged body text of one `/secret` secret-file field read from `path`.
+const secretBody = (path: string) =>
+  merge({ fields: { "/secret": secret(path) } }).pipe(Effect.map(textOf));
+
 const recorded = Effect.flatMap(Effect.service(RunCredentials), Ref.get);
 
 const inputLayer = (stdin: string, stderr: Buffer[] = []) =>
@@ -105,9 +112,9 @@ const errorOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
 
 describe("a secret-file field flag", () => {
-  test("the file's bytes, trailing LF kept, land at the field's path", async () => {
+  test("the file's text, one trailing line end stripped, lands at the field's path", async () => {
     const exit = await runInput(
-      withTempFile(SECRET, (path) =>
+      withTempFile(FILE_TEXT, (path) =>
         merge({ fields: { "/auth/password": secret(path) } }).pipe(Effect.map(textOf)),
       ),
     );
@@ -121,10 +128,39 @@ describe("a secret-file field flag", () => {
   test("- reads stdin", async () => {
     const exit = await runInput(
       merge({ fields: { "/password": secret("-") } }).pipe(Effect.map(textOf)),
-      SECRET,
+      FILE_TEXT,
     );
 
     expect(JSON.parse(Exit.isSuccess(exit) ? exit.value : "null")).toEqual({ password: SECRET });
+  });
+
+  test.each([
+    ["pw\n", "pw"],
+    ["pw\r\n", "pw"],
+    ["pw\n\n", "pw\n"],
+    ["pw", "pw"],
+  ])("a file holding %j sends %j, from a path or stdin", async (text, sent) => {
+    const fromFile = await runInput(withTempFile(text, secretBody));
+    const fromStdin = await runInput(secretBody("-"), text);
+
+    expect(JSON.parse(Exit.isSuccess(fromFile) ? fromFile.value : "null")).toEqual({
+      secret: sent,
+    });
+    expect(JSON.parse(Exit.isSuccess(fromStdin) ? fromStdin.value : "null")).toEqual({
+      secret: sent,
+    });
+  });
+
+  test("the stripped value is the one recorded and scrubbed", async () => {
+    const exit = await runInput(
+      merge({ fields: { "/password": secret("-") } }).pipe(
+        Effect.andThen(recorded),
+        Effect.map((entries) => Output.boundedExcerpt(`echo=${SECRET};`, 4096, entries)),
+      ),
+      FILE_TEXT,
+    );
+
+    expect(Exit.isSuccess(exit) ? exit.value : "").toBe(`echo=${LABEL};`);
   });
 
   test("- with --body-file - is a UsageError naming the flag", async () => {
