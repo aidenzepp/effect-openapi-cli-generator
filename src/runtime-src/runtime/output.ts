@@ -37,6 +37,7 @@ import {
   allowCredentialsForBaseUrl,
   attach,
   attachPlaceholders,
+  certificateInitFor,
   credentialOrigins,
   evaluate,
   placeholder,
@@ -44,6 +45,7 @@ import {
   preview,
   redactedNames,
   Schemes,
+  withheldCertificateClause,
 } from "./auth.ts";
 import {
   baseUrlSetting,
@@ -1357,16 +1359,24 @@ const splitTarget = (target: string): readonly [path: string, query: string] => 
 };
 
 /**
- * The one stderr notice of design 6.4 (F:R1): a configured credential is withheld from an unbound
- * operator-chosen base URL. It names schemes and the flag, never a value.
+ * The one stderr notice of design 6.4 (F:R1): a configured header credential or the `mutualTLS`
+ * client certificate is withheld from an unbound operator-chosen base URL. One line: the withheld
+ * header schemes with the flag that sends them, then the certificate clause, which says the flag
+ * does not extend to it (m3.md P19). It never names a value, a path or certificate material.
  */
-const withheldNotice = (credentials: readonly Credential[]): string => {
-  const schemes = [...new Set(credentials.map((credential) => credential.scheme))].join(", ");
+const withheldNotice = (headers: readonly Credential[], certificate: boolean): string => {
+  const schemes = [...new Set(headers.map((credential) => credential.scheme))].join(", ");
+  const clauses = [
+    ...(headers.length > 0
+      ? [
+          `not sending credentials (${schemes}) to an unbound base URL; ` +
+            "--allow-credentials-for-base-url sends them",
+        ]
+      : []),
+    ...(certificate ? [withheldCertificateClause] : []),
+  ];
 
-  return sanitize(
-    `Notice: not sending credentials (${schemes}) to an unbound base URL; ` +
-      "--allow-credentials-for-base-url sends them",
-  );
+  return sanitize(`Notice: ${clauses.join("; ")}`);
 };
 
 /**
@@ -1996,7 +2006,8 @@ const printDryRun = (
  * The policy client, innermost first (design D-AD7; audit ad9f808b F5): `verboseTransform` on the
  * inner client the redirect loop receives, so `--verbose` sees each hop of each attempt as sent;
  * `redirectLoop` (per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, the per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
+ * loopback hops, the per-hop client certificate for the operation's bound origins only, the
+ * per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
  * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
  * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
  * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
@@ -2061,16 +2072,21 @@ export const send =
         provenance: selection.provenance,
       };
       const origins = credentialOrigins(gate);
-      const sendsToBase = credentials.length > 0 && origins.includes(baseOrigin);
+      // The bound origins alone: the certificate's set, which the flag never widens.
+      const bound = credentialOrigins({ ...gate, allowUnboundBase: false });
+      const headers = credentials.filter(({ definition }) => definition.kind !== "mutualTLS");
+      // Only header credentials reach the base; the certificate never rides the flag.
+      const sendsToBase = headers.length > 0 && origins.includes(baseOrigin);
+      const headersWithheld = headers.length > 0 && !sendsToBase;
+      const certificateWithheld =
+        headers.length < credentials.length && !bound.includes(baseOrigin);
 
-      if (credentials.length > 0 && !sendsToBase) {
-        yield* printStderr(withheldNotice(credentials));
+      if (headersWithheld || certificateWithheld) {
+        yield* printStderr(withheldNotice(headersWithheld ? headers : [], certificateWithheld));
       }
 
       // The flag let them through only when the base is not bound without it.
-      const allowedByFlag =
-        sendsToBase &&
-        !credentialOrigins({ ...gate, allowUnboundBase: false }).includes(baseOrigin);
+      const allowedByFlag = sendsToBase && !bound.includes(baseOrigin);
       yield* warnOncePerRun(plaintextWarning(baseUrl, allowedByFlag));
 
       const policy = yield* ClientPolicy;
@@ -2093,7 +2109,13 @@ export const send =
       const scrub = (text: string): string => scrubbedAndSanitized(text, scrubbed);
       const client = (yield* HttpClient.HttpClient).pipe(
         verboseTransform(scrub),
-        redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        redirectLoop(
+          attach(security, { credentials, origins }),
+          policy.direct,
+          policy.allowed,
+          // Per hop, from the operation's bound origins: the flag never extends the certificate.
+          (url) => certificateInitFor(url, servers.boundOrigins),
+        ),
         retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );
