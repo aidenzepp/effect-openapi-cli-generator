@@ -83,6 +83,7 @@ const SchemeNode = Schema.Struct({
 
 const FlowNode = Schema.Struct({
   authorizationUrl: Schema.optionalKey(Schema.String),
+  deviceAuthorizationUrl: Schema.optionalKey(Schema.String),
   refreshUrl: Schema.optionalKey(Schema.String),
   scopes: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   tokenUrl: Schema.optionalKey(Schema.String),
@@ -207,14 +208,16 @@ const apiKeyRows = new Map([
 ]);
 
 // One flow's help-only data, sanitized; a URL is present only when the spec gives it (design 9 I3).
+// `deviceAuthorizationUrl` belongs to the 3.2 `deviceAuthorization` flow and is read only there.
 interface FlowHelp {
   authorizationUrl?: string;
+  deviceAuthorizationUrl?: string;
   refreshUrl?: string;
   readonly scopes: readonly { readonly description: string; readonly name: string }[];
   tokenUrl?: string;
 }
 
-const flowHelp = (flow: typeof FlowNode.Type): FlowHelp => {
+const flowHelp = (kind: string, flow: typeof FlowNode.Type): FlowHelp => {
   const help: FlowHelp = {
     scopes: Object.entries(flow.scopes ?? {}).map(([name, description]) => ({
       description: sanitize(description),
@@ -223,6 +226,10 @@ const flowHelp = (flow: typeof FlowNode.Type): FlowHelp => {
   };
   if (flow.authorizationUrl !== undefined) {
     help.authorizationUrl = sanitize(flow.authorizationUrl);
+  }
+
+  if (kind === "deviceAuthorization" && flow.deviceAuthorizationUrl !== undefined) {
+    help.deviceAuthorizationUrl = sanitize(flow.deviceAuthorizationUrl);
   }
 
   if (flow.refreshUrl !== undefined) {
@@ -250,7 +257,7 @@ const flowsOf = (fields: SchemeFields): Option.Option<Readonly<Record<string, Fl
       return Option.none();
     }
 
-    flows[kind] = flowHelp(flow.value);
+    flows[kind] = flowHelp(kind, flow.value);
   }
 
   return Option.some(flows);

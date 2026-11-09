@@ -149,6 +149,34 @@ describe("AUTH help for oauth2, openIdConnect, mutualTLS and the TTY prompt", ()
     );
   });
 
+  test("a 3.2 deviceAuthorization flow shows its deviceAuthorizationUrl folded, beside tokenUrl", () => {
+    const device = scheme("oauth", {
+      flows: {
+        deviceAuthorization: {
+          deviceAuthorizationUrl: "https://auth.example/\n\tdevice",
+          scopes: [],
+          tokenUrl: "https://auth.example/device-token",
+        },
+      },
+      type: "oauth2Token",
+    });
+    const line = authFor([{ scheme: "oauth", scopes: [] }], [device], {
+      credentials: [oauthCredential],
+    });
+
+    expect(line).toContain(
+      "deviceAuthorization flow deviceAuthorizationUrl https://auth.example/ device, tokenUrl https://auth.example/device-token",
+    );
+  });
+
+  test("a flow without deviceAuthorizationUrl prints no deviceAuthorizationUrl", () => {
+    const line = authFor([{ scheme: "oauth", scopes: [] }], [oauth], {
+      credentials: [oauthCredential],
+    });
+
+    expect(line.includes("deviceAuthorizationUrl")).toBe(false);
+  });
+
   test("each flow lists its scope names and descriptions (OAF-12)", () => {
     const line = authFor([{ scheme: "oauth", scopes: [] }], [oauth], {
       credentials: [oauthCredential],

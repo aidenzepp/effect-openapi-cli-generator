@@ -288,6 +288,7 @@ export class Server extends Schema.Class<Server>("Server")({
 // ever becomes a request target (design 9 I3).
 const OAuthFlow = Schema.Struct({
   authorizationUrl: Schema.optionalKey(SafeText),
+  deviceAuthorizationUrl: Schema.optionalKey(SafeText),
   refreshUrl: Schema.optionalKey(SafeText),
   scopes: Schema.Array(Schema.Struct({ description: SafeText, name: SafeText })),
   tokenUrl: Schema.optionalKey(SafeText),

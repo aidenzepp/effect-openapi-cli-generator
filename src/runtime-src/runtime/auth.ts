@@ -30,6 +30,7 @@ export type SecurityRequirement = readonly (readonly string[])[];
  */
 export interface OAuthFlow {
   readonly authorizationUrl?: string;
+  readonly deviceAuthorizationUrl?: string;
   readonly refreshUrl?: string;
   readonly scopes: readonly { readonly description: string; readonly name: string }[];
   readonly tokenUrl?: string;
