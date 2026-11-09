@@ -486,6 +486,8 @@ interface CommandContext extends FieldStore {
   readonly api: Api;
   readonly booleans: Map<string, boolean>;
   readonly domain: NamePlan["domain"];
+  // The author config's environment prefix, which each command's run record reads.
+  readonly envPrefix: string;
   readonly plan: NamePlan;
   readonly targets: ReadonlyMap<Operation, Target>;
 }
@@ -1566,6 +1568,12 @@ const commandStatement = (
     });
     const handler = arrow(config.length === 0 ? [] : [{ name: I("flags") }], handled);
     const make = fn("Command.make", str(command.name), obj(config), handler);
+    // The run's error format is recorded after parsing and before the handler's first fallible
+    // step, so an error raised before `send` renders in it (design 7.4 revision 31b).
+    const recording = fn(
+      "Command.provideEffectDiscard",
+      fn("Output.recordRun", str(context.envPrefix)),
+    );
 
     return {
       domain: Option.match(body, { onNone: () => [], onSome: (plan) => plan.domain }),
@@ -1573,7 +1581,7 @@ const commandStatement = (
         _tag: "Const",
         exported: true,
         name,
-        value: pipe(make, annotationsOf(command, meta, context)),
+        value: pipe(make, [recording, ...annotationsOf(command, meta, context)]),
       },
     };
   });
@@ -1887,7 +1895,23 @@ const globalSettings: readonly string[] = [
   "Output.Force",
   "Output.MaxErrorBytes",
   "Describe.describeFlag",
+  "Client.timeoutSetting",
+  "Client.retriesSetting",
+  "Client.retryUnsafeSetting",
+  "Client.verboseSetting",
+  "Output.Raw",
+  "Output.MaxRecordBytes",
+  "Output.errorFormatSetting",
+  "Output.dryRunSetting",
 ];
+
+// The runtime client module, which owns the timeout, retry and verbose settings. Only the root
+// reads it, so it is not one of the fixed namespaces every cli module may import.
+const clientNamespace: Binding = {
+  from: "../runtime/client.ts",
+  kind: "Namespace",
+  name: "Client",
+};
 
 // One table row per top-level group: its header and a thunk importing its module by a literal
 // specifier, so the module loads only when `Groups.root` selects it (design 4.1 Lazy root).
@@ -1984,6 +2008,7 @@ const rootFile = (
       { from: "../api/security.ts", kind: "Named", name: "security" },
       { from: "../api/servers.ts", kind: "Named", name: "servers" },
       ...rootNamespaceImports.map(([name, from]) => ({ from, kind: "Namespace" as const, name })),
+      clientNamespace,
       ...domainBindings(domain),
       ...author.bindings,
     ]);
@@ -2079,6 +2104,7 @@ export const emitCli = (
       booleans: new Map(),
       defs,
       domain: plan.domain,
+      envPrefix: envPrefixOf(config),
       line: api.line,
       plan,
       refusedDefaults: refusedDefaultsOf(input.validationEdits, defs),

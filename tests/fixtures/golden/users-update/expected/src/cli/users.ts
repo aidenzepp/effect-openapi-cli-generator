@@ -40,6 +40,7 @@ export const update = Command.make(
       Effect.flatMap(Output.send(Users.updateMeta)),
     ),
 ).pipe(
+  Command.provideEffectDiscard(Output.recordRun("EXAMPLE")),
   Command.withDescription("Update a user."),
   Command.annotate(Describe.Binding, {
     operation: Users.updateMeta,
@@ -125,6 +126,7 @@ export const setAvatar = Command.make(
       Effect.flatMap(Output.send(Users.setAvatarMeta, flags.accept)),
     ),
 ).pipe(
+  Command.provideEffectDiscard(Output.recordRun("EXAMPLE")),
   Command.withDescription("Set a user avatar."),
   Command.annotate(Describe.Binding, {
     operation: Users.setAvatarMeta,
