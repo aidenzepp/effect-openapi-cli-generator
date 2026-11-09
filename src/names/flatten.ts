@@ -192,6 +192,11 @@ interface Ctx {
    */
   readonly styleRefused: ReadonlySet<string>;
   /**
+   * Multipart only: the parts whose Encoding rule nests by name (design 6.3, HT:B16, ENC-07). An
+   * object part among them gets one dotted part flag per nested property instead of a JSON flag.
+   */
+  readonly nestedParts: ReadonlySet<string>;
+  /**
    * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5). Each
    * gets no flag and no notice, as a style-refused part gets none.
    */
@@ -214,6 +219,17 @@ const base64PartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<stri
   new Set(
     encoding.flatMap((rule) =>
       rule.contentEncoding !== undefined && rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
+// The property parts of a multipart alternative whose rule nests by name (ENC-07).
+const nestedPartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.target.kind === "property" &&
+      (rule.nested ?? []).some((nested) => nested.target.kind === "property")
         ? [rule.target.name]
         : [],
     ),
@@ -244,6 +260,7 @@ const newCtx = (
   defs,
   fileParts: codec === "multipart",
   memo: new Map(),
+  nestedParts: codec === "multipart" ? nestedPartsOf(encoding) : new Set(),
   readOnlyOmitted: line === "3.0",
   refusedFields: new Set(refusedFields),
   styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
@@ -645,12 +662,96 @@ const walkProperties = (
   return Result.succeed({ flags, skipped });
 };
 
+type PartBase = Pick<BodyFlag, "name" | "notes" | "pointer">;
+
+// One part's flag by the top-level part kinds: a scalar typed (a scalar array repeated), a binary
+// or password string a file, an object one JSON flag; any other shape has none.
+const partFlag = (
+  part: Classified,
+  base: PartBase,
+): Omit<BodyFlag, "schemaPointer"> | undefined => {
+  if (part._tag === "Opaque") {
+    return undefined;
+  }
+
+  return part._tag === "Object"
+    ? { ...base, kind: "json", repeated: false }
+    : { ...base, kind: part.kind, repeated: part.repeated };
+};
+
+// A nested part's flag kind: as a top-level part's, except that a scalar array is one JSON part and
+// an array of files has none.
+const nestedKind = (part: Classified): BodyFlagKind | undefined => {
+  if (part._tag === "Opaque" || (part._tag === "Scalar" && part.repeated && part.kind === "file")) {
+    return undefined;
+  }
+
+  return part._tag === "Object" || part.repeated ? "json" : part.kind;
+};
+
+/**
+ * The part flags of a by-name nested part (design 6.3, HT:B16, ENC-07): one per nested property,
+ * named `<part>.<property>` with the dotted body-field naming, by the top-level part kinds. A
+ * nested scalar array is one JSON part (3.2 sends a nested array as `application/json`, ENC-24),
+ * so it is one JSON flag; an array of files has no flag. Nested parts carry no transfer encoding:
+ * normalize refuses one (ENC-37/nested-transfer-encoding).
+ */
+const nestedFlags = (
+  ctx: Ctx,
+  properties: ReadonlyMap<string, Property>,
+  key: string,
+  folded: { readonly name: string; readonly notes: readonly FoldNote[] },
+): Result.Result<Walk, FlattenError> => {
+  const flags: BodyFlag[] = [];
+  const skipped: SkippedProperty[] = [];
+  for (const [member, { schema: child, site }] of properties) {
+    ctx.visits += 1;
+    if (ctx.visits > maxVisits) {
+      return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
+    }
+
+    if (omitted(ctx, child)) {
+      continue;
+    }
+
+    const pointer = formatPointer([key, member]);
+    const memberFolded = foldKebab(member);
+    if (Result.isFailure(memberFolded)) {
+      skipped.push({ pointer, reason: "EmptyFold" });
+      continue;
+    }
+
+    const classified = classify(ctx, child, site, 0);
+    if (Result.isFailure(classified)) {
+      return Result.fail(classified.failure);
+    }
+
+    const kind = nestedKind(classified.success);
+    if (kind === undefined) {
+      skipped.push({ pointer, reason: "UnsupportedPart" });
+      continue;
+    }
+
+    flags.push({
+      kind,
+      name: `${folded.name}.${memberFolded.success.name}`,
+      notes: [...folded.notes, ...memberFolded.success.notes],
+      pointer,
+      repeated: false,
+      schemaPointer: sourcePointer(site),
+    });
+  }
+
+  return Result.succeed({ flags, skipped });
+};
+
 /**
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
  * (repeated parts), a `file` part when it is binary, a `format: password` string (an array of
  * them a repeated file part) or its rule sends it base64 encoded, or a `json` flag for an object
  * part, sent as one JSON part (ENC-22); any other shape is skipped with a reason. A part whose
- * style normalize refused (ENC-40) or that it refused at `field` scope gets nothing.
+ * style normalize refused (ENC-40) or that it refused at `field` scope gets nothing. An object part
+ * whose rule nests by name gets one dotted flag per nested property (`nestedFlags`).
  */
 const walkParts = (
   ctx: Ctx,
@@ -681,23 +782,31 @@ const walkParts = (
     }
 
     const part = classified.success;
-    if (part._tag === "Opaque") {
+    if (part._tag === "Object" && ctx.nestedParts.has(key)) {
+      const inner = nestedFlags(ctx, part.properties, key, folded.success);
+      if (Result.isFailure(inner)) {
+        return Result.fail(inner.failure);
+      }
+
+      flags.push(...inner.success.flags);
+      skipped.push(...inner.success.skipped);
+      continue;
+    }
+
+    const flag = partFlag(part, {
+      name: folded.success.name,
+      notes: folded.success.notes,
+      pointer,
+    });
+    if (flag === undefined) {
       skipped.push({ pointer, reason: "UnsupportedPart" });
       continue;
     }
 
-    const base = { name: folded.success.name, notes: folded.success.notes, pointer };
-    const schemaPointer = sourcePointer(site);
-    if (part._tag === "Object") {
-      flags.push({ ...base, kind: "json", repeated: false, schemaPointer });
-      continue;
-    }
-
     flags.push({
-      ...base,
-      kind: ctx.base64Parts.has(key) ? "file" : part.kind,
-      repeated: part.repeated,
-      schemaPointer,
+      ...flag,
+      kind: ctx.base64Parts.has(key) && part._tag === "Scalar" ? "file" : flag.kind,
+      schemaPointer: sourcePointer(site),
     });
   }
 

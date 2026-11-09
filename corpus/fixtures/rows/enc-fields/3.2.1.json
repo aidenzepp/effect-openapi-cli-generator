@@ -159,6 +159,75 @@
         }
       }
     },
+    "/nested": {
+      "post": {
+        "operationId": "nested-send",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "envelope": {
+                  "contentType": "multipart/mixed",
+                  "encoding": {
+                    "scan": {
+                      "contentType": "image/png"
+                    }
+                  }
+                },
+                "form": {
+                  "contentType": "multipart/form-data",
+                  "encoding": {
+                    "x": {
+                      "contentType": "text/csv"
+                    }
+                  }
+                }
+              },
+              "schema": {
+                "properties": {
+                  "envelope": {
+                    "properties": {
+                      "meta": {
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "scan": {}
+                    },
+                    "type": "object"
+                  },
+                  "form": {
+                    "properties": {
+                      "x": {
+                        "type": "string"
+                      },
+                      "y": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["y"],
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
     "/parts": {
       "post": {
         "operationId": "parts-send",

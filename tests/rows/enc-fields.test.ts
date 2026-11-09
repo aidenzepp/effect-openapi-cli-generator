@@ -19,9 +19,9 @@ import { setEnv } from "../support/env.ts";
 // from `contentType`, part headers, `style`, `explode` and `allowReserved` on form and multipart
 // bodies, and 3.2 nested encoding. One generated package per version line, built once, run against
 // the capture server; the diagnostic rows call `generate()` in process. A row the product gets
-// wrong is a `test.todo` with what was observed. ENC-07, ENC-08, ENC-09 and ENC-16 are deferred to
-// Milestone 3; the M2 refusal tests pin today's refusal of nested multipart/mixed parts until
-// M3-MP2 and M3-MP3 replace them.
+// wrong is a `test.todo` with what was observed. One nested level by name (ENC-07, ENC-16) is sent
+// since M3-MP2; nested by position (ENC-08, ENC-09) is deferred to M3-MP3, and the M2 refusal tests
+// pin today's refusal of it until M3-MP3 replaces them.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -116,22 +116,27 @@ interface Sent {
   readonly target: string;
 }
 
-// The one request an invocation of the line's built CLI sent to the bound server. `runBin` is
-// asynchronous, so the in-process capture server keeps answering.
-const sentOnce = async (line: Line, args: readonly string[]): Promise<Sent> => {
+// One invocation of the line's built CLI against the bound server. `runBin` is asynchronous, so
+// the in-process capture server keeps answering.
+const invoke = (line: Line, args: readonly string[]) => {
   const generated = packages.get(line);
   if (generated === undefined) {
     throw new Error(`no package built for ${line}`);
   }
 
-  const before = capture.requests().length;
-  const result = await Effect.runPromise(
+  return Effect.runPromise(
     runBin(generated, {
       args: ["--server", "0", "--server-variable", `port=${port}`, ...args],
       stdin: new Uint8Array(),
       timeoutMs: 30_000,
     }).pipe(Effect.provide(layer)),
   );
+};
+
+// The one request an invocation of the line's built CLI sent to the bound server.
+const sentOnce = async (line: Line, args: readonly string[]): Promise<Sent> => {
+  const before = capture.requests().length;
+  const result = await invoke(line, args);
   if (result.exitCode !== 0) {
     throw new Error(`unexpected exit ${String(result.exitCode)}: ${latin1(result.stderr)}`);
   }
@@ -193,6 +198,43 @@ const text = (name: string, body: string, type = "text/plain"): Part => ({
   body,
   headers: [`Content-Disposition: form-data; name="${name}"`, `Content-Type: ${type}`],
 });
+
+// A nested part (ENC-07, ENC-16): its outer headers, the nested Content-Type's boundary replaced by
+// `<nested>`, and its nested parts, split at that boundary.
+interface NestedSent {
+  readonly headers: readonly string[];
+  readonly parts: readonly Part[];
+}
+
+const withoutBoundary = (part: Part): NestedSent => {
+  const at = part.headers.findIndex((line) => line.startsWith("Content-Type: multipart/"));
+  const boundary = /; boundary=(?<boundary>.+)$/u.exec(part.headers[at] ?? "")?.groups?.boundary;
+  if (boundary === undefined) {
+    throw new Error("the nested part's Content-Type names no boundary");
+  }
+
+  const segments = part.body.split(`--${boundary}`);
+  expect(segments.at(-1)).toBe("--");
+
+  return {
+    headers: part.headers.map((line, index) =>
+      index === at ? line.replace(boundary, "<nested>") : line,
+    ),
+    parts: segments.slice(1, -1).map((segment) => {
+      const headEnd = segment.indexOf("\r\n\r\n");
+
+      return {
+        body: segment.slice(headEnd + 4, -2),
+        headers: segment.slice(2, headEnd).split("\r\n"),
+      };
+    }),
+  };
+};
+
+const nestedSent = async (args: readonly string[]): Promise<readonly Part[]> =>
+  partsOf(await sentOnce("3.2.1", ["nested-send", ...args]));
+
+const nestedRun = (args: readonly string[]) => invoke("3.2.1", ["nested-send", ...args]);
 
 describe("ENC field rows through the built CLI", () => {
   for (const line of lines) {
@@ -660,18 +702,40 @@ describe("ENC field rows through generate()", () => {
     ]);
   });
 
-  // Milestone 3 (M3-MP2, M3-MP3) sends one level of nested multipart/mixed parts; until then the
-  // operation is refused, and these tests pin that refusal.
-  test("M2 refusal of ENC-07 (M3-MP2): a multipart/mixed part with a nested encoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", multipart, {
-        encoding: { a: { contentType: mixedPart, encoding: { x: {} } } },
-        schema: objectOf({ a: objectOf({ x: string }) }),
-      }),
-    );
+  // Milestone 3 sends one nested level: by name here (M3-MP2), by position under M3-MP3, whose
+  // ENC-08 and ENC-09 refusals stay pinned until it lands.
+  test("ENC-07: a nested encoding by name under a multipart/mixed part sends one nested part from its dotted part flags, in nested property order, with no nested part names (3.2.1)", async () => {
+    const sent = await nestedSent([
+      "--envelope.scan",
+      file("three.bin"),
+      "--envelope.note",
+      "n",
+      "--envelope.meta",
+      '{"id":1}',
+    ]);
 
-    expect(refusedOperation(found)).toEqual(unsupportedBody);
-  });
+    expect(sent.map(withoutBoundary)).toEqual([
+      {
+        headers: [
+          'Content-Disposition: form-data; name="envelope"',
+          "Content-Type: multipart/mixed; boundary=<nested>",
+        ],
+        parts: [
+          { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+          { body: "n", headers: ["Content-Type: text/plain"] },
+          { body: "abc", headers: ["Content-Type: image/png"] },
+        ],
+      },
+    ]);
+  }, 60_000);
+
+  test("ENC-07: a nested part none of whose dotted part flags is given is not sent (3.2.1)", async () => {
+    const sent = await nestedSent(["--form.y", "2"]);
+
+    expect(sent.map(({ headers }) => headers[0])).toEqual([
+      'Content-Disposition: form-data; name="form"',
+    ]);
+  }, 60_000);
 
   test("M2 refusal of ENC-08 (M3-MP3): a multipart/mixed part with a nested prefixEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
     const found = await inProcess(
@@ -703,13 +767,41 @@ describe("ENC field rows through generate()", () => {
     ]);
   });
 
-  test("M2 refusal of ENC-16 (M3-MP2): one nested encoding level refuses the operation with EMT-1/unsupported-body, by name and by position, so nothing is sent (3.2.1)", async () => {
-    const byName = await inProcess(
-      withBody("3.2.1", multipart, {
-        encoding: { a: { contentType: mixedPart, encoding: { x: { contentType: mixedPart } } } },
-        schema: objectOf({ a: objectOf({ x: string }) }),
-      }),
-    );
+  test("ENC-16: one nested level is sent: a multipart/form-data part's nested parts carry their names and rules (3.2.1)", async () => {
+    const sent = await nestedSent(["--form.y", "2", "--form.x", "a,b"]);
+
+    expect(sent.map(withoutBoundary)).toEqual([
+      {
+        headers: [
+          'Content-Disposition: form-data; name="form"',
+          "Content-Type: multipart/form-data; boundary=<nested>",
+        ],
+        parts: [
+          {
+            body: "a,b",
+            headers: ['Content-Disposition: form-data; name="x"', "Content-Type: text/csv"],
+          },
+          {
+            body: "2",
+            headers: ['Content-Disposition: form-data; name="y"', "Content-Type: text/plain"],
+          },
+        ],
+      },
+    ]);
+  }, 60_000);
+
+  test("ENC-16: a nested part is asserted as its object, so a missing required nested member exits 2 and nothing is sent (3.2.1)", async () => {
+    const before = capture.requests().length;
+    const missing = await nestedRun(["--form.x", "a"]);
+    const between = capture.requests().length;
+    const given = await nestedRun(["--form.x", "a", "--form.y", "2"]);
+
+    expect([missing.exitCode, between - before]).toEqual([2, 0]);
+    expect([given.exitCode, capture.requests().length - between]).toEqual([0, 1]);
+  }, 60_000);
+
+  // M3-MP3 sends one nested level by position; until then that operation is refused.
+  test("Pending M3-MP3: one nested encoding level by position refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
     const byPosition = await inProcess(
       withBody("3.2.1", multipart, {
         encoding: { a: { contentType: mixedPart, prefixEncoding: [{ contentType: mixedPart }] } },
@@ -717,10 +809,7 @@ describe("ENC field rows through generate()", () => {
       }),
     );
 
-    expect([refusedOperation(byName), refusedOperation(byPosition)]).toEqual([
-      unsupportedBody,
-      unsupportedBody,
-    ]);
+    expect(refusedOperation(byPosition)).toEqual(unsupportedBody);
   });
 
   test("ENC-16: encoding nested two levels deep is refused at element scope, by name and by position (3.2.1)", async () => {

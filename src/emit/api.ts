@@ -619,10 +619,30 @@ export interface PartHeader {
 }
 
 /**
+ * One nested part of a by-name nested part (design 6.3, HT:B16, ENC-07): its dotted part flag, its
+ * nested name and the one `Content-Type` its nested rule gives.
+ */
+export interface NestedFormPart {
+  readonly contentType: string;
+  readonly flag: PlannedFlag;
+  readonly name: string;
+}
+
+/**
+ * The nested body of a part by name: its kind, from the part's Encoding `contentType`, and its
+ * nested parts in nested property order.
+ */
+export interface NestedParts {
+  readonly kind: "form-data" | "mixed";
+  readonly parts: readonly NestedFormPart[];
+}
+
+/**
  * One `multipart/form-data` part a command sends: its part flag, its part name, its `Content-Type`,
  * its declared headers and, from its Encoding rule, its transfer encoding. `key` is the part's key
  * in the builder's form when the part travels as a `Serialize.ChosenPart` beside `fields`: it
- * lists several types or declares a header.
+ * lists several types or declares a header. A part with `nested` is sent as one nested part from
+ * its nested parts' flags; its `flag` is the first of them.
  */
 export interface FormPart {
   readonly contentEncoding?: "base64";
@@ -631,6 +651,7 @@ export interface FormPart {
   readonly headers: readonly PartHeader[];
   readonly key?: string;
   readonly name: string;
+  readonly nested?: NestedParts;
 }
 
 /**
@@ -765,6 +786,11 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
     return Result.fail(`an encoding for multipart part ${pointer}`);
   }
 
+  // A part nested by name is an object part whose nested parts have the flags (`nestedPartOf`).
+  if (rule.nested !== undefined) {
+    return Result.fail(`nested parts in multipart part ${pointer}`);
+  }
+
   // A style the writer sends (ENC-40) arrives typed `text/plain`; normalize refuses any other, and
   // the names plan gives that part no flag.
   if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
@@ -815,15 +841,119 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
 
 const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
 
+// The kind of nested body a part's one Encoding `contentType` names, if the writer nests it.
+const nestedKind = (contentType: readonly string[]): NestedParts["kind"] | undefined => {
+  const [only, ...more] = contentType;
+  const named = only === undefined || more.length > 0 ? undefined : essence(only);
+  if (named === "multipart/mixed") {
+    return "mixed";
+  }
+
+  return named === "multipart/form-data" ? "form-data" : undefined;
+};
+
+// One nested part's flag with its nested name and the one concrete type its nested rule gives, and
+// its index among the nested rules, or the reason the writer cannot send it.
+const nestedMemberOf = (
+  flag: PartFlag,
+  nestedName: string,
+  rule: EncodingRule,
+): Result.Result<{ readonly order: number; readonly part: NestedFormPart }, string> => {
+  const pointer = flag.source.wireName;
+  const nested = rule.nested ?? [];
+  const order = nested.findIndex(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === nestedName,
+  );
+  const memberRule = nested[order];
+  if (memberRule === undefined) {
+    return Result.fail(`an encoding for nested multipart part ${pointer}`);
+  }
+
+  if (memberRule.headers.length > 0) {
+    return Result.fail(`part headers of nested multipart part ${pointer}`);
+  }
+
+  if (memberRule.serialization !== undefined && !sendsFormPairs(memberRule.serialization)) {
+    return Result.fail(`a style for nested multipart part ${pointer}`);
+  }
+
+  const [only, ...more] = memberRule.contentType;
+  if (only === undefined || more.length > 0 || only.includes("*")) {
+    return Result.fail(`one content type for nested multipart part ${pointer}`);
+  }
+
+  return Result.succeed({ order, part: { contentType: only, flag, name: nestedName } });
+};
+
+// A part nested by name (design 6.3, HT:B16, ENC-07): its Encoding `contentType` is one
+// `multipart/mixed` or `multipart/form-data`, it declares no part header or transfer encoding, and
+// each nested part with a flag has one concrete type and no part header. Refused otherwise.
+const nestedPartOf = (
+  name: string,
+  flags: readonly PartFlag[],
+  context: PartContext,
+): Result.Result<OrderedPart, string> => {
+  const { alternative } = context;
+  const pointer = formatPointer([name]);
+  const order = alternative.encoding.findIndex(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === name,
+  );
+  const rule = alternative.encoding[order];
+  if (rule?.nested === undefined) {
+    return Result.fail(`an encoding for nested multipart part ${pointer}`);
+  }
+
+  const kind = nestedKind(rule.contentType);
+  const [contentType] = rule.contentType;
+  if (kind === undefined || contentType === undefined) {
+    return Result.fail(`nested parts in multipart part ${pointer}`);
+  }
+
+  if (rule.headers.length > 0 || rule.contentEncoding !== undefined) {
+    return Result.fail(`part headers of multipart part ${pointer}, which nests parts`);
+  }
+
+  const members: { readonly order: number; readonly part: NestedFormPart }[] = [];
+  for (const flag of flags) {
+    const [, nestedName] = flag.source.wireName.split("/").slice(1).map(unescape);
+    const built = nestedName === undefined ? undefined : nestedMemberOf(flag, nestedName, rule);
+    if (built === undefined || Result.isFailure(built)) {
+      return Result.fail(built?.failure ?? `the nested multipart part ${flag.source.wireName}`);
+    }
+
+    members.push(built.success);
+  }
+
+  const parts = Arr.sort(
+    members,
+    Order.mapInput(Order.Number, (entry: (typeof members)[number]) => entry.order),
+  ).map(({ part }) => part);
+  const [first] = parts;
+  if (first === undefined) {
+    return Result.fail(`a flag for nested multipart part ${pointer}`);
+  }
+
+  return Result.succeed({
+    contentType: { _tag: "Declared", mediaType: contentType },
+    flag: first.flag,
+    headers: [],
+    name,
+    nested: { kind, parts },
+    order,
+  });
+};
+
 /**
  * The parts a `multipart/form-data` command sends, in Encoding order, or the reason the runtime
  * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
- * command's request media alternatives; the part flags are those whose media lists it. Refused,
- * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
- * positional parts, a nested part, a part style other than exploded `form`, a part whose
- * `contentType` lists a range, a part listing several types with no `--<part>-content-type` flag,
- * a part header the names plan gave no `--<part>-<header>` flag, and a required part the names plan
- * gave no flag. Normalize keeps the headers the writer owns out of the rule (ENC-03).
+ * command's request media alternatives; the part flags are those whose media lists it. A part
+ * nested by name is one nested part from its dotted part flags (HT:B16, ENC-07). Refused, not
+ * guessed: a multipart alternative under a range key, another multipart subtype, 3.2 positional
+ * parts, a part nested by position (M3-MP3), a nested part under any other `contentType` or with
+ * part headers, a part style other than exploded `form`, a part whose `contentType` lists a range,
+ * a part listing several types with no `--<part>-content-type` flag, a part header the names plan
+ * gave no `--<part>-<header>` flag, and a required part the names plan gave no flag. Normalize
+ * keeps the headers the writer owns out of the rule (ENC-03).
  */
 export const formParts = (
   command: PlannedCommand,
@@ -837,9 +967,13 @@ export const formParts = (
 
   // Checked over the rules, not the part flags: a part the names plan gave no flag (a
   // `prefixItems` array) still carries its nested rule. Positional rules were refused above.
-  const nested = alternative.encoding.find((rule) => rule.nested !== undefined);
-  if (nested !== undefined && nested.target.kind === "property") {
-    return Result.fail(`nested parts in multipart part ${formatPointer([nested.target.name])}`);
+  const byPosition = alternative.encoding.find((rule) =>
+    (rule.nested ?? []).some((nested) => nested.target.kind === "position"),
+  );
+  if (byPosition !== undefined && byPosition.target.kind === "property") {
+    return Result.fail(
+      `nested parts by position in multipart part ${formatPointer([byPosition.target.name])}`,
+    );
   }
 
   const key = alternative.schema?.key ?? "";
@@ -850,15 +984,33 @@ export const formParts = (
     schemas: objectSchemas(defs, key),
   };
   const parts: OrderedPart[] = [];
+  const nested = new Map<string, PartFlag[]>();
   for (const flag of command.flags) {
-    if (isPartFlag(flag, alternative.mediaType)) {
-      const part = partOf(flag, context);
-      if (Result.isFailure(part)) {
-        return Result.fail(part.failure);
-      }
-
-      parts.push(part.success);
+    if (!isPartFlag(flag, alternative.mediaType)) {
+      continue;
     }
+
+    const [name, nestedName, ...rest] = flag.source.wireName.split("/").slice(1).map(unescape);
+    if (name !== undefined && nestedName !== undefined && rest.length === 0) {
+      nested.set(name, [...(nested.get(name) ?? []), flag]);
+      continue;
+    }
+
+    const part = partOf(flag, context);
+    if (Result.isFailure(part)) {
+      return Result.fail(part.failure);
+    }
+
+    parts.push(part.success);
+  }
+
+  for (const [name, flags] of nested) {
+    const part = nestedPartOf(name, flags, context);
+    if (Result.isFailure(part)) {
+      return Result.fail(part.failure);
+    }
+
+    parts.push(part.success);
   }
 
   const sent = new Set(parts.map((part) => part.name));
@@ -1164,8 +1316,18 @@ const encoderOf = (
     const aliases: Statement[] = [];
     const keyed: Field[] = [];
     const sends: ((form: Expr) => Expr)[] = [];
-    for (const { contentEncoding, contentType, key, name } of parts.success) {
+    for (const { contentEncoding, contentType, key, name, nested } of parts.success) {
       const encoding = contentEncoding === undefined ? [] : [str(contentEncoding)];
+      if (nested !== undefined) {
+        const members = nested.parts.map((part) => arr([str(part.name), str(part.contentType)]));
+        const form = obj([
+          ["kind", str(nested.kind)],
+          ["parts", arr(members)],
+        ]);
+        sends.push(() => arr([str(name), form]));
+        continue;
+      }
+
       if (key === undefined && contentType._tag === "Declared") {
         sends.push(() => arr([str(name), str(contentType.mediaType), ...encoding]));
         continue;
