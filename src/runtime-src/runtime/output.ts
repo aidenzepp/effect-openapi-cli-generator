@@ -756,9 +756,6 @@ const reportOnce = <E extends object>(
     Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
   );
 
-// `redact.ts` owns these. Two tests still import them from this module, so the re-export stays.
-export { RunCredentials, runCredentialsLayer } from "./redact.ts";
-
 /**
  * What the run recorded for its error rendering (design 7.4 revision 31b): the effective format,
  * once `recordRun` ran, the retry-hint input, once `send` reached the client, and the implicit

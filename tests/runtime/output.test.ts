@@ -38,13 +38,12 @@ import {
   finalCatch,
   readExcerpt,
   renderError,
-  runCredentialsLayer,
   sanitize,
   valueFreeFormatter,
   writeBody,
 } from "../../src/runtime-src/runtime/output.ts";
 import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
-import { queryWireForm, scrub } from "../../src/runtime-src/runtime/redact.ts";
+import { queryWireForm, runCredentialsLayer, scrub } from "../../src/runtime-src/runtime/redact.ts";
 
 type Env =
   | FileSystem.FileSystem

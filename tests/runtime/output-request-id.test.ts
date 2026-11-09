@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer, Redacted, Sink, Stdio } from "effect";
 import { ApiResponseError } from "../../src/runtime-src/domain/errors.ts";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
-import { finalCatch, runCredentialsLayer } from "../../src/runtime-src/runtime/output.ts";
+import { finalCatch } from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 const bearer: Credential = {
   definition: { kind: "http", scheme: "bearer" },
