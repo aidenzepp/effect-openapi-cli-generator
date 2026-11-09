@@ -119,6 +119,12 @@ export interface Credential {
 export const maxCredentialBytes = 65_536;
 
 /**
+ * Ceiling for a `mutualTLS` certificate, key or CA file, in bytes: room for a CA bundle, which
+ * `maxCredentialBytes` is too small for. `bin.ts` reads each file through it (design 9 I5).
+ */
+export const maxCertificateBytes = 1_048_576;
+
+/**
  * The security table and environment prefix, provided once by the root `services` layer.
  */
 export class Schemes extends Context.Service<

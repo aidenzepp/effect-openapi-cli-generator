@@ -19,11 +19,12 @@ import {
   newExpr,
   num,
   obj,
-  plus,
   printModule,
   str,
   typeKeyword,
+  typeReadonlyArray,
   typeRef,
+  typeUnion,
 } from "./printer.ts";
 import type { Expr, Import, Module, Param, PrinterError, Statement } from "./printer.ts";
 
@@ -158,30 +159,67 @@ const mainModule = (config: AuthorConfig): Module => {
  * The client-certificate part of `bin.ts` (design 4.3, 6.5 `mutualTLS` row, D-SEC3), emitted only
  * for a package with a `mutualTLS` scheme. At start-up it reads each `mutualTLS` scheme of
  * `api/security.ts` through the runtime's `Auth.clientCertificatePaths` (the names the scheme
- * carries are the one derivation), checks each configured path readable (an unreadable one is a
- * `UsageError` naming its environment variable, exit 2, rendered once by `Output.finalCatch`, which
- * reads `<PREFIX>_ERROR_FORMAT` as for a parse-time error, design 7.4), and
- * provides `{ tls: { cert, key, ca? } }` over `Bun.file` as `Auth.ClientCertificate`, the first
- * configured scheme's. The runtime sets it per hop on bound origins only; `layerOptions` never
- * gets a `tls` key, because a client-wide one presents the certificate to every host (I3).
+ * carries are the one derivation) and reads each configured path into bytes (design 9 I5): a path
+ * that cannot be read, is not a regular file (a directory, FIFO or device is never opened) or holds
+ * more than `Auth.maxCertificateBytes` is a `UsageError` naming its environment variable and never
+ * the path, exit 2, rendered once by `Output.finalCatch`, which reads `<PREFIX>_ERROR_FORMAT` as
+ * for a parse-time error (design 7.4). The read itself stops at the bound, so a file swapped after
+ * the `stat` cannot exceed it. It provides `{ tls: { cert, key, ca? } }` over those bytes as
+ * `Auth.ClientCertificate`, the first configured scheme's. The runtime sets it per hop on bound
+ * origins only; `layerOptions` never gets a `tls` key, because a client-wide one presents the
+ * certificate to every host (I3).
  */
 const clientCertificateStatements = (config: AuthorConfig): readonly Statement[] => {
+  // `parts` are joined: the printer has no nested `+` (printer.ts `check`, `Plus`).
   const unreadable = arrow(
-    [stringParam("message")],
-    newExpr(path("UsageError"), [obj([["message", path("message")]])]),
+    [
+      {
+        name: I("parts"),
+        type: typeReadonlyArray(typeUnion([typeKeyword("number"), typeKeyword("string")])),
+      },
+    ],
+    newExpr(path("UsageError"), [obj([["message", fn("parts.join", str(""))]])]),
+  );
+  const fileNamed = (tail: readonly Expr[]): Expr =>
+    fn("unreadable", arr([str("the file named by "), path("name"), ...tail]));
+  const cannotRead = arrow(
+    [],
+    fn("unreadable", arr([str("cannot read the file named by "), path("name")])),
+  );
+  const bounded = piped(
+    fn("Stream.mapError", fn("fs.stream", path("path")), cannotRead),
+    fn(
+      "Stream.limitBytes",
+      path("Auth.maxCertificateBytes"),
+      arrow(
+        [],
+        fn(
+          "Stream.fail",
+          fileNamed([str(" is larger than "), path("Auth.maxCertificateBytes"), str(" bytes")]),
+        ),
+      ),
+    ),
+    path("Stream.mkUint8Array"),
+  );
+  const regularOnly = arrow(
+    [{ name: I("info") }],
+    piped(
+      fn("Match.value", path("info")),
+      fn("Match.when", obj([["type", str("File")]]), arrow([], bounded)),
+      fn("Match.orElse", arrow([], fn("Effect.fail", fileNamed([str(" is not a regular file")])))),
+    ),
   );
   const certificateFile = arrow(
     [stringParam("name"), stringParam("path")],
-    piped(
-      fn(
-        "FileSystem.FileSystem.use",
-        arrow([{ name: I("fs") }], fn("fs.access", path("path"), obj([["readable", bool(true)]]))),
+    fn(
+      "FileSystem.FileSystem.use",
+      arrow(
+        [{ name: I("fs") }],
+        piped(
+          fn("Effect.mapError", fn("fs.stat", path("path")), cannotRead),
+          fn("Effect.flatMap", regularOnly),
+        ),
       ),
-      fn(
-        "Effect.mapError",
-        arrow([], fn("unreadable", plus(str("cannot read the file named by "), path("name")))),
-      ),
-      fn("Effect.as", fn("Bun.file", path("path"))),
     ),
   );
   const files = obj([
@@ -226,7 +264,7 @@ const clientCertificateStatements = (config: AuthorConfig): readonly Statement[]
       fn("Auth.clientCertificatePaths", path("scheme")),
       fn(
         "Effect.mapError",
-        arrow([], fn("unreadable", plus(str("cannot read the setting "), path("scheme.certEnv")))),
+        arrow([], fn("unreadable", arr([str("cannot read the setting "), path("scheme.certEnv")]))),
       ),
       fn(
         "Effect.flatMap",
@@ -352,7 +390,7 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
       named(
         "effect",
         mutualTls
-          ? ["Effect", "FileSystem", "Layer", "Match", "Option", "References"]
+          ? ["Effect", "FileSystem", "Layer", "Match", "Option", "References", "Stream"]
           : ["Effect", "Layer", "References"],
       ),
       named("effect/cli", ["CliConfig", "CliOutput"]),
