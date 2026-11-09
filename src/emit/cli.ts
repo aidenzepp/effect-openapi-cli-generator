@@ -854,13 +854,16 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return yield* partOptionEntry(flag, source, operation, context);
     }
 
+    const { alternative, schema } = bodyField(operation, source, context);
+
     // A `format: password` property's secret-file flag (design 13.1 R4): the m3-pw2 helper carries
-    // its presence and its help note, which a schema description would replace.
+    // its presence and its help note, after the property's sanitized description when it has one.
     if (source.kind === "secret-file") {
-      return [flag.identifier, fn("Input.secretFileFlag", str(flag.name))] as const;
+      const description = describedBy(yield* fieldDescription(flag, alternative, schema));
+
+      return [flag.identifier, fn("Input.secretFileFlag", str(flag.name), ...description)] as const;
     }
 
-    const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }

@@ -418,15 +418,20 @@ export class SecretField {
   }
 }
 
+const secretFileNote = "Read the value from a file or stdin (-); it is never echoed";
+
 /**
  * A secret-file field flag, `--<prop>-file <path|->`. `Flag.String` keeps `-` literal; the value
- * is a path, so argv never holds the secret.
+ * is a path, so argv never holds the secret. Help shows the property's description, when given,
+ * then the note that the value is read from a file or stdin.
  */
-export const secretFileFlag = (name: string) =>
+export const secretFileFlag = (name: string, description?: string) =>
   Flag.String(name).pipe(
     Flag.withMetavar("path|-"),
     Flag.optional,
-    Flag.withDescription("Read the value from a file or stdin (-); it is never echoed"),
+    Flag.withDescription(
+      description === undefined ? secretFileNote : `${description} ${secretFileNote}`,
+    ),
   );
 
 export type Fields = Readonly<
