@@ -1,0 +1,80 @@
+{
+  "openapi": "3.1.2",
+  "info": { "title": "deepObject scalars", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [{ "name": "charges", "description": "Stripe-shaped deepObject unions." }],
+  "components": {
+    "schemas": {
+      "Created": {
+        "anyOf": [
+          { "type": "object", "properties": { "gt": { "type": "integer" } } },
+          { "type": "integer" }
+        ]
+      },
+      "Metadata": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "a": { "type": "object", "properties": { "b": { "type": "string" } } }
+            }
+          },
+          { "type": "string", "enum": [""] }
+        ]
+      },
+      "Description": {
+        "anyOf": [{ "type": "string" }, { "type": "string", "enum": [""] }]
+      },
+      "ActiveFrom": {
+        "anyOf": [{ "type": "number" }, { "type": "string", "enum": ["now"] }]
+      },
+      "ChargeCreate": {
+        "type": "object",
+        "properties": {
+          "active_from": { "$ref": "#/components/schemas/ActiveFrom" },
+          "description": { "$ref": "#/components/schemas/Description" },
+          "metadata": { "$ref": "#/components/schemas/Metadata" }
+        },
+        "required": ["active_from"]
+      }
+    }
+  },
+  "paths": {
+    "/charges": {
+      "get": {
+        "operationId": "charges-list",
+        "summary": "List charges.",
+        "tags": ["charges"],
+        "parameters": [
+          {
+            "name": "created",
+            "in": "query",
+            "style": "deepObject",
+            "explode": true,
+            "schema": { "$ref": "#/components/schemas/Created" }
+          }
+        ],
+        "responses": { "204": { "description": "Listed." } }
+      },
+      "post": {
+        "operationId": "charges-create",
+        "summary": "Create a charge.",
+        "tags": ["charges"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/ChargeCreate" },
+              "encoding": {
+                "active_from": { "style": "deepObject", "explode": true },
+                "description": { "style": "deepObject", "explode": true },
+                "metadata": { "style": "deepObject", "explode": true }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Created." } }
+      }
+    }
+  }
+}

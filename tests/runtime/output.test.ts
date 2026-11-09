@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
   Cause,
+  ConfigProvider,
   Effect,
   Exit,
   FileSystem,
@@ -16,7 +17,7 @@ import {
   Stream,
 } from "effect";
 import { CliError } from "effect/cli";
-import { HttpClientRequest } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
 import {
@@ -26,9 +27,14 @@ import {
   TransportError,
   UsageError,
 } from "../../src/runtime-src/domain/errors.ts";
-import type { OutputError } from "../../src/runtime-src/domain/errors.ts";
+import * as Auth from "../../src/runtime-src/runtime/auth.ts";
+import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
+import * as Input from "../../src/runtime-src/runtime/input.ts";
+import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
 import {
+  ClientPolicy,
+  dryRunSetting,
   Force,
   InternalError,
   defaultMaxErrorBytes,
@@ -38,13 +44,13 @@ import {
   finalCatch,
   readExcerpt,
   renderError,
-  runCredentialsLayer,
   sanitize,
+  send,
   valueFreeFormatter,
   writeBody,
 } from "../../src/runtime-src/runtime/output.ts";
-import type { ResponseBody } from "../../src/runtime-src/runtime/output.ts";
-import { queryWireForm, scrub } from "../../src/runtime-src/runtime/redact.ts";
+import type { OperationMeta, ResponseBody } from "../../src/runtime-src/runtime/output.ts";
+import { queryWireForm, runCredentialsLayer, scrub } from "../../src/runtime-src/runtime/redact.ts";
 
 type Env =
   | FileSystem.FileSystem
@@ -146,8 +152,8 @@ const inDir = <A>(use: (dir: string, fs: FileSystem.FileSystem, path: Path.Path)
 const failure = <E>(exit: Exit.Exit<unknown, E>): E | undefined =>
   Option.getOrUndefined(Exit.findErrorOption(exit));
 
-const reasonOf = (error: OutputError | UsageError | undefined) =>
-  error?._tag === "OutputError" ? error.reason : undefined;
+const reasonOf = (error: { readonly _tag: string } | undefined) =>
+  error instanceof OutputErrorClass ? error.reason : undefined;
 
 describe("stdout sink", () => {
   test("raw bytes reach stdout unchanged", async () => {
@@ -886,4 +892,140 @@ describe("a credential split by a stripped character and cut at the budget (audi
       expect(excerpt).toBe("<redacted:bearer>");
     });
   }
+});
+
+const created: OperationMeta = {
+  media: { request: [], responses: { "201": ["application/json"] } },
+  method: "POST",
+  operationId: "widgets-create",
+  pathTemplate: "/widgets",
+  security: [],
+};
+
+const createRequest = Serialize.request("POST", {
+  headers: [],
+  path: Serialize.path("/widgets", []),
+  query: [],
+});
+
+/**
+ * Run `send` once with `--output <target>` against a scripted client that counts the requests it
+ * receives; `onRequest` runs inside the client before it answers 201 with `{"id":"w1"}`.
+ */
+const sendTo = async (
+  target: string,
+  settings: { readonly dryRun?: boolean; readonly force?: boolean } = {},
+  onRequest: Effect.Effect<void> = Effect.void,
+) => {
+  const requests = { count: 0 };
+  const client = HttpClient.make((sent) =>
+    Effect.gen(function* answer() {
+      requests.count += 1;
+      yield* onRequest;
+
+      return HttpClientResponse.fromWeb(
+        sent,
+        new Response('{"id":"w1"}', {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        }),
+      );
+    }),
+  );
+  const environment = Layer.mergeAll(
+    BaseUrl.layer(
+      {
+        boundOrigins: ["https://api.example.com"],
+        defaultServer: 0,
+        servers: [{ url: "https://api.example.com", variables: {} }],
+      },
+      "EXAMPLE",
+    ),
+    Auth.layer({ schemes: {} }, "EXAMPLE"),
+    ConfigProvider.layer(ConfigProvider.fromEnvRecord({})),
+    BunFileSystem.layer,
+    BunPath.layer,
+    Stdio.layerTest({}),
+    Input.stdinClaimLayer,
+    runCredentialsLayer,
+    Layer.succeed(HttpClient.HttpClient, client),
+    Layer.succeed(ClientPolicy, {
+      allowed: new Set(["POST"]),
+      binName: "example",
+      direct: {},
+      version: "1.2.3",
+    }),
+    Layer.succeed(OutputPath, Option.some(target)),
+    Layer.succeed(Force, settings.force ?? false),
+    Layer.succeed(dryRunSetting, settings.dryRun ?? false),
+    Layer.succeed(MaxErrorBytes, defaultMaxErrorBytes),
+    Layer.succeed(BaseUrl.baseUrlSetting, Option.none()),
+    Layer.succeed(BaseUrl.serverSetting, Option.none()),
+    Layer.succeed(BaseUrl.serverVariableSetting, []),
+    Layer.succeed(Auth.allowCredentialsForBaseUrl, false),
+  );
+  const exit = await Effect.runPromise(
+    Effect.exit(createRequest.pipe(Effect.flatMap(send(created)))).pipe(
+      Effect.provide(environment),
+    ),
+  );
+
+  return { exit, requests: requests.count };
+};
+
+const readText = (fs: FileSystem.FileSystem, target: string) =>
+  Effect.runPromise(fs.readFileString(target).pipe(Effect.provide(BunFileSystem.layer)));
+
+const writeText = (fs: FileSystem.FileSystem, target: string, text: string) =>
+  Effect.runPromise(fs.writeFileString(target, text).pipe(Effect.provide(BunFileSystem.layer)));
+
+// HB4: the target is checked before the request is sent, so a refused --output never discards
+// the answer of a request that took effect.
+describe("--output through send", () => {
+  test("an existing target without --force is refused before any request is sent", async () => {
+    await inDir(async (dir, fs, path) => {
+      const target = path.join(dir, "out.json");
+      await writeText(fs, target, "keep");
+      const result = await sendTo(target);
+      expect(reasonOf(failure(result.exit))).toBe("exists");
+      expect(result.requests).toBe(0);
+      expect(await readText(fs, target)).toBe("keep");
+    });
+  });
+
+  test("--force sends one request and replaces the existing target", async () => {
+    await inDir(async (dir, fs, path) => {
+      const target = path.join(dir, "out.json");
+      await writeText(fs, target, "old");
+      const result = await sendTo(target, { force: true });
+      expect(Exit.isSuccess(result.exit)).toBe(true);
+      expect(result.requests).toBe(1);
+      expect(await readText(fs, target)).toBe('{"id":"w1"}');
+    });
+  });
+
+  test("a target created after the check, while the request runs, is still refused by link", async () => {
+    await inDir(async (dir, fs, path) => {
+      const target = path.join(dir, "out.json");
+      const racer = fs.writeFileString(target, "racer").pipe(Effect.orDie);
+      const result = await sendTo(target, {}, racer.pipe(Effect.provide(BunFileSystem.layer)));
+      expect(reasonOf(failure(result.exit))).toBe("exists");
+      expect(result.requests).toBe(1);
+      expect(await readText(fs, target)).toBe("racer");
+      expect(
+        await Effect.runPromise(fs.readDirectory(dir).pipe(Effect.provide(BunFileSystem.layer))),
+      ).toEqual(["out.json"]);
+    });
+  });
+
+  test("--dry-run with an existing target sends nothing and is not refused", async () => {
+    await inDir(async (dir, fs, path) => {
+      const target = path.join(dir, "out.json");
+      await writeText(fs, target, "keep");
+      const result = await sendTo(target, { dryRun: true });
+      expect(Exit.isSuccess(result.exit)).toBe(true);
+      expect(result.requests).toBe(0);
+      expect(await readText(fs, target)).toBe("keep");
+    });
+  });
 });

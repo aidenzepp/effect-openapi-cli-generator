@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { flattenBody } from "../../src/names/flatten.ts";
+import { WireName } from "../../src/model/brands.ts";
 import { EncodingRule } from "../../src/model/entities.ts";
 import type { MediaAlternative } from "../../src/model/entities.ts";
 
@@ -485,6 +486,44 @@ describe("flattenBody: multipart and xml", () => {
     expect(run(parts, "form").flags.find(({ name }) => name === "avatar")?.kind).toBe("string");
   });
 
+  describe("format password parts (design 4.5)", () => {
+    const secrets = {
+      Pin: { format: "password", type: "string" },
+      Root: object({
+        keys: { items: { $ref: "#/$defs/Pin" }, type: "array" },
+        names: { items: { type: "string" }, type: "array" },
+        note: { type: "string" },
+        pin: { $ref: "#/$defs/Pin" },
+        secret: { format: "password", type: "string" },
+        secrets: { items: { format: "password", type: "string" }, type: "array" },
+      }),
+    } satisfies Defs;
+
+    test("a password part is a file part and an array of them a repeated file part", () => {
+      const flattened = run(secrets, "multipart");
+      expect(flattened.flags.map(({ kind, name, repeated }) => [name, kind, repeated])).toEqual([
+        ["keys", "file", true],
+        ["names", "string", true],
+        ["note", "string", false],
+        ["pin", "file", false],
+        ["secret", "file", false],
+        ["secrets", "file", true],
+      ]);
+      expect(flattened.skipped).toEqual([]);
+    });
+
+    test("a json or form body's password property is untouched", () => {
+      for (const codec of ["json", "form"] as const) {
+        const kinds = new Map(run(secrets, codec).flags.map(({ kind, name }) => [name, kind]));
+        expect([kinds.get("secret"), kinds.get("pin"), kinds.get("secrets")]).toEqual([
+          "string",
+          "string",
+          "string",
+        ]);
+      }
+    });
+  });
+
   test("a multipart part named like a reserved flag is reported as a clash", () => {
     const flattened = run({ Root: object({ output: { type: "string" } }) }, "multipart");
     expect(flattened.reserved.map(({ flag }) => flag)).toEqual(["output"]);
@@ -494,6 +533,75 @@ describe("flattenBody: multipart and xml", () => {
     expect(run({ Root: object({ a: { type: "string" } }) }, "xml").flags).toEqual([
       expect.objectContaining({ kind: "body-file", name: "body-file" }),
     ]);
+  });
+});
+
+// A by-name nested rule (ENC-07): the part's Encoding `contentType` and one nested rule per name.
+const nestedRule = (name: string, contentType: string, members: readonly string[]) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentType: [contentType],
+    headers: [],
+    nested: members.map((member) => ({
+      contentType: ["text/plain"],
+      headers: [],
+      target: { kind: "property", name: member },
+    })),
+    origin: { document: "file:///spec.json", pointer: `/encoding/${name}` },
+    rows: [],
+    target: { kind: "property", name },
+  });
+
+describe("flattenBody: one nested level by name (design 6.3, HT:B16)", () => {
+  const defs = {
+    Root: object({
+      envelope: object({
+        list: { items: { type: "string" }, type: "array" },
+        meta: object({ id: { type: "integer" } }),
+        note: { type: "string" },
+        pass: { format: "password", type: "string" },
+        rows: { items: object({ a: { type: "string" } }), type: "array" },
+        scan: { format: "binary", type: "string" },
+      }),
+      plain: object({ a: { type: "string" } }),
+    }),
+  } satisfies Defs;
+
+  const flatten = (encoding: readonly EncodingRule[]) => {
+    const result = flattenBody(
+      defs,
+      { codec: "multipart", encoding, schema: { key: "Root" } },
+      "3.2",
+    );
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return result.success;
+  };
+
+  test("ENC-07: a part with a nested rule by name gets one dotted part flag per nested property, by the top-level part kinds", () => {
+    const flattened = flatten([
+      nestedRule("envelope", "multipart/mixed", ["list", "meta", "note", "rows", "scan"]),
+    ]);
+
+    expect(
+      flattened.flags.map(({ kind, name, pointer, repeated }) => [name, kind, pointer, repeated]),
+    ).toEqual([
+      ["envelope.list", "json", "/envelope/list", false],
+      ["envelope.meta", "json", "/envelope/meta", false],
+      ["envelope.note", "string", "/envelope/note", false],
+      ["envelope.pass", "file", "/envelope/pass", false],
+      ["envelope.scan", "file", "/envelope/scan", false],
+      ["plain", "json", "/plain", false],
+    ]);
+    expect(flattened.flags.find(({ name }) => name === "envelope.note")?.schemaPointer).toBe(
+      "/components/schemas/Root/properties/envelope/properties/note",
+    );
+    expect(flattened.skipped).toEqual([{ pointer: "/envelope/rows", reason: "UnsupportedPart" }]);
+  });
+
+  test("a part with no nested rule by name keeps its one JSON flag", () => {
+    expect(flatten([]).flags.map(({ name }) => name)).toEqual(["envelope", "plain"]);
   });
 });
 
@@ -535,5 +643,151 @@ describe("flattenBody: 3.0 readOnly (S30-31, D-SCH2)", () => {
     const kept = ["body", "body-file", "id", "meta.stamp", "meta.tag", "name", "ref"];
     expect(names("3.1").flags).toEqual(kept);
     expect(names("3.2").flags).toEqual(kept);
+  });
+});
+
+describe("flattenBody: refused fields (design 4.5, 8.5 rule 5)", () => {
+  const defs = {
+    Root: object({
+      help: { type: "string" },
+      meta: object({ a: { type: "string" } }),
+      name: { type: "string" },
+      nested: object({ meta: { type: "string" } }),
+    }),
+  } satisfies Defs;
+
+  const flatten = (codec: Alternative["codec"], refused: readonly string[]) => {
+    const result = flattenBody(
+      defs,
+      {
+        codec,
+        refusedFields: refused.map((name) => Schema.decodeUnknownSync(WireName)(name)),
+        schema: { key: "Root" },
+      },
+      defaultLine,
+    );
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return {
+      flags: result.success.flags.map((flag) => flag.name),
+      reserved: result.success.reserved.map((clash) => clash.flag),
+      skipped: result.success.skipped,
+    };
+  };
+
+  test("a refused top-level property of a form body gets no flag, no nested flag and no notice", () => {
+    expect(flatten("form", ["meta"])).toEqual({
+      flags: ["body", "body-file", "help", "name", "nested.meta"],
+      reserved: ["help"],
+      skipped: [],
+    });
+  });
+
+  test("a refused property gets no flag in a json body or as a multipart part", () => {
+    expect(flatten("json", ["name"]).flags).toEqual([
+      "body",
+      "body-file",
+      "help",
+      "meta.a",
+      "nested.meta",
+    ]);
+    expect(flatten("multipart", ["meta"]).flags).toEqual(["help", "name", "nested"]);
+  });
+
+  test("a refused property named like a reserved flag raises no clash", () => {
+    expect(flatten("form", ["help"])).toEqual({
+      flags: ["body", "body-file", "meta.a", "name", "nested.meta"],
+      reserved: [],
+      skipped: [],
+    });
+  });
+
+  test("an empty or absent list refuses nothing", () => {
+    const all = ["body", "body-file", "help", "meta.a", "name", "nested.meta"];
+    expect(flatten("form", []).flags).toEqual(all);
+    expect(run(defs, "form").flags.map((flag) => flag.name)).toEqual(all);
+  });
+});
+
+// A form property's Encoding rule with `style: deepObject`, as normalize builds it, carrying the
+// markers the author config's switches set (design 6.1 Scalar switch).
+const deepObjectRule = (
+  name: string,
+  markers: { readonly nonStandard?: string; readonly nonStandardScalars?: string },
+) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentType: ["text/plain"],
+    headers: [],
+    ...markers,
+    origin: { document: "file:///spec.json", pointer: `/encoding/${name}` },
+    rows: [],
+    serialization: { explode: true, style: "deepObject" },
+    target: { kind: "property", name },
+  });
+
+describe("flattenBody: the scalar switch (design 6.1 Scalar switch, 4.5 Not flattened)", () => {
+  const defs = {
+    Root: object({
+      created: object({ gt: { type: "integer" }, lt: { type: "integer" } }),
+      flag: { type: "boolean" },
+      title: { type: "string" },
+    }),
+  } satisfies Defs;
+
+  const flatten = (encoding: readonly EncodingRule[]) => {
+    const result = flattenBody(defs, { codec: "form", encoding, schema: { key: "Root" } }, "3.1");
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return result.success.flags.map(({ kind, name, pointer, repeated }) => [
+      name,
+      kind,
+      pointer,
+      repeated,
+    ]);
+  };
+
+  test("a scalar-marked form property is one JSON-valued field flag, not dotted fields or a scalar flag", () => {
+    expect(
+      flatten([
+        deepObjectRule("created", { nonStandardScalars: "deepObjectScalars" }),
+        deepObjectRule("flag", { nonStandardScalars: "deepObjectScalars" }),
+      ]),
+    ).toEqual([
+      ["body", "body", "", false],
+      ["body-file", "body-file", "", false],
+      ["created", "json", "/created", false],
+      ["flag", "json", "/flag", false],
+      ["title", "string", "/title", false],
+    ]);
+  });
+
+  test("a property marked by both switches is one JSON-valued field flag", () => {
+    expect(
+      flatten([
+        deepObjectRule("created", {
+          nonStandard: "deepObjectBrackets",
+          nonStandardScalars: "deepObjectScalars",
+        }),
+      ]),
+    ).toContainEqual(["created", "json", "/created", false]);
+  });
+
+  test("an unmarked or bracket-marked form property keeps its flags", () => {
+    const kept = [
+      ["body", "body", "", false],
+      ["body-file", "body-file", "", false],
+      ["created.gt", "integer", "/created/gt", false],
+      ["created.lt", "integer", "/created/lt", false],
+      ["flag", "boolean", "/flag", false],
+      ["title", "string", "/title", false],
+    ];
+    expect(flatten([deepObjectRule("created", {}), deepObjectRule("flag", {})])).toEqual(kept);
+    expect(flatten([deepObjectRule("created", { nonStandard: "deepObjectBrackets" })])).toEqual(
+      kept,
+    );
   });
 });

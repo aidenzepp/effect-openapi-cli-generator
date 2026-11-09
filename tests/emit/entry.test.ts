@@ -20,7 +20,7 @@ const config = Schema.decodeUnknownSync(AuthorConfig)({
   package: { name: "example-cli", version: "1.2.3" },
 });
 
-const emit = () => Effect.runSync(emitEntryFiles(config));
+const emit = () => Effect.runSync(emitEntryFiles(config, []));
 
 const contentOf = (path: string): string => {
   const file = emit().find((candidate) => candidate.path === path);
@@ -64,10 +64,19 @@ describe("emitEntryFiles", () => {
   test("main.ts runs the root without rendering, provides services and the formatter", () => {
     expect(contentOf("src/main.ts")).toBe(
       [
-        'import { Effect, Layer, Stdio } from "effect";',
+        'import { ConfigProvider, Effect, Layer, Stdio } from "effect";',
         'import { CliOutput, Command } from "effect/cli";',
         'import { root, services } from "./cli/root.ts";',
         'import * as Output from "./runtime/output.ts";',
+        "",
+        "const provider = ConfigProvider.orElse(",
+        "  ConfigProvider.fromEnv(),",
+        "  ConfigProvider.fromUnknown({",
+        "    EXAMPLE_CLI_IDLE_TIMEOUT: 300,",
+        "    EXAMPLE_CLI_RETRIES: 2,",
+        "    EXAMPLE_CLI_TIMEOUT: 30,",
+        "  }),",
+        ");",
         "",
         "export const run = Stdio.Stdio.use((stdio) => stdio.args).pipe(",
         "  Effect.flatMap(root),",
@@ -77,7 +86,8 @@ describe("emitEntryFiles", () => {
         "    ),",
         "  ),",
         "  Output.exitForHelp,",
-        "  Output.finalCatch([]),",
+        '  Output.finalCatch([], { envPrefix: "EXAMPLE_CLI" }),',
+        "  Effect.provideService(ConfigProvider.ConfigProvider, provider),",
         ");",
         "",
       ].join("\n"),
@@ -118,7 +128,9 @@ describe("emitEntryFiles", () => {
     for (const provided of [
       "BunServices.layer,",
       "Layer.succeed(FileBody.FileBody, {",
-      "Output.runCredentialsLayer,",
+      "Redact.runCredentialsLayer,",
+      "Output.runRecordLayer,",
+      "Output.runWarningsLayer,",
       "CliOutput.layerPresenter(Output.presenter),",
       "Layer.succeed(References.LogToStderr, true),",
       "Layer.succeed(HttpClient.TracerPropagationEnabled, false),",

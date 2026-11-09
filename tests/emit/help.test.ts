@@ -78,7 +78,7 @@ const response = (key: Schema.Json, types: readonly string[]) => ({
 });
 
 const schemePlain = {
-  credentialSources: ["flag", "env"],
+  credentialSources: ["file", "env", "prompt"],
   deprecated: false,
   kind: { scheme: "bearer", type: "http" },
   name: "bearerAuth",
@@ -426,6 +426,37 @@ describe("operationHelp", () => {
     expect(refused).toContain("session: ");
     expect(refused).toContain("csrf: ");
     expect(refused).not.toContain("Parameter in cookie");
+  });
+
+  test("a field refusal is listed on the REFUSED line beside the element refusals", () => {
+    const decode = Schema.decodeUnknownSync(Diagnostic);
+    const refusal = (scope: "element" | "field", element: string, code: string) =>
+      decode({
+        code,
+        document: origin.document,
+        element,
+        message: "Refused.",
+        openapi: "3.1.0",
+        operation: { method: "PATCH", operationId: "users-update", path: "/users/{id}" },
+        pointer: origin.pointer,
+        row: code.split("/")[0],
+        scope,
+        severity: "refusal",
+        specSection: "https://spec.openapis.org/oas/v3.1.0",
+      });
+    const help = operationHelp({
+      ...input,
+      diagnostics: [
+        refusal("element", "session", "PRM-12/cookie-unsupported"),
+        refusal("field", "metadata", "PRM-27/compound-nested"),
+      ],
+    });
+    const refused = sectionText(help, "REFUSED");
+
+    expect(refused?.split("; ").map((entry) => entry.split(": ")[0])).toEqual([
+      "session",
+      "metadata",
+    ]);
   });
 
   test("notices and other operations' refusals are not listed", () => {

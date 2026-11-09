@@ -127,6 +127,35 @@ describe("scheme kinds", () => {
     expect(result).toEqual(["mutualTls", "oauth2Token", "oidcToken"]);
   });
 
+  test("a 3.2 deviceAuthorization flow keeps its sanitized deviceAuthorizationUrl", () => {
+    const [kind] = kinds(
+      {
+        o: {
+          flows: {
+            deviceAuthorization: {
+              deviceAuthorizationUrl: "https://a.example/device\u0007\u202E",
+              scopes: {},
+              tokenUrl: "https://a.example/t",
+            },
+          },
+          type: "oauth2",
+        },
+      },
+      "3.2",
+    );
+
+    expect(kind).toEqual({
+      flows: {
+        deviceAuthorization: {
+          deviceAuthorizationUrl: "https://a.example/device",
+          scopes: [],
+          tokenUrl: "https://a.example/t",
+        },
+      },
+      type: "oauth2Token",
+    });
+  });
+
   test("a 3.2 deprecated scheme keeps its flag", () => {
     const { schemes } = run(
       "3.2",
@@ -251,52 +280,33 @@ describe("undeclared names", () => {
   });
 });
 
-const staged = withSchemes({
-  key: keyed,
-  mtls: { type: "mutualTLS" },
-  oauth: {
-    flows: {
-      authorizationCode: {
-        authorizationUrl: "https://a.example/a",
-        scopes: {},
-        tokenUrl: "https://a.example/t",
-      },
-    },
-    type: "oauth2",
-  },
-  oidc: { openIdConnectUrl: "https://a.example/.well-known", type: "openIdConnect" },
-});
+const certified = withSchemes({ key: keyed, mtls: { type: "mutualTLS" } });
 
-describe("staged refusals (SSC-18, SSC-19, SSC-20)", () => {
-  const cases: readonly (readonly [string, string, readonly Line[]])[] = [
-    ["oauth", "SSC-18/not-implemented", ["3.1"]],
-    ["oidc", "SSC-19/not-implemented", ["3.1"]],
-    ["mtls", "SSC-20/not-implemented", ["3.1", "3.2"]],
-  ];
+describe("mutualTLS alternatives are kept", () => {
+  for (const line of ["3.1", "3.2"] as const) {
+    test(`mtls on ${line} is kept beside another alternative with no refusal`, () => {
+      const { policy } = run(line, { ...certified, security: [{ mtls: [] }, { key: [] }] });
 
-  for (const [name, code, lines] of cases) {
-    for (const line of lines) {
-      test(`${name} on ${line} is refused at the alternative with ${code} and a Milestone 3 hint`, () => {
-        const { policy } = run(line, { ...staged, security: [{ [name]: [] }, { key: [] }] });
-        const [refusal] = policy.diagnostics;
-
-        expect(policy.policy.alternatives).toEqual([{ uses: [{ scheme: "key", scopes: [] }] }]);
-        expect(policy.diagnostics).toHaveLength(1);
-        expect(refusal?.code).toBe(code);
-        expect(refusal?.scope).toBe("element");
-        expect(refusal?.severity).toBe("refusal");
-        expect(String(refusal?.pointer)).toBe("/security/0");
-        expect(refusal?.specSection.startsWith("https://spec.openapis.org/oas/v")).toBe(true);
-        expect(refusal?.hint).toContain("Milestone 3");
-      });
-    }
+      expect(policy.policy.alternatives).toEqual([
+        { uses: [{ scheme: "mtls", scopes: [] }] },
+        { uses: [{ scheme: "key", scopes: [] }] },
+      ]);
+      expect(policy.diagnostics).toEqual([]);
+    });
   }
 
-  test("one staged scheme refuses the whole AND alternative, never dropped silently", () => {
-    const { policy } = run("3.1", { ...staged, security: [{ key: [], oauth: [] }] });
+  test("an AND alternative naming mtls keeps every scheme", () => {
+    const { policy } = run("3.1", { ...certified, security: [{ key: [], mtls: [] }] });
 
-    expect(policy.policy.alternatives).toEqual([]);
-    expect(codes(policy.diagnostics)).toEqual(["SSC-18/not-implemented"]);
+    expect(policy.policy.alternatives).toEqual([
+      {
+        uses: [
+          { scheme: "key", scopes: [] },
+          { scheme: "mtls", scopes: [] },
+        ],
+      },
+    ]);
+    expect(policy.diagnostics).toEqual([]);
   });
 });
 

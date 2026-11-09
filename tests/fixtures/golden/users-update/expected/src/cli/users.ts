@@ -40,6 +40,7 @@ export const update = Command.make(
       Effect.flatMap(Output.send(Users.updateMeta)),
     ),
 ).pipe(
+  Command.provideEffectDiscard(Output.recordRun("EXAMPLE")),
   Command.withDescription("Update a user."),
   Command.annotate(Describe.Binding, {
     operation: Users.updateMeta,
@@ -77,7 +78,10 @@ export const update = Command.make(
     },
     sections: [
       ["REQUEST", "PATCH /users/{id}, body application/json (required), operationId users-update"],
-      ["AUTH", "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH"],
+      [
+        "AUTH",
+        "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH, TTY prompt",
+      ],
       [
         "RESPONSES",
         "200 application/json; 404; default application/json. Non-2xx exits 1 (401/403 exit 3)",
@@ -122,6 +126,7 @@ export const setAvatar = Command.make(
       Effect.flatMap(Output.send(Users.setAvatarMeta, flags.accept)),
     ),
 ).pipe(
+  Command.provideEffectDiscard(Output.recordRun("EXAMPLE")),
   Command.withDescription("Set a user avatar."),
   Command.annotate(Describe.Binding, {
     operation: Users.setAvatarMeta,
@@ -146,7 +151,10 @@ export const setAvatar = Command.make(
         "REQUEST",
         "PUT /users/{id}/avatar, body application/json or image/png (required), operationId users-set-avatar",
       ],
-      ["AUTH", "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH"],
+      [
+        "AUTH",
+        "bearerAuth (http bearer): --bearer-auth-file <path|->, env EXAMPLE_BEARER_AUTH, TTY prompt",
+      ],
       ["RESPONSES", "200 application/json or image/png. Non-2xx exits 1 (401/403 exit 3)"],
     ],
   }),

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Array as Arr, Data, Effect, FileSystem, Path, Runtime, Schema } from "effect";
+import { Array as Arr, Data, Effect, FileSystem, Order, Path, Runtime, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 import generatorPackage from "../../package.json" with { type: "json" };
 import { GenerateRefused } from "../../src/generate.ts";
@@ -15,16 +15,16 @@ import { Description } from "../../src/runtime-src/runtime/describe.ts";
 import { lineOf } from "../../src/validate/dispatch.ts";
 import { sha256Hex } from "../../src/write/manifest.ts";
 import { coverageOf } from "./coverage.ts";
-import type { Coverage, Invented } from "./coverage.ts";
+import type { Coverage, Invented, Missing } from "./coverage.ts";
 import { Corpus, fetchPinned, githubSource } from "./fetch.ts";
 import type { CorpusEntry, Pin } from "./fetch.ts";
 import { Generation, GenerationRequest, reportFile } from "./generate.ts";
 import { walk } from "./walk.ts";
-import type { WalkElement } from "./walk.ts";
 
 // The corpus run (design 8.2, CP-2): for each `ci` spec with an author config, generate from the
 // pinned bytes, compare the YAML twin, build, run `--describe`, join coverage and print the
-// verdict. `--check` compares the printed verdict with the committed one byte for byte.
+// verdict. `--check` compares the printed verdict with the committed one byte for byte, and fails
+// on a committed verdict file that no `ci` entry names.
 // Generation runs in its own process (`generate.ts`) that exits before the build, so the build
 // never shares the memory ceiling with what generation held.
 
@@ -153,7 +153,11 @@ const spawn = (
         );
   });
 
-const describeElement = (element: WalkElement): string => {
+const describeElement = (element: Missing): string => {
+  if (element.kind === "refusedField") {
+    return `refusedField ${element.pointer} ${element.mediaType} ${element.name}`;
+  }
+
   if (element.kind === "parameter") {
     return `parameter ${element.pointer} ${element.in} ${element.name}`;
   }
@@ -178,6 +182,10 @@ const describeElement = (element: WalkElement): string => {
 const describeInvented = (invented: Invented): string => {
   const head = `invented ${invented.kind} ${invented.document} ${invented.pointer}`;
 
+  if (invented.kind === "refusedField") {
+    return `${head} ${invented.mediaType} ${invented.name}`;
+  }
+
   if (invented.kind === "requestMedia") {
     return `${head} ${invented.mediaType}`;
   }
@@ -195,9 +203,14 @@ const describeInvented = (invented: Invented): string => {
 
 type CoverageEntries = typeof VerdictCoverage.Encoded;
 
-// A walk element as the verdict lists it: its use site, its kind and the kind's value.
-const elementEntry = (element: WalkElement): CoverageEntries["missing"][number] => {
+// A walk element or field refusal as the verdict lists it: its use site, its kind and the kind's
+// value.
+const elementEntry = (element: Missing): CoverageEntries["missing"][number] => {
   const site = { document: element.document, pointer: element.pointer };
+
+  if (element.kind === "refusedField") {
+    return { ...site, kind: element.kind, mediaType: element.mediaType, name: element.name };
+  }
 
   if (element.kind === "parameter") {
     return { ...site, in: element.in, kind: element.kind, name: element.name };
@@ -223,6 +236,10 @@ const elementEntry = (element: WalkElement): CoverageEntries["missing"][number] 
 // A claim as the verdict lists it: its kind, the command's path and the value.
 const inventedEntry = (invented: Invented): CoverageEntries["invented"][number] => {
   const { path } = invented;
+
+  if (invented.kind === "refusedField") {
+    return { kind: invented.kind, mediaType: invented.mediaType, name: invented.name, path };
+  }
 
   if (invented.kind === "requestMedia") {
     return { kind: invented.kind, mediaType: invented.mediaType, path };
@@ -446,6 +463,10 @@ const firstDifference = (committed: string, regenerated: string) => {
   };
 };
 
+// The verdict file an entry owns under `corpus/verdicts/`: its id and the first 12 hex digits of its
+// pinned sha256.
+const verdictName = (entry: Entry): string => `${entry.id}@${entry.sha256.slice(0, 12)}.json`;
+
 // A refused document writes no package, so there is no verdict to build: the run names the codes.
 const refusedFinding = (id: string, refused: GenerateRefused): Findings => ({
   coverage: [],
@@ -495,7 +516,7 @@ const verdictFor = (entry: Entry, corpusVersion: number, context: Context, check
     yield* Effect.log(result.summary);
 
     const printed = yield* printVerdict(result.verdict);
-    const name = `${entry.id}@${entry.sha256.slice(0, 12)}.json`;
+    const name = verdictName(entry);
     const relative = `corpus/verdicts/${name}`;
     const target =
       !check && context.out !== undefined
@@ -531,6 +552,27 @@ const verdictFor = (entry: Entry, corpusVersion: number, context: Context, check
     }
 
     return result.findings;
+  });
+
+// The committed verdicts that no `ci` entry names (design 8.2 Drift check): a file left behind by a
+// pin change or a removed entry. Every `ci` entry names its file, whether `--only` selected it or not.
+const staleVerdicts = (ci: readonly Entry[], root: string) =>
+  Effect.gen(function* stale() {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = path.join(root, "corpus", "verdicts");
+    if (!(yield* fs.exists(directory))) {
+      return [];
+    }
+
+    const named = new Set(ci.map(verdictName));
+    const files = yield* fs.readDirectory(directory);
+
+    const unnamed = files.filter((file) => file.endsWith(".json") && !named.has(file));
+
+    return Arr.sort(unnamed, Order.String).map(
+      (file) => `corpus/verdicts/${file}: stale verdict, no ci entry has this name`,
+    );
   });
 
 interface Options {
@@ -607,7 +649,9 @@ const run = (options: Options) =>
       selected.map((entry) => verdictFor(entry, corpus.version, context, options.check)),
     );
 
-    yield* settle(found);
+    const stale = options.check ? yield* staleVerdicts(ci, root) : [];
+
+    yield* settle([...found, { coverage: [], other: stale }]);
   });
 
 // `--only` repeats; `--only`, `--out` and `--root` each take a value. Anything else is refused.

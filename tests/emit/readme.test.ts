@@ -86,7 +86,7 @@ const fenced = (text: string): readonly string[] => {
 };
 
 const refusing = (
-  scope: "element" | "operation",
+  scope: "element" | "field" | "operation",
   code: string,
   operation?: { readonly method: string; readonly path: string },
 ): Diagnostic => {
@@ -156,7 +156,7 @@ describe("emitReadme", () => {
     expect(refusals).toContain("Nothing in the description was refused.");
   });
 
-  test("lists an operation refused at normalize, which is absent from the model", async () => {
+  test("generates an operation whose only oauth2 flow is refused, the token being supplied", async () => {
     const components = Schema.decodeUnknownSync(JsonRecord)(spec.components);
     const schemes = Schema.decodeUnknownSync(JsonRecord)(components.securitySchemes);
     const oauthOnly = {
@@ -181,12 +181,14 @@ describe("emitReadme", () => {
     const base = await input(oauthOnly);
     const refusals = section(emitReadme(base).content, "Refusals");
 
-    expect(base.api.operations.map((operation) => operation.key.path)).not.toContain("/oauth-only");
-    expect(base.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    expect(base.api.operations.map((operation) => String(operation.key.path))).toContain(
+      "/oauth-only",
+    );
+    expect(base.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "SEC-06/no-satisfiable-alternative",
     );
     expect(refusals).not.toContain("Nothing in the description was refused.");
-    expect(fenced(refusals)).toEqual(['GET "/oauth-only"']);
+    expect(fenced(refusals)).toEqual([]);
   });
 
   test("lists an operation refused at the plan once, with other stages' refusals", async () => {
@@ -223,6 +225,39 @@ describe("emitReadme", () => {
 
     expect(refusals).toContain("Generation refused 2 elements of generated commands;");
     expect(fenced(refusals)).toEqual(['GET "/gone"']);
+  });
+
+  test("counts field refusals of commands that still exist, apart from element refusals", async () => {
+    const base = await input();
+    const [first] = base.api.operations;
+    const operation = { method: first?.key.method ?? "", path: first?.key.path ?? "" };
+    const gone = { method: "GET", path: "/gone" };
+    const diagnostics = [
+      ...base.diagnostics,
+      refusing("field", "PRM-27/compound-nested", operation),
+      refusing("field", "PRM-27/non-object-schema", operation),
+      refusing("operation", "OPR-09/required-body-refused", gone),
+      refusing("field", "PRM-27/compound-nested", gone),
+    ];
+    const refusals = section(emitReadme({ ...base, diagnostics }).content, "Refusals");
+
+    expect(refusals).toContain("Generation refused 2 body fields of generated commands;");
+    expect(refusals).not.toContain("element");
+    expect(fenced(refusals)).toEqual(['GET "/gone"']);
+  });
+
+  test("a field refusal alone means something was refused", async () => {
+    const base = await input();
+    const [first] = base.api.operations;
+    const operation = { method: first?.key.method ?? "", path: first?.key.path ?? "" };
+    const diagnostics = [
+      ...base.diagnostics,
+      refusing("field", "PRM-27/compound-nested", operation),
+    ];
+    const refusals = section(emitReadme({ ...base, diagnostics }).content, "Refusals");
+
+    expect(refusals).not.toContain("Nothing in the description was refused.");
+    expect(refusals).toContain("Generation refused 1 body field of generated commands;");
   });
 
   test("tells users to write a value that starts with a dash as --flag=-value", async () => {

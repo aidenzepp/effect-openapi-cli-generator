@@ -1,6 +1,43 @@
-import { Array as Arr, Order, Redacted } from "effect";
+import { Array as Arr, Context, Layer, Order, Redacted, Ref } from "effect";
 import { Base64 } from "effect/encoding";
 import type { Credential } from "./auth.ts";
+
+/**
+ * A value read from a secret-file field flag (design 13.1 R4): scrubbed like a credential, but it
+ * answers no security scheme, so its placeholder is `<redacted:<label>>`, the flag's name.
+ */
+export interface Secret {
+  readonly kind: "secret";
+  readonly label: string;
+  readonly value: Redacted.Redacted;
+}
+
+/**
+ * One value the run scrubs: a configured credential or a secret-file value.
+ */
+export type ScrubEntry = Credential | Secret;
+
+const isSecret = (entry: ScrubEntry): entry is Secret => "kind" in entry;
+
+const placeholderOf = (entry: ScrubEntry): string =>
+  `<redacted:${isSecret(entry) ? entry.label : entry.scheme}>`;
+
+/**
+ * The values the run recorded, so the final catch scrubs what the command handler chose: the
+ * credentials `send` evaluated and the secret-file values the body read; `send` adds to it and
+ * never replaces it. `finalCatch` adds them to its own list. Both require the service, so an entry
+ * that omits `runCredentialsLayer` does not compile. It lives here, beside the entries it holds,
+ * so `input.ts` records a secret-file value without an import cycle (`output.ts` imports
+ * `auth.ts`, which imports `input.ts`).
+ */
+export class RunCredentials extends Context.Service<
+  RunCredentials,
+  Ref.Ref<readonly ScrubEntry[]>
+>()("openapi-cli/runtime/RunCredentials") {}
+
+export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
+  Ref.make<readonly ScrubEntry[]>([]),
+);
 
 /**
  * A query name or value exactly as the request target carries it (audit M F1): percent-encoded
@@ -10,25 +47,105 @@ import type { Credential } from "./auth.ts";
 export const queryWireForm = (text: string): string =>
   encodeURIComponent(text).replaceAll("'", "%27");
 
+const searchParamsForm = (text: string): string =>
+  new URLSearchParams([["", text]]).toString().slice(1);
+
 /**
- * Every form a credential travels in (audit F2): the raw value; for http basic also the base64
- * token `basicAuth` sends and the password alone; for an apiKey in the query also the form the
- * request target carries and the URLSearchParams form a server may echo. Empty forms are dropped.
+ * The forms a value takes in a URL or a form-urlencoded body, shared by credentials and secrets:
+ * as `encodeURIComponent` writes it, as the request target carries it (`queryWireForm`), and as
+ * URLSearchParams writes it, `+` for a space. `encodeURIComponent` throws on a lone surrogate, so
+ * such a value gets only the URLSearchParams form.
  */
-const wireForms = (credential: Credential): readonly string[] => {
-  const value: string = Redacted.value(credential.value);
-  const { definition } = credential;
-  const forms = [value];
+const loneSurrogate = /\p{Cs}/u;
 
-  if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
-    forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
+const encodedForms = (text: string): readonly string[] =>
+  loneSurrogate.test(text)
+    ? [searchParamsForm(text)]
+    : [encodeURIComponent(text), queryWireForm(text), searchParamsForm(text)];
+
+const hexLower = (unit: number): string => unit.toString(16).padStart(4, "0");
+
+const hexUpper = (unit: number): string => hexLower(unit).toUpperCase();
+
+// The UTF-16 units of one code point: itself, or its surrogate pair above U+FFFF.
+const utf16Units = (point: number): readonly number[] => {
+  const offset = point - 0x1_00_00;
+
+  return offset >= 0
+    ? [0xd8_00 + Math.floor(offset / 0x4_00), 0xdc_00 + (offset % 0x4_00)]
+    : [point];
+};
+
+// A JSON string body with every non-ASCII UTF-16 unit written as `\uXXXX`, as an ASCII-only JSON
+// encoder echoes it. `JSON.stringify` already escaped any lone surrogate, so every code point here
+// is whole.
+const asciiEscaped = (escaped: string, hex: (unit: number) => string): string => {
+  let ascii = "";
+  for (const character of escaped) {
+    const point = character.codePointAt(0) ?? 0;
+
+    ascii +=
+      point < 0x80
+        ? character
+        : utf16Units(point)
+            .map((unit) => `\\u${hex(unit)}`)
+            .join("");
   }
 
-  if (definition.kind === "apiKey" && definition.in === "query") {
-    forms.push(queryWireForm(value), new URLSearchParams([["", value]]).toString().slice(1));
+  return ascii;
+};
+
+// The value without its trailing CR and LF characters, which a server reading a line drops.
+const withoutLineEnd = (text: string): string => {
+  let end = text.length;
+  while (end > 0 && (text.charAt(end - 1) === "\n" || text.charAt(end - 1) === "\r")) {
+    end -= 1;
   }
 
-  return forms.filter((form) => form !== "");
+  return text.slice(0, end);
+};
+
+/**
+ * Every form a secret travels in or is echoed in (security review of bd3128a): the value as given
+ * and without its trailing CR/LF, each also URL- and form-encoded (`encodedForms`) and
+ * JSON-escaped, both as written and ASCII-only with lower- and upper-case hex.
+ */
+const secretForms = (secret: string): readonly string[] =>
+  [secret, withoutLineEnd(secret)].flatMap((base) => {
+    const escaped = JSON.stringify(base).slice(1, -1);
+
+    return [
+      base,
+      ...encodedForms(base),
+      escaped,
+      asciiEscaped(escaped, hexLower),
+      asciiEscaped(escaped, hexUpper),
+    ];
+  });
+
+/**
+ * Every form a scrub entry travels in, each once and none empty. A secret: `secretForms`. A
+ * credential (audit F2): the raw value; for http basic also the base64 token `basicAuth` sends and
+ * the password alone; for an apiKey in the query also its `encodedForms`, the form the request
+ * target carries and the forms a server may echo.
+ */
+const wireForms = (entry: ScrubEntry): readonly string[] => {
+  const value: string = Redacted.value(entry.value);
+  const forms = isSecret(entry) ? [...secretForms(value)] : [value];
+
+  if (!isSecret(entry)) {
+    const { definition } = entry;
+
+    if (definition.kind === "http" && definition.scheme === "basic" && value.includes(":")) {
+      forms.push(Base64.encode(value), value.slice(value.indexOf(":") + 1));
+    }
+
+    if (definition.kind === "apiKey" && definition.in === "query") {
+      forms.push(...encodedForms(value));
+    }
+  }
+
+  return [...new Set(forms)].filter((form) => form !== "");
 };
 
 /**
@@ -36,8 +153,8 @@ const wireForms = (credential: Credential): readonly string[] => {
  */
 const formsAround =
   (strip: (text: string) => string) =>
-  (credential: Credential): readonly string[] =>
-    wireForms(credential)
+  (entry: ScrubEntry): readonly string[] =>
+    wireForms(entry)
       .flatMap((form) => [form, strip(form)])
       .filter((form) => form !== "");
 
@@ -53,26 +170,53 @@ const byStartThenLongest = Order.combine(
 );
 
 /**
+ * Every occurrence of a placeholder this run's runtime emits (security review of m3-hb1): exactly
+ * `<redacted>`, or `<redacted:<label>>` for the scheme or secret label of a scrubbed entry. Each is
+ * matched as a literal string, so no label is read as a pattern. Other placeholder-shaped text,
+ * such as a server echoing `<redacted:` + credential + `>`, is ordinary input.
+ */
+const placeholderTokens = (text: string, entries: readonly ScrubEntry[]): readonly Covered[] =>
+  [...new Set(["<redacted>", ...entries.map(placeholderOf)])].flatMap((placeholder) => {
+    const found: Covered[] = [];
+
+    for (let at = text.indexOf(placeholder); at !== -1; at = text.indexOf(placeholder, at + 1)) {
+      found.push({ end: at + placeholder.length, placeholder, start: at });
+    }
+
+    return found;
+  });
+
+/**
  * Every occurrence of every wire form of every credential as a character range, overlapping
- * occurrences included.
+ * occurrences included, except one that lies wholly inside a placeholder the runtime emits already
+ * in the text (hater m3 HB1, `placeholderTokens`): such a placeholder is opaque, so a credential
+ * shorter than one, such as `a`, is never spelled out inside it. An occurrence that only overlaps
+ * one is kept and merged, so no character of a form survives.
  */
 const occurrences = (
   text: string,
-  credentials: readonly Credential[],
-  formsOf: (credential: Credential) => readonly string[],
-): readonly Covered[] =>
-  credentials.flatMap((credential) =>
-    formsOf(credential).flatMap((form) => {
-      const placeholder = `<redacted:${credential.scheme}>`;
+  entries: readonly ScrubEntry[],
+  formsOf: (entry: ScrubEntry) => readonly string[],
+): readonly Covered[] => {
+  const tokens = placeholderTokens(text, entries);
+  const insideToken = (start: number, end: number): boolean =>
+    tokens.some((token) => token.start <= start && end <= token.end);
+
+  return entries.flatMap((entry) =>
+    formsOf(entry).flatMap((form) => {
+      const placeholder = placeholderOf(entry);
       const found: Covered[] = [];
 
       for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
-        found.push({ end: at + form.length, placeholder, start: at });
+        if (!insideToken(at, at + form.length)) {
+          found.push({ end: at + form.length, placeholder, start: at });
+        }
       }
 
       return found;
     }),
   );
+};
 
 /**
  * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,
@@ -96,10 +240,10 @@ const mergeRuns = (ranges: readonly Covered[]): readonly Covered[] => {
 
 const scrubForms = (
   text: string,
-  credentials: readonly Credential[],
-  formsOf: (credential: Credential) => readonly string[],
+  entries: readonly ScrubEntry[],
+  formsOf: (entry: ScrubEntry) => readonly string[],
 ): string => {
-  const runs = mergeRuns(occurrences(text, credentials, formsOf));
+  const runs = mergeRuns(occurrences(text, entries, formsOf));
   let scrubbed = "";
   let at = 0;
 
@@ -116,7 +260,7 @@ const scrubForms = (
  * C5). Occurrences that overlap or touch merge into one run replaced by one placeholder, so no
  * character of any form survives (recheck N1), and placeholders are never rescanned.
  */
-export const scrub = (text: string, credentials: readonly Credential[]): string =>
+export const scrub = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubForms(text, credentials, wireForms);
 
 /**
@@ -127,13 +271,13 @@ export const scrub = (text: string, credentials: readonly Credential[]): string 
  */
 export const scrubAround = (
   text: string,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
   strip: (text: string) => string,
 ): string => scrubForms(strip(scrub(text, credentials)), credentials, formsAround(strip));
 
 const encoder = new TextEncoder();
 
-export const longestFormBytes = (credentials: readonly Credential[]): number =>
+export const longestFormBytes = (credentials: readonly ScrubEntry[]): number =>
   Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));
 
 /**
@@ -195,7 +339,7 @@ const tailKeeping = (text: string, kept: number, strip: (text: string) => string
  */
 export const dropTrailingFragment = (
   text: string,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
   strip: (text: string) => string,
 ): string => {
   const stripped = strip(text);

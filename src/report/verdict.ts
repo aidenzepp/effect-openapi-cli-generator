@@ -60,7 +60,8 @@ const refusalsOfScope = (diagnostics: readonly Diagnostic[], scope: Diagnostic["
 
 /**
  * Design 8.2: `refused` when any document refusal exists, `partly-refused` when any other refusal
- * exists (the CLI was emitted), otherwise `accepted`. Notices never change the class.
+ * exists, an operation, element or field refusal (the CLI was emitted), otherwise `accepted`.
+ * Notices never change the class.
  */
 export const classifyVerdict = (diagnostics: readonly Diagnostic[]): VerdictClass => {
   if (refusalsOfScope(diagnostics, "document") > 0) {
@@ -94,6 +95,7 @@ export const makeVerdict = (input: VerdictInput): VerdictValue => {
       refusals: {
         document: refusalsOfScope(diagnostics, "document"),
         element: refusalsOfScope(diagnostics, "element"),
+        field: refusalsOfScope(diagnostics, "field"),
         operation: refusalsOfScope(diagnostics, "operation"),
       },
     },

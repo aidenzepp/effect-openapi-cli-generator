@@ -14,6 +14,14 @@ GLOBAL FLAGS
   --force                                                             Replace an existing --output file
   --max-error-bytes integer                                           Bytes of an error response body to print; 0 prints none
   --describe                                                          Print the command tree and its operation bindings as JSON
+  --timeout seconds                                                   Seconds to wait for response headers on each attempt; 0 waits forever
+  --retries n                                                         Times to retry a transient failure, 0 to 10
+  --retry-unsafe                                                      Retry methods that are not idempotent, such as POST and PATCH
+  --verbose                                                           Print each request's and response's status line and headers to stderr
+  --raw                                                               Write a streamed response as the bytes received, not one item per line
+  --max-record-bytes integer                                          Largest record of a streamed response, in bytes
+  --error-format choice                                               Print errors as text lines or as one JSON object (choices: text, json)
+  --dry-run                                                           Print the request with credentials replaced instead of sending it
   --api-key-file path|-                                               
 
 SUBCOMMANDS

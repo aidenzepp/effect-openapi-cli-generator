@@ -1,8 +1,17 @@
-import { Array as Arr, Data, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import type { NamingAlias, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
+import type {
+  MediaAlternative,
+  NamingAlias,
+  Operation,
+  Parameter,
+  SecurityScheme,
+} from "../model/entities.ts";
 import { envName, schemeSlug } from "../runtime-src/runtime/auth.ts";
-import type { SecurityScheme as RuntimeScheme } from "../runtime-src/runtime/auth.ts";
+import type {
+  MutualTlsScheme,
+  SecurityScheme as RuntimeScheme,
+} from "../runtime-src/runtime/auth.ts";
 import { flattenBody } from "./flatten.ts";
 import type { BodyFlag, BodyFlagKind, SkippedProperty } from "./flatten.ts";
 import type {
@@ -14,7 +23,7 @@ import type {
 } from "./fold.ts";
 import { foldKebab, words } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
-import { escapeToken, formatPointer } from "../model/pointer.ts";
+import { escapeToken, formatPointer, parsePointer } from "../model/pointer.ts";
 import type { SpecLine } from "../model/spec-section.ts";
 
 /**
@@ -37,6 +46,12 @@ export type PartOptionKind =
   | { readonly kind: "header"; readonly name: string };
 
 /**
+ * A body flag's kind in the plan: a flattened kind, or `secret-file` for a `format: password`
+ * string property whose value is read from a file or stdin and never echoed (design 13.1 R4).
+ */
+export type BodyKind = BodyFlagKind | "secret-file";
+
+/**
  * Where a flag's value goes: a parameter by location and wire name, a body field by its RFC 6901
  * pointer relative to the body root (`""` for `--body` and `--body-file`), for the listed media, or
  * an option of the multipart part at `part` (the part flag's body pointer). `pointer` is what
@@ -54,7 +69,7 @@ export type FlagSource =
     }
   | {
       readonly _tag: "Body";
-      readonly kind: BodyFlagKind;
+      readonly kind: BodyKind;
       readonly media: readonly string[];
       readonly pointer: string;
       readonly repeated: boolean;
@@ -141,6 +156,37 @@ export interface PlannedCredential {
   readonly flag: string;
   readonly scheme: string;
 }
+
+/**
+ * A `mutualTLS` scheme's client certificate names: the environment variables holding the
+ * certificate, key and CA paths. It has no flag (design 6.5, D-SEC3).
+ */
+export interface PlannedCertificate {
+  readonly caEnv: string;
+  readonly certEnv: string;
+  readonly keyEnv: string;
+  readonly scheme: string;
+}
+
+/**
+ * The names a used scheme's credential is read by: a token scheme's `<scheme>-file` flag and
+ * environment name, or a `mutualTls` scheme's certificate environment names and no flag. `slug` is
+ * empty when the scheme name folds to nothing.
+ */
+export type CredentialNames =
+  | {
+      readonly _tag: "Token";
+      readonly env: string;
+      readonly flag: string;
+      readonly slug: string;
+    }
+  | {
+      readonly _tag: "Certificate";
+      readonly caEnv: string;
+      readonly certEnv: string;
+      readonly keyEnv: string;
+      readonly slug: string;
+    };
 
 export type OperationOverride = NonNullable<
   NonNullable<NonNullable<AuthorConfig["naming"]>["operations"]>[string]
@@ -397,26 +443,59 @@ export const isBooleanSchema = (
 const runtimeScheme = (
   scheme: SecurityScheme,
   env: string | undefined,
-): RuntimeScheme | undefined => {
+): Exclude<RuntimeScheme, MutualTlsScheme> | undefined => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
     return { env, in: kind.in, kind: "apiKey", name: kind.name };
   }
 
-  return kind.type === "http" ? { env, kind: "http", scheme: kind.scheme } : undefined;
+  if (kind.type === "http") {
+    return { env, kind: "http", scheme: kind.scheme };
+  }
+
+  if (kind.type === "oauth2Token") {
+    return { env, kind: "oauth2" };
+  }
+
+  return kind.type === "oidcToken" ? { env, kind: "openIdConnect" } : undefined;
 };
 
 /**
- * The credential names of a scheme the runtime can send (`apiKey`, `http`): `<scheme>-file` and
- * `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design 6.5), through the
- * runtime's own `schemeSlug` and `envName`. Other kinds have no credential flag in Milestone 1.
- * `slug` is empty when the scheme name folds to nothing; the caller refuses that.
+ * The environment names of a `mutualTls` scheme's client certificate: `<PREFIX>_<SCHEME>_CERT`,
+ * `_KEY` and `_CA` (design 4.4). The one derivation: the reserved names and the plan entry both
+ * read it, and the runtime reads `Config` by the names the plan emits.
+ */
+export const certificateEnvNames = (
+  envPrefix: string,
+  scheme: string,
+): Omit<PlannedCertificate, "scheme"> => {
+  const stem = `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
+
+  return { caEnv: `${stem}_CA`, certEnv: `${stem}_CERT`, keyEnv: `${stem}_KEY` };
+};
+
+/**
+ * The credential names of a used scheme. A scheme the runtime sends as a token (`apiKey`, `http`,
+ * `oauth2Token` and `oidcToken`, whose operator-supplied token is passed through; design D-SEC1)
+ * gets `<scheme>-file` and `<PREFIX>_<SCHEME>` unless `security.<scheme>.env` overrides it (design
+ * 6.5), through the runtime's own `schemeSlug` and `envName`. A `mutualTls` scheme gets its
+ * `certificateEnvNames` and no flag. `slug` is empty when the scheme name folds to nothing; the
+ * caller refuses that.
  */
 export const credentialNames = (
   config: AuthorConfig,
   envPrefix: string,
   scheme: SecurityScheme,
-): Option.Option<{ readonly env: string; readonly flag: string; readonly slug: string }> => {
+): Option.Option<CredentialNames> => {
+  const slug = schemeSlug(scheme.name);
+  if (scheme.kind.type === "mutualTls") {
+    return Option.some({
+      _tag: "Certificate",
+      ...certificateEnvNames(envPrefix, scheme.name),
+      slug,
+    });
+  }
+
   const configured = own(config.security, scheme.name);
   const definition = runtimeScheme(
     scheme,
@@ -426,9 +505,8 @@ export const credentialNames = (
     return Option.none();
   }
 
-  const slug = schemeSlug(scheme.name);
-
   return Option.some({
+    _tag: "Token",
     env: envName(envPrefix, scheme.name, definition),
     flag: `${slug}-file`,
     slug,
@@ -455,9 +533,9 @@ export const reservedEnvNames = (
     ...schemes
       .filter((scheme) => scheme.kind.type === "mutualTls")
       .flatMap((scheme) => {
-        const stem = `${envPrefix}_${schemeSlug(scheme.name).toUpperCase().replaceAll("-", "_")}`;
+        const names = certificateEnvNames(envPrefix, scheme.name);
 
-        return [`${stem}_CA`, `${stem}_CERT`, `${stem}_KEY`];
+        return [names.caEnv, names.certEnv, names.keyEnv];
       }),
   ]);
 
@@ -807,16 +885,191 @@ const draftParameters = (
     return { flags, positionals };
   });
 
+// A flattened body flag as the plan names it: its kind may be `secret-file`.
+interface PlannedBodyFlag extends Omit<BodyFlag, "kind"> {
+  readonly kind: BodyKind;
+}
+
 interface Merged {
-  readonly flag: BodyFlag;
+  readonly flag: PlannedBodyFlag;
   readonly media: string[];
   readonly pointer: string;
 }
 
-const sameFlag = (left: BodyFlag, right: BodyFlag): boolean =>
+const sameFlag = (left: PlannedBodyFlag, right: PlannedBodyFlag): boolean =>
   left.pointer === right.pointer && left.kind === right.kind && left.repeated === right.repeated;
 
-const isWholeBody = (kind: BodyFlagKind): boolean => kind === "body" || kind === "body-file";
+// `--part` is the whole input of a positional body (HT:B15), so it is never renamed.
+const isWholeBody = (kind: BodyKind): boolean =>
+  kind === "body" || kind === "body-file" || kind === "part";
+
+const maxSchemaVisits = 10_000;
+
+interface JsonObject {
+  readonly [key: string]: Schema.Json;
+}
+
+const isJsonObject = (json: Schema.Json | undefined): json is JsonObject =>
+  Predicate.isObject(json);
+
+const isJsonArray = (json: Schema.Json | undefined): json is readonly Schema.Json[] =>
+  Arr.isArray(json);
+
+// Follows a `$ref` chain into `defs`; a reference outside `#/$defs/`, a missing key or a chain
+// past the hop budget ends the search.
+const dereference = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  hops = 0,
+): JsonObject | undefined => {
+  if (!isJsonObject(json) || hops > maxRefHops) {
+    return undefined;
+  }
+
+  const { $ref } = json;
+  if ($ref === undefined) {
+    return json;
+  }
+
+  return Predicate.isString($ref) && $ref.startsWith(refPrefix)
+    ? dereference(defs, own(defs, unescapeKey($ref.slice(refPrefix.length))), hops + 1)
+    : undefined;
+};
+
+// The schema of member `key` of an object schema, found the way the body walk merged it: through
+// `$ref`, own `properties`, then `allOf` members. `budget` counts the nodes a hostile `allOf`
+// graph may make the search visit.
+const memberSchema = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  key: string,
+  budget: { visits: number },
+): Schema.Json | undefined => {
+  budget.visits += 1;
+  const node = dereference(defs, json);
+  if (node === undefined || budget.visits > maxSchemaVisits) {
+    return undefined;
+  }
+
+  const { allOf, properties } = node;
+  const found = isJsonObject(properties) ? own(properties, key) : undefined;
+  if (found !== undefined || !isJsonArray(allOf)) {
+    return found;
+  }
+
+  for (const member of allOf) {
+    const inMember = memberSchema(defs, member, key, budget);
+    if (inMember !== undefined) {
+      return inMember;
+    }
+  }
+
+  return undefined;
+};
+
+const branchesOf = (json: Schema.Json | undefined): readonly Schema.Json[] =>
+  isJsonArray(json) ? json : [];
+
+// Whether a flag's own schema carries `format: password` on any node the flattener reads (each node
+// of a `$ref` chain with its sibling keywords, each `allOf` member) or in any `anyOf` or `oneOf`
+// branch. It never descends into `properties` or `items`. It fails closed: past the hop or visit
+// budget the answer is yes, so a secret never falls back to an argv flag (design invariant I4).
+const isPassword = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  budget: { visits: number },
+  hops = 0,
+): boolean => {
+  budget.visits += 1;
+  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+    return true;
+  }
+
+  if (!isJsonObject(json)) {
+    return false;
+  }
+
+  if (json.format === "password") {
+    return true;
+  }
+
+  const { $ref, allOf, anyOf, oneOf } = json;
+  const target =
+    Predicate.isString($ref) && $ref.startsWith(refPrefix)
+      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
+      : undefined;
+
+  return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
+    isPassword(defs, branch, budget, hops + 1),
+  );
+};
+
+// Whether an array schema's `items` is a password string on any node the flattener reads: each
+// node of a `$ref` chain with its sibling keywords, each `allOf` member, and any `anyOf` or `oneOf`
+// branch. Like `isPassword`, it fails closed past the hop or visit budget.
+const hasPasswordItems = (
+  defs: DraftContext["defs"],
+  json: Schema.Json | undefined,
+  budget: { visits: number },
+  hops = 0,
+): boolean => {
+  budget.visits += 1;
+  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+    return true;
+  }
+
+  if (!isJsonObject(json)) {
+    return false;
+  }
+
+  const { $ref, allOf, anyOf, items, oneOf } = json;
+  if (items !== undefined && isPassword(defs, items, budget)) {
+    return true;
+  }
+
+  const target =
+    Predicate.isString($ref) && $ref.startsWith(refPrefix)
+      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
+      : undefined;
+
+  return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
+    hasPasswordItems(defs, branch, budget, hops + 1),
+  );
+};
+
+// A `format: password` property of a JSON or form body is read from a file or stdin: its flag is
+// --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). That holds for a
+// string flag and for a JSON flag whose own schema is a composition with a password branch; a
+// property inside a JSON-valued flag has no flag of its own and gets none (m3 open question 6). A
+// property whose array items are password strings, as a repeated flag or a JSON flag, has no flag
+// at all (`undefined`) and is reached through --body-file (design 4.5, FMT-05/password-array). A
+// property the walk cannot locate within the budget fails closed.
+// Multipart parts are unchanged (m3-pw1m).
+const secretFile = (
+  defs: DraftContext["defs"],
+  alternative: Pick<MediaAlternative, "codec" | "schema">,
+  flag: BodyFlag,
+): Effect.Effect<PlannedBodyFlag | undefined> =>
+  Effect.gen(function* secret() {
+    const key = alternative.schema?.key;
+    const flattened = alternative.codec === "json" || alternative.codec === "form";
+    const candidate = flag.kind === "string" || flag.kind === "json";
+    if (!flattened || key === undefined || !candidate) {
+      return flag;
+    }
+
+    const budget = { visits: 0 };
+    let property = own(defs, key);
+    for (const token of yield* Effect.orDie(parsePointer(flag.pointer))) {
+      property = memberSchema(defs, property, token, budget);
+    }
+
+    if (!flag.repeated && (property === undefined || isPassword(defs, property, budget))) {
+      return { ...flag, kind: "secret-file", name: `${flag.name}-file` };
+    }
+
+    return property === undefined || hasPasswordItems(defs, property, budget) ? undefined : flag;
+  });
 
 // A skipped property's notice. A multipart body has no whole-body flag, so a part whose name
 // folds to nothing is not reachable at all.
@@ -834,18 +1087,23 @@ const skippedNotice = (skipped: SkippedProperty, multipart: boolean): string => 
 const fieldHint = (site: OverrideSite, field: string): string =>
   `Rename the flag with ${site.configKey}.fields[${JSON.stringify(field)}].flag, or skip the operation with ${site.configKey}.skip.`;
 
-const kindOf = (flag: BodyFlag): string => (flag.repeated ? `repeated ${flag.kind}` : flag.kind);
+const kindOf = (flag: PlannedBodyFlag): string =>
+  flag.repeated ? `repeated ${flag.kind}` : flag.kind;
 
 // One body field that is a different kind of flag in two media alternatives (a plain value in one,
 // a file part in another) keeps one name: fields[...].flag renames it in every alternative.
-const splitReason = (field: string, left: Merged, right: BodyFlag, media: string): string =>
+const splitReason = (field: string, left: Merged, right: PlannedBodyFlag, media: string): string =>
   ` The body field ${field} is a ${kindOf(left.flag)} flag in ${left.media.join(", ")} and a ${kindOf(right)} flag in ${media}. A rename cannot separate them: fields[...].flag renames the field in every media type.`;
 
-const skipHint = (site: OverrideSite): string => `Skip the operation with ${site.configKey}.skip.`;
+/**
+ * The hint for a collision that only skipping the operation resolves.
+ */
+export const skipHint = (site: OverrideSite): string =>
+  `Skip the operation with ${site.configKey}.skip.`;
 
 // A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
 // names. The config is never inferred.
-const renamed = (site: OverrideSite, flag: BodyFlag): BodyFlag => {
+const renamed = (site: OverrideSite, flag: PlannedBodyFlag): PlannedBodyFlag => {
   const configured = isWholeBody(flag.kind) ? undefined : own(site.override?.fields, flag.pointer);
 
   return configured === undefined ? flag : { ...flag, name: configured.flag, notes: [] };
@@ -1042,6 +1300,7 @@ const draftBody = (
     const { collector } = context;
     const merged = new Map<string, Merged>();
     const fields = new Set<string>();
+    const passwordArrays = new Set<string>();
     let flattenedAll = true;
     for (const alternative of operation.body?.alternatives ?? []) {
       const { pointer } = alternative.origin;
@@ -1072,7 +1331,28 @@ const draftBody = (
         );
       }
 
-      for (const flag of flattened.success.flags.map((found) => renamed(site, found))) {
+      for (const found of flattened.success.flags) {
+        const secret = yield* secretFile(context.defs, alternative, found);
+        if (secret === undefined) {
+          if (!passwordArrays.has(found.schemaPointer)) {
+            passwordArrays.add(found.schemaPointer);
+            collector.report(
+              operation,
+              "FMT-05/password-array",
+              "Request body",
+              `The property at ${found.pointer} is an array of password strings and has no flag.`,
+              {
+                hint: "Send it in a --body-file document, which keeps the values out of argv.",
+                pointer: found.schemaPointer,
+                scope: "element",
+              },
+            );
+          }
+
+          continue;
+        }
+
+        const flag = renamed(site, secret);
         fields.add(flag.pointer);
 
         const known = merged.get(flag.name);
@@ -1105,6 +1385,12 @@ const draftBody = (
     const headers = yield* draftPartHeaders(subject, context, [...merged.values()], owners);
     const fieldFlags = [...merged.values()].map(({ flag, media, pointer }): DraftFlag => {
       const boolean = flag.kind === "boolean" && !flag.repeated;
+      // `--part` is no reserved name, so a field or parameter flag of that name collides with it
+      // here rather than shadowing it; the flag cannot be renamed, so only a skip resolves it.
+      if (flag.kind === "part") {
+        addOwner(owners, flag.name, { hint: skipHint(site), kind: "body", pointer });
+      }
+
       if (!isWholeBody(flag.kind)) {
         const owner: Owner = {
           field: flag.pointer,

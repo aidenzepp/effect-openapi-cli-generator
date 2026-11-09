@@ -5,6 +5,7 @@ import { UsageError } from "../domain/errors.ts";
 import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
+import type { MediaDeclaration } from "./negotiate.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -450,6 +451,12 @@ export interface QueryOptions {
   readonly brackets?: boolean;
   readonly explode: boolean;
   readonly required: boolean;
+  /**
+   * `deepObject` only: send a scalar value as one `name=value` pair by the type-to-text rule
+   * (design 6.1 Scalar switch). Set only by the author config's `nonStandard.deepObjectScalars`;
+   * absent is strict, and a scalar is refused.
+   */
+  readonly scalars?: boolean;
 }
 
 /**
@@ -654,6 +661,19 @@ const bracketPairs = (
       : leaves.map(([, text], index) => `${names[index]}=${codec.value(text)}`);
   });
 
+/**
+ * Whether `deepObject` takes this value through the bracket convention: an object or array under
+ * `brackets`, but not a scalar the scalar switch sends as one pair.
+ */
+const bracketed = (style: QueryStyle, value: Nested, brackets?: boolean, scalars?: boolean) =>
+  style === "deepObject" && brackets === true && !(scalars === true && isScalar(value));
+
+/**
+ * `deepObject` sends an object, or a scalar when the scalar switch is set.
+ */
+const deepObjectTakes = (text: Text, scalars?: boolean) =>
+  text.kind === "object" || (scalars === true && text.kind === "primitive");
+
 const nothingSent = (
   name: string,
   value: Nested,
@@ -676,7 +696,7 @@ const queryStyled =
         return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
       }
 
-      if (style === "deepObject" && options.brackets === true) {
+      if (bracketed(style, value, options.brackets, options.scalars)) {
         const pairs = yield* bracketPairs(name, value, queryCodec(options.allowReserved));
 
         return pairs === undefined ? yield* nothingSent(name, value, options) : pairs.join("&");
@@ -692,7 +712,7 @@ const queryStyled =
         return yield* nothingSent(name, value, options);
       }
 
-      if (style === "deepObject" && text.kind !== "object") {
+      if (style === "deepObject" && !deepObjectTakes(text, options.scalars)) {
         return yield* refuse(`parameter ${name} is not an object, which deepObject requires`);
       }
 
@@ -730,7 +750,8 @@ export const pipeDelimited: QueryExpansion = queryStyled("pipeDelimited");
 /**
  * Query `deepObject`: an object with scalar members as `name[key]=value`, brackets encoded.
  * `explode` has no effect. A deeper value is refused unless `brackets` is set; then any object or
- * array is sent in the bracket convention.
+ * array is sent in the bracket convention. A scalar is refused unless `scalars` is set; then it is
+ * one `name=value` pair.
  */
 export const deepObject = queryStyled("deepObject");
 
@@ -1083,10 +1104,29 @@ export interface FormJson {
 export const jsonPart = (json: Json): FormJson => ({ json });
 
 /**
- * One `multipart/form-data` part value: a scalar sent as its text (an `int64` field as its digit
- * text), a JSON value, or a file.
+ * A by-name nested part's value (design 6.3, HT:B16): its nested parts' values by nested part name.
  */
-export type FormValue = string | number | boolean | { readonly text: string } | FormJson | FormFile;
+export interface FormNested {
+  readonly nested: FormFields;
+}
+
+/**
+ * One `multipart/form-data` part value: a scalar sent as its text (an `int64` field as its digit
+ * text), a JSON value, a file, or a by-name nested part's values.
+ */
+export type FormValue =
+  | string
+  | number
+  | boolean
+  | { readonly text: string }
+  | FormJson
+  | FormFile
+  | FormNested;
+
+/**
+ * A part value the writer sends as one leaf part.
+ */
+type LeafValue = Exclude<FormValue, FormNested>;
 
 /**
  * The part values of a `multipart/form-data` body by part name, each name sent once per value.
@@ -1107,18 +1147,49 @@ export interface ChosenPart<T extends string = string> {
 }
 
 /**
+ * The one nested level of a part by name (design 6.3, HT:B16, ENC-07): the nested body's kind,
+ * from the part's Encoding `contentType`, and each nested part's name and `Content-Type` in nested
+ * property order. Under `mixed` the nested names are not written.
+ */
+export interface NestedForm {
+  readonly kind: "form-data" | "mixed";
+  readonly parts: readonly (readonly [name: string, contentType: string])[];
+}
+
+/**
+ * The one nested level of a part by position (design 6.3, HT:B16, ENC-08, ENC-09): one
+ * `multipart/mixed` nested part from the files of the part's repeated file flag `flag`, in order,
+ * file `i` under `positions[i]` and every later file under `item`. With no `item` a file beyond
+ * the positions has no rule.
+ */
+export interface PositionalForm {
+  readonly flag: string;
+  readonly item?: string;
+  readonly kind: "mixed";
+  readonly positions: readonly string[];
+}
+
+/**
  * One declared part: its name, its `Content-Type` and, when the part is sent base64 encoded, its
  * transfer encoding (design 6.3 Multipart transfer encoding). The writer then encodes the part's
  * bytes and writes the one `Content-Transfer-Encoding` header. A string is the one type the
- * Encoding `contentType` lists, and the part's values are the fields under its name. A `ChosenPart`
- * brings its own type, values and headers, and `undefined` is a keyed part not sent; the fields
- * hold neither name.
+ * Encoding `contentType` lists, and the part's values are the fields under its name. A `NestedForm`
+ * sends the part as one nested part from the `FormNested` values under its name, and a
+ * `PositionalForm` as one nested part from the files under its name. A `ChosenPart` brings its own
+ * type, values and headers, and `undefined` is a keyed part not sent; the fields hold neither name.
  */
 export type FormPartEntry = readonly [
   name: string,
-  contentType: string | ChosenPart | undefined,
+  contentType: string | ChosenPart | NestedForm | PositionalForm | undefined,
   contentEncoding?: "base64",
 ];
+
+/**
+ * A by-name nested part's values as its part's values: one `FormNested`, or none when no nested
+ * part has a value, so the part is not sent.
+ */
+export const nestedValues = (fields: FormFields): readonly FormValue[] =>
+  Object.values(fields).some((values) => values.length > 0) ? [{ nested: fields }] : [];
 
 /**
  * The declared parts in wire order.
@@ -1134,7 +1205,16 @@ const isFormFile = (value: FormValue): value is FormFile =>
 const isFormJson = (value: FormValue): value is FormJson =>
   Predicate.isObject(value) && "json" in value;
 
-const formText = (value: Exclude<FormValue, FormFile>) => {
+const isFormNested = (value: FormValue): value is FormNested =>
+  Predicate.isObject(value) && "nested" in value;
+
+const isNestedForm = (sent: FormPartEntry[1]): sent is NestedForm =>
+  Predicate.isObject(sent) && "parts" in sent;
+
+const isPositionalForm = (sent: FormPartEntry[1]): sent is PositionalForm =>
+  Predicate.isObject(sent) && "positions" in sent;
+
+const formText = (value: Exclude<LeafValue, FormFile>) => {
   if (isFormJson(value)) {
     return jsonText("a multipart part", value.json);
   }
@@ -1158,7 +1238,11 @@ const utf8 = new TextEncoder();
 
 // What one part entry sends: a declared type with the fields' values under the part's name, a
 // chosen part as given, or nothing for a chosen part not sent.
-const sentPart = (fields: FormFields, [name, sent]: FormPartEntry): ChosenPart | undefined =>
+const sentPart = (
+  fields: FormFields,
+  name: string,
+  sent: Exclude<FormPartEntry[1], NestedForm | PositionalForm>,
+): ChosenPart | undefined =>
   Predicate.isString(sent)
     ? { contentType: sent, values: Object.hasOwn(fields, name) ? (fields[name] ?? []) : [] }
     : sent;
@@ -1186,7 +1270,7 @@ const formPart = (
   [name, , contentEncoding]: FormPartEntry,
   contentType: string,
   headers: readonly HeaderLine[],
-  value: FormValue,
+  value: LeafValue,
 ) => {
   const encoded = (part: Multipart.LeafPart): Multipart.LeafPart => {
     const withHeaders = headers.length === 0 ? part : { ...part, headers };
@@ -1201,6 +1285,64 @@ const formPart = (
       );
 };
 
+// A by-name nested part (design 6.3, HT:B16): each nested part's values in nested property order,
+// each under its own rule. The writer's one nesting level holds leaf parts only.
+const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
+  Effect.gen(function* nested() {
+    const declared = new Set(nesting.parts.map(([member]) => member));
+    if (Object.keys(fields).some((member) => !declared.has(member))) {
+      return yield* Effect.die(new Error("formData: a nested field has no declared part"));
+    }
+
+    const leaves: Multipart.LeafPart[] = [];
+    for (const entry of nesting.parts) {
+      const [member, contentType] = entry;
+      for (const value of Object.hasOwn(fields, member) ? (fields[member] ?? []) : []) {
+        if (isFormNested(value)) {
+          return yield* Effect.die(new Error("formData: a nested part nests again"));
+        }
+
+        leaves.push(yield* formPart(entry, contentType, [], value));
+      }
+    }
+
+    return { kind: nesting.kind, name, parts: leaves } satisfies Multipart.NestedPart;
+  });
+
+// A part nested by position (design 6.3, HT:B16): the part's files in order, file `i` under
+// `positions[i]` and later files under `item`, as one `multipart/mixed` nested part with no
+// nested names, or nothing when no file is given. A file beyond the positions with no item rule is
+// a `UsageError` naming the flag.
+const positionalParts = (fields: FormFields, name: string, nesting: PositionalForm) =>
+  Effect.gen(function* positional() {
+    const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+    if (values.length === 0) {
+      return [];
+    }
+
+    const ruled = nesting.item === undefined ? nesting.positions.length : Infinity;
+    if (values.length > ruled) {
+      return yield* Effect.fail(
+        new UsageError({
+          flag: nesting.flag,
+          message: `--${nesting.flag}: this part takes at most ${String(ruled)} file${ruled === 1 ? "" : "s"}`,
+        }),
+      );
+    }
+
+    const leaves: Multipart.LeafPart[] = [];
+    for (const [index, value] of values.entries()) {
+      const contentType = nesting.positions[index] ?? nesting.item;
+      if (!isFormFile(value) || contentType === undefined) {
+        return yield* Effect.die(new Error("formData: a positional nested part holds a non-file"));
+      }
+
+      leaves.push({ body: value.stream, contentType });
+    }
+
+    return [{ kind: nesting.kind, name, parts: leaves } satisfies Multipart.NestedPart];
+  });
+
 const formDataOf = (fields: FormFields, options: FormDataOptions) =>
   Effect.gen(function* formDataEvaluation() {
     const declared = new Set(options.parts.map(([name]) => name));
@@ -1208,38 +1350,72 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
       return yield* Effect.die(new Error("formData: a field has no declared part"));
     }
 
-    const leaves: Multipart.LeafPart[] = [];
+    const sent: Multipart.Part[] = [];
     for (const entry of options.parts) {
-      const [name, sent] = entry;
-      if (!Predicate.isString(sent) && Object.hasOwn(fields, name)) {
+      const [name, rule] = entry;
+      if (isPositionalForm(rule)) {
+        sent.push(...(yield* positionalParts(fields, name, rule)));
+        continue;
+      }
+
+      if (isNestedForm(rule)) {
+        const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+        for (const value of values) {
+          if (!isFormNested(value)) {
+            return yield* Effect.die(new Error("formData: a nested part has a plain value"));
+          }
+
+          const nested = yield* nestedPart(name, rule, value.nested);
+          if (nested.parts.length > 0) {
+            sent.push(nested);
+          }
+        }
+
+        continue;
+      }
+
+      if (!Predicate.isString(rule) && Object.hasOwn(fields, name)) {
         return yield* Effect.die(new Error("formData: a chosen part is also a field"));
       }
 
-      const part = sentPart(fields, entry);
+      const part = sentPart(fields, name, rule);
       if (part === undefined) {
         continue;
       }
 
       const headers = part.values.length === 0 ? [] : yield* headerLines(part.headers);
       for (const value of part.values) {
-        leaves.push(yield* formPart(entry, part.contentType, headers, value));
+        if (isFormNested(value)) {
+          return yield* Effect.die(new Error("formData: a nested value under a plain part"));
+        }
+
+        sent.push(yield* formPart(entry, part.contentType, headers, value));
       }
     }
 
-    if (leaves.length === 0 && !options.required) {
+    if (sent.length === 0 && !options.required) {
       return HttpBody.empty;
     }
 
-    return yield* Multipart.formData(leaves);
+    return yield* Multipart.formData(sent);
   });
 
 /**
- * What `assertFormData` reads beside the part values: each declared part's flag, the parts that
- * repeat (an array property, one value per item), whether the body is required, and its schema.
+ * Each declared part's flag by part name, and the parts that repeat (an array property, one value
+ * per item).
  */
-export interface FormSchemaOptions {
+export interface FormPartFlags {
   readonly flags: Readonly<Record<string, string>>;
   readonly repeated: readonly string[];
+}
+
+/**
+ * What `assertFormData` reads beside the part values: the parts' flags, each by-name nested part's
+ * own part flags (design 6.3, HT:B16), whose entry in `flags` is its first nested flag, whether the
+ * body is required, and its schema.
+ */
+export interface FormSchemaOptions extends FormPartFlags {
+  readonly nested?: Readonly<Record<string, FormPartFlags>>;
   readonly required: boolean;
   readonly schema: Schema.Top;
 }
@@ -1271,7 +1447,7 @@ const parsedJson = (value: Json): Schema.Json => {
 // A part value as the body schema reads it: a scalar as itself, an `int64` digit text as its
 // number and a JSON part as its parsed value, as a merged JSON body is asserted. A file is a
 // stand-in whose issues are never reported.
-const assertedValue = (value: FormValue) => {
+const assertedValue = (value: LeafValue): Schema.Json => {
   if (isFormFile(value)) {
     return "";
   }
@@ -1285,73 +1461,135 @@ const assertedValue = (value: FormValue) => {
 
 const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
-// The part an issue is under: the first segment of its path, if that is a part name.
-const issuePart = (issue: { readonly path?: readonly unknown[] | undefined }) => {
-  const [head] = issue.path ?? [];
-  const key: unknown = Predicate.isObject(head) && "key" in head ? head.key : head;
+// A part's path: its name, and a nested part's nested name after it, as one key.
+const partPath = (...names: readonly string[]): string => JSON.stringify(names);
+
+interface Asserted {
+  readonly files: Set<string>;
+  readonly sent: Set<string>;
+}
+
+// The values of one form level as the body schema reads them: each part's first value, every value
+// of a repeated part, and a by-name nested part's values as its object. The paths of the parts
+// given and of the file parts are gathered into `seen`.
+const assertedObject = (
+  fields: FormFields,
+  options: FormPartFlags & { readonly nested?: FormSchemaOptions["nested"] },
+  seen: Asserted,
+  ...at: readonly string[]
+): { readonly [name: string]: Schema.Json } => {
+  const repeated = new Set(options.repeated);
+  const entries: (readonly [string, Schema.Json])[] = [];
+  for (const [name, values] of Object.entries(fields)) {
+    const [first] = values;
+    if (first === undefined) {
+      continue;
+    }
+
+    const slot = partPath(...at, name);
+    seen.sent.add(slot);
+    if (isFormNested(first)) {
+      const members = options.nested?.[name] ?? { flags: {}, repeated: [] };
+      entries.push([name, assertedObject(first.nested, members, seen, ...at, name)]);
+      continue;
+    }
+
+    const leaves = values.filter((value): value is LeafValue => !isFormNested(value));
+    if (leaves.some(isFormFile)) {
+      seen.files.add(slot);
+    }
+
+    entries.push([name, repeated.has(name) ? leaves.map(assertedValue) : assertedValue(first)]);
+  }
+
+  return Object.fromEntries(entries);
+};
+
+type PathSegment = PropertyKey | { readonly key: PropertyKey };
+
+// An issue path segment's name, if it is a string key.
+const segmentName = (segment: PathSegment | undefined): string | undefined => {
+  const key = Predicate.isObject(segment) ? segment.key : segment;
 
   return Predicate.isString(key) ? key : undefined;
 };
 
+// The path of the part an issue is under: its first segment, if that is a part name, and for a
+// by-name nested part the nested name after it.
+const issuePath = (
+  issue: { readonly path?: readonly PathSegment[] | undefined },
+  nested: ReadonlySet<string>,
+): string | undefined => {
+  const [head, inner] = issue.path ?? [];
+  const name = segmentName(head);
+  const member = segmentName(inner);
+  if (name === undefined) {
+    return undefined;
+  }
+
+  return nested.has(name) && member !== undefined ? partPath(name, member) : partPath(name);
+};
+
+// The first failing part's flag and path in declared order, a nested part's nested flags before
+// its own.
+const failingFlag = (options: FormSchemaOptions, failing: ReadonlySet<string | undefined>) =>
+  Object.entries(options.flags)
+    .flatMap(([name, flag]) => [
+      ...Object.entries(options.nested?.[name]?.flags ?? {}).map(([member, memberFlag]) => ({
+        flag: memberFlag,
+        slot: partPath(name, member),
+      })),
+      { flag, slot: partPath(name) },
+    ])
+    .find(({ slot }) => failing.has(slot));
+
 /**
  * The part values asserted against the body's schema before any request (design 4.5, C2): text
- * parts as their typed values, each supplied file part for presence only, never its content. A
- * failure is a `UsageError` naming the first failing part's flag in declared order, never a value.
- * An optional body with no value is not asserted; a required one is asserted as `{}`, so a missing
- * required part fails. The values pass through unchanged.
+ * parts as their typed values, each supplied file part for presence only, never its content (the
+ * files of a part nested by position among them), and a by-name nested part as its object (HT:B16).
+ * A failure is a `UsageError` naming the first failing part's flag in declared order, a nested
+ * part's dotted flag for its nested parts, never a value. An optional body with no value is not
+ * asserted; a required one is asserted as `{}`, so a missing required part fails. The values pass
+ * through unchanged.
  */
 export const assertFormData =
   (options: FormSchemaOptions) =>
   (fields: FormFields): Effect.Effect<FormFields, UsageError> =>
     Effect.gen(function* assertion() {
-      const repeated = new Set(options.repeated);
-      const files = new Set<string>();
-      const entries: (readonly [string, unknown])[] = [];
-      for (const [name, values] of Object.entries(fields)) {
-        const [first] = values;
-        if (first === undefined) {
-          continue;
-        }
-
-        if (values.some(isFormFile)) {
-          files.add(name);
-        }
-
-        entries.push([name, repeated.has(name) ? values.map(assertedValue) : assertedValue(first)]);
-      }
-
-      if (entries.length === 0 && !options.required) {
+      const seen: Asserted = { files: new Set(), sent: new Set() };
+      const value = assertedObject(fields, options, seen);
+      if (seen.sent.size === 0 && !options.required) {
         return fields;
       }
 
-      const checked = SchemaParser.decodeUnknownResult(Schema.toType(options.schema))(
-        Object.fromEntries(entries),
-        { errors: "all" },
-      );
+      const checked = SchemaParser.decodeUnknownResult(Schema.toType(options.schema))(value, {
+        errors: "all",
+      });
       if (Result.isSuccess(checked)) {
         return fields;
       }
 
-      const failing = standardIssues(checked.failure)
-        .issues.map(issuePart)
-        .filter((name) => name === undefined || !files.has(name));
-      if (failing.length === 0) {
+      const nested = new Set(Object.keys(options.nested ?? {}));
+      const failing = new Set(
+        standardIssues(checked.failure)
+          .issues.map((issue) => issuePath(issue, nested))
+          .filter((slot) => slot === undefined || !seen.files.has(slot)),
+      );
+      if (failing.size === 0) {
         return fields;
       }
 
-      const sent = new Set(entries.map(([name]) => name));
-      const named = Object.keys(options.flags).find((name) => failing.includes(name));
-      const flag = named === undefined ? undefined : options.flags[named];
-      if (named === undefined || flag === undefined) {
+      const named = failingFlag(options, failing);
+      if (named === undefined) {
         return yield* refuse("the multipart parts do not match the request body schema");
       }
 
       return yield* Effect.fail(
         new UsageError({
-          flag,
-          message: sent.has(named)
-            ? `--${flag}: does not match the request body schema`
-            : `--${flag}: this request needs it`,
+          flag: named.flag,
+          message: seen.sent.has(named.slot)
+            ? `--${named.flag}: does not match the request body schema`
+            : `--${named.flag}: this request needs it`,
         }),
       );
     });
@@ -1444,6 +1682,66 @@ export const formData = (fields: FormFields, options: FormDataOptions): RequestB
 });
 
 /**
+ * The part bodies of a 3.2 positional `multipart/mixed` body, in the order the operator gave them.
+ */
+export type MixedParts = readonly Multipart.LeafPart["body"][];
+
+/**
+ * The rules of a positional body (design 6.3, HT:B15): part `i` takes `prefixEncoding[i]` and every
+ * later part `itemEncoding`. `maxParts` and `minParts` are the schema's bounds on the part count.
+ */
+export interface MixedOptions {
+  readonly itemEncoding?: Multipart.PartEncoding;
+  readonly maxParts?: number;
+  readonly minParts?: number;
+  readonly prefixEncoding: readonly Multipart.PartEncoding[];
+  readonly required: boolean;
+}
+
+// The one flag a positional body's parts come from (the names plan never renames it).
+const partFlag = "part";
+
+const partCount = (count: number) => `${count} part${count === 1 ? "" : "s"}`;
+
+const partCountError = (bound: string) =>
+  new UsageError({ flag: partFlag, message: `--${partFlag}: this body takes ${bound}` });
+
+const mixedOf = (bodies: MixedParts, options: MixedOptions) =>
+  Effect.gen(function* mixedEvaluation() {
+    if (bodies.length === 0 && !options.required) {
+      return HttpBody.empty;
+    }
+
+    // With no item rule a part beyond the position rules has no rule to be sent under.
+    const ruled = options.itemEncoding === undefined ? options.prefixEncoding.length : Infinity;
+    const most = Math.min(ruled, options.maxParts ?? Infinity);
+    if (bodies.length > most) {
+      return yield* Effect.fail(partCountError(`at most ${partCount(most)}`));
+    }
+
+    const least = options.minParts ?? 0;
+    if (bodies.length < least) {
+      return yield* Effect.fail(partCountError(`at least ${partCount(least)}`));
+    }
+
+    return yield* Multipart.mixed(Multipart.positionalParts(bodies, options));
+  });
+
+/**
+ * A 3.2 positional `multipart/mixed` body streamed through the multipart writer (design 6.3,
+ * HT:B15): each part's raw bytes in the given order, part `i` under `prefixEncoding[i]` and later
+ * parts under `itemEncoding`, with no `Content-Disposition`; `prefixEncoding` entries beyond the
+ * parts are unused (MED-15). More parts than rules, or a count outside `minParts` and `maxParts`,
+ * is a `UsageError` naming `--part` before any request. With no part a required body is the close
+ * delimiter alone and an optional one is empty. `request` sends the writer's `Content-Type`.
+ */
+export const mixed = (bodies: MixedParts, options: MixedOptions): RequestBody => ({
+  expand: mixedOf(bodies, options),
+  mediaType: "multipart/mixed",
+  ownsContentType: true,
+});
+
+/**
  * An Encoding Object's RFC 6570 fields for one form-urlencoded property. With none of the three the
  * property is encoded by its default `contentType` (design 6.3).
  */
@@ -1454,6 +1752,10 @@ export interface FormEncoding {
    */
   readonly brackets?: boolean;
   readonly explode?: boolean;
+  /**
+   * With `style: deepObject` only: a scalar as one pair, as `QueryOptions.scalars`.
+   */
+  readonly scalars?: boolean;
   readonly style?: QueryStyle;
 }
 
@@ -1558,7 +1860,7 @@ const styledPairs = (
       explode: encoding.explode ?? style === "form",
     };
 
-    if (style === "deepObject" && encoding.brackets === true) {
+    if (bracketed(style, value, encoding.brackets, encoding.scalars)) {
       const pairs = yield* bracketPairs(name, value, formCodec(options.allowReserved));
 
       return pairs === undefined ? noPairs : { members: true, pairs };
@@ -1574,7 +1876,7 @@ const styledPairs = (
       return noPairs;
     }
 
-    if (style === "deepObject" && text.kind !== "object") {
+    if (style === "deepObject" && !deepObjectTakes(text, encoding.scalars)) {
       return yield* refuse(`property ${name} is not an object, which deepObject requires`);
     }
 
@@ -1681,11 +1983,77 @@ export const urlEncode = (
     return pairs.join("&");
   });
 
-const urlEncodedOf = (
+/**
+ * A form body's options: its declared properties, whether it is required, and the operation's
+ * refused fields keyed by request media type, the `refused` list of its `MediaDeclaration`.
+ */
+export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
+  readonly refused?: MediaDeclaration["refused"];
+  readonly required: boolean;
+}
+
+/**
+ * The properties refused at `field` scope under `mediaType`, from the operation's `refused` list.
+ */
+const refusedNamesOf = (
   mediaType: string,
-  value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
-) =>
+  refused: MediaDeclaration["refused"],
+): readonly string[] => {
+  const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
+
+  return (listed ? refused[mediaType] : undefined) ?? [];
+};
+
+/**
+ * Whether a sent pair name carries `field`: the name itself, or a bracketed or dotted name under
+ * it, as a server reading brackets or dots would nest it.
+ */
+const carries = (field: string, pairName: string): boolean =>
+  pairName === field || pairName.startsWith(`${field}[`) || pairName.startsWith(`${field}.`);
+
+// A refused field has no flag, so only the whole body can carry it; the name is the field's,
+// never its value.
+const refuseField = (field: string, mediaType: string): Refusal =>
+  Effect.fail(
+    new UsageError({
+      flag: "--body",
+      message: `property ${field} is refused for ${mediaType} and cannot be set through --body or --body-file`,
+    }),
+  );
+
+/**
+ * The form text of `value`, refusing a refused field however it would be sent (design 4.5
+ * Refused body fields, 8.5): an own key of the merged body named like one, even one that sends no
+ * pair, and any pair the text carries, decoded as a server decodes it, whose name carries one. A
+ * pair named exactly like a declared property that is not refused is that property's own.
+ */
+const guardedText = (value: JsonObject, mediaType: string, options: UrlEncodedBodyOptions) =>
+  Effect.gen(function* refusedFieldGuard() {
+    const names = refusedNamesOf(mediaType, options.refused);
+    const ownKey = Object.keys(value).find((key) => names.includes(key));
+    if (ownKey !== undefined) {
+      return yield* refuseField(ownKey, mediaType);
+    }
+
+    const text = yield* urlEncode(value, options);
+    if (names.length === 0) {
+      return text;
+    }
+
+    const own = new Set(
+      options.properties.map(([name]) => name).filter((name) => !names.includes(name)),
+    );
+    for (const pairName of new URLSearchParams(text).keys()) {
+      const field = own.has(pairName) ? undefined : names.find((name) => carries(name, pairName));
+      if (field !== undefined) {
+        return yield* refuseField(field, mediaType);
+      }
+    }
+
+    return text;
+  });
+
+const urlEncodedOf = (mediaType: string, value: Json | undefined, options: UrlEncodedBodyOptions) =>
   Effect.gen(function* urlEncodedEvaluation() {
     if (mediaType === "" || unsafeHeaderText(mediaType)) {
       return yield* refuse("the request media type is not a valid header value");
@@ -1699,7 +2067,7 @@ const urlEncodedOf = (
       return yield* refuse("a form-urlencoded body must be an object");
     }
 
-    return HttpBody.text(yield* urlEncode(value, options), mediaType);
+    return HttpBody.text(yield* guardedText(value, mediaType, options), mediaType);
   });
 
 /**
@@ -1712,7 +2080,7 @@ const urlEncodedOf = (
 export const urlEncoded = (
   mediaType: string,
   value: Json | undefined,
-  options: UrlEncodedOptions & { readonly required: boolean },
+  options: UrlEncodedBodyOptions,
 ): RequestBody => ({
   expand: urlEncodedOf(mediaType, value, options),
   mediaType,

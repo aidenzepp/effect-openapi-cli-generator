@@ -2,7 +2,7 @@
   "commandSources": {
     "config": 0,
     "fern": 0,
-    "fold": 245,
+    "fold": 250,
     "forge": 0
   },
   "corpusVersion": 1,
@@ -11,14 +11,15 @@
     "nonStandard": 0,
     "notices": 665,
     "operations": {
-      "generated": 245,
-      "refused": 5,
+      "generated": 250,
+      "refused": 0,
       "total": 250
     },
     "refusals": {
       "document": 0,
-      "element": 46,
-      "operation": 5
+      "element": 5,
+      "field": 0,
+      "operation": 0
     }
   },
   "coverage": {
@@ -3380,291 +3381,15 @@
       "scope": "element"
     },
     {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1attachment/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands/put/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/delete/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1commands~1{command_id}/patch/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1entitlements/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}/delete/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1entitlements~1{entitlement_id}~1consume/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands/put/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1permissions/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/delete/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}/patch/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}~1permissions/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1applications~1{application_id}~1guilds~1{guild_id}~1commands~1{command_id}~1permissions/put/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1channels~1{channel_id}~1messages/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1guilds~1{guild_id}~1channels/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1guilds~1{guild_id}~1messages~1search/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies/put/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies~1{lobby_id}~1channel-linking/patch/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies~1{lobby_id}~1members~1@me/delete/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies~1{lobby_id}~1members~1@me~1invites/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1lobbies~1{lobby_id}~1messages/post/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
       "code": "SCH-13/multipart-extra-fields",
       "pointer": "/paths/~1lobbies~1{lobby_id}~1messages~1{message_id}~1moderation-metadata/put/requestBody/content/multipart~1form-data/schema/additionalProperties",
       "row": "SCH-13",
       "scope": "element"
     },
     {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1oauth2~1@me/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1oauth2~1userinfo/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
       "code": "SCH-13/multipart-extra-fields",
       "pointer": "/paths/~1partner-sdk~1dms~1{user_id_1}~1{user_id_2}~1messages~1{message_id}~1moderation-metadata/put/requestBody/content/multipart~1form-data/schema/additionalProperties",
       "row": "SCH-13",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1skus~1{sku_id}~1subscriptions/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1skus~1{sku_id}~1subscriptions~1{subscription_id}/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SEC-06/no-satisfiable-alternative",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1entitlements/get",
-      "row": "SEC-06",
-      "scope": "operation"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1entitlements/get/security/0",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SEC-06/no-satisfiable-alternative",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/delete",
-      "row": "SEC-06",
-      "scope": "operation"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/delete/security/0",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SEC-06/no-satisfiable-alternative",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/get",
-      "row": "SEC-06",
-      "scope": "operation"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/get/security/0",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SEC-06/no-satisfiable-alternative",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/put",
-      "row": "SEC-06",
-      "scope": "operation"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1applications~1{application_id}~1role-connection/put/security/0",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1connections/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1guilds/get/security/1",
-      "row": "SSC-18",
-      "scope": "element"
-    },
-    {
-      "code": "SEC-06/no-satisfiable-alternative",
-      "pointer": "/paths/~1users~1@me~1guilds~1{guild_id}~1member/get",
-      "row": "SEC-06",
-      "scope": "operation"
-    },
-    {
-      "code": "SSC-18/not-implemented",
-      "pointer": "/paths/~1users~1@me~1guilds~1{guild_id}~1member/get/security/0",
-      "row": "SSC-18",
       "scope": "element"
     }
   ],

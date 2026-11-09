@@ -2,7 +2,8 @@ import { Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
-import { isNonStandard } from "../model/non-standard.ts";
+import type { NonStandardChoice, NonStandardUse } from "../model/non-standard.ts";
+import { markedUses, nonStandardUses } from "../model/non-standard.ts";
 import type { Json } from "../model/pointer.ts";
 
 /**
@@ -18,13 +19,16 @@ export interface HelpBodyField {
 
 /**
  * Where a flag's value lands: a parameter (`negatable` for a three-state boolean), a body property
- * at an RFC 6901 pointer inside the body, with that property's annotations, or the `Content-Type`
- * of the multipart part at `part`, one of `choices`.
+ * at an RFC 6901 pointer inside the body, with that property's annotations, the `Content-Type`
+ * of the multipart part at `part`, one of `choices`, or the ordered parts of a positional
+ * `multipart/mixed` body, `prefix[i]` the content type of part `i + 1` and `item` that of every
+ * later part.
  */
 export type HelpFlagSource =
   | { readonly _tag: "Body"; readonly field?: HelpBodyField; readonly pointer: string }
   | { readonly _tag: "Parameter"; readonly negatable: boolean; readonly parameter: Parameter }
-  | { readonly _tag: "PartOption"; readonly option: HelpPartOption; readonly part: string };
+  | { readonly _tag: "PartOption"; readonly option: HelpPartOption; readonly part: string }
+  | { readonly _tag: "Parts"; readonly item?: string; readonly prefix: readonly string[] };
 
 /**
  * What a multipart part option sets: the part's content type, one of `choices`, or the value of
@@ -57,7 +61,19 @@ export interface HelpCredential {
   readonly scheme: string;
 }
 
+/**
+ * The environment names that carry one `mutualTLS` scheme's client certificate, key and CA paths;
+ * it has no flag (design 6.5, D-SEC3).
+ */
+export interface HelpCertificate {
+  readonly caEnv: string;
+  readonly certEnv: string;
+  readonly keyEnv: string;
+  readonly scheme: string;
+}
+
 export interface HelpInput {
+  readonly certificates?: readonly HelpCertificate[];
   readonly credentials: readonly HelpCredential[];
   readonly diagnostics: readonly Diagnostic[];
   readonly flags: readonly HelpFlag[];
@@ -108,43 +124,64 @@ export const sanitizeProse = (text: string): SafeTextValue =>
 // A single-line generated field: sanitized, with LF and TAB runs folded to one space.
 const line = (text: string): string => sanitizeProse(text).replaceAll(/[\n\t]+/gu, " ");
 
-const bracketNote =
-  "non-standard: sent as name[a][b]=v (author config nonStandard.deepObjectBrackets)";
+// Each switch's flag note (design 6.1 Scalar switch, Marking).
+const choiceNotes: Readonly<Record<NonStandardChoice, string>> = {
+  deepObjectBrackets:
+    "non-standard: sent as name[a][b]=v (author config nonStandard.deepObjectBrackets)",
+  deepObjectScalars:
+    "non-standard: a scalar value is sent as name=value (author config nonStandard.deepObjectScalars)",
+};
+
+const choices: readonly NonStandardChoice[] = ["deepObjectBrackets", "deepObjectScalars"];
+
+// The distinct choices among use sites, bracket choice first.
+const choicesOf = (uses: readonly NonStandardUse[]): readonly NonStandardChoice[] =>
+  choices.filter((choice) => uses.some((use) => use.choice === choice));
 
 // The first pointer token, unescaped: the form property a body flag writes.
 const propertyOf = (pointer: string): string =>
   (pointer.split("/")[1] ?? "").replaceAll("~1", "/").replaceAll("~0", "~");
 
-// Whether the author config marked the form property a body flag writes (design 6.1).
-const bodyMarked = (operation: Operation, pointer: string): boolean => {
+// The use sites the author config marked on the form property a body flag writes (design 6.1).
+const bodyMarked = (operation: Operation, pointer: string): readonly NonStandardUse[] => {
   const name = propertyOf(pointer);
 
-  return (operation.body?.alternatives ?? []).some((alternative) =>
-    alternative.encoding.some(
-      (rule) =>
-        rule.nonStandard === "deepObjectBrackets" &&
-        rule.target.kind === "property" &&
-        rule.target.name === name,
+  return (operation.body?.alternatives ?? []).flatMap((alternative) =>
+    alternative.encoding.flatMap((rule) =>
+      rule.target.kind === "property" && rule.target.name === name ? markedUses(rule) : [],
     ),
   );
 };
 
-const isMarked = (operation: Operation, flag: HelpFlag): boolean => {
+// The switches that marked the element a flag writes, bracket choice first; empty when unmarked.
+const markedChoices = (operation: Operation, flag: HelpFlag): readonly NonStandardChoice[] => {
   const { source } = flag;
   if (source._tag === "Body") {
-    return bodyMarked(operation, source.pointer);
+    return choicesOf(bodyMarked(operation, source.pointer));
   }
 
-  if (source._tag === "PartOption") {
-    return false;
+  if (source._tag === "PartOption" || source._tag === "Parts") {
+    return [];
   }
 
-  return isNonStandard(source.parameter.serialization);
+  return choicesOf(nonStandardUses(source.parameter.serialization));
+};
+
+// Each position's content type, then every later part's (HT:B15): `part 1: a; parts 2+: b`.
+const partsNote = (prefix: readonly string[], item: string | undefined): string => {
+  const positions = prefix.map((type, index) => `part ${index + 1}: ${line(type)}`);
+  const rest = item === undefined ? [] : [`parts ${prefix.length + 1}+: ${line(item)}`];
+
+  return [...positions, ...rest].join("; ");
 };
 
 const locationNote = (source: HelpFlagSource, name: string): string => {
   if (source._tag === "Body") {
     return `body ${line(source.pointer)}`;
+  }
+
+  if (source._tag === "Parts") {
+    return partsNote(source.prefix, source.item);
   }
 
   if (source._tag === "PartOption") {
@@ -251,21 +288,119 @@ const firstByKey = <T>(items: readonly T[], keyOf: (item: T) => string): Readonl
 };
 
 interface UseLookup {
+  readonly certificates: ReadonlyMap<string, HelpCertificate>;
   readonly credentials: ReadonlyMap<string, HelpCredential>;
   readonly schemes: ReadonlyMap<string, SecurityScheme>;
 }
 
-const useLine = (lookup: UseLookup, name: string): string => {
-  const scheme = lookup.schemes.get(name);
+type Use = Operation["security"]["alternatives"][number]["uses"][number];
+
+type Flows = Extract<SecurityScheme["kind"], { readonly type: "oauth2Token" }>["flows"];
+
+// Flow kinds in a fixed order, so the line does not depend on the spec's key order.
+const flowKinds = [
+  "authorizationCode",
+  "clientCredentials",
+  "deviceAuthorization",
+  "implicit",
+  "password",
+] as const;
+
+const acquisition = "token acquisition is not supported; supply an access token";
+
+// One flow: its URLs when the spec gives them, then its scope names and descriptions (OAF-01, OAF-12).
+const flowText = (kind: string, flow: NonNullable<Flows[keyof Flows]>): string => {
+  const urls = (
+    ["authorizationUrl", "deviceAuthorizationUrl", "tokenUrl", "refreshUrl"] as const
+  ).flatMap((field) => {
+    const url = flow[field];
+
+    return url === undefined ? [] : [`${field} ${line(url)}`];
+  });
+  const scopes =
+    flow.scopes.length === 0
+      ? "none"
+      : flow.scopes
+          .map(({ description, name }) =>
+            description === "" ? line(name) : `${line(name)} (${line(description)})`,
+          )
+          .join(", ");
+
+  return `${kind} flow ${[...urls, `scopes ${scopes}`].join(", ")}`;
+};
+
+// What help shows of a scheme besides its sources: the oauth2 flows and metadata URL, the OIDC
+// discovery URL (neither URL is ever fetched, design 9 I3), and that no token is acquired.
+const kindDetails = (scheme: SecurityScheme): readonly string[] => {
+  const { kind } = scheme;
+  if (kind.type === "oauth2Token") {
+    const flows = flowKinds.flatMap((flowKind) => {
+      const flow = kind.flows[flowKind];
+
+      return flow === undefined ? [] : [flowText(flowKind, flow)];
+    });
+    const metadata =
+      kind.oauth2MetadataUrl === undefined
+        ? []
+        : [`oauth2MetadataUrl ${line(kind.oauth2MetadataUrl)} (never fetched)`];
+
+    return [...flows, ...metadata, acquisition];
+  }
+
+  return kind.type === "oidcToken"
+    ? [`openIdConnectUrl ${line(kind.openIdConnectUrl)} (never fetched)`, acquisition]
+    : [];
+};
+
+// The values of a requirement entry: required scopes for a token scheme (SEC-11), role names for
+// any other (SEC-13). Help shows them; they are never sent.
+const scopesNote = (scheme: SecurityScheme | undefined, scopes: readonly string[]): string[] => {
+  if (scopes.length === 0) {
+    return [];
+  }
+
+  const type = scheme?.kind.type;
+  const label = type === "oauth2Token" || type === "oidcToken" ? "required scopes" : "roles";
+
+  return [`${label} ${scopes.map(line).join(", ")} (never sent)`];
+};
+
+// Where the credential is read from: a token scheme's file flag and env name, then the TTY prompt
+// when the scheme's credential sources hold it; a mutualTLS scheme's three env names and no flag.
+const sourcesOf = (
+  lookup: UseLookup,
+  scheme: SecurityScheme | undefined,
+  name: string,
+): string | undefined => {
+  const certificate = lookup.certificates.get(name);
+  if (certificate !== undefined) {
+    const envs = [certificate.certEnv, certificate.keyEnv, certificate.caEnv].map(line);
+
+    return `env ${envs.join(", ")}; the certificate is presented only to accepted origins`;
+  }
+
   const credential = lookup.credentials.get(name);
+  const prompt = scheme?.credentialSources.includes("prompt") === true ? ", TTY prompt" : "";
+
+  return credential === undefined
+    ? undefined
+    : `--${line(credential.flag)} <path|->, env ${line(credential.env)}${prompt}`;
+};
+
+const useLine = (lookup: UseLookup, use: Use): string => {
+  const name = use.scheme;
+  const scheme = lookup.schemes.get(name);
   const marked = scheme === undefined ? [] : markers(scheme);
   const mark = marked.length === 0 ? "" : ` [${marked.join(", ")}]`;
   const head = scheme === undefined ? line(name) : `${line(name)} (${kindNote(scheme)})${mark}`;
-  if (credential === undefined) {
-    return head;
-  }
+  const sources = sourcesOf(lookup, scheme, name);
+  const details = [
+    ...(scheme === undefined ? [] : kindDetails(scheme)),
+    ...scopesNote(scheme, use.scopes),
+  ];
+  const text = sources === undefined ? head : `${head}: ${sources}`;
 
-  return `${head}: --${line(credential.flag)} <path|->, env ${line(credential.env)}`;
+  return details.length === 0 ? text : `${text}; ${details.join("; ")}`;
 };
 
 const anonymous = "no authentication";
@@ -279,6 +414,7 @@ const authLine = (input: HelpInput): string => {
   }
 
   const lookup: UseLookup = {
+    certificates: firstByKey(input.certificates ?? [], (certificate) => certificate.scheme),
     credentials: firstByKey(input.credentials, (credential) => credential.scheme),
     schemes: firstByKey(input.schemes, (scheme) => scheme.name),
   };
@@ -287,7 +423,7 @@ const authLine = (input: HelpInput): string => {
     .map((alternative) =>
       alternative.uses.length === 0
         ? anonymous
-        : alternative.uses.map((use) => useLine(lookup, use.scheme)).join(" and "),
+        : alternative.uses.map((use) => useLine(lookup, use)).join(" and "),
     )
     .join(" or ");
 };
@@ -338,7 +474,7 @@ const refusedLine = (input: HelpInput): string | undefined => {
   const refused = input.diagnostics.filter(
     (diagnostic) =>
       diagnostic.severity === "refusal" &&
-      diagnostic.scope === "element" &&
+      (diagnostic.scope === "element" || diagnostic.scope === "field") &&
       diagnostic.operation?.method === key.method &&
       diagnostic.operation.path === key.path,
   );
@@ -359,6 +495,10 @@ const isArgument = (flag: HelpFlag): boolean =>
 const isDeprecated = ({ source }: HelpFlag): boolean => {
   if (source._tag === "PartOption") {
     return source.option.kind === "header" && source.option.deprecated;
+  }
+
+  if (source._tag === "Parts") {
+    return false;
   }
 
   return source._tag === "Parameter"
@@ -394,14 +534,14 @@ const fieldNotes = (source: HelpFlagSource): readonly string[] => {
   ];
 };
 
-// A flag's annotation: its location, then the bracket note, the body field's schema notes and
+// A flag's annotation: its location, then each switch's note, the body field's schema notes and
 // `deprecated` when they apply.
 const noted =
   (operation: Operation) =>
   (flag: HelpFlag): readonly [string, string] => {
     const notes = [
       locationNote(flag.source, flag.name),
-      ...(isMarked(operation, flag) ? [bracketNote] : []),
+      ...markedChoices(operation, flag).map((choice) => choiceNotes[choice]),
       ...fieldNotes(flag.source),
       ...(isDeprecated(flag) ? ["deprecated"] : []),
     ];
@@ -409,13 +549,19 @@ const noted =
     return [line(flag.name), notes.join("; ")];
   };
 
-// The NON-STANDARD line: the marked flags of the command, by visible name.
+// The NON-STANDARD line: for each switch, the flags it marked by visible name, then its choice.
 const nonStandardLine = (input: HelpInput): string | undefined => {
-  const marked = input.flags.filter((flag) => isMarked(input.operation, flag));
+  const groups = choices.flatMap((choice) => {
+    const marked = input.flags.filter((flag) =>
+      markedChoices(input.operation, flag).includes(choice),
+    );
 
-  return marked.length === 0
-    ? undefined
-    : `${marked.map((flag) => `--${line(flag.name)}`).join(", ")} (deepObjectBrackets)`;
+    return marked.length === 0
+      ? []
+      : [`${marked.map((flag) => `--${line(flag.name)}`).join(", ")} (${choice})`];
+  });
+
+  return groups.length === 0 ? undefined : groups.join("; ");
 };
 
 /**
@@ -424,7 +570,7 @@ const nonStandardLine = (input: HelpInput): string | undefined => {
  * default and read-only and deprecated marks), and the REQUEST, VARIANTS, AUTH, RESPONSES,
  * RESPONSE HEADERS and REFUSED lines. VARIANTS lists a discriminated body's branches and is absent
  * without a hint; RESPONSE HEADERS is absent when no case declares a header; the REFUSED line lists
- * the command's refused elements by wire name and reason.
+ * the command's refused elements and refused body fields by wire name and reason.
  */
 export const operationHelp = (input: HelpInput): OperationHelp => {
   const { operation } = input;

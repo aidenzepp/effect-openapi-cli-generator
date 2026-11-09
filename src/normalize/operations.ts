@@ -24,7 +24,7 @@ import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
-import { normalizeParameter } from "./parameters.ts";
+import { authorChoiceCodes, normalizeParameter } from "./parameters.ts";
 import type { ParameterNotReadable, ParameterOutcome, ParameterSite } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
 import { normalizeSecurityPolicy } from "./security.ts";
@@ -788,6 +788,12 @@ interface Assembly {
   readonly operation?: Operation;
 }
 
+// An operation refused whole sends nothing, so none of its elements is sent in the bracket
+// convention or as a scalar pair: their notices go with it (design 8.5 rule 7, option A), as a
+// refused form alternative's do in the body assembly. `nonStandard` reads generated operations only.
+const withoutAuthorChoiceNotices = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
+  diagnostics.filter((diagnostic) => !authorChoiceCodes.has(diagnostic.code));
+
 const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly, OperationsError> =>
   Effect.gen(function* assemble() {
     const { resolution } = shared;
@@ -843,7 +849,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       ...raises,
     ];
     if (raises.length > 0) {
-      return { diagnostics };
+      return { diagnostics: withoutAuthorChoiceNotices(diagnostics) };
     }
 
     const fields: Plain<typeof Operation.Encoded> = {

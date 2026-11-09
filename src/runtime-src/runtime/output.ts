@@ -1,14 +1,17 @@
 import type { PlatformError } from "effect";
 import {
   Cause,
+  Config,
   Console,
   Context,
   Data,
+  Duration,
   Effect,
   FileSystem,
   Layer,
   Option,
   Path,
+  Redacted,
   Ref,
   Runtime,
   Schema,
@@ -18,7 +21,7 @@ import {
 } from "effect";
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
-import { Headers, HttpClient, HttpClientRequest } from "effect/http";
+import { Headers, HttpClient, HttpClientRequest, UrlParams } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
@@ -29,14 +32,20 @@ import {
   TransportError,
   UsageError,
 } from "../domain/errors.ts";
-import type { Credential, SecurityRequirement } from "./auth.ts";
+import type { Credential, Placeholder, SecurityRequirement } from "./auth.ts";
 import {
   allowCredentialsForBaseUrl,
   attach,
+  attachPlaceholders,
+  certificateInitFor,
   credentialOrigins,
   evaluate,
+  placeholder,
+  plaintextWarning,
+  preview,
   redactedNames,
   Schemes,
+  withheldCertificateClause,
 } from "./auth.ts";
 import {
   baseUrlSetting,
@@ -49,10 +58,28 @@ import {
 } from "./base-url.ts";
 import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
-import { redirectLoop, withUserAgent } from "./client.ts";
+import {
+  redirectLoop,
+  retryAfterCapSeconds,
+  retryTransform,
+  sendOrder,
+  setUserAgent,
+  verboseSetting,
+  verboseTransform,
+  withUserAgent,
+  wouldRetry,
+} from "./client.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
-import { dropTrailingFragment, longestFormBytes, scrubAround } from "./redact.ts";
+import type { ScrubEntry } from "./redact.ts";
+import {
+  dropTrailingFragment,
+  longestFormBytes,
+  queryWireForm,
+  RunCredentials,
+  scrub as scrubValues,
+  scrubAround,
+} from "./redact.ts";
 import {
   classify,
   isBodiless,
@@ -60,6 +87,8 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
+import { jsonSeqRecords, ndjsonRecords, sequentialCodecOf, sseRecords } from "./sequential.ts";
+import type { SequentialCodec } from "./sequential.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -105,6 +134,68 @@ export const MaxErrorBytes = GlobalFlag.Setting("max-error-bytes")({
     Flag.filter(inErrorBytesRange, errorBytesRangeMessage),
     Flag.withDescription("Bytes of an error response body to print; 0 prints none"),
     Flag.withDefault(defaultMaxErrorBytes),
+  ),
+});
+
+/**
+ * `--raw` writes a sequential response (SSE, NDJSON/JSONL, JSON-seq) as the bytes received
+ * instead of one JSON value per line (design 4.6).
+ */
+export const Raw = GlobalFlag.Setting("raw")({
+  flag: Flag.Boolean("raw").pipe(
+    Flag.withDescription("Write a streamed response as the bytes received, not one item per line"),
+    Flag.withDefault(false),
+  ),
+});
+
+/**
+ * Default `--max-record-bytes`: 16 MiB per record (planner choice P6; the design names no number).
+ */
+export const defaultMaxRecordBytes = 16 * 1024 * 1024;
+
+const isPositive = (n: number): boolean => n >= 1;
+
+const recordBytesRangeMessage = (): string => "must be 1 or more";
+
+/**
+ * `--max-record-bytes` bounds one record of a sequential response, in UTF-8 bytes.
+ */
+export const MaxRecordBytes = GlobalFlag.Setting("max-record-bytes")({
+  flag: Flag.Int("max-record-bytes").pipe(
+    // Flag.filter takes (predicate, onFalse); it is not an array method with a thisArg.
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument
+    Flag.filter(isPositive, recordBytesRangeMessage),
+    Flag.withDescription("Largest record of a streamed response, in bytes"),
+    Flag.withDefault(defaultMaxRecordBytes),
+  ),
+});
+
+const errorFormats = ["text", "json"] as const;
+
+/**
+ * How errors render on stderr (design 7.4): `text` lines, or one `json` object.
+ */
+export type ErrorFormat = (typeof errorFormats)[number];
+
+/**
+ * `--error-format text|json`. The flag holds only the operator's choice; `recordRun` applies the
+ * fallbacks, because the env name needs the prefix the root supplies.
+ */
+export const errorFormatSetting = GlobalFlag.Setting("error-format")({
+  flag: Flag.Literals("error-format", errorFormats).pipe(
+    Flag.withDescription("Print errors as text lines or as one JSON object"),
+    Flag.optional,
+  ),
+});
+
+/**
+ * `--dry-run` prints the request `send` would send, with every credential replaced, and sends
+ * nothing (design 4.6, D-OUT3).
+ */
+export const dryRunSetting = GlobalFlag.Setting("dry-run")({
+  flag: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("Print the request with credentials replaced instead of sending it"),
+    Flag.withDefault(false),
   ),
 });
 
@@ -197,6 +288,20 @@ const toStdout = <E, R>(
 
 const writeError = (path: string) => () => new OutputError({ path, reason: "write" });
 
+/**
+ * Refuse an existing `--output` target with `OutputError` exists. `send` runs it before the
+ * request is sent, so a refusal never discards the answer of a request that took effect; `toFile`
+ * runs it again, and its `link` still refuses a path created after both checks.
+ */
+const refuseExisting = (target: string): Effect.Effect<void, OutputError, FileSystem.FileSystem> =>
+  Effect.gen(function* checkTarget() {
+    const fs = yield* FileSystem.FileSystem;
+
+    if (yield* fs.exists(target).pipe(Effect.mapError(writeError(target)))) {
+      yield* new OutputError({ path: target, reason: "exists" });
+    }
+  });
+
 const toFile = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
   target: string,
@@ -207,8 +312,8 @@ const toFile = <E, R>(
     const path = yield* Path.Path;
     const failWrite = writeError(target);
 
-    if (!force && (yield* fs.exists(target).pipe(Effect.mapError(failWrite)))) {
-      return yield* new OutputError({ path: target, reason: "exists" });
+    if (!force) {
+      yield* refuseExisting(target);
     }
 
     const temp = yield* fs
@@ -239,13 +344,66 @@ const toFile = <E, R>(
   });
 
 /**
- * Write a response body to its destination: stdout, or with `--output <path>` a temp sibling
- * renamed into place (an existing path is refused unless `--force`). `--output -` is stdout.
- * Binary media to a terminal is refused before the body is read unless `--output -` is given.
- * EPIPE on stdout stops the stream and succeeds.
+ * A sequential framer: one record's text per element, without a line terminator.
  */
-export const writeBody = <E, R>(
-  response: ResponseBody<E, R>,
+type Framer = (
+  maxRecordBytes: number,
+) => <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+) => Stream.Stream<string, E | ResponseStreamError, R>;
+
+const framers: Readonly<Record<SequentialCodec, Framer>> = {
+  jsonseq: jsonSeqRecords,
+  ndjson: ndjsonRecords,
+  sse: sseRecords,
+};
+
+/**
+ * The framer the matched response media key selects (design 4.6, 5), or `undefined` for raw
+ * bytes. The codec comes from `sequentialCodecOf`, the rule the generator assigns codecs by.
+ */
+const framerFor = (mediaType: string | undefined): Framer | undefined => {
+  const codec = mediaType === undefined ? undefined : sequentialCodecOf(mediaType);
+
+  return codec === undefined ? undefined : framers[codec];
+};
+
+/**
+ * Whether a body of this media type is printed as text: text-family (`isText`) or a sequential
+ * type (`framerFor`). The binary terminal guard and the `--dry-run` body both decide by it.
+ */
+const printsAsText = (mediaType: string | undefined): boolean =>
+  isText(mediaType) || framerFor(mediaType) !== undefined;
+
+// A root that registers no `--raw` or `--max-record-bytes` gets their defaults.
+const rawRequested = Effect.map(
+  Effect.serviceOption(Raw),
+  Option.getOrElse(() => false),
+);
+
+const recordBound = Effect.map(
+  Effect.serviceOption(MaxRecordBytes),
+  Option.getOrElse(() => defaultMaxRecordBytes),
+);
+
+/**
+ * Each record as one LF-terminated line, its own chunk, so the sink writes it as it arrives.
+ */
+const asLines = <E, R>(records: Stream.Stream<string, E, R>): Stream.Stream<Uint8Array, E, R> =>
+  records.pipe(
+    Stream.map((record) => `${record}\n`),
+    Stream.encodeText,
+  );
+
+/**
+ * The destination the output settings name: with `--output <path>` a temp sibling renamed into
+ * place (an existing path is refused unless `--force`), else stdout (`--output -` is stdout).
+ * `binary` refuses a terminal before the body is read unless `--output -` is given. EPIPE on
+ * stdout stops the stream and succeeds.
+ */
+const writeStream = <E, R>(
+  bytes: Stream.Stream<Uint8Array, E, R>,
+  binary: boolean,
 ): Effect.Effect<
   void,
   E | OutputError | UsageError,
@@ -262,10 +420,10 @@ export const writeBody = <E, R>(
     const target = Option.getOrUndefined(output);
 
     if (target !== undefined && target !== stdoutPath) {
-      return yield* toFile(response.bytes, target, force);
+      return yield* toFile(bytes, target, force);
     }
 
-    if (target === undefined && !isText(response.mediaType)) {
+    if (target === undefined && binary) {
       const stdio = yield* Stdio.Stdio;
 
       if (yield* stdio.stdoutIsTerminal) {
@@ -277,7 +435,32 @@ export const writeBody = <E, R>(
       }
     }
 
-    return yield* toStdout(response.bytes);
+    return yield* toStdout(bytes);
+  });
+
+/**
+ * Write a response body as received to its destination: stdout, or with `--output <path>` a temp
+ * sibling renamed into place (an existing path is refused unless `--force`). `--output -` is
+ * stdout. Binary media to a terminal is refused before the body is read unless `--output -` is
+ * given; the sequential types (`printsAsText`) are text, so their raw bytes (`--raw`) are not.
+ * EPIPE on stdout stops the stream and succeeds.
+ */
+export const writeBody = <E, R>(response: ResponseBody<E, R>) =>
+  writeStream(response.bytes, !printsAsText(response.mediaType));
+
+/**
+ * Write a 2xx response body by its matched media key (design 4.6): a sequential type
+ * (`framerFor`) one compact JSON line per record, each written as it arrives and bounded by
+ * `--max-record-bytes`; with `--raw`, or for any other type, the bytes received (`writeBody`).
+ * Sequential lines are text, so the binary terminal guard does not apply to them.
+ */
+export const writeResponse = <E, R>(response: ResponseBody<E, R>) =>
+  Effect.gen(function* dispatchOutput() {
+    const framer = (yield* rawRequested) ? undefined : framerFor(response.mediaType);
+
+    return framer === undefined
+      ? yield* writeBody(response)
+      : yield* writeStream(asLines(framer(yield* recordBound)(response.bytes)), false);
   });
 
 /**
@@ -295,7 +478,7 @@ export const sanitize = (text: string): string => text.replaceAll(unsafeText, ""
  * Credential values scrubbed, then the text sanitized, then scrubbed again (design 7.4, audit
  * S2), so neither a credential holding a removed character nor one split by them survives.
  */
-const scrubbedAndSanitized = (text: string, credentials: readonly Credential[]): string =>
+const scrubbedAndSanitized = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubAround(text, credentials, sanitize);
 
 // The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
@@ -347,7 +530,7 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
 export const boundedExcerpt = (
   text: string,
   maxBytes: number,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
 ): string => truncateUtf8(scrubbedAndSanitized(text, credentials), maxBytes);
 
 // Stream.limitBytes drops the chunk that crosses the limit, which would lose a whole first chunk
@@ -386,7 +569,7 @@ const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
  */
 export const readExcerpt = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
 ): Effect.Effect<string, E, R | GlobalFlag.Setting.Identifier<"max-error-bytes">> =>
   Effect.gen(function* step5() {
     const maxBytes = yield* MaxErrorBytes;
@@ -432,16 +615,52 @@ const isKnownError = (error: unknown): error is KnownError =>
 
 const oneLine = (text: string): string => text.replaceAll(/[\n\t]+/gu, " ");
 
-const singleLine = (text: string, credentials: readonly Credential[]): string =>
+const singleLine = (text: string, credentials: readonly ScrubEntry[]): string =>
   oneLine(scrubbedAndSanitized(text, credentials));
 
 /**
- * The text printed on stderr for a known error (design 7.4): `Error: <message>`, for an
+ * The sentence a message carries when the failed request is one D-AD7 would retry (SM-16):
+ * running it again is safe. After a request D-AD7 would not retry, no message carries it.
+ */
+export const retryHint = "The request is idempotent, so running the command again is safe.";
+
+/**
+ * The sentence the text form adds when retrying stopped because the server's `Retry-After`
+ * exceeded the `--timeout` cap (design 7.4, m3 P14).
+ */
+const cappedSentence = (seconds: number): string =>
+  `Retrying stopped: the server's Retry-After of ${seconds} second${seconds === 1 ? "" : "s"} ` +
+  "exceeds the --timeout cap.";
+
+/**
+ * The failures of an exchange with the server, the errors a retry hint may follow (SM-16).
+ */
+const isExchangeFailure = (error: KnownError): boolean =>
+  error instanceof ApiResponseError ||
+  error instanceof TransportError ||
+  error instanceof ResponseStreamError;
+
+/**
+ * The text printed on stderr for a known error (design 7.4): `Error: <message>`; for an
+ * `ApiResponseError` whose retrying stopped at the cap, the sentence naming the server's
+ * `Retry-After`; `retryHint` when `hint` is set and the error is an exchange failure; for an
  * `ApiResponseError` then `Request ID: <id>` when set, then the excerpt (omitted when empty).
  * Every part is scrubbed and sanitized again here, because the error may come from anywhere.
  */
-export const renderError = (error: KnownError, credentials: readonly Credential[]): string => {
+export const renderError = (
+  error: KnownError,
+  credentials: readonly ScrubEntry[],
+  hint = false,
+): string => {
   const lines = [`Error: ${singleLine(error[CliError.userMessage], credentials)}`];
+
+  if (error instanceof ApiResponseError && error.retryAfterSeconds !== undefined) {
+    lines.push(cappedSentence(error.retryAfterSeconds));
+  }
+
+  if (hint && isExchangeFailure(error)) {
+    lines.push(retryHint);
+  }
 
   if (error instanceof ApiResponseError) {
     if (error.requestId !== undefined) {
@@ -548,44 +767,279 @@ const reportOnce = <E extends object>(
   );
 
 /**
- * The credentials the run evaluated, so the final catch scrubs what the command handler chose.
- * `send` records them; `finalCatch` adds them to its own list. Both require the service, so an
- * entry that omits `runCredentialsLayer` does not compile.
+ * What the run recorded for its error rendering (design 7.4 revision 31b): the effective format,
+ * once `recordRun` ran, the retry-hint input, once `send` reached the client, and the implicit
+ * help `presenter` held back until the run's outcome decides whether it prints.
  */
-export class RunCredentials extends Context.Service<
-  RunCredentials,
-  Ref.Ref<readonly Credential[]>
->()("openapi-cli/runtime/RunCredentials") {}
+export interface RunRecordState {
+  readonly format?: ErrorFormat | undefined;
+  readonly help?: string | undefined;
+  readonly sent?: { readonly idempotencyKey: boolean; readonly method: string } | undefined;
+}
 
-export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(RunCredentials)(
-  Ref.make<readonly Credential[]>([]),
+/**
+ * The run-scoped error-rendering record, provided outside the final catch like `RunCredentials`.
+ * Every reader and writer takes it with `Effect.serviceOption`; without it the documented default
+ * applies: format `text` (or, in `finalCatch`, `<PREFIX>_ERROR_FORMAT`) and no retry hint.
+ */
+export class RunRecord extends Context.Service<RunRecord, Ref.Ref<RunRecordState>>()(
+  "openapi-cli/runtime/RunRecord",
+) {}
+
+/**
+ * A fresh record per run: nothing recorded yet.
+ */
+export const runRecordLayer: Layer.Layer<RunRecord> = Layer.effect(RunRecord)(
+  Ref.make<RunRecordState>({}),
 );
 
-const recordedCredentials: Effect.Effect<readonly Credential[], never, RunCredentials> =
+const errorFormatName = (envPrefix: string): string => `${envPrefix}_ERROR_FORMAT`;
+
+const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
+
+/**
+ * `<envPrefix>_ERROR_FORMAT`, read by that explicit name (memo 6f21e261), then `text`. A value
+ * other than `text` or `json` is a `UsageError` naming the variable, never the value.
+ */
+const envErrorFormat = Effect.fnUntraced(function* readErrorFormat(envPrefix: string) {
+  const name = errorFormatName(envPrefix);
+  const invalid = new UsageError({ flag: name, message: `${name} must be text or json` });
+  const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
+  if (Option.isNone(env)) {
+    return "text" as const;
+  }
+
+  return isErrorFormat(env.value) ? env.value : yield* invalid;
+});
+
+// The operator's `--error-format`, if the root registers the setting and the flag was given.
+const flagErrorFormat = Effect.map(Effect.serviceOption(errorFormatSetting), Option.flatten);
+
+/**
+ * Record the run's effective error format (design 7.4 revision 31b): `--error-format`, then
+ * `<envPrefix>_ERROR_FORMAT`, then `text`. A generated command runs it after argument parsing and
+ * before its handler's first step that can fail, so an error raised before `send` renders in that
+ * format. Without `RunRecord` it does nothing.
+ */
+export const recordRun = Effect.fnUntraced(function* recordRunFormat(envPrefix: string) {
+  const record = yield* Effect.serviceOption(RunRecord);
+  if (Option.isNone(record)) {
+    return;
+  }
+
+  const flag = yield* flagErrorFormat;
+  const format = Option.isSome(flag) ? flag.value : yield* envErrorFormat(envPrefix);
+  yield* Ref.update(record.value, (state) => ({ ...state, format }));
+});
+
+/**
+ * The retry-hint input `send` adds to `RunRecord` before the request reaches the client: the
+ * method and whether an `Idempotency-Key` header was sent, read before the attach step, as
+ * `retryTransform` reads it.
+ */
+const recordSent = (request: HttpClientRequest.HttpClientRequest): Effect.Effect<void> =>
+  Effect.flatMap(
+    Effect.serviceOption(RunRecord),
+    Option.match({
+      onNone: () => Effect.void,
+      onSome: (record) =>
+        Ref.update(record, (state) => ({
+          ...state,
+          sent: {
+            idempotencyKey: Headers.has(request.headers, "idempotency-key"),
+            method: request.method,
+          },
+        })),
+    }),
+  );
+
+/**
+ * How the final catch renders this run's error: the format and whether a retry hint applies.
+ */
+interface Rendering {
+  readonly format: ErrorFormat;
+  readonly hint: boolean;
+}
+
+/**
+ * The format a parse-time error renders in, when nothing was recorded: `json` when
+ * `<envPrefix>_ERROR_FORMAT` is `json`, text otherwise (design 7.4).
+ */
+const parseTimeFormat = (envPrefix: string): Effect.Effect<ErrorFormat> =>
+  Config.option(Config.String(errorFormatName(envPrefix))).pipe(
+    Effect.map((env): ErrorFormat => (Option.getOrUndefined(env) === "json" ? "json" : "text")),
+    Effect.orElseSucceed((): ErrorFormat => "text"),
+  );
+
+/**
+ * The run's rendering from `RunRecord`: the recorded format, else the parse-time format when the
+ * caller named the env prefix, else `text`; the hint when `send` recorded a method D-AD7 would
+ * retry (`wouldRetry`).
+ */
+const runRendering = Effect.fnUntraced(function* readRendering(envPrefix: string | undefined) {
+  const record = yield* Effect.serviceOption(RunRecord);
+  const state: RunRecordState = Option.isSome(record) ? yield* Ref.get(record.value) : {};
+  const fallback: ErrorFormat =
+    envPrefix === undefined ? "text" : yield* parseTimeFormat(envPrefix);
+  const rendering: Rendering = {
+    format: state.format ?? fallback,
+    hint: state.sent !== undefined && wouldRetry(state.sent.method, state.sent.idempotencyKey),
+  };
+
+  return rendering;
+});
+
+const recordedCredentials: Effect.Effect<readonly ScrubEntry[], never, RunCredentials> =
   Effect.flatMap(Effect.service(RunCredentials), Ref.get);
+
+/**
+ * The fields of the `--error-format json` object (design 7.4). Declared in alphabetical order,
+ * which `JSON.stringify` keeps; an `undefined` field is left out.
+ */
+interface ErrorFields {
+  readonly body?: string | undefined;
+  readonly kind: string;
+  readonly matched?: string | undefined;
+  readonly message: string;
+  readonly operation?: string | undefined;
+  readonly requestId?: string | undefined;
+  readonly retryAfter?: number | undefined;
+  readonly status?: number | undefined;
+}
+
+/**
+ * One line holding `{"error":{...}}`, keys alphabetical. Every string arrives scrubbed and
+ * sanitized; the JSON escaping covers the characters sanitizing keeps (design 7.4, C5).
+ */
+const jsonLine = (fields: ErrorFields): string =>
+  JSON.stringify({
+    error: {
+      body: fields.body,
+      kind: fields.kind,
+      matched: fields.matched,
+      message: fields.message,
+      operation: fields.operation,
+      requestId: fields.requestId,
+      retryAfter: fields.retryAfter,
+      status: fields.status,
+    },
+  });
+
+/**
+ * The JSON `message`, then `retryHint` as a second sentence when `hint` is set: a period unless
+ * the message already ends in terminal punctuation, a space, then the hint. The text form keeps
+ * the hint on its own line after the `Error:` line.
+ */
+const withHint = (message: string, hint: boolean): string => {
+  if (!hint) {
+    return message;
+  }
+
+  return `${/[.!?]$/u.test(message) ? message : `${message}.`} ${retryHint}`;
+};
+
+/**
+ * The JSON object for a known error: `operation` only for the classes that carry one, and for an
+ * `ApiResponseError` its status, matched key, excerpt (when not empty), request id and capped
+ * `Retry-After` (design 7.4, m3 P14, P15).
+ */
+const renderErrorJson = (
+  error: KnownError,
+  credentials: readonly ScrubEntry[],
+  hint: boolean,
+): string => {
+  const api = error instanceof ApiResponseError ? error : undefined;
+  const excerpt =
+    api === undefined ? "" : boundedExcerpt(api.bodyExcerpt, maxErrorBytesCeiling, credentials);
+  const operation =
+    error instanceof ApiResponseError || error instanceof CredentialMissing
+      ? singleLine(error.operation, credentials)
+      : undefined;
+
+  return jsonLine({
+    body: excerpt === "" ? undefined : excerpt,
+    kind: error._tag,
+    matched: api?.matched,
+    message: withHint(
+      singleLine(error[CliError.userMessage], credentials),
+      hint && isExchangeFailure(error),
+    ),
+    operation,
+    requestId: api?.requestId === undefined ? undefined : singleLine(api.requestId, credentials),
+    retryAfter: api?.retryAfterSeconds,
+    status: api?.status,
+  });
+};
+
+/**
+ * The JSON object for a parse-time `CliError`, value-free as `renderCliError` is, or `undefined`
+ * when there is nothing to print. `kind` is the one parse error's tag, or the failure's own tag
+ * when help carries several.
+ */
+const renderCliErrorJson = (
+  error: CliError.CliError,
+  credentials: readonly ScrubEntry[],
+): string | undefined => {
+  const errors = error._tag === "ShowHelp" ? error.errors : [error];
+  const [only] = errors;
+
+  return only === undefined
+    ? undefined
+    : jsonLine({
+        kind: errors.length === 1 ? only._tag : error._tag,
+        message: errors.map((each) => singleLine(rawMessage(each), credentials)).join("; "),
+      });
+};
+
+/**
+ * Take the implicit help `presenter` held in `RunRecord`, if any, and print it on stderr unless
+ * `drop` is set. Taking it clears it, so it prints at most once.
+ */
+const flushHeldHelp = (drop: boolean): Effect.Effect<void> =>
+  Effect.flatMap(Effect.serviceOption(RunRecord), (record) =>
+    Option.isNone(record)
+      ? Effect.void
+      : Effect.flatMap(
+          Ref.modify(record.value, (state): [string | undefined, RunRecordState] => [
+            state.help,
+            { ...state, help: undefined },
+          ]),
+          (help) => (help === undefined || drop ? Effect.void : Console.error(help)),
+        ),
+  );
 
 const renderCause = <E>(
   cause: Cause.Cause<E>,
-  credentials: readonly Credential[],
+  credentials: readonly ScrubEntry[],
+  rendering: Rendering,
 ): Effect.Effect<never, E | InternalError, Stdio.Stdio> => {
   const failure = Cause.findErrorOption(cause);
+  const json = rendering.format === "json";
 
   if (Cause.hasInterruptsOnly(cause)) {
     return Effect.failCause(cause);
   }
 
   if (Option.isSome(failure) && CliError.isCliError(failure.value)) {
-    const text = renderCliError(failure.value);
+    const raw = renderCliError(failure.value);
+    const text = raw === undefined ? undefined : scrubbedAndSanitized(raw, credentials);
+    const rendered = json ? renderCliErrorJson(failure.value, credentials) : text;
+    // The json form is one object on stderr (design 7.4), so the held help goes only with text.
+    const help = flushHeldHelp(json && rendered !== undefined);
 
-    return text === undefined
-      ? Effect.failCause(cause)
-      : reportOnce(scrubbedAndSanitized(text, credentials), failure.value);
+    return Effect.andThen(
+      help,
+      rendered === undefined ? Effect.failCause(cause) : reportOnce(rendered, failure.value),
+    );
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
     const error = failure.value;
+    const rendered = json
+      ? renderErrorJson(error, credentials, rendering.hint)
+      : renderError(error, credentials, rendering.hint);
 
-    return reportOnce(renderError(error, credentials), error);
+    return reportOnce(rendered, error);
   }
 
   const squashed = Cause.squash(cause);
@@ -593,30 +1047,40 @@ const renderCause = <E>(
     isDescribed(squashed) ? defectMessage(squashed) : "unknown failure",
     credentials,
   ).slice(0, maxDefectLineLength);
+  const rendered = json
+    ? jsonLine({ kind: "Internal", message: `${line}; internal error, please report` })
+    : `Error: ${line}\ninternal error, please report`;
 
-  return printStderr(`Error: ${line}\ninternal error, please report`).pipe(
-    Effect.andThen(Effect.fail(new InternalError())),
-  );
+  return printStderr(rendered).pipe(Effect.andThen(Effect.fail(new InternalError())));
 };
 
 /**
  * The final catch around `Command.run` (design 7.4), the only error renderer: the CLI runs
  * `Command.run` with `renderErrors: false`. A known error is rendered once and fails again as
- * itself, so its exit code stands; a `CliError` parse error is rendered once through
- * `valueFreeFormatter`; help and interruption pass through; anything else prints one scrubbed
- * line and "internal error, please report" and fails with `InternalError`, exit 70.
+ * itself, so its exit code stands; a `CliError` parse error is rendered once, value-free; help and
+ * interruption pass through; anything else prints one scrubbed line and "internal error, please
+ * report" and fails with `InternalError`, exit 70. Exit codes do not depend on the format.
  * `credentials` are the values to scrub that the caller holds; `RunCredentials`, provided outside
- * the catch, adds the credentials the command handler evaluated.
+ * the catch, adds the credentials the command handler evaluated and its secret-file values.
+ *
+ * The format is the one `recordRun` put in `RunRecord`; when nothing was recorded (a parse-time
+ * error) and `options.envPrefix` is given, `json` when `<envPrefix>_ERROR_FORMAT` is `json`; else
+ * text. `json` prints one `{"error":{...}}` object per error. An exchange failure carries
+ * `retryHint` when the method `send` recorded is one D-AD7 would retry. Without `RunRecord`
+ * nothing is recorded and no hint applies.
  */
 export const finalCatch =
-  (credentials: readonly Credential[]) =>
+  (credentials: readonly ScrubEntry[], options?: { readonly envPrefix: string }) =>
   <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | InternalError, R | RunCredentials | Stdio.Stdio> =>
     Effect.catchCause(effect, (cause) =>
-      recordedCredentials.pipe(
-        Effect.flatMap((recorded) => renderCause(cause, [...credentials, ...recorded])),
-      ),
+      Effect.gen(function* renderFailure() {
+        const recorded = yield* recordedCredentials;
+        const rendering = yield* runRendering(options?.envPrefix);
+
+        return yield* renderCause(cause, [...credentials, ...recorded], rendering);
+      }),
     );
 
 /**
@@ -624,6 +1088,12 @@ export const finalCatch =
  * version are the answer, so they go to stdout; implicit help (a group run without a
  * subcommand) and an invalid invocation explain a run that did nothing, so they go to stderr.
  * The text comes from the `CliOutput.Formatter` in context and is sanitized before it is printed.
+ *
+ * With `renderErrors: false`, `Command.run` presents a parse error as implicit help too, before
+ * the final catch knows the error format. With `RunRecord` in context the implicit help is held
+ * there instead of printed: `exitForHelp` prints it when the help carries no errors, and
+ * `finalCatch` prints it before a text error and drops it before a json object (design 7.4: one
+ * object). Without `RunRecord` it prints at once.
  */
 export const presenter: CliOutput.Presenter = {
   present: (event) =>
@@ -645,7 +1115,16 @@ export const presenter: CliOutput.Presenter = {
         return;
       }
 
-      yield* event.reason === "Requested" ? Console.log(help) : Console.error(help);
+      if (event.reason === "Requested") {
+        yield* Console.log(help);
+
+        return;
+      }
+
+      const record = yield* Effect.serviceOption(RunRecord);
+      yield* Option.isNone(record)
+        ? Console.error(help)
+        : Ref.update(record.value, (state) => ({ ...state, help }));
     }),
 };
 
@@ -659,8 +1138,9 @@ const isShowHelp = (error: unknown): error is CliError.ShowHelp =>
 
 /**
  * Maps `CliError.ShowHelp` to the entry's exit status. Help with parse errors fails again as
- * itself with exit 2, so `finalCatch` renders its errors once; help without errors (already
- * presented) succeeds, exit 0. Other failures pass through. Apply it inside `finalCatch`.
+ * itself with exit 2, so `finalCatch` renders its errors once (and the help `presenter` held);
+ * help without errors succeeds, exit 0, after printing the help `presenter` held, if any. Other
+ * failures pass through. Apply it inside `finalCatch`.
  */
 export const exitForHelp = <E, R>(effect: Effect.Effect<void, E, R>): Effect.Effect<void, E, R> =>
   Effect.catchIf(
@@ -668,7 +1148,7 @@ export const exitForHelp = <E, R>(effect: Effect.Effect<void, E, R>): Effect.Eff
     (error): error is E & CliError.ShowHelp => isShowHelp(error),
     (help) =>
       help.errors.length === 0
-        ? Effect.void
+        ? flushHeldHelp(false)
         : Effect.fail(Object.assign(help, { [Runtime.errorExitCode]: invalidInvocationExitCode })),
   );
 
@@ -898,6 +1378,24 @@ export class ClientPolicy extends Context.Service<
 >()("openapi-cli/runtime/ClientPolicy") {}
 
 /**
+ * The once-per-run warning lines this run has printed (design 13.1 R3): `send` prints such a line
+ * only when it is not here yet, then records it. Run-scoped, like `RunCredentials`; the emitted
+ * `bin.ts` provides `runWarningsLayer`. `send` reads it with `Effect.serviceOption`, and without it
+ * the documented default applies: nothing printed yet, so each `send` prints its warning (audit
+ * ad9f808b F2).
+ */
+export class RunWarnings extends Context.Service<RunWarnings, Ref.Ref<ReadonlySet<string>>>()(
+  "openapi-cli/runtime/RunWarnings",
+) {}
+
+/**
+ * A fresh record per run: no warning printed yet.
+ */
+export const runWarningsLayer: Layer.Layer<RunWarnings> = Layer.effect(RunWarnings)(
+  Ref.make<ReadonlySet<string>>(new Set()),
+);
+
+/**
  * The errors `send` fails with.
  */
 export type SendError =
@@ -922,28 +1420,79 @@ const splitTarget = (target: string): readonly [path: string, query: string] => 
 };
 
 /**
- * The one stderr notice of design 6.4 (F:R1): a configured credential is withheld from an unbound
- * operator-chosen base URL. It names schemes and the flag, never a value.
+ * The one stderr notice of design 6.4 (F:R1): a configured header credential or the `mutualTLS`
+ * client certificate is withheld from an unbound operator-chosen base URL. One line: the withheld
+ * header schemes with the flag that sends them, then the certificate clause, which says the flag
+ * does not extend to it (m3.md P19). It never names a value, a path or certificate material.
  */
-const withheldNotice = (credentials: readonly Credential[]): string => {
-  const schemes = [...new Set(credentials.map((credential) => credential.scheme))].join(", ");
+const withheldNotice = (headers: readonly Credential[], certificate: boolean): string => {
+  const schemes = [...new Set(headers.map((credential) => credential.scheme))].join(", ");
+  const clauses = [
+    ...(headers.length > 0
+      ? [
+          `not sending credentials (${schemes}) to an unbound base URL; ` +
+            "--allow-credentials-for-base-url sends them",
+        ]
+      : []),
+    ...(certificate ? [withheldCertificateClause] : []),
+  ];
 
-  return sanitize(
-    `Notice: not sending credentials (${schemes}) to an unbound base URL; ` +
-      "--allow-credentials-for-base-url sends them",
-  );
+  return sanitize(`Notice: ${clauses.join("; ")}`);
 };
 
 /**
- * A response body read that fails part-way is a truncated body (exit 5). A bodiless response
- * (`isBodiless`) is the empty body and is never read.
+ * The built-in stream idle timeout in seconds (design D-AD7), used when neither
+ * `<PREFIX>_IDLE_TIMEOUT` nor an author default sets one.
+ */
+export const defaultIdleTimeoutSeconds = 300;
+
+const wholeSeconds = /^\d+$/u;
+
+/**
+ * The effective stream idle timeout in seconds: `<envPrefix>_IDLE_TIMEOUT` read by that explicit
+ * name (as `base-url.ts` reads `<PREFIX>_BASE_URL`), then `defaultIdleTimeoutSeconds`. The author
+ * default reaches the env read through the `ConfigProvider` `main.ts` provides (design D-AD7);
+ * there is no flag. The value is whole seconds, 1 or more; anything else is a `UsageError` naming
+ * the variable, never the value. An unprefixed `IDLE_TIMEOUT` is never read.
+ */
+export const effectiveIdleTimeoutSeconds = (envPrefix: string): Effect.Effect<number, UsageError> =>
+  Effect.gen(function* resolveIdleTimeout() {
+    const name = `${envPrefix}_IDLE_TIMEOUT`;
+    const invalid = new UsageError({
+      flag: name,
+      message: `${name} must be a whole number of seconds, 1 or more`,
+    });
+    const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
+    if (Option.isNone(env)) {
+      return defaultIdleTimeoutSeconds;
+    }
+
+    const seconds = Number(env.value);
+
+    return wholeSeconds.test(env.value) && Number.isSafeInteger(seconds) && seconds >= 1
+      ? seconds
+      : yield* invalid;
+  });
+
+/**
+ * A response body read that fails part-way is a truncated body (exit 5). A read that waits longer
+ * than `idleSeconds` for its next chunk fails `idleTimeout` (exit 5; design 9 I5): the only bound
+ * on a raw stream. `Stream.timeoutOrElse` with a failure, because `Stream.timeout` ends a stalled
+ * stream successfully. A bodiless response (`isBodiless`) is the empty body and is never read.
  */
 const bodyOf = (
   response: HttpClientResponse.HttpClientResponse,
+  idleSeconds: number,
 ): Stream.Stream<Uint8Array, ResponseStreamError> =>
   isBodiless(response)
     ? Stream.empty
-    : Stream.mapError(response.stream, () => new ResponseStreamError({ reason: "truncated" }));
+    : response.stream.pipe(
+        Stream.mapError(() => new ResponseStreamError({ reason: "truncated" })),
+        Stream.timeoutOrElse({
+          duration: Duration.seconds(idleSeconds),
+          orElse: () => Stream.fail(new ResponseStreamError({ reason: "idleTimeout" })),
+        }),
+      );
 
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
@@ -974,19 +1523,565 @@ const warnMissingHeaders = (
 };
 
 /**
- * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a
- * typed error, and the only runtime function that sends. In order: the base URL (`--base-url`,
+ * Print `line` on stderr unless this run printed it already (`RunWarnings`).
+ */
+const warnOncePerRun = (line: Option.Option<string>): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* warnOnce() {
+    if (Option.isNone(line)) {
+      return;
+    }
+
+    const record = yield* Effect.serviceOption(RunWarnings);
+    const first = Option.isNone(record)
+      ? true
+      : yield* Ref.modify(record.value, (printed) =>
+          printed.has(line.value) ? [false, printed] : [true, new Set([...printed, line.value])],
+        );
+    if (first) {
+      yield* printStderr(sanitize(line.value));
+    }
+  });
+
+/**
+ * Under `--verbose`, one stderr notice that a 2xx response's media type matches no declared key
+ * of its status, so its bytes are written as received (design 6.6). The type is the response's
+ * `Content-Type` through `scrub`, or `none` when it has none.
+ */
+const undeclaredMediaNotice = (
+  operation: string,
+  response: HttpClientResponse.HttpClientResponse,
+  scrub: (text: string) => string,
+): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* noticeUndeclaredMedia() {
+    if (!Option.getOrElse(yield* Effect.serviceOption(verboseSetting), () => false)) {
+      return;
+    }
+
+    const type = Option.match(Headers.get(response.headers, "content-type"), {
+      onNone: () => "none",
+      onSome: scrub,
+    });
+    yield* printStderr(
+      oneLine(
+        `Notice: ${operation} returned ${response.status} with the undeclared media type ` +
+          `${type}; writing its bytes as received`,
+      ),
+    );
+  });
+
+const encoder = new TextEncoder();
+
+const crlf = encoder.encode("\r\n");
+
+const headEnd = encoder.encode("\r\n\r\n");
+
+// The longest part head the dry-run summary holds while it looks for the head's end. The writer's
+// heads are a few lines; a longer one ends the summary (`MultipartSummary`), so memory stays bound.
+const maxPartHeadBytes = 65_536;
+
+// Whether `needle` occurs in `haystack` at `at`.
+const matchesAt = (haystack: Uint8Array, needle: Uint8Array, at: number): boolean =>
+  needle.every((byte, offset) => haystack[at + offset] === byte);
+
+// The first index of `needle` in `haystack`, or -1.
+const indexOfBytes = (haystack: Uint8Array, needle: Uint8Array): number => {
+  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
+    if (matchesAt(haystack, needle, at)) {
+      return at;
+    }
+  }
+
+  return -1;
+};
+
+const multipartBoundary =
+  /^multipart\/[^;]+;\s*boundary=(?<quote>"?)(?<boundary>[^";\r\n]+)\k<quote>/iu;
+
+const boundaryOf = (mediaType: string | undefined): string | undefined =>
+  multipartBoundary.exec(mediaType?.trim() ?? "")?.groups?.boundary;
+
+const partFilename = /;\s*filename="(?<filename>[^"]*)"/u;
+
+const partContentType = /^content-type:\s*(?<type>[^\r\n]*)$/imu;
+
+const unchanged = (text: string): string => text;
+
+/**
+ * The recorded-value scrub over text that arrives in chunks, for the `--dry-run` body: each piece
+ * is emitted scrubbed (`scrub`) once it ends with no proper prefix of any recorded form, found by
+ * `dropTrailingFragment` repeated until it holds, so every occurrence lies whole inside one emitted
+ * piece, as a scrub of the whole text would find it. What it holds back is shorter than the longest
+ * form, so memory stays bound. The text is decoded as UTF-8 across chunk ends.
+ */
+class StreamScrubber {
+  private readonly decoder = new TextDecoder();
+  private pending = "";
+  private readonly recorded: readonly ScrubEntry[];
+
+  constructor(recorded: readonly ScrubEntry[]) {
+    this.recorded = recorded;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    const text = this.pending + this.decoder.decode(chunk, { stream: true });
+    let safe = text;
+    let shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    while (shorter.length < safe.length) {
+      safe = shorter;
+      shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    }
+
+    this.pending = text.slice(safe.length);
+
+    return this.emit(safe);
+  }
+
+  end(): readonly Uint8Array[] {
+    const rest = this.pending + this.decoder.decode();
+    this.pending = "";
+
+    return this.emit(rest);
+  }
+
+  private emit(text: string): readonly Uint8Array[] {
+    return text === "" ? [] : [encoder.encode(scrubValues(text, this.recorded))];
+  }
+}
+
+const scrubStream =
+  (recorded: readonly ScrubEntry[]) =>
+  <E, R>(body: Stream.Stream<Uint8Array, E, R>): Stream.Stream<Uint8Array, E, R> =>
+    body.pipe(
+      Stream.mapAccum(
+        () => new StreamScrubber(recorded),
+        (scrubber, chunk: Uint8Array) => [scrubber, scrubber.push(chunk)] as const,
+        { onHalt: (scrubber) => scrubber.end() },
+      ),
+    );
+
+/**
+ * The `--dry-run` view of a multipart body (design 4.6), as a streaming state machine over the
+ * bytes the writer produced: delimiters, part heads and text parts as given, the heads and text
+ * through the recorded-value scrub (`StreamScrubber`); a file part's content
+ * (one with a `filename`) as `<file <basename>, N bytes>`, and any other part with a binary content
+ * type as `<binary part, N bytes>`, counted, never held. One nested multipart level is walked with
+ * its own boundary. Every delimiter is read as CRLF `--<boundary>`, so a CRLF is put before the
+ * first one and left out of the output.
+ */
+class MultipartSummary {
+  private readonly boundaries: string[];
+  private counted = 0;
+  private first = true;
+  private mode: "content" | "epilogue" | "head" | "opaque" = "content";
+  private pending: Uint8Array = crlf;
+  private readonly recorded: readonly ScrubEntry[];
+  private summary: string | undefined = undefined;
+  private text: StreamScrubber | undefined = undefined;
+
+  constructor(boundary: string, recorded: readonly ScrubEntry[]) {
+    this.boundaries = [boundary];
+    this.recorded = recorded;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    this.pending = concatBytes([this.pending, chunk]);
+
+    return this.drain(false);
+  }
+
+  end(): readonly Uint8Array[] {
+    const out = [...this.drain(true)];
+    this.flushText(out);
+
+    return out;
+  }
+
+  // Text is emitted through the recorded-value scrub; a summarized part is only counted.
+  private content(bytes: Uint8Array, out: Uint8Array[]): void {
+    if (this.summary === undefined) {
+      this.text ??= new StreamScrubber(this.recorded);
+      out.push(...this.text.push(bytes));
+    } else {
+      this.counted += bytes.length;
+    }
+  }
+
+  private flushText(out: Uint8Array[]): void {
+    if (this.text !== undefined) {
+      out.push(...this.text.end());
+      this.text = undefined;
+    }
+  }
+
+  private closePart(out: Uint8Array[]): void {
+    this.flushText(out);
+    if (this.summary !== undefined) {
+      out.push(this.scrubbed(`<${this.summary}, ${this.counted} bytes>`));
+    }
+
+    this.summary = undefined;
+    this.counted = 0;
+  }
+
+  private scrubbed(text: string): Uint8Array {
+    return encoder.encode(scrubValues(text, this.recorded));
+  }
+
+  private drain(final: boolean): readonly Uint8Array[] {
+    const out: Uint8Array[] = [];
+    while (this.step(final, out)) {
+      // Each step consumes input or changes mode; it returns false when it needs more bytes.
+    }
+
+    return out;
+  }
+
+  private step(final: boolean, out: Uint8Array[]): boolean {
+    if (this.mode === "epilogue") {
+      this.content(this.pending, out);
+      this.pending = new Uint8Array(0);
+
+      return false;
+    }
+
+    if (this.mode === "opaque") {
+      this.counted += this.pending.length;
+      this.pending = new Uint8Array(0);
+      if (final) {
+        out.push(encoder.encode(`<multipart body, ${this.counted} more bytes>`));
+      }
+
+      return false;
+    }
+
+    return this.mode === "head" ? this.head(final, out) : this.body(final, out);
+  }
+
+  private head(final: boolean, out: Uint8Array[]): boolean {
+    const at = indexOfBytes(this.pending, headEnd);
+    if (at === -1) {
+      if (final) {
+        this.content(this.pending, out);
+        this.pending = new Uint8Array(0);
+      } else if (this.pending.length > maxPartHeadBytes) {
+        this.mode = "opaque";
+
+        return true;
+      }
+
+      return false;
+    }
+
+    const head = new TextDecoder().decode(this.pending.subarray(0, at));
+    const contentType = partContentType.exec(head)?.groups?.type;
+    const nested = boundaryOf(contentType);
+    if (nested === undefined) {
+      out.push(this.scrubbed(`${head}\r\n\r\n`));
+      this.pending = this.pending.subarray(at + headEnd.length);
+      const filename = partFilename.exec(head)?.groups?.filename;
+      if (filename !== undefined) {
+        this.summary = `file ${filename}`;
+      } else if (contentType !== undefined && !isText(contentType)) {
+        this.summary = "binary part";
+      }
+    } else {
+      // The head's last CRLF starts the nested body's first delimiter.
+      out.push(this.scrubbed(`${head}\r\n`));
+      this.pending = this.pending.subarray(at + 2);
+      this.boundaries.push(nested);
+    }
+
+    this.mode = "content";
+
+    return true;
+  }
+
+  private body(final: boolean, out: Uint8Array[]): boolean {
+    const boundary = this.boundaries.at(-1) ?? "";
+    const delimiter = encoder.encode(`\r\n--${boundary}`);
+    const at = indexOfBytes(this.pending, delimiter);
+    const after = at === -1 ? -1 : at + delimiter.length;
+    if (at === -1 || after + 2 > this.pending.length) {
+      // Keep a tail that may hold the start of a delimiter and the two bytes after it.
+      let safe = at;
+      if (final) {
+        safe = this.pending.length;
+      } else if (at === -1) {
+        safe = Math.max(0, this.pending.length - delimiter.length - 1);
+      }
+
+      this.content(this.pending.subarray(0, safe), out);
+      this.pending = this.pending.subarray(safe);
+      if (final) {
+        this.closePart(out);
+      }
+
+      return false;
+    }
+
+    const next = new TextDecoder().decode(this.pending.subarray(after, after + 2));
+    if (next !== "\r\n" && next !== "--") {
+      // The boundary text inside a part's content, not a delimiter.
+      this.content(this.pending.subarray(0, after), out);
+      this.pending = this.pending.subarray(after);
+
+      return true;
+    }
+
+    this.content(this.pending.subarray(0, at), out);
+    this.closePart(out);
+    out.push(encoder.encode(`${this.first ? "" : "\r\n"}--${boundary}${next}`));
+    this.first = false;
+    this.pending = this.pending.subarray(after + 2);
+    if (next === "--") {
+      this.boundaries.pop();
+    }
+
+    if (next === "\r\n") {
+      this.mode = "head";
+    } else {
+      this.mode = this.boundaries.length > 0 ? "content" : "epilogue";
+    }
+
+    return true;
+  }
+}
+
+const summarizeMultipart = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+  boundary: string,
+  recorded: readonly ScrubEntry[],
+): Stream.Stream<Uint8Array, E, R> =>
+  body.pipe(
+    Stream.mapAccum(
+      () => new MultipartSummary(boundary, recorded),
+      (summary, chunk: Uint8Array) => [summary, summary.push(chunk)] as const,
+      { onHalt: (summary) => summary.end() },
+    ),
+  );
+
+const newline = encoder.encode("\n");
+
+// End a non-empty body with a newline, so the next prompt starts on its own line.
+const endWithNewline = <E, R>(
+  body: Stream.Stream<Uint8Array, E, R>,
+): Stream.Stream<Uint8Array, E, R> =>
+  body.pipe(
+    Stream.mapAccum(
+      () => true,
+      (ended: boolean, chunk: Uint8Array) =>
+        [chunk.length === 0 ? ended : chunk.at(-1) === newline[0], [chunk]] as const,
+      { onHalt: (ended) => (ended ? [] : [newline]) },
+    ),
+  );
+
+const line = (text: string): Stream.Stream<Uint8Array> => Stream.succeed(encoder.encode(text));
+
+/**
+ * The `--dry-run` body (design 4.6, DM3-8): a text body (`printsAsText`: text-family or sequential)
+ * as given, with every recorded value replaced (`scrub`, or `StreamScrubber` for a streamed one); a
+ * multipart body summarized by `MultipartSummary`; a binary body as `<binary body, N bytes>` from
+ * its declared length, or, with no length, which is stdin, as `<binary body from stdin>` (`<body
+ * from stdin>` for a text one) without reading it. A file the runtime streams arrives with its size
+ * only, so its path cannot be named here.
+ */
+const dryRunBody = (
+  request: HttpClientRequest.HttpClientRequest,
+  recorded: readonly ScrubEntry[],
+): Stream.Stream<Uint8Array, UsageError> => {
+  const { body } = request;
+  if (body._tag === "Empty") {
+    return Stream.empty;
+  }
+
+  const mediaType = Option.getOrElse(
+    Headers.get(request.headers, "content-type"),
+    (): string | undefined => body.contentType,
+  );
+
+  if (body._tag === "Uint8Array") {
+    return printsAsText(mediaType)
+      ? line(scrubValues(new TextDecoder().decode(body.body), recorded))
+      : line(`<binary body, ${body.body.length} bytes>`);
+  }
+
+  if (body._tag !== "Stream") {
+    return line("<binary body>");
+  }
+
+  const boundary = boundaryOf(mediaType);
+  if (boundary !== undefined) {
+    return summarizeMultipart(
+      body.stream.pipe(
+        Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
+      ),
+      boundary,
+      recorded,
+    );
+  }
+
+  if (body.contentLength === undefined) {
+    return line(printsAsText(mediaType) ? "<body from stdin>" : "<binary body from stdin>");
+  }
+
+  return printsAsText(mediaType)
+    ? body.stream.pipe(
+        Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
+        scrubStream(recorded),
+      )
+    : line(`<binary body, ${body.contentLength} bytes>`);
+};
+
+const querySeparator = (url: string): string => {
+  if (/[?&]$/u.test(url)) {
+    return "";
+  }
+
+  return url.includes("?") ? "&" : "?";
+};
+
+// A query name as a server decodes it.
+const decodedQueryName = (raw: string): string =>
+  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
+
+/**
+ * The request target as the redirect loop sends it: `urlParams` folded in their `queryWireForm`,
+ * a placeholder written as itself, no fragment. A query value whose decoded name
+ * `UrlParams.CurrentRedactedNames` lists is `<redacted>`, unless it is a placeholder.
+ */
+const dryRunUrl = (
+  request: HttpClientRequest.HttpClientRequest,
+  placeholders: ReadonlySet<string>,
+  names: readonly (string | RegExp)[],
+): string => {
+  // A `Redacted` param is a value the runtime holds secret; it prints as `<redacted>`.
+  const wire = (value: string | Redacted.Redacted): string => {
+    if (Redacted.isRedacted(value)) {
+      return "<redacted>";
+    }
+
+    return placeholders.has(value) ? value : queryWireForm(value);
+  };
+  const pairs = UrlParams.fromInput(request.urlParams).params.map(
+    ([name, value]) => `${queryWireForm(name)}=${wire(value)}`,
+  );
+  const url =
+    pairs.length === 0
+      ? request.url
+      : `${request.url}${querySeparator(request.url)}${pairs.join("&")}`;
+  const at = url.indexOf("?");
+  if (at === -1) {
+    return url;
+  }
+
+  const query = url
+    .slice(at + 1)
+    .split("&")
+    .map((part) => {
+      const equals = part.indexOf("=");
+      const redacted =
+        equals !== -1 &&
+        !placeholders.has(part.slice(equals + 1)) &&
+        UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names);
+
+      return redacted ? `${part.slice(0, equals + 1)}<redacted>` : part;
+    });
+
+  return `${url.slice(0, at + 1)}${query.join("&")}`;
+};
+
+/**
+ * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
+ * `METHOD <absolute URL> HTTP/1.1`, the headers in `sendOrder`, a blank line and `dryRunBody`. The
+ * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
+ * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
+ * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
+ * the run recorded, secret-file values among them, and sanitized.
+ */
+const printDryRun = (
+  request: HttpClientRequest.HttpClientRequest,
+  placeholders: readonly Placeholder[],
+  recorded: readonly ScrubEntry[],
+): Effect.Effect<void, OutputError | UsageError, Stdio.Stdio> =>
+  Effect.gen(function* dryRun() {
+    const written = new Set(placeholders.map(({ scheme }) => placeholder(scheme)));
+    const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+    const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
+    const exact = new Set(
+      [...written].flatMap((text) => [text, `Bearer ${text}`, `Basic ${text}`]),
+    );
+    // A redacted header keeps only an exact placeholder form; a `Cookie` keeps each pair whose
+    // value is exactly a placeholder and redacts the value of every other pair.
+    const shownValue = (name: string, value: string): string => {
+      if (!Headers.isRedactedName(name, headerNames)) {
+        return value;
+      }
+
+      if (name.toLowerCase() !== "cookie") {
+        return exact.has(value) ? value : "<redacted>";
+      }
+
+      return value
+        .split(";")
+        .map((pair) => pair.trim())
+        .filter((pair) => pair !== "")
+        .map((pair) => {
+          const equals = pair.indexOf("=");
+          if (equals === -1) {
+            return "<redacted>";
+          }
+
+          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=<redacted>`;
+        })
+        .join("; ");
+    };
+    const lines = [
+      `${request.method} ${dryRunUrl(request, written, queryNames)} HTTP/1.1`,
+      ...sendOrder(request.headers).map(([name, value]) => `${name}: ${shownValue(name, value)}`),
+    ].map((text) => scrubbedAndSanitized(text, recorded));
+
+    yield* toStdout(
+      Stream.concat(line(`${lines.join("\n")}\n\n`), endWithNewline(dryRunBody(request, recorded))),
+    );
+  });
+
+/**
+ * Send one built request (design 4.8): the one path from a `Serialize.Request` to a sink or a typed
+ * error, and the only runtime function that sends. In order: the base URL (`--base-url`,
  * `<PREFIX>_BASE_URL`, `--server`, `--server-variable` or the accepted default, from the
- * operation's effective servers: its meta's override, else the root table from `Servers`)
- * joined to the builder's path and query; `Accept` from the declared response media or
- * `accept` (`--accept`), leaving the builder's `Content-Type`; the security requirement evaluated
- * against `Schemes` before any connection (`CredentialMissing`); the policy client (redirect loop
- * with the per-hop attach gated by the base's provenance, method allowlist, direct route for
- * loopback hops, `User-Agent`); then response matching, after a stderr warning for each required
+ * operation's effective servers: its meta's override, else the root table from `Servers`) joined to
+ * the builder's path and query; `Accept` from the declared response media or `accept` (`--accept`),
+ * leaving the builder's `Content-Type`; the security requirement evaluated against `Schemes` before
+ * any connection (`CredentialMissing`); the plaintext warning of design 13.1 R3, once per run
+ * (`RunWarnings`), when `--allow-credentials-for-base-url` is what lets credentials reach an
+ * `http:` base; the policy client; then response matching, after a stderr warning for each required
  * header the matched case declares and the response lacks. A 2xx streams to the output sink (a
- * bodiless one, `isBodiless`, writes nothing and reads nothing); any
- * other status fails with `ApiResponseError` carrying the scrubbed, bounded body excerpt. The
- * request and every body read run in one scope. Errors are not rendered here: `finalCatch` does.
+ * bodiless one, `isBodiless`, writes nothing and reads nothing), after the `--verbose` notice for
+ * an undeclared media type; any other status fails with `ApiResponseError` carrying the body
+ * excerpt, bounded and scrubbed of every value the run recorded (its credentials, added to the
+ * record, and its secret-file values), and the server's `Retry-After` when retrying stopped at the
+ * cap.
+ *
+ * The policy client, innermost first (design D-AD7; audit ad9f808b F5): `verboseTransform` on the
+ * inner client the redirect loop receives, so `--verbose` sees each hop of each attempt as sent;
+ * `redirectLoop` (per-hop attach gated by the base's provenance, method allowlist, direct route for
+ * loopback hops, the per-hop client certificate for the operation's bound origins only, the
+ * per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
+ * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
+ * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
+ * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
+ * operation declares and the operator supplied, never a credential (design D-AD7). Every line the
+ * transforms print passes through the run's scrubber (`scrubbedAndSanitized` over the recorded
+ * values). Every body read, the excerpt's included, is bounded by the stream idle timeout
+ * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
+ * run in one scope. Before the client runs, `send` adds the retry-hint input (the method and
+ * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. An existing
+ * `--output <path>` without `--force` is refused before the client runs, so the server never acts
+ * on a request whose answer would be discarded. Errors are not rendered here: `finalCatch` does.
+ *
+ * Under `--dry-run` (`dryRunSetting`) the requirement is evaluated by `preview`, which never fails
+ * for a missing credential and never prompts, and the built request, with its `User-Agent` and the
+ * chosen alternative's placeholders, is printed by `printDryRun` instead of entering the client.
  */
 export const send =
   (meta: OperationMeta, accept: Option.Option<string> = Option.none()) =>
@@ -997,7 +2092,8 @@ export const send =
         yield* printStderr(`Notice: the operation ${operation} is deprecated`);
       }
 
-      const servers = meta.servers ?? (yield* Servers).table;
+      const { envPrefix, table: rootServers } = yield* Servers;
+      const servers = meta.servers ?? rootServers;
       const selection = yield* select(
         {
           baseUrl: yield* baseUrlSetting,
@@ -1015,25 +2111,81 @@ export const send =
         onSome: (value) => HttpClientRequest.setHeader(located, "accept", value),
       });
 
-      const credentials = yield* evaluate(operation, meta.security);
-      yield* Ref.set(yield* Effect.service(RunCredentials), credentials);
+      // `--dry-run` shows the chosen alternative's placeholders and never fails for a missing
+      // credential or prompts for one.
+      const dryRun = Option.getOrElse(yield* Effect.serviceOption(dryRunSetting), () => false);
+      const chosen = dryRun
+        ? yield* preview(meta.security)
+        : { credentials: yield* evaluate(operation, meta.security), placeholders: [] };
+      const { credentials } = chosen;
+      // Merged, never replaced: a secret-file value the body recorded before `send` stays
+      // recorded, and the error excerpt below scrubs it (audit ad9f808b F3).
+      const recorded = yield* Effect.service(RunCredentials);
+      const scrubbed = yield* Ref.updateAndGet(recorded, (entries) => [...entries, ...credentials]);
 
       const { table: security } = yield* Schemes;
       const baseOrigin = new URL(baseUrl).origin;
-      const origins = credentialOrigins({
+      const gate = {
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
         baseOrigin,
         boundOrigins: servers.boundOrigins,
         provenance: selection.provenance,
-      });
+      };
+      const origins = credentialOrigins(gate);
+      // The bound origins alone: the certificate's set, which the flag never widens.
+      const bound = credentialOrigins({ ...gate, allowUnboundBase: false });
+      const headers = credentials.filter(({ definition }) => definition.kind !== "mutualTLS");
+      // The certificate is a credential of the chosen alternative (design 6.5, 9 I3; audit F1):
+      // presented and withheld by this one fact.
+      const certificateChosen = headers.length < credentials.length;
+      // Only header credentials reach the base; the certificate never rides the flag.
+      const sendsToBase = headers.length > 0 && origins.includes(baseOrigin);
+      const headersWithheld = headers.length > 0 && !sendsToBase;
+      const certificateWithheld = certificateChosen && !bound.includes(baseOrigin);
 
-      if (credentials.length > 0 && !origins.includes(baseOrigin)) {
-        yield* printStderr(withheldNotice(credentials));
+      if (headersWithheld || certificateWithheld) {
+        yield* printStderr(withheldNotice(headersWithheld ? headers : [], certificateWithheld));
       }
 
+      // The flag let them through only when the base is not bound without it.
+      const allowedByFlag = sendsToBase && !bound.includes(baseOrigin);
+      yield* warnOncePerRun(plaintextWarning(baseUrl, allowedByFlag));
+
       const policy = yield* ClientPolicy;
+      if (dryRun) {
+        // The `User-Agent` `withUserAgent` sets, then the attach step, in the policy client's order.
+        const agent = setUserAgent(policy.binName, policy.version)(built);
+        const shown = yield* attachPlaceholders(security, chosen.placeholders, origins)(agent);
+        yield* printDryRun(shown, chosen.placeholders, scrubbed).pipe(
+          Effect.provide(redactedNames(security)),
+        );
+
+        return;
+      }
+
+      // Before the request is sent: a refused target must not discard the answer of a request
+      // that took effect (a POST's one-time id or secret).
+      const target = Option.getOrUndefined(yield* OutputPath);
+      if (target !== undefined && target !== stdoutPath && !(yield* Force)) {
+        yield* refuseExisting(target);
+      }
+
+      const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
+      const scrub = (text: string): string => scrubbedAndSanitized(text, scrubbed);
       const client = (yield* HttpClient.HttpClient).pipe(
-        redirectLoop(attach(security, { credentials, origins }), policy.direct, policy.allowed),
+        verboseTransform(scrub),
+        redirectLoop(
+          attach(security, { credentials, origins }),
+          policy.direct,
+          policy.allowed,
+          // Per hop, from the operation's bound origins: the flag never extends the certificate.
+          // An alternative without mutualTLS presents it on no hop.
+          (url) =>
+            certificateChosen
+              ? certificateInitFor(url, servers.boundOrigins)
+              : Effect.succeed(Option.none()),
+        ),
+        retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );
       const table = {
@@ -1042,28 +2194,45 @@ export const send =
         responses: meta.media.responses,
       };
 
+      yield* recordSent(built);
       yield* client.execute(built).pipe(
         Effect.catchTag("HttpClientError", mapClientError),
         Effect.tap((response) => warnMissingHeaders(meta, response)),
         Effect.flatMap((response) =>
-          classify(table, response, credentials).pipe(
+          classify(table, response, scrubbed).pipe(
             Effect.matchEffect({
               onFailure: () =>
-                readExcerpt(bodyOf(response), credentials).pipe(
-                  Effect.orElseSucceed(() => ""),
+                readExcerpt(bodyOf(response, idleSeconds), scrubbed).pipe(
+                  // A truncated excerpt is no excerpt; a stalled one is the idle timeout.
+                  Effect.catchIf(
+                    (error) => error.reason !== "idleTimeout",
+                    () => Effect.succeed(""),
+                  ),
                   Effect.flatMap((excerpt) =>
-                    Effect.fail(toApiResponseError(table, response, excerpt, credentials)),
+                    Effect.fail(
+                      toApiResponseError(
+                        table,
+                        response,
+                        excerpt,
+                        scrubbed,
+                        retryAfterCapSeconds(response),
+                      ),
+                    ),
                   ),
                 ),
               onSuccess: (ok) =>
                 isBodiless(ok)
                   ? Effect.void
-                  : writeBody({
-                      bytes: bodyOf(ok),
-                      mediaType: dispatchResponse(
+                  : Effect.gen(function* writeOk() {
+                      const mediaType = dispatchResponse(
                         declaredMedia(meta, ok.status),
                         Option.getOrUndefined(Headers.get(ok.headers, "content-type")),
-                      ),
+                      );
+                      if (mediaType === undefined) {
+                        yield* undeclaredMediaNotice(operation, ok, scrub);
+                      }
+
+                      yield* writeResponse({ bytes: bodyOf(ok, idleSeconds), mediaType });
                     }),
             }),
           ),

@@ -1,8 +1,10 @@
 import { Array as Arr, Order } from "effect";
-import type { AuthorConfig } from "../model/author-config.ts";
+import { AuthorConfig, runtimeSettings } from "../model/author-config.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Api } from "../model/entities.ts";
 import type { NamePlan } from "../names/index.ts";
+import { envPrefixOf } from "../names/plan.ts";
+import type { PlannedCredential } from "../names/plan.ts";
 import { reservedCliNames } from "../names/reserved.ts";
 import { stringLiteral } from "./escape.ts";
 import type { EmittedFile } from "./package.ts";
@@ -70,21 +72,197 @@ const usage = (bin: string): string =>
     `These names belong to the CLI, so no command or flag of the description may claim them: ${reserved}. Each credential's \`<scheme>-file\` flag is reserved as well.`,
   ].join("\n\n");
 
-const credentials = (plan: NamePlan): string => {
-  if (plan.credentials.length === 0) {
+const credentialLine = (credential: PlannedCredential): string =>
+  `- \`${credential.env}\` or \`--${credential.flag} <path|->\``;
+
+// The `oauth2` and `openIdConnect` schemes: the operator supplies the token (design 6.5, D-SEC1).
+const passThrough = (input: ReadmeInput): string | undefined => {
+  const tokenSchemes = new Set(
+    input.api.securitySchemes
+      .filter((scheme) => scheme.kind.type === "oauth2Token" || scheme.kind.type === "oidcToken")
+      .map((scheme) => scheme.name),
+  );
+  const lines = input.plan.credentials
+    .filter((credential) => tokenSchemes.has(credential.scheme))
+    .map(credentialLine);
+
+  return lines.length === 0
+    ? undefined
+    : [
+        "### OAuth2 and OpenID Connect",
+        "This CLI does not obtain tokens: it runs no OAuth2 flow and no OpenID Connect discovery. Obtain an access token elsewhere and supply it through the scheme's credential source; it is sent as `Authorization: Bearer <token>`. Each command's `--help` shows the flows, URLs and scopes.",
+        lines.join("\n"),
+      ].join("\n\n");
+};
+
+// The `mutualTLS` schemes' certificate, key and CA paths: environment only, no file flag (6.5).
+const certificates = (plan: NamePlan): string | undefined =>
+  plan.certificates.length === 0
+    ? undefined
+    : [
+        "### Client certificates",
+        "Each `mutualTLS` scheme reads the paths of its client certificate, its private key and an optional CA bundle from these environment variables. No flag sets them.",
+        plan.certificates
+          .map(
+            (certificate) =>
+              `- \`${certificate.certEnv}\`, \`${certificate.keyEnv}\` and \`${certificate.caEnv}\``,
+          )
+          .join("\n"),
+        "The certificate is presented only to the origins this package accepts. It is never presented on a cross-origin redirect, or to an origin `--base-url` or its environment variable names outside them, even with `--allow-credentials-for-base-url`: such a request is sent without it, and stderr says so.",
+      ].join("\n\n");
+
+const credentials = (input: ReadmeInput): string => {
+  const { plan } = input;
+  if (plan.credentials.length === 0 && plan.certificates.length === 0) {
     return "## Credentials\n\nThe API declares no credentials this CLI reads.";
   }
 
-  const lines = plan.credentials.map(
-    (credential) => `- \`${credential.env}\` or \`--${credential.flag} <path|->\``,
+  const parts = ["## Credentials"];
+  if (plan.credentials.length > 0) {
+    parts.push(
+      "Each credential is read from the first source that has it: the file its flag names (`-` reads stdin), then its environment variable, then, only when stdin and stdout are both terminals, a prompt that does not echo. No flag takes a credential value on the command line.",
+      plan.credentials.map(credentialLine).join("\n"),
+      "A credential is sent only to the origins this package accepts. An origin `--base-url` or its environment variable names outside them gets no credential unless `--allow-credentials-for-base-url` is given.",
+    );
+  }
+
+  return [...parts, passThrough(input), certificates(plan)]
+    .filter((part) => part !== undefined)
+    .join("\n\n");
+};
+
+// The `format: password` body fields, read from a file or stdin (design 13.1 R4).
+const secretFields = (plan: NamePlan): string | undefined => {
+  const names = Arr.sort(
+    Arr.dedupe(
+      [...plan.root, ...plan.groups.flatMap((group) => group.commands)].flatMap((command) =>
+        command.flags.flatMap((flag) =>
+          flag.source._tag === "Body" && flag.source.kind === "secret-file" ? [flag.name] : [],
+        ),
+      ),
+    ),
+    Order.String,
   );
 
+  return names.length === 0
+    ? undefined
+    : [
+        "## Secret fields",
+        "A body field the description marks `format: password` has no flag that takes its value. Its `--<field>-file` flag reads the value from a file, or from stdin with `-`, and the value is never echoed.",
+        names.map((name) => `- \`--${name} <path|->\``).join("\n"),
+      ].join("\n\n");
+};
+
+// Ruling X7 (a): the request path through the generated modules (design 4.1).
+const howACommandRuns = (): string =>
+  [
+    "## How a command runs",
+    "A command's flags are parsed by its module in `cli/<group>.ts`, which hands the input to the request builder in `api/<group>.ts`. The built request goes to `runtime/output.ts`, whose `Output.send` sends it through the client policy of `runtime/client.ts` (credentials, redirects, retries and timeouts) to the HTTP client `bin.ts` provides, then writes the response.",
+  ].join("\n\n");
+
+const seconds = (value: number): string => `${value} s`;
+
+// Ruling X7 (b): one row per runtime setting, precedence flag > env > author default > built-in.
+const settings = (config: AuthorConfig): string => {
+  const prefix = envPrefixOf(config);
+  // A config without `runtime` resolves to the built-in defaults, which live in `runtimeSettings`.
+  const builtIn = runtimeSettings(
+    new AuthorConfig({ binName: config.binName, package: config.package }),
+  );
+  const authored = (key: "idleTimeoutSeconds" | "retries" | "timeoutSeconds"): string => {
+    const value = config.runtime?.[key];
+
+    return value === undefined
+      ? `\`runtime.${key}\`, not set`
+      : `\`runtime.${key}\`: ${key === "retries" ? value : seconds(value)}`;
+  };
+  const rows = [
+    ["`--base-url`", `\`${prefix}_BASE_URL\``, "`servers.accepted`", "none"],
+    [
+      "`--timeout`",
+      `\`${prefix}_TIMEOUT\``,
+      authored("timeoutSeconds"),
+      `${builtIn.timeoutSeconds}`,
+    ],
+    ["`--retries`", `\`${prefix}_RETRIES\``, authored("retries"), `${builtIn.retries}`],
+    [
+      "none",
+      `\`${prefix}_IDLE_TIMEOUT\``,
+      authored("idleTimeoutSeconds"),
+      `${builtIn.idleTimeoutSeconds}`,
+    ],
+    ["`--error-format`", `\`${prefix}_ERROR_FORMAT\``, "none", "`text`"],
+  ];
+  const header = ["Flag", "Environment", "Author default (config key)", "Built-in default"];
+  const widths = header.map((title, column) =>
+    Math.max(title.length, ...rows.map((row) => row[column]?.length ?? 0)),
+  );
+  const line = (cells: readonly string[]): string =>
+    `| ${cells.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join(" | ")} |`;
+  // Padded as `vp fmt` prints a table; every cell is ASCII, so length is display width.
+  const table = [
+    line(header),
+    line(widths.map((width) => "-".repeat(width))),
+    ...rows.map(line),
+  ].join("\n");
+
   return [
-    "## Credentials",
-    "Each credential is read from its environment variable, or from a file named by its flag (`-` reads stdin).",
-    lines.join("\n"),
+    "## Settings",
+    "Precedence: flag > environment variable > author default > built-in default. A setting takes the first value found in that order; the author default is the one this package was generated with. Timeouts are in seconds.",
+    table,
+    `Between \`${prefix}_BASE_URL\` and the accepted server, \`--server <name|index>\` chooses one of the description's servers. With no base URL from any of them, a command fails with exit code 2 and names \`--base-url\`.`,
+    `An error raised while the command line is parsed comes before any flag is read, so only \`${prefix}_ERROR_FORMAT\` sets its format. Every later error follows \`--error-format\`, then \`${prefix}_ERROR_FORMAT\`.`,
   ].join("\n\n");
 };
+
+// Design D-AD7 and 7.4: the retry policy and the `Retry-After` cap.
+const retries = (): string =>
+  [
+    "## Retries",
+    "A request is retried when the connection, the DNS lookup or the wait for headers fails, or when the server answers 408, 429, 500, 502, 503 or 504. A TLS failure is not retried. Without `--retry-unsafe`, only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, `DELETE` and `QUERY` are retried, and other methods only when the request carries an `Idempotency-Key` header. A body read from stdin is never retried, because it cannot be sent twice.",
+    "`--retries <n>` sets how many times a request is retried, and `--retries 0` turns retrying off. Waits grow exponentially with jitter, and each retry writes a note to stderr.",
+    "A `Retry-After` header is honored up to the effective `--timeout`. When the server asks for a longer wait, the CLI does not wait: it stops retrying, and the error reports the server's value. `--timeout 0` removes this cap along with the timeout.",
+  ].join("\n\n");
+
+const timeouts = (config: AuthorConfig): string => {
+  const prefix = envPrefixOf(config);
+
+  return [
+    "## Timeouts",
+    `\`--timeout <seconds>\` (\`${prefix}_TIMEOUT\`) bounds each attempt's wait for the response headers; \`0\` waits forever. A timeout exits with code 4.`,
+    `\`${prefix}_IDLE_TIMEOUT\` bounds the wait for each next chunk of a response body, streamed or not. A body that stalls longer exits with code 5. It has no flag.`,
+    `\`${prefix}_RETRIES\` sets the retry count as \`--retries\` does. Settings lists the defaults, including those this package was generated with.`,
+  ].join("\n\n");
+};
+
+// Design 4.6 output modes and 7.4 `--error-format json`.
+const output = (): string =>
+  [
+    "## Output",
+    "stdout carries only the response body, the request `--dry-run` prints, or the `--describe` JSON. Errors, notices, retry notes and `--verbose` lines go to stderr.",
+    "A response body is written to stdout as it arrives, or to a file with `--output <path>`, which `--force` lets replace an existing file. A binary body is not written to a terminal unless `--output -` asks for it.",
+    "A sequential response (Server-Sent Events, NDJSON, JSON Lines or JSON text sequences) is written one JSON value per line, each line as soon as its item arrives. Numbers keep their digits. `--raw` writes the bytes as received instead. `--max-record-bytes <n>` bounds one item; a larger item, or a stream that ends inside an item, exits with code 5.",
+    "`--dry-run` prints the request to stdout with every credential replaced and sends nothing. `--verbose` prints each attempt's and each redirect hop's request and response lines and headers to stderr, redacted and without bodies.",
+    '`--error-format json` writes each error to stderr as one JSON object, `{"error":{...}}`. The inner object always has `kind` and `message`, and has `operation`, `status`, `matched`, `body`, `retryAfter` and `requestId` only when they have a value. `retryAfter` is the server\'s `Retry-After` in seconds when retrying stopped at the `--timeout` cap.',
+  ].join("\n\n");
+
+// Design 6.5 Proxy environment and Loopback hosts, D-SEC8 (operator ruling 71514c79): Bun routes
+// every hop but a loopback one from the platform's proxy variables, which carry no package prefix.
+const proxies = (): string =>
+  [
+    "## Proxies",
+    "Requests to loopback hosts (`127.0.0.0/8`, `::1`, `localhost` and names under `.localhost`) always go direct, never through a proxy, whatever `no_proxy` or any proxy variable says, so a request to a local server, credentials included, never passes through a proxy. On macOS only `127.0.0.1` answers on the loopback interface, so another `127.x` address that a proxy used to reach now times out.",
+    "Every other request is routed by the platform's proxy variables, which carry no package prefix. An `http:` URL uses `http_proxy`, else `HTTP_PROXY`, and an `https:` URL uses `https_proxy`, else `HTTPS_PROXY`. There is no fallback between the two pairs, and the lowercase name wins when both are set. When the URL scheme's pair is unset, `ALL_PROXY` or `all_proxy` proxies both schemes.",
+    "`no_proxy`, else `NO_PROXY`, exempts the hosts it lists: exact names, `*`, CIDR ranges, IPv6 literals, or a comma-separated list of them.",
+    "Every redirect hop is routed afresh from its own URL. The userinfo of a proxy URL goes only to the proxy, never to the API. Over plain `http:` the proxy receives the whole request, credentials included; over `https:` it sees only the host and port. The CLI has no proxy flag.",
+    "Untested on the pinned Bun:",
+    [
+      "- an `https://` proxy URL;",
+      "- a SOCKS proxy;",
+      "- `NO_PROXY` domain-suffix and `host:port` entries;",
+      "- which of `ALL_PROXY` and `all_proxy` wins when both are set.",
+    ].join("\n"),
+  ].join("\n\n");
 
 const exits = (): string =>
   [
@@ -110,14 +288,18 @@ const refusals = (input: ReadmeInput): string => {
   );
   const isRefused = (method: string, path: string): boolean =>
     operations.some((key) => key.method === method && key.path === path);
-  const elements = refusedDiagnostics.filter(
-    (diagnostic) =>
-      diagnostic.scope === "element" &&
-      (diagnostic.operation === undefined ||
-        !isRefused(diagnostic.operation.method, diagnostic.operation.path)),
-  ).length;
+  // The refusals at one scope that belong to no refused operation: a generated command's.
+  const countOf = (scope: "element" | "field"): number =>
+    refusedDiagnostics.filter(
+      (diagnostic) =>
+        diagnostic.scope === scope &&
+        (diagnostic.operation === undefined ||
+          !isRefused(diagnostic.operation.method, diagnostic.operation.path)),
+    ).length;
+  const elements = countOf("element");
+  const fields = countOf("field");
 
-  if (operations.length === 0 && elements === 0) {
+  if (operations.length === 0 && elements === 0 && fields === 0) {
     return "## Refusals\n\nNothing in the description was refused.";
   }
 
@@ -132,6 +314,12 @@ const refusals = (input: ReadmeInput): string => {
   if (elements > 0) {
     parts.push(
       `Generation refused ${elements} element${elements === 1 ? "" : "s"} of generated commands; each command's \`--help\` names them.`,
+    );
+  }
+
+  if (fields > 0) {
+    parts.push(
+      `Generation refused ${fields} body field${fields === 1 ? "" : "s"} of generated commands; each command's \`--help\` names them.`,
     );
   }
 
@@ -160,10 +348,15 @@ const webhooks = (api: Api): string | undefined => {
 
 /**
  * Emits the generated package's `README.md` (design 4.1, 4.2): usage with the `--flag=-value`
- * escape and the reserved CLI names (design 4.4), the credential environment variables and file
- * flags from the name plan, the exit codes (design 4.6), a refusal summary of every stage's
- * refusals, and the webhooks, listed as informational. The bin name and credential names are ASCII
- * by their grammars; every spec string is an escaped literal in a `text` fence.
+ * escape and the reserved CLI names (design 4.4), how a command runs and the runtime settings
+ * table (ruling X7), the credential sources, environment variables and file flags from the name
+ * plan with the `oauth2`/`openIdConnect` pass-through and the `mutualTLS` certificate names when
+ * planned, the secret-file fields when any, the retry policy, timeouts and output modes (design
+ * D-AD7, 4.6, 7.4), the proxy routing with its loopback rule (design 6.5), the exit codes (design
+ * 4.6), a refusal summary of every stage's refusals, and the webhooks, listed as informational.
+ * The prefix comes from the config, defaults from `runtimeSettings`. The bin, environment, flag
+ * and config names are ASCII by their grammars; every spec string is an escaped literal in a
+ * `text` fence.
  */
 export const emitReadme = (input: ReadmeInput): EmittedFile => {
   const bin = input.config.binName;
@@ -172,7 +365,14 @@ export const emitReadme = (input: ReadmeInput): EmittedFile => {
     `# ${bin}`,
     intro,
     usage(bin),
-    credentials(input.plan),
+    howACommandRuns(),
+    settings(input.config),
+    credentials(input),
+    secretFields(input.plan),
+    retries(),
+    timeouts(input.config),
+    output(),
+    proxies(),
     exits(),
     refusals(input),
     webhooks(input.api),

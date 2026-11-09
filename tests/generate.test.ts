@@ -189,6 +189,18 @@ const withDuplicateId: Schema.Json = {
   },
 };
 
+// The golden spec plus a declared mutualTLS scheme, which bin.ts answers with the client certificate.
+const withMutualTls: Schema.Json = {
+  ...goldenSpec,
+  components: {
+    ...decodeRecord(goldenSpec.components),
+    securitySchemes: {
+      ...decodeRecord(decodeRecord(goldenSpec.components).securitySchemes),
+      client: { type: "mutualTLS" },
+    },
+  },
+};
+
 const decoder = new TextDecoder();
 
 const encoder = new TextEncoder();
@@ -271,6 +283,25 @@ describe("generate", () => {
     expect(checked.tsc.exitCode).toBe(0);
     expect(checked.unformatted).toEqual([]);
   }, 180_000);
+
+  test("a mutualTLS scheme makes bin.ts provide the client certificate", async () => {
+    const written = await run({ spec: withMutualTls }, (exit, { out }) =>
+      Effect.all({
+        bin: readOut(out, "src/bin.ts"),
+        result: Effect.succeed(succeeded(exit)),
+      }),
+    );
+
+    expect(written.bin).toContain("Auth.clientCertificatePaths(scheme)");
+    expect(written.bin).toContain("Layer.effect(\n  Auth.ClientCertificate,");
+  });
+
+  test("without a mutualTLS scheme bin.ts provides no client certificate", async () => {
+    const bin = await run({}, (_exit, { out }) => readOut(out, "src/bin.ts"));
+
+    expect(bin).toBeDefined();
+    expect(bin).not.toContain("ClientCertificate");
+  });
 
   test("a document-level refusal writes nothing", async () => {
     const observed = await run({ spec: withDuplicateId }, (exit, { out }) =>

@@ -19,6 +19,7 @@ import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import type * as Client from "../../src/runtime-src/runtime/client.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 const SECRET = "tok-S12-SECRET";
@@ -190,7 +191,7 @@ const run = async (world: World = {}) => {
       stdoutIsTerminal: Effect.succeed(world.terminal ?? false),
     }),
     Input.stdinClaimLayer,
-    Output.runCredentialsLayer,
+    runCredentialsLayer,
     Layer.succeed(HttpClient.HttpClient, client),
     Layer.succeed(Output.ClientPolicy, {
       allowed: new Set(["HEAD", "PATCH"]),

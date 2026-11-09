@@ -40,7 +40,7 @@ const emitted = Effect.gen(function* emit() {
   const { api } = yield* normalize(resolution, { checkFindings: [], config, configDocument });
   const plan = yield* planNames(api, { config, configDocument, strict: false });
   const cli = yield* emitCli({ api, config, plan, validationEdits: [] });
-  const entry = yield* emitEntryFiles(config);
+  const entry = yield* emitEntryFiles(config, api.securitySchemes);
 
   return { files: [...cli.files, ...entry], plan };
 });

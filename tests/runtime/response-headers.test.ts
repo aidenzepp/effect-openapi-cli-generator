@@ -6,6 +6,7 @@ import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // HDR-03 (response clause): a required response header the matched case declares and the response
@@ -26,6 +27,13 @@ const meta: Output.OperationMeta = {
   requiredHeaders: { "200": ["X-Required", "X-Second"], "4XX": ["X-Trace"] },
   security: [],
 };
+
+// Retry notices carry a jittered delay (design D-AD7); fix only that value so two runs compare equal.
+const fixRetryDelays = (stderr: string) =>
+  stderr.replaceAll(
+    /^(?<notice>Notice: retrying .+ \(attempt \d+ of \d+\) in )\d+ ms$/gmu,
+    "$<notice><delay> ms",
+  );
 
 const run = async (
   operation: Output.OperationMeta,
@@ -62,7 +70,7 @@ const run = async (
       stdoutIsTerminal: Effect.succeed(false),
     }),
     Input.stdinClaimLayer,
-    Output.runCredentialsLayer,
+    runCredentialsLayer,
     Layer.succeed(HttpClient.HttpClient, client),
     Layer.succeed(Output.ClientPolicy, {
       allowed: new Set(["GET"]),
@@ -123,7 +131,7 @@ describe("missing required response headers (HDR-03)", () => {
     const result = await run(meta, 500, {});
     const plain = await run({ ...meta, requiredHeaders: undefined }, 500, {});
 
-    expect(result.stderr).toBe(plain.stderr);
+    expect(fixRetryDelays(result.stderr)).toBe(fixRetryDelays(plain.stderr));
   });
 
   test("an operation without required headers writes nothing", async () => {

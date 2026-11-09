@@ -120,6 +120,20 @@
       }
     },
     {
+      "bytes": 5070331,
+      "format": "json",
+      "id": "stripe-brackets-scalars",
+      "license": "MIT",
+      "pinnedRef": "stripe/openapi@3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2",
+      "sha256": "27e7f9681bfe4423708023338fd14096600581718fc2e15efd0d946d6a522c25",
+      "sourceUrl": "https://raw.githubusercontent.com/stripe/openapi/3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2/latest/openapi.spec3.json",
+      "tier": "ci",
+      "twin": {
+        "sha256": "9f4af6778fa1e9a868da5a14c643a05de8528dfc3205645e2438955761c2680c",
+        "sourceUrl": "https://raw.githubusercontent.com/stripe/openapi/3376b56a42f68e2b0a8ba5e9aad7cd4cbe8d2ae2/latest/openapi.spec3.yaml"
+      }
+    },
+    {
       "bytes": 4366745,
       "format": "yaml",
       "id": "digitalocean",

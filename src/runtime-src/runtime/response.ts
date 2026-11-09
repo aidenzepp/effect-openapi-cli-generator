@@ -2,7 +2,7 @@ import { Effect, Option, Schema } from "effect";
 import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
-import type { Credential } from "./auth.ts";
+import type { ScrubEntry } from "./redact.ts";
 import { scrubAround } from "./redact.ts";
 
 /**
@@ -80,14 +80,15 @@ const boundRequestId = (text: string): string => {
 };
 
 /**
- * The declared request-id header, credentials scrubbed, sanitized and scrubbed again (design 7.1,
- * audit S2), then bounded (audit F6): bounding first could cut a credential so that the remaining
- * prefix no longer matches.
+ * The declared request-id header, the run's recorded values scrubbed, sanitized and scrubbed
+ * again (design 7.1, audit S2), then bounded (audit F6): bounding first could cut a value so that
+ * the remaining prefix no longer matches. `scrubbed` is the full recorded list, credentials and
+ * secret-file values alike (design 9 I4; audit F2): the final catch cannot match a cut prefix.
  */
 const requestIdOf = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
-  credentials: readonly Credential[],
+  scrubbed: readonly ScrubEntry[],
 ): string | undefined => {
   if (table.requestIdHeader === undefined) {
     return undefined;
@@ -97,7 +98,7 @@ const requestIdOf = (
 
   return header === undefined
     ? undefined
-    : boundRequestId(scrubAround(header, credentials, (text) => text.replaceAll(unsafeText, "")));
+    : boundRequestId(scrubAround(header, scrubbed, (text) => text.replaceAll(unsafeText, "")));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
@@ -111,18 +112,22 @@ const locationNote = (response: HttpClientResponse.HttpClientResponse): string =
  * of the running fiber (`UrlParams.CurrentRedactedNames`, which the runtime extends with every spec
  * `apiKey` name); outside a fiber only Effect's defaults apply. The body excerpt is bounded and
  * rendered elsewhere (RT-6), so the caller passes it in. A 3xx with no excerpt carries its redacted
- * `Location` there instead. `credentials` are scrubbed from the request id before it is bounded;
- * they are required so a caller cannot silently skip the scrub.
+ * `Location` there instead. `scrubbed`, the run's full recorded list, is scrubbed from the request
+ * id before it is bounded; it is required so a caller cannot silently skip the scrub.
+ * `retryAfterSeconds` is the server's `Retry-After` delay when retrying stopped at the cap (design
+ * D-AD7, 7.1; m3 P14), and sets `ApiResponseError.retryAfterSeconds`; `None`, the default, leaves
+ * it unset.
  */
 export const toApiResponseError = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
   bodyExcerpt: string,
-  credentials: readonly Credential[],
+  scrubbed: readonly ScrubEntry[],
+  retryAfterSeconds: Option.Option<number> = Option.none(),
 ): ApiResponseError => {
   const key = matchResponse(table.responses, response.status);
   const mediaType = mediaTypeOf(response);
-  const requestId = requestIdOf(table, response, credentials);
+  const requestId = requestIdOf(table, response, scrubbed);
   const redirect = response.status >= 300 && response.status < 400 ? locationNote(response) : "";
 
   const base = {
@@ -132,25 +137,30 @@ export const toApiResponseError = (
     status: response.status,
   } as const;
   const withMediaType = mediaType === undefined ? base : { ...base, mediaType };
+  const withRequestId = requestId === undefined ? withMediaType : { ...withMediaType, requestId };
 
   return new ApiResponseError(
-    requestId === undefined ? withMediaType : { ...withMediaType, requestId },
+    Option.match(retryAfterSeconds, {
+      onNone: () => withRequestId,
+      onSome: (seconds) => ({ ...withRequestId, retryAfterSeconds: seconds }),
+    }),
   );
 };
 
 /**
  * A 2xx response passes through whichever key matched. Any other final status fails with
- * an `ApiResponseError`. `filterStatusOk` is never used: it would discard declared error bodies.
+ * an `ApiResponseError`, its request id scrubbed of `scrubbed`, the run's full recorded list.
+ * `filterStatusOk` is never used: it would discard declared error bodies.
  */
 export const classify = (
   table: ResponseTable,
   response: HttpClientResponse.HttpClientResponse,
-  credentials: readonly Credential[],
+  scrubbed: readonly ScrubEntry[],
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, ApiResponseError> =>
   Effect.suspend(() =>
     isSuccess(response.status)
       ? Effect.succeed(response)
-      : Effect.fail(toApiResponseError(table, response, "", credentials)),
+      : Effect.fail(toApiResponseError(table, response, "", scrubbed)),
   );
 
 /**

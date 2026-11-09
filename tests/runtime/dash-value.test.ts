@@ -3,6 +3,7 @@ import { BunServices } from "@effect/platform-bun";
 import { Cause, Console, Effect, Exit, Layer, Runtime, Stdio } from "effect";
 import { CliConfig, CliOutput, Command, Flag } from "effect/cli";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 // A string flag value that starts with "-" (operator decision A on the dash-led value defect):
 // with the entry's built-in list there is no -h or -v alias, so `--p -bad_.host-` is a usage
@@ -42,7 +43,7 @@ const run = (args: readonly string[]): Promise<Run> =>
       return Command.runWith(command, { renderErrors: false, version: "1.2.3" })(args).pipe(
         Output.exitForHelp,
         Output.finalCatch([]),
-        Effect.provide(Layer.merge(Stdio.layerTest({}), Output.runCredentialsLayer)),
+        Effect.provide(Layer.merge(Stdio.layerTest({}), runCredentialsLayer)),
         Effect.provide(CliOutput.layer(Output.formatter(command))),
         Effect.provide(CliOutput.layerPresenter(Output.presenter)),
         Effect.provide(CliConfig.layer({ builtIns: Output.builtIns })),

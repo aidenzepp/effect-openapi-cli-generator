@@ -16,8 +16,16 @@ import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
-import { deepObjectExplodeText, formStyleRefusal, partHeader } from "./parameters.ts";
-import type { PartHeaderOutcome } from "./parameters.ts";
+import {
+  authorChoiceCodes,
+  bracketChoiceCode,
+  deepObjectExplodeText,
+  formStyleRefusal,
+  partHeader,
+  scalarChoiceCode,
+  scalarCover,
+} from "./parameters.ts";
+import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
@@ -26,7 +34,10 @@ import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
  * opt-in switches of the same name; absent is strict (design 6.1, D-OQ1).
  */
 export interface BodySite {
-  readonly nonStandard?: { readonly deepObjectBrackets?: boolean };
+  readonly nonStandard?: {
+    readonly deepObjectBrackets?: boolean;
+    readonly deepObjectScalars?: boolean;
+  };
   readonly openapi: string;
   readonly operation?: typeof DiagnosticOperation.Type;
   readonly pointer: string;
@@ -131,15 +142,23 @@ const MediaTypeObject = Schema.Struct({
 
 type MediaNode = typeof MediaTypeObject.Type;
 
-// Only what the multipart rules read of a schema; a boolean schema decodes to nothing.
+// Only what the part rules read of a schema; a boolean schema decodes to nothing. `required` and
+// the compositions are `Unknown` so a malformed value never hides the node's other members.
 const SchemaNode = Schema.Struct({
   additionalProperties: Schema.optionalKey(Schema.Unknown),
   allOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  anyOf: Schema.optionalKey(Schema.Unknown),
   contentEncoding: Schema.optionalKey(Schema.String),
+  dependentRequired: Schema.optionalKey(Schema.Unknown),
+  dependentSchemas: Schema.optionalKey(Schema.Unknown),
   format: Schema.optionalKey(Schema.String),
+  if: Schema.optionalKey(Schema.Unknown),
   items: Schema.optionalKey(Schema.Unknown),
+  not: Schema.optionalKey(Schema.Unknown),
+  oneOf: Schema.optionalKey(Schema.Unknown),
   prefixItems: Schema.optionalKey(Schema.Array(Schema.Unknown)),
   properties: Schema.optionalKey(ObjectValue),
+  required: Schema.optionalKey(Schema.Unknown),
   type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 });
 
@@ -220,7 +239,15 @@ interface Finding {
   readonly message: string;
   readonly at: CanonicalKey;
   readonly related?: readonly CanonicalKey[];
+  /**
+   * `field`: one property of a kept alternative is refused (design 8.5); absent, `element`.
+   */
+  readonly scope?: "field";
   readonly severity: "notice" | "refusal";
+  /**
+   * The refused property's wire name, set with `field` scope only.
+   */
+  readonly wire?: string;
 }
 
 const refusal = (
@@ -255,6 +282,18 @@ const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly
       ? { ...finding, at: home, related: [finding.at, ...(finding.related ?? [])] }
       : finding,
   );
+
+// A dropping refusal of an optional property whose alternative stays is refused at `field` scope,
+// anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4),
+// and names the property by `wire`.
+const fieldRefusal = (entry: CanonicalKey, finding: Finding, wire: string): Finding => {
+  const { drops: _drops, ...kept } = finding;
+  const field: Finding = { ...kept, at: entry, scope: "field", wire };
+
+  return keyOf(finding.at) === keyOf(entry)
+    ? field
+    : { ...field, related: [finding.at, ...(finding.related ?? [])] };
+};
 
 const sorted = (rows: readonly string[]): readonly string[] =>
   Arr.sort(Arr.dedupe(rows), Order.String);
@@ -388,8 +427,9 @@ const membersOf = (walk: Walk, schema: CanonicalKey): Effect.Effect<Members, Bod
     const prefix = firstLocated(nodes, (node) => node.prefixItems);
     const items = firstLocated(nodes, (node) => node.items);
 
+    // `items: false` admits no item beyond `prefixItems`, so it has no item schema.
     return {
-      items: items === undefined ? undefined : childKey(items.at, "items"),
+      items: items === undefined || items.value === false ? undefined : childKey(items.at, "items"),
       prefixItems:
         prefix === undefined
           ? []
@@ -402,6 +442,81 @@ const memberSchema = (members: Members, target: Target): CanonicalKey | undefine
   target.kind === "property"
     ? members.properties.find(([name]) => name === target.name)?.[1]
     : members.prefixItems[target.index];
+
+/**
+ * Which properties of an alternative schema are required (design 8.5 rule 3): `names` gathers every
+ * `required` array on the path `membersOf` walks, the root, `$ref` targets and `allOf` members.
+ * `sure` is false when that walk cannot be complete: a cycle, a reference it cannot follow, or a
+ * composition it does not resolve; then every property counts as required.
+ */
+interface Requirement {
+  readonly names: ReadonlySet<string>;
+  readonly sure: boolean;
+}
+
+// Keywords that can make a property required on a path `membersOf` does not follow; `then` and
+// `else` apply only under `if`.
+const unresolved = [
+  "anyOf",
+  "dependentRequired",
+  "dependentSchemas",
+  "if",
+  "not",
+  "oneOf",
+] as const;
+
+const requiredStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String));
+
+const requirementOf = (
+  walk: Walk,
+  schema: CanonicalKey,
+): Effect.Effect<Requirement, BodyNodeBudget> =>
+  Effect.gen(function* requirement() {
+    const names = new Set<string>();
+    const done = new Set<string>();
+    const path = new Set<string>();
+    let sure = true;
+    // A schema already on the path is a cycle, and a reference `settle` left unfollowed is not
+    // resolved: either leaves the walk unsure. A schema reached twice otherwise is read once.
+    const visit = (start: CanonicalKey): Effect.Effect<void, BodyNodeBudget> =>
+      Effect.gen(function* member() {
+        const at = settle(walk.resolution, start);
+        walk.spent += 1;
+        if (walk.spent > walk.maxNodes) {
+          yield* budgetFailure(walk);
+        }
+
+        const key = keyOf(at);
+        if (path.has(key) || referenceIn(walk.resolution, at)?.kind === "schema") {
+          sure = false;
+        } else if (!done.has(key)) {
+          done.add(key);
+
+          const node = yield* nodeAt(walk.resolution, at);
+          for (const name of Option.getOrElse(requiredStrings(node.required), () => [])) {
+            names.add(name);
+          }
+
+          if (unresolved.some((keyword) => node[keyword] !== undefined)) {
+            sure = false;
+          }
+
+          path.add(key);
+          for (const index of (node.allOf ?? []).keys()) {
+            yield* visit(childKey(at, "allOf", String(index)));
+          }
+
+          path.delete(key);
+        }
+      });
+
+    yield* visit(schema);
+
+    return { names, sure };
+  });
+
+const isRequired = (requirement: Requirement, name: string): boolean =>
+  !requirement.sure || requirement.names.has(name);
 
 interface Facts {
   readonly contentEncoding: { readonly at: CanonicalKey; readonly value: string } | undefined;
@@ -554,7 +669,9 @@ interface PlainNested {
 interface PlainRule extends PlainNested {
   contentEncoding?: Transfer;
   nested?: readonly PlainNested[];
+  nestedItem?: PlainNested;
   nonStandard?: "deepObjectBrackets";
+  nonStandardScalars?: "deepObjectScalars";
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
 }
@@ -636,9 +753,11 @@ export const sendsFormPairs = (serialization: {
 
 const formPairsType = "text/plain";
 
+const unsupportedPartStyleCode = "ENC-40/unsupported-part-style";
+
 const unsupportedPartStyle = (input: RuleInput): Finding =>
   refusal(
-    "ENC-40/unsupported-part-style",
+    unsupportedPartStyleCode,
     "appendix-c-using-rfc6570-based-serialization",
     "Encoding style, explode or allowReserved",
     `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
@@ -908,22 +1027,49 @@ const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.E
 
 interface NestedEntry {
   readonly actual: CanonicalKey;
-  readonly node: EncodingNode;
+  readonly node: EncodingNode | undefined;
   readonly target: Target;
 }
 
-const nestedEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] => [
-  ...Object.entries(node.encoding ?? {}).map(([name, child]): NestedEntry => ({
-    actual: childKey(actual, "encoding", name),
-    node: child,
-    target: { kind: "property", name },
-  })),
-  ...(node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
+const positionalEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] =>
+  (node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
     actual: childKey(actual, "prefixEncoding", String(index)),
     node: child,
     target: { index, kind: "position" },
-  })),
-];
+  }));
+
+// The nested rules' entries: by name (HT:B16, ENC-07), every property of the part's schema in
+// property order, its Encoding Object or else the default table, then each encoding key that names
+// no property; by position, each `prefixEncoding` entry.
+const nestedEntries = (
+  node: EncodingNode,
+  actual: CanonicalKey,
+  members: Members,
+): readonly NestedEntry[] => {
+  const byName = node.encoding;
+  const declared = new Set(members.properties.map(([name]) => name));
+  const properties =
+    byName === undefined
+      ? []
+      : members.properties.map(([name, schema]): NestedEntry => {
+          const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+
+          return {
+            actual: explicit === undefined ? schema : childKey(actual, "encoding", name),
+            node: explicit,
+            target: { kind: "property", name },
+          };
+        });
+  const undeclared = Object.entries(byName ?? {})
+    .filter(([name]) => !declared.has(name))
+    .map(([name, child]): NestedEntry => ({
+      actual: childKey(actual, "encoding", name),
+      node: child,
+      target: { kind: "property", name },
+    }));
+
+  return [...properties, ...undeclared, ...positionalEntries(node, actual)];
+};
 
 const toNested = (rule: PlainRule): PlainNested => {
   const nested: PlainNested = {
@@ -947,6 +1093,10 @@ const nestingRefusal = (
 
 interface Nesting {
   readonly findings: readonly Finding[];
+  /**
+   * The nested `itemEncoding`'s rule, after the nested positions (ENC-09).
+   */
+  readonly item: PlainNested | undefined;
   readonly nested: readonly PlainNested[];
   readonly refused: boolean;
   readonly rows: readonly string[];
@@ -954,6 +1104,7 @@ interface Nesting {
 
 const refuseNesting = (finding: Finding): Nesting => ({
   findings: [finding],
+  item: undefined,
   nested: [],
   refused: true,
   rows: [],
@@ -973,10 +1124,12 @@ type BuildAll = (
 const nestedRows = (node: EncodingNode): readonly string[] => [
   ...(node.encoding === undefined ? [] : ["ENC-07"]),
   ...(node.prefixEncoding === undefined ? [] : ["ENC-08"]),
+  ...(node.itemEncoding === undefined ? [] : ["ENC-09"]),
 ];
 
-// ENC-07 to ENC-09, ENC-16: one nested level by name and by position; a deeper level, and a nested
-// itemEncoding (which `EncodingRule.nested` cannot hold), are refused.
+// ENC-07 to ENC-09, ENC-16: one nested level by name and by position, the nested `itemEncoding`
+// the rule of every position after the nested `prefixEncoding` (HT:B16); a deeper level is
+// refused.
 const nestingOf = (
   ctx: Context,
   input: RuleInput,
@@ -984,8 +1137,9 @@ const nestingOf = (
   buildAll: BuildAll,
 ): Effect.Effect<Nesting, BodyNodeBudget> =>
   Effect.gen(function* nesting() {
-    const entries = nestedEntries(node, input.actual);
-    if (input.depth === 1 && (entries.length > 0 || node.itemEncoding !== undefined)) {
+    const nests =
+      Object.keys(node.encoding ?? {}).length > 0 || (node.prefixEncoding ?? []).length > 0;
+    if (input.depth === 1 && (nests || node.itemEncoding !== undefined)) {
       return refuseNesting(
         nestingRefusal(
           "ENC-16/nesting-too-deep",
@@ -996,37 +1150,42 @@ const nestingOf = (
       );
     }
 
-    if (node.itemEncoding !== undefined) {
-      return refuseNesting(
-        nestingRefusal(
-          "ENC-09/nested-item-encoding",
-          "Nested itemEncoding",
-          "A nested itemEncoding has no place in the model.",
-          childKey(input.actual, "itemEncoding"),
-        ),
-      );
-    }
-
+    const item = node.itemEncoding;
     const children =
-      entries.length === 0 || input.schema === undefined
+      (!nests && item === undefined) || input.schema === undefined
         ? noMembers
         : yield* membersOf(ctx.walk, input.schema);
-    const built = yield* buildAll(
-      ctx,
-      entries.map((entry): RuleInput => ({
-        actual: entry.actual,
-        depth: 1,
-        formData: false,
-        honorsStyle: false,
-        node: entry.node,
-        schema: memberSchema(children, entry.target),
-        target: entry.target,
-      })),
-    );
+    const entries = nestedEntries(node, input.actual, children);
+    const inputs = entries.map((entry): RuleInput => ({
+      actual: entry.actual,
+      depth: 1,
+      formData: false,
+      honorsStyle: false,
+      node: entry.node,
+      schema: memberSchema(children, entry.target),
+      target: entry.target,
+    }));
+    const itemInput: readonly RuleInput[] =
+      item === undefined
+        ? []
+        : [
+            {
+              actual: childKey(input.actual, "itemEncoding"),
+              depth: 1,
+              formData: false,
+              honorsStyle: false,
+              node: item,
+              schema: children.items,
+              target: { index: (node.prefixEncoding ?? []).length, kind: "position" },
+            },
+          ];
+    const built = yield* buildAll(ctx, [...inputs, ...itemInput]);
+    const rules = built.rules.map((rule) => toNested(rule));
 
     return {
       findings: built.findings,
-      nested: built.rules.map((rule) => toNested(rule)),
+      item: item === undefined ? undefined : rules[entries.length],
+      nested: rules.slice(0, entries.length),
       refused: built.refused,
       rows: nestedRows(node),
     };
@@ -1171,6 +1330,18 @@ const transferConflict = (
         );
   });
 
+// A nesting part's rules on its rule: `nested` is present whenever the part nests, so an item rule
+// alone still marks it, and `nestedItem` holds the nested `itemEncoding`'s rule (ENC-09).
+const withNesting = (rule: PlainRule, nesting: Nesting): void => {
+  if (nesting.nested.length > 0 || nesting.item !== undefined) {
+    rule.nested = nesting.nested;
+  }
+
+  if (nesting.item !== undefined) {
+    rule.nestedItem = nesting.item;
+  }
+};
+
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
 const buildRule = (
   ctx: Context,
@@ -1237,10 +1408,7 @@ const buildRule = (
       rule.contentEncoding = transfer.encoding;
     }
 
-    if (nesting.nested.length > 0) {
-      rule.nested = nesting.nested;
-    }
-
+    withNesting(rule, nesting);
     if (typing.serialization !== undefined) {
       rule.serialization = typing.serialization;
     }
@@ -1276,6 +1444,7 @@ interface PlainAlternative {
   readonly mediaType: string;
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly prefixEncoding: readonly PlainRule[];
+  refusedFields?: readonly string[];
   readonly rows: readonly string[];
   schema?: { readonly key: string };
 }
@@ -1402,6 +1571,10 @@ interface Parts {
   readonly itemEncoding: PlainRule | undefined;
   readonly prefixEncoding: readonly PlainRule[];
   readonly refused: boolean;
+  /**
+   * The properties refused at `field` scope, in property order (design 8.5).
+   */
+  readonly refusedFields: readonly string[];
 }
 
 const noParts: Parts = {
@@ -1410,6 +1583,7 @@ const noParts: Parts = {
   itemEncoding: undefined,
   prefixEncoding: [],
   refused: false,
+  refusedFields: [],
 };
 
 const refusedParts = (findings: readonly Finding[]): Parts => ({
@@ -1528,43 +1702,70 @@ const propertyInputs = (
   });
 };
 
-// One input per declared property, then per prefixEncoding entry, then the itemEncoding rule.
+interface PartInputs {
+  readonly inputs: readonly RuleInput[];
+  /**
+   * How many of `inputs`, after the properties, are `prefixEncoding` positions; an item rule
+   * follows.
+   */
+  readonly prefixCount: number;
+}
+
+// One input per declared property, then per position, then the item rule. A 3.2 positional
+// `multipart/mixed` body (HT:B15) gives every `prefixItems` position a rule, its Encoding Object or
+// else the default table, and `items` or `itemSchema` an item rule; elsewhere only the declared
+// `prefixEncoding` entries and `itemEncoding` become rules.
 const partInputs = (
   line: Line,
   media: Media,
   members: Members,
-  honorsStyle: boolean,
-  formData: boolean,
-): readonly RuleInput[] => {
+  options: { readonly formData: boolean; readonly honorsStyle: boolean; readonly mixed: boolean },
+): PartInputs => {
   const { home, node } = media;
+  const { formData, honorsStyle, mixed } = options;
   const prefix = line === "3.2" ? (node.prefixEncoding ?? []) : [];
   const item = line === "3.2" ? node.itemEncoding : undefined;
+  const positional = line === "3.2" && mixed;
+  const count = positional ? Math.max(prefix.length, members.prefixItems.length) : prefix.length;
   const properties = propertyInputs(media, members, honorsStyle, formData);
-  const positions = prefix.map((entry, index): RuleInput => ({
-    actual: childKey(home, "prefixEncoding", String(index)),
-    depth: 0,
-    formData,
-    honorsStyle,
-    node: entry,
-    schema: members.prefixItems[index],
-    target: { index, kind: "position" },
-  }));
+  const positions = Array.from({ length: count }, (_, index): RuleInput => {
+    const entry = prefix[index];
+    const schema = members.prefixItems[index];
+
+    return {
+      actual:
+        entry === undefined && schema !== undefined
+          ? schema
+          : childKey(home, "prefixEncoding", String(index)),
+      depth: 0,
+      formData,
+      honorsStyle,
+      node: entry,
+      schema,
+      target: { index, kind: "position" },
+    };
+  });
+  const itemSchema = node.itemSchema === undefined ? members.items : childKey(home, "itemSchema");
+  const defaulted = positional && itemSchema !== undefined;
   const remaining: RuleInput[] =
-    item === undefined
+    item === undefined && !defaulted
       ? []
       : [
           {
-            actual: childKey(home, "itemEncoding"),
+            actual:
+              item === undefined && itemSchema !== undefined
+                ? itemSchema
+                : childKey(home, "itemEncoding"),
             depth: 0,
             formData,
             honorsStyle,
             node: item,
-            schema: node.itemSchema === undefined ? members.items : childKey(home, "itemSchema"),
-            target: { index: prefix.length, kind: "position" },
+            schema: itemSchema,
+            target: { index: count, kind: "position" },
           },
         ];
 
-  return [...properties, ...positions, ...remaining];
+  return { inputs: [...properties, ...positions, ...remaining], prefixCount: count };
 };
 
 // Multipart part rules: the declared properties by name, then 3.2 positions (design 6.3).
@@ -1607,6 +1808,50 @@ const isObjectBody = (
     );
   });
 
+interface PartStyles {
+  readonly drops: boolean;
+  readonly findings: readonly Finding[];
+  readonly refusedFields: readonly string[];
+}
+
+// ENC-40 on a named part follows the form property rules (design 8.5 rules 2, 3 and 11): refused
+// at `field` scope when every named part it refuses is optional, otherwise every one of them drops
+// the alternative. A 3.2 positional entry has no name, so its refusal keeps `element` scope.
+const partStyles = (
+  ctx: Context,
+  schema: CanonicalKey | undefined,
+  inputs: readonly RuleInput[],
+  findings: readonly Finding[],
+): Effect.Effect<PartStyles, BodyNodeBudget> =>
+  Effect.gen(function* styles() {
+    const named = new Map(
+      inputs.flatMap((input) =>
+        input.target.kind === "property" ? [[keyOf(input.actual), input.target.name] as const] : [],
+      ),
+    );
+    const nameOf = (finding: Finding): string | undefined =>
+      finding.code === unsupportedPartStyleCode ? named.get(keyOf(finding.at)) : undefined;
+    const refusedFields = findings.flatMap((finding) => nameOf(finding) ?? []);
+    if (schema === undefined || refusedFields.length === 0) {
+      return { drops: false, findings, refusedFields: [] };
+    }
+
+    const requirement = yield* requirementOf(ctx.walk, schema);
+    const drops = refusedFields.some((name) => isRequired(requirement, name));
+    const moved = (finding: Finding, name: string): Finding =>
+      drops ? dropping(finding) : fieldRefusal(finding.at, finding, name);
+
+    return {
+      drops,
+      findings: findings.map((finding) => {
+        const name = nameOf(finding);
+
+        return name === undefined ? finding : moved(finding, name);
+      }),
+      refusedFields: drops ? [] : refusedFields,
+    };
+  });
+
 const multipartParts = (
   ctx: Context,
   media: Media,
@@ -1645,15 +1890,22 @@ const multipartParts = (
       return refusedParts([...extra, ...keys.findings]);
     }
 
-    const honorsStyle = base === "multipart/form-data" && line !== "3.0";
-    const inputs = partInputs(line, media, members, honorsStyle, base === "multipart/form-data");
+    const { inputs, prefixCount } = partInputs(line, media, members, {
+      formData: base === "multipart/form-data",
+      honorsStyle: base === "multipart/form-data" && line !== "3.0",
+      mixed: base === "multipart/mixed",
+    });
     const built = yield* buildAll(ctx, inputs);
-    const findings = [...extra, ...keys.findings, ...built.findings];
     if (built.refused) {
+      return refusedParts([...extra, ...keys.findings, ...built.findings]);
+    }
+
+    const styled = yield* partStyles(ctx, schema, inputs, built.findings);
+    const findings = [...extra, ...keys.findings, ...styled.findings];
+    if (styled.drops) {
       return refusedParts(findings);
     }
 
-    const prefixCount = line === "3.2" ? (media.node.prefixEncoding ?? []).length : 0;
     const propertyCount = members.properties.length;
     const positioned = built.rules.slice(propertyCount);
 
@@ -1663,6 +1915,7 @@ const multipartParts = (
       itemEncoding: positioned[prefixCount],
       prefixEncoding: positioned.slice(0, prefixCount),
       refused: false,
+      refusedFields: styled.refusedFields,
     };
   });
 
@@ -1781,8 +2034,6 @@ const compoundNested = (input: RuleInput): Finding =>
     ),
   );
 
-const bracketChoiceCode = "PRM-27/bracket-author-choice";
-
 const bracketChoice = (input: RuleInput): Finding =>
   notice(
     bracketChoiceCode,
@@ -1791,6 +2042,28 @@ const bracketChoice = (input: RuleInput): Finding =>
     `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
     input.actual,
   );
+
+const scalarChoice = (input: RuleInput): Finding =>
+  notice(
+    scalarChoiceCode,
+    "style-values",
+    "Encoding style deepObject under form-urlencoded",
+    `The author config sends a scalar deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} as name=value, which the specification does not define.`,
+    input.actual,
+  );
+
+// The scalar switch's decision for a form deepObject entry, by the query parameter rule (design
+// 6.1 Scalar switch); `Strict` for any other style.
+const scalarCoverOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<ScalarCover> =>
+  serialization?.style !== "deepObject" || input.schema === undefined
+    ? Effect.succeed({ _tag: "Strict" })
+    : scalarCover(ctx.resolution, input.schema, ctx.site.nonStandard, {
+        maxNodes: ctx.walk.maxNodes,
+      });
 
 // The query style table's refusal for a form property's explicit style fields (design 6.3, through
 // the parameter rule `formStyleRefusal`), placed at the Encoding entry; it drops the alternative.
@@ -1854,6 +2127,26 @@ const deepObjectOf = (
     return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
   });
 
+// What PRM-27 does to one form rule once the scalar switch has decided: its covered branches
+// (refused when a nested branch or member union is uncovered, marked when the bracket switch covers
+// a nested one), or the strict nested test.
+const coveredDeepObject = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+  cover: ScalarCover,
+): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> => {
+  if (cover._tag === "Uncovered") {
+    return Effect.succeed("refuse");
+  }
+
+  if (cover._tag === "Covered") {
+    return Effect.succeed(cover.nested ? "mark" : "none");
+  }
+
+  return deepObjectOf(ctx, input, serialization);
+};
+
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
 // names the table's type, which changes nothing on the wire. Style fields the query style table
@@ -1867,12 +2160,18 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       return { findings: typing.findings, rule: undefined };
     }
 
-    const inapplicable = yield* styleRefusalOf(ctx, input, typing.serialization);
+    // Under the scalar switch the branch walk decides a deepObject entry the strict object test
+    // would refuse; the style table refuses nothing else for deepObject (design 6.1 Scalar switch).
+    const cover = yield* scalarCoverOf(ctx, input, typing.serialization);
+    const inapplicable =
+      cover._tag === "Strict"
+        ? yield* styleRefusalOf(ctx, input, typing.serialization)
+        : Option.none();
     if (Option.isSome(inapplicable)) {
       return { findings: [...typing.findings, inapplicable.value], rule: undefined };
     }
 
-    const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);
+    const deepObject = yield* coveredDeepObject(ctx, input, typing.serialization, cover);
     if (deepObject === "refuse") {
       return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
     }
@@ -1912,10 +2211,15 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       rule.nonStandard = "deepObjectBrackets";
     }
 
+    if (cover._tag === "Covered") {
+      rule.nonStandardScalars = "deepObjectScalars";
+    }
+
     return {
       findings: [
         ...typing.findings,
         ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...(cover._tag === "Covered" ? [scalarChoice(input)] : []),
         ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
         ...formIgnored(node, input.actual),
       ],
@@ -1947,13 +2251,22 @@ const formPositional = (media: Media): readonly Finding[] => [
       ]),
 ];
 
-// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention:
-// its bracket notices go with it (design 8.4), whatever the order of its properties.
+// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention or
+// as a scalar pair: its author-choice notices go with it (design 8.4, 8.5 rule 7), whatever the
+// order of its properties.
 const refusedFormParts = (findings: readonly Finding[]): Parts =>
-  refusedParts(findings.filter((finding) => finding.code !== bracketChoiceCode));
+  refusedParts(findings.filter((finding) => !authorChoiceCodes.has(finding.code)));
 
 // Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
-const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBudget> =>
+// With `fields` (a request body, design 8.5 rules 2, 3 and 11), a property whose rule refuses is
+// refused at `field` scope when it is optional, and the alternative stays; a required one drops
+// the alternative with every entry's dropping refusals, so no `field` record outlives it. Without
+// (a `querystring` content entry, design 6.1), the first refusing rule refuses the entry.
+const formParts = (
+  ctx: Context,
+  media: Media,
+  fields: boolean,
+): Effect.Effect<Parts, BodyNodeBudget> =>
   Effect.gen(function* parts() {
     const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
     const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
@@ -1964,17 +2277,44 @@ const formParts = (ctx: Context, media: Media): Effect.Effect<Parts, BodyNodeBud
 
     const findings: Finding[] = [...keys.findings, ...formPositional(media)];
     const rules: PlainRule[] = [];
+    const refusedFields: string[] = [];
+    const entries = new Map<Finding, { readonly at: CanonicalKey; readonly name: string }>();
+    let requirement: Requirement | undefined;
     for (const input of propertyInputs(media, members, true, false)) {
       const result = yield* formRule(ctx, input);
       findings.push(...result.findings);
-      if (result.rule === undefined) {
+      if (result.rule !== undefined) {
+        rules.push(result.rule);
+        continue;
+      }
+
+      if (!fields || schema === undefined || input.target.kind !== "property") {
         return refusedFormParts(findings);
       }
 
-      rules.push(result.rule);
+      requirement ??= yield* requirementOf(ctx.walk, schema);
+      if (isRequired(requirement, input.target.name)) {
+        return refusedFormParts(findings);
+      }
+
+      refusedFields.push(input.target.name);
+      for (const finding of result.findings) {
+        if (finding.drops === true) {
+          entries.set(finding, { at: input.actual, name: input.target.name });
+        }
+      }
     }
 
-    return { ...noParts, encoding: rules, findings };
+    return {
+      ...noParts,
+      encoding: rules,
+      findings: findings.map((finding) => {
+        const entry = entries.get(finding);
+
+        return entry === undefined ? finding : fieldRefusal(entry.at, finding, entry.name);
+      }),
+      refusedFields,
+    };
   });
 
 const ignoredParts = (line: Line, media: Media): Parts => {
@@ -1998,7 +2338,9 @@ const partsOf = (
     return multipartParts(ctx, media, base);
   }
 
-  return codec === "form" ? formParts(ctx, media) : Effect.succeed(ignoredParts(ctx.line, media));
+  return codec === "form"
+    ? formParts(ctx, media, true)
+    : Effect.succeed(ignoredParts(ctx.line, media));
 };
 
 const normalizeAlternative = (
@@ -2064,6 +2406,10 @@ const normalizeAlternative = (
       result.itemEncoding = parts.itemEncoding;
     }
 
+    if (parts.refusedFields.length > 0) {
+      result.refusedFields = parts.refusedFields;
+    }
+
     const described = line === "3.2" && node.description !== undefined;
 
     return {
@@ -2085,29 +2431,60 @@ interface DiagnosticFields {
   pointer: string;
   related?: readonly { readonly document: string; readonly pointer: string }[];
   row: string;
-  scope: "element";
+  scope: "element" | "field";
   severity: "notice" | "refusal";
   specSection: string;
+  wire?: string;
 }
+
+// Where `at` sits below the content entry `mediaSite` when that entry is a reference, as a 3.2
+// `components/mediaTypes` one is: the same path under the entry instead of under its target. Undefined
+// when the entry is no reference or `at` lies outside its target.
+const underMediaSite = (
+  resolution: Resolution,
+  mediaSite: CanonicalKey | undefined,
+  at: CanonicalKey,
+): CanonicalKey | undefined => {
+  if (mediaSite === undefined) {
+    return undefined;
+  }
+
+  const home = follow(resolution, mediaSite);
+  const below = at.pointer === home.pointer || at.pointer.startsWith(`${home.pointer}/`);
+  if (keyOf(home) === keyOf(mediaSite) || at.document !== home.document || !below) {
+    return undefined;
+  }
+
+  return {
+    document: mediaSite.document,
+    pointer: `${mediaSite.pointer}${at.pointer.slice(home.pointer.length)}`,
+  };
+};
 
 // The use site is the operation's request body; when it is a reference, the element's own
 // location in the target is `related[0]` (design 8.1). Otherwise the element names its own
-// location, in whichever document of the set holds it.
+// location, in whichever document of the set holds it. Under a content entry `mediaSite` that is a
+// reference, the use site is that entry: inline, the element sits below it with its location in the
+// target as `related[0]`; under a referenced body, the same place below the body's entry follows
+// `related[0]`, so the media key stays known.
 const toDiagnostics = (
   ctx: Context,
   findings: readonly Finding[],
+  mediaSite?: CanonicalKey,
 ): Effect.Effect<readonly Diagnostic[]> =>
   Effect.all(
     findings.map((item) => {
+      const viaEntry = underMediaSite(ctx.resolution, mediaSite, item.at);
+      const own = viaEntry ?? item.at;
       const fields: DiagnosticFields = {
         code: item.code,
-        document: ctx.reference === undefined ? item.at.document : ctx.resolution.document,
+        document: ctx.reference === undefined ? own.document : ctx.resolution.document,
         element: item.element,
         message: item.message,
         openapi: ctx.site.openapi,
-        pointer: ctx.reference === undefined ? item.at.pointer : ctx.site.pointer,
+        pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
         row: item.code.slice(0, item.code.indexOf("/")),
-        scope: "element",
+        scope: item.scope ?? "element",
         severity: item.severity,
         specSection: specSectionUrl(ctx.line, item.anchor),
       };
@@ -2115,11 +2492,19 @@ const toDiagnostics = (
         fields.hint = item.hint;
       }
 
+      if (item.wire !== undefined) {
+        fields.wire = item.wire;
+      }
+
       if (ctx.site.operation !== undefined) {
         fields.operation = ctx.site.operation;
       }
 
-      const related = [...(ctx.reference === undefined ? [] : [item.at]), ...(item.related ?? [])];
+      // Placed away from its own location, the element names it first; under a referenced body,
+      // the same place below the body's content entry follows.
+      const moved = ctx.reference !== undefined || viaEntry !== undefined;
+      const bodyEntry = ctx.reference === undefined || viaEntry === undefined ? [] : [viaEntry];
+      const related = [...(moved ? [item.at] : []), ...bodyEntry, ...(item.related ?? [])];
       if (related.length > 0) {
         fields.related = related;
       }
@@ -2341,10 +2726,12 @@ export const normalizeBody = (
     }
 
     const results = yield* Effect.all(keys.map((key) => normalizeAlternative(ctx, target, key)));
-    const diagnostics = yield* toDiagnostics(
-      ctx,
-      results.flatMap((result) => result.findings),
+    const placed = yield* Effect.all(
+      results.map((result, index) =>
+        toDiagnostics(ctx, result.findings, childKey(target, "content", keys[index] ?? "")),
+      ),
     );
+    const diagnostics = placed.flat();
     const alternatives = results.flatMap((result) =>
       result.alternative === undefined ? [] : [result.alternative],
     );
@@ -2397,21 +2784,19 @@ export const formContentRules = (
     const reference = referenceIn(resolution, use);
     const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
     const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
-    const media = yield* readMedia(
-      resolution,
-      childKey(follow(resolution, use), "content", mediaType),
-    );
-    const parts = yield* formParts(ctx, media);
+    const mediaSite = childKey(follow(resolution, use), "content", mediaType);
+    const media = yield* readMedia(resolution, mediaSite);
+    const parts = yield* formParts(ctx, media, false);
     if (parts.refused) {
       return {
         _tag: "Refused",
-        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings)),
+        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings), mediaSite),
       };
     }
 
     return {
       _tag: "Implemented",
-      diagnostics: yield* toDiagnostics(ctx, parts.findings),
+      diagnostics: yield* toDiagnostics(ctx, parts.findings, mediaSite),
       encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
         Effect.orDie,
       ),

@@ -12,7 +12,14 @@ import type {
 } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { foldIdentifier } from "../names/fold.ts";
-import type { NamePlan, PlannedCommand, PlannedFlag, PlannedGroup } from "../names/index.ts";
+import type {
+  NamePlan,
+  PlannedCertificate,
+  PlannedCommand,
+  PlannedFlag,
+  PlannedGroup,
+} from "../names/index.ts";
+import { isPositionalBody } from "../names/flatten.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
 import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
@@ -250,6 +257,29 @@ const isRange = (mediaType: string): boolean => essence(mediaType).endsWith("/*"
 const mediaTypes = (alternatives: readonly MediaAlternative[]) =>
   alternatives.map((alternative) => alternative.mediaType);
 
+const refusedFieldsOf = (alternative: MediaAlternative): readonly string[] =>
+  alternative.refusedFields ?? [];
+
+/**
+ * The `refused` entry of an operation's media declaration: each request key with refused fields,
+ * in alternative order (design 8.5 rule 6). `None` when no alternative refuses one, so a spec
+ * without a field refusal emits what it emitted before.
+ */
+const refusedEntry = (alternatives: readonly MediaAlternative[]): Option.Option<Expr> => {
+  const listed = alternatives.filter((alternative) => refusedFieldsOf(alternative).length > 0);
+
+  return listed.length === 0
+    ? Option.none()
+    : Option.some(
+        obj(
+          listed.map((alternative) => [
+            alternative.mediaType,
+            strings(refusedFieldsOf(alternative)),
+          ]),
+        ),
+      );
+};
+
 const responseKey = (key: ResponseCase["key"]): string => {
   if (key === "default") {
     return key;
@@ -292,6 +322,13 @@ const documentLabel = (entry: string, document: string): string => {
 // nothing for an unmarked one, so it emits what it emitted before (C16).
 const brackets = (marker: EncodingRule["nonStandard"]): readonly (readonly [string, Expr])[] =>
   marker === "deepObjectBrackets" ? [["brackets", bool(true)]] : [];
+
+// The scalar switch's option, `scalars: true`, for an entry the model marks (design 6.1 Scalar
+// switch); nothing for an unmarked one (C16).
+const scalars = (
+  marker: EncodingRule["nonStandardScalars"],
+): readonly (readonly [string, Expr])[] =>
+  marker === "deepObjectScalars" ? [["scalars", bool(true)]] : [];
 
 interface ParameterParts {
   readonly cookie?: Expr;
@@ -510,9 +547,10 @@ const parameterParts = (
     }
 
     // An object's value is JSON data, as a `content` parameter's is; the runtime refuses a member
-    // that is itself an object or array.
+    // that is itself an object or array. A scalar-marked union is one JSON value too (design 6.1
+    // Scalar switch).
     let valueType = typeKeyword(boolean.success ? "boolean" : "string");
-    if (serialization.objectValued) {
+    if (serialization.objectValued || serialization.nonStandardScalars !== undefined) {
       valueType = typeRef(I("Serialize"), [M("Json")]);
     } else if (array.success) {
       valueType = typeReadonlyArray(typeKeyword("string"));
@@ -542,6 +580,7 @@ const parameterParts = (
         ...brackets(serialization.nonStandard),
         ["explode", bool(explode)],
         ["required", required],
+        ...scalars(serialization.nonStandardScalars),
       ]);
 
       return { field, query: fn(style, [wire, value, options]) };
@@ -589,10 +628,41 @@ export interface PartHeader {
 }
 
 /**
+ * One nested part of a by-name nested part (design 6.3, HT:B16, ENC-07): its dotted part flag, its
+ * nested name and the one `Content-Type` its nested rule gives.
+ */
+export interface NestedFormPart {
+  readonly contentType: string;
+  readonly flag: PlannedFlag;
+  readonly name: string;
+}
+
+/**
+ * The nested body of a part by name: its kind, from the part's Encoding `contentType`, and its
+ * nested parts in nested property order.
+ */
+export interface NestedParts {
+  readonly kind: "form-data" | "mixed";
+  readonly parts: readonly NestedFormPart[];
+}
+
+/**
+ * The nested body of a part by position (design 6.3, HT:B16, ENC-08, ENC-09): one
+ * `multipart/mixed` nested part from the part's repeated file flag, file `i` under
+ * `positions[i]` and every later file under `item`.
+ */
+export interface NestedPositions {
+  readonly item?: string;
+  readonly positions: readonly string[];
+}
+
+/**
  * One `multipart/form-data` part a command sends: its part flag, its part name, its `Content-Type`,
  * its declared headers and, from its Encoding rule, its transfer encoding. `key` is the part's key
  * in the builder's form when the part travels as a `Serialize.ChosenPart` beside `fields`: it
- * lists several types or declares a header.
+ * lists several types or declares a header. A part with `nested` is sent as one nested part from
+ * its nested parts' flags; its `flag` is the first of them. A part with `positions` is sent as one
+ * nested part from its own repeated file flag.
  */
 export interface FormPart {
   readonly contentEncoding?: "base64";
@@ -601,6 +671,8 @@ export interface FormPart {
   readonly headers: readonly PartHeader[];
   readonly key?: string;
   readonly name: string;
+  readonly nested?: NestedParts;
+  readonly positions?: NestedPositions;
 }
 
 /**
@@ -718,6 +790,97 @@ const alternativeProblem = (alternative: MediaAlternative): string | undefined =
   return positional ? `positional parts of ${mediaType}` : undefined;
 };
 
+// The kind of nested body a part's one Encoding `contentType` names, if the writer nests it.
+const nestedKind = (contentType: readonly string[]): NestedParts["kind"] | undefined => {
+  const [only, ...more] = contentType;
+  const named = only === undefined || more.length > 0 ? undefined : essence(only);
+  if (named === "multipart/mixed") {
+    return "mixed";
+  }
+
+  return named === "multipart/form-data" ? "form-data" : undefined;
+};
+
+type NestedRule = NonNullable<EncodingRule["nested"]>[number];
+
+// The one concrete type a nested rule gives its nested part, or the reason the writer cannot send
+// it: a nested part has no part headers, no style but exploded `form`, and one listed type.
+const nestedType = (rule: NestedRule, subject: string): Result.Result<string, string> => {
+  if (rule.headers.length > 0) {
+    return Result.fail(`part headers of ${subject}`);
+  }
+
+  if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
+    return Result.fail(`a style for ${subject}`);
+  }
+
+  const [only, ...more] = rule.contentType;
+  if (only === undefined || more.length > 0 || only.includes("*")) {
+    return Result.fail(`one content type for ${subject}`);
+  }
+
+  return Result.succeed(only);
+};
+
+// Whether a part's rule nests by position: a nested `prefixEncoding` or `itemEncoding`.
+const nestsByPosition = (rule: EncodingRule): boolean =>
+  rule.nestedItem !== undefined ||
+  (rule.nested ?? []).some((nested) => nested.target.kind === "position");
+
+// A part nested by position (design 6.3, HT:B16, ENC-08, ENC-09): its Encoding `contentType` is one
+// `multipart/mixed`, whose parts need no name (form-data would), it declares no part header or
+// transfer encoding and does not also nest by name, and each nested position rule gives one
+// concrete type. Its flag is the part's repeated file flag. Refused otherwise.
+const positionalPartOf = (
+  flag: PartFlag,
+  name: string,
+  rule: EncodingRule,
+  order: number,
+): Result.Result<OrderedPart, string> => {
+  const pointer = flag.source.wireName;
+  const kind = nestedKind(rule.contentType);
+  const [contentType] = rule.contentType;
+  if (kind !== "mixed" || contentType === undefined) {
+    return Result.fail(`nested parts by position in multipart part ${pointer}`);
+  }
+
+  if (rule.headers.length > 0 || rule.contentEncoding !== undefined) {
+    return Result.fail(`part headers of multipart part ${pointer}, which nests parts`);
+  }
+
+  const nested = rule.nested ?? [];
+  if (nested.some((candidate) => candidate.target.kind === "property")) {
+    return Result.fail(`nested parts by name and by position in multipart part ${pointer}`);
+  }
+
+  const positions: string[] = [];
+  for (const [index, position] of nested.entries()) {
+    const type = nestedType(position, `nested position ${index + 1} of multipart part ${pointer}`);
+    if (Result.isFailure(type)) {
+      return Result.fail(type.failure);
+    }
+
+    positions.push(type.success);
+  }
+
+  const item =
+    rule.nestedItem === undefined
+      ? undefined
+      : nestedType(rule.nestedItem, `the nested items of multipart part ${pointer}`);
+  if (item !== undefined && Result.isFailure(item)) {
+    return Result.fail(item.failure);
+  }
+
+  return Result.succeed({
+    contentType: { _tag: "Declared", mediaType: contentType },
+    flag,
+    headers: [],
+    name,
+    order,
+    positions: item === undefined ? { positions } : { item: item.success, positions },
+  });
+};
+
 // One part flag's part, with the index of its Encoding rule, or the reason it is refused.
 const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart, string> => {
   const { alternative } = context;
@@ -733,6 +896,15 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
   const rule = alternative.encoding[order];
   if (rule === undefined) {
     return Result.fail(`an encoding for multipart part ${pointer}`);
+  }
+
+  if (nestsByPosition(rule)) {
+    return positionalPartOf(flag, name, rule, order);
+  }
+
+  // A part nested by name is an object part whose nested parts have the flags (`nestedPartOf`).
+  if (rule.nested !== undefined) {
+    return Result.fail(`nested parts in multipart part ${pointer}`);
   }
 
   // A style the writer sends (ENC-40) arrives typed `text/plain`; normalize refuses any other, and
@@ -785,15 +957,101 @@ const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart
 
 const byOrder = Order.mapInput(Order.Number, (part: OrderedPart) => part.order);
 
+// One nested part's flag with its nested name and the one concrete type its nested rule gives, and
+// its index among the nested rules, or the reason the writer cannot send it.
+const nestedMemberOf = (
+  flag: PartFlag,
+  nestedName: string,
+  rule: EncodingRule,
+): Result.Result<{ readonly order: number; readonly part: NestedFormPart }, string> => {
+  const pointer = flag.source.wireName;
+  const nested = rule.nested ?? [];
+  const order = nested.findIndex(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === nestedName,
+  );
+  const memberRule = nested[order];
+  if (memberRule === undefined) {
+    return Result.fail(`an encoding for nested multipart part ${pointer}`);
+  }
+
+  const type = nestedType(memberRule, `nested multipart part ${pointer}`);
+  if (Result.isFailure(type)) {
+    return Result.fail(type.failure);
+  }
+
+  return Result.succeed({ order, part: { contentType: type.success, flag, name: nestedName } });
+};
+
+// A part nested by name (design 6.3, HT:B16, ENC-07): its Encoding `contentType` is one
+// `multipart/mixed` or `multipart/form-data`, it declares no part header or transfer encoding, and
+// each nested part with a flag has one concrete type and no part header. Refused otherwise.
+const nestedPartOf = (
+  name: string,
+  flags: readonly PartFlag[],
+  context: PartContext,
+): Result.Result<OrderedPart, string> => {
+  const { alternative } = context;
+  const pointer = formatPointer([name]);
+  const order = alternative.encoding.findIndex(
+    (candidate) => candidate.target.kind === "property" && candidate.target.name === name,
+  );
+  const rule = alternative.encoding[order];
+  if (rule?.nested === undefined) {
+    return Result.fail(`an encoding for nested multipart part ${pointer}`);
+  }
+
+  const kind = nestedKind(rule.contentType);
+  const [contentType] = rule.contentType;
+  if (kind === undefined || contentType === undefined) {
+    return Result.fail(`nested parts in multipart part ${pointer}`);
+  }
+
+  if (rule.headers.length > 0 || rule.contentEncoding !== undefined) {
+    return Result.fail(`part headers of multipart part ${pointer}, which nests parts`);
+  }
+
+  const members: { readonly order: number; readonly part: NestedFormPart }[] = [];
+  for (const flag of flags) {
+    const [, nestedName] = flag.source.wireName.split("/").slice(1).map(unescape);
+    const built = nestedName === undefined ? undefined : nestedMemberOf(flag, nestedName, rule);
+    if (built === undefined || Result.isFailure(built)) {
+      return Result.fail(built?.failure ?? `the nested multipart part ${flag.source.wireName}`);
+    }
+
+    members.push(built.success);
+  }
+
+  const parts = Arr.sort(
+    members,
+    Order.mapInput(Order.Number, (entry: (typeof members)[number]) => entry.order),
+  ).map(({ part }) => part);
+  const [first] = parts;
+  if (first === undefined) {
+    return Result.fail(`a flag for nested multipart part ${pointer}`);
+  }
+
+  return Result.succeed({
+    contentType: { _tag: "Declared", mediaType: contentType },
+    flag: first.flag,
+    headers: [],
+    name,
+    nested: { kind, parts },
+    order,
+  });
+};
+
 /**
  * The parts a `multipart/form-data` command sends, in Encoding order, or the reason the runtime
  * writer cannot send it exactly (design 6.3; a `CliRefusal` subject). `alternative` is one of the
- * command's request media alternatives; the part flags are those whose media lists it. Refused,
- * not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
- * positional parts, a nested part, a part style other than exploded `form`, a part whose
- * `contentType` lists a range, a part listing several types with no `--<part>-content-type` flag,
- * a part header the names plan gave no `--<part>-<header>` flag, and a required part the names plan
- * gave no flag. Normalize keeps the headers the writer owns out of the rule (ENC-03).
+ * command's request media alternatives; the part flags are those whose media lists it. A part
+ * nested by name is one nested part from its dotted part flags (HT:B16, ENC-07), and a part nested
+ * by position one `multipart/mixed` nested part from its repeated file flag (ENC-08, ENC-09).
+ * Refused, not guessed: a multipart alternative under a range key, another multipart subtype, 3.2
+ * positional parts, a nested part under any other `contentType` or with part headers, a part nested
+ * both by name and by position, a part style other than exploded `form`, a part whose `contentType`
+ * lists a range, a part listing several types with no `--<part>-content-type` flag, a part header
+ * the names plan gave no `--<part>-<header>` flag, and a required part the names plan gave no flag.
+ * Normalize keeps the headers the writer owns out of the rule (ENC-03).
  */
 export const formParts = (
   command: PlannedCommand,
@@ -805,13 +1063,6 @@ export const formParts = (
     return Result.fail(problem);
   }
 
-  // Checked over the rules, not the part flags: a part the names plan gave no flag (a
-  // `prefixItems` array) still carries its nested rule. Positional rules were refused above.
-  const nested = alternative.encoding.find((rule) => rule.nested !== undefined);
-  if (nested !== undefined && nested.target.kind === "property") {
-    return Result.fail(`nested parts in multipart part ${formatPointer([nested.target.name])}`);
-  }
-
   const key = alternative.schema?.key ?? "";
   const context: PartContext = {
     alternative,
@@ -820,15 +1071,33 @@ export const formParts = (
     schemas: objectSchemas(defs, key),
   };
   const parts: OrderedPart[] = [];
+  const nested = new Map<string, PartFlag[]>();
   for (const flag of command.flags) {
-    if (isPartFlag(flag, alternative.mediaType)) {
-      const part = partOf(flag, context);
-      if (Result.isFailure(part)) {
-        return Result.fail(part.failure);
-      }
-
-      parts.push(part.success);
+    if (!isPartFlag(flag, alternative.mediaType)) {
+      continue;
     }
+
+    const [name, nestedName, ...rest] = flag.source.wireName.split("/").slice(1).map(unescape);
+    if (name !== undefined && nestedName !== undefined && rest.length === 0) {
+      nested.set(name, [...(nested.get(name) ?? []), flag]);
+      continue;
+    }
+
+    const part = partOf(flag, context);
+    if (Result.isFailure(part)) {
+      return Result.fail(part.failure);
+    }
+
+    parts.push(part.success);
+  }
+
+  for (const [name, flags] of nested) {
+    const part = nestedPartOf(name, flags, context);
+    if (Result.isFailure(part)) {
+      return Result.fail(part.failure);
+    }
+
+    parts.push(part.success);
   }
 
   const sent = new Set(parts.map((part) => part.name));
@@ -839,6 +1108,143 @@ export const formParts = (
 
   return Result.succeed(Arr.sort(parts, byOrder).map(({ order: _order, ...part }) => part));
 };
+
+/**
+ * One position rule of a positional body as the writer takes it: one concrete content type and,
+ * when the part is sent base64 encoded, its transfer encoding.
+ */
+export interface PositionRule {
+  readonly contentEncoding?: "base64";
+  readonly contentType: string;
+}
+
+/**
+ * A positional `multipart/mixed` body's rules (design 6.3, HT:B15): `prefix[i]` for part `i`,
+ * `item` for every later part, and the schema's bounds on the part count.
+ */
+export interface MixedPlan {
+  readonly item?: PositionRule;
+  readonly maxParts?: number;
+  readonly minParts?: number;
+  readonly prefix: readonly PositionRule[];
+}
+
+// One position rule the writer sends exactly, or the reason it does not.
+const positionRule = (rule: EncodingRule, index: number): Result.Result<PositionRule, string> => {
+  const at = `positional part ${index + 1}`;
+  if (rule.headers.length > 0) {
+    return Result.fail(`part headers of ${at}`);
+  }
+
+  if (rule.nested !== undefined) {
+    return Result.fail(`nested parts in ${at}`);
+  }
+
+  if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
+    return Result.fail(`a style for ${at}`);
+  }
+
+  const [only, ...more] = rule.contentType;
+  if (only === undefined || more.length > 0 || only.includes("*")) {
+    return Result.fail(`one content type for ${at}`);
+  }
+
+  return Result.succeed(
+    rule.contentEncoding === undefined
+      ? { contentType: only }
+      : { contentEncoding: rule.contentEncoding, contentType: only },
+  );
+};
+
+interface PartBounds {
+  maxParts?: number;
+  minParts?: number;
+}
+
+// The part count bounds of a positional body's array schema, from its own node and its `allOf`
+// members: the tightest `minItems` and `maxItems`, and `items: false`, which admits no part beyond
+// `prefixItems`.
+const partBounds = (defs: Defs, key: string | undefined): PartBounds => {
+  const bounds: PartBounds = {};
+  const seen = new Set<JsonNode>();
+  const pending: (Schema.Json | undefined)[] = key === undefined ? [] : [own(defs, key)];
+  const tighten = (
+    field: keyof PartBounds,
+    value: number,
+    pick: (a: number, b: number) => number,
+  ) => {
+    const known = bounds[field];
+    bounds[field] = known === undefined ? value : pick(known, value);
+  };
+  while (pending.length > 0 && seen.size < maxPartNodes) {
+    const node = settle(defs, pending.pop(), key ?? "");
+    if (Result.isFailure(node) || seen.has(node.success)) {
+      continue;
+    }
+
+    seen.add(node.success);
+
+    const { allOf, items, maxItems, minItems, prefixItems } = node.success;
+    if (Predicate.isNumber(maxItems)) {
+      tighten("maxParts", maxItems, Math.min);
+    }
+
+    if (Predicate.isNumber(minItems)) {
+      tighten("minParts", minItems, Math.max);
+    }
+
+    if (items === false) {
+      tighten("maxParts", Array.isArray(prefixItems) ? prefixItems.length : 0, Math.min);
+    }
+
+    if (Array.isArray(allOf)) {
+      pending.push(...Arr.reverse(allOf.filter(isNode)));
+    }
+  }
+
+  return bounds;
+};
+
+/**
+ * The rules a positional `multipart/mixed` command sends (design 6.3, HT:B15), or the reason the
+ * writer cannot send them exactly (a `CliRefusal` subject). Refused, not guessed: a position with
+ * part headers (a stretch HT:B15 does not commit), a nested part (M3-MP3), a style other than
+ * exploded `form`, and a rule whose `contentType` lists several types or a range.
+ */
+export const mixedParts = (
+  alternative: MediaAlternative,
+  defs: Defs,
+): Result.Result<MixedPlan, string> => {
+  const prefix: PositionRule[] = [];
+  for (const [index, rule] of alternative.prefixEncoding.entries()) {
+    const built = positionRule(rule, index);
+    if (Result.isFailure(built)) {
+      return Result.fail(built.failure);
+    }
+
+    prefix.push(built.success);
+  }
+
+  const plan: Types.Mutable<MixedPlan> = { ...partBounds(defs, alternative.schema?.key), prefix };
+  if (alternative.itemEncoding !== undefined) {
+    const item = positionRule(alternative.itemEncoding, prefix.length);
+    if (Result.isFailure(item)) {
+      return Result.fail(item.failure);
+    }
+
+    plan.item = item.success;
+  }
+
+  return Result.succeed(plan);
+};
+
+const positionEntry = (rule: PositionRule): Expr =>
+  obj([
+    ...(rule.contentEncoding === undefined
+      ? []
+      : ([["contentEncoding", str(rule.contentEncoding)]] as const)),
+    ["contentType", str(rule.contentType)],
+  ]);
 
 interface BodyParts {
   readonly declarations: readonly Statement[];
@@ -866,6 +1272,8 @@ const formEncoding = (
   if (serialization?.explode !== undefined) {
     entries.push(["explode", bool(serialization.explode)]);
   }
+
+  entries.push(...scalars(rule?.nonStandardScalars));
 
   const style = serialization?.style;
   if (style !== undefined && !queryStyles.has(style)) {
@@ -907,8 +1315,65 @@ const bytesEncoder: Encoder = {
   typed: true,
 };
 
+// A positional `multipart/mixed` body's encoder (HT:B15): its part bodies in order, sent by
+// `Serialize.mixed` under the position rules and the schema's count bounds, or none when the writer
+// cannot send the rules exactly.
+const mixedEncoder = (
+  alternative: MediaAlternative,
+  defs: Defs,
+  required: Expr,
+): Option.Option<Encoder> => {
+  const mixed = mixedParts(alternative, defs);
+  if (Result.isFailure(mixed)) {
+    return Option.none();
+  }
+
+  const { item, maxParts, minParts, prefix } = mixed.success;
+  const options = obj([
+    ...(item === undefined ? [] : ([["itemEncoding", positionEntry(item)]] as const)),
+    ...(maxParts === undefined ? [] : ([["maxParts", num(maxParts)]] as const)),
+    ...(minParts === undefined ? [] : ([["minParts", num(minParts)]] as const)),
+    ["prefixEncoding", arr(prefix.map(positionEntry))],
+    ["required", required],
+  ]);
+
+  return Option.some<Encoder>({
+    encode: (value) => fn("mixed", [value, options]),
+    type: typeRef(I("Serialize"), [M("MixedParts")]),
+    typed: false,
+  });
+};
+
+// A nesting part's `Serialize.FormPartEntry` rule: a by-name part's `NestedForm`, its nested
+// parts' names and types, or a by-position part's `PositionalForm`, its flag and position types
+// (HT:B16); none for a part that does not nest.
+const nestingForm = (part: Pick<FormPart, "flag" | "nested" | "positions">): Expr | undefined => {
+  if (part.positions !== undefined) {
+    const { item, positions } = part.positions;
+
+    return obj([
+      ["flag", str(part.flag.name)],
+      ...(item === undefined ? [] : ([["item", str(item)]] as const)),
+      ["kind", str("mixed")],
+      ["positions", arr(positions.map((type) => str(type)))],
+    ]);
+  }
+
+  return part.nested === undefined
+    ? undefined
+    : obj([
+        ["kind", str(part.nested.kind)],
+        [
+          "parts",
+          arr(part.nested.parts.map((inner) => arr([str(inner.name), str(inner.contentType)]))),
+        ],
+      ]);
+};
+
 // One alternative's encoder (design 4.5, 6.3). A form body is its JSON value, or `undefined` for
-// no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order.
+// no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order;
+// a form alternative with refused fields passes its operation's `media` declaration's `refused`
+// list, the one list `--describe` also reads (design 8.5 rule 6).
 // A multipart body the writer can send is its part values, streamed by `Serialize.formData`. Any
 // other body is an `HttpBody` that `Serialize.body` sends. A multipart body the writer cannot send
 // has no encoder (`None`); `cli/` refuses its operation. A multipart body with a chosen part type is
@@ -918,6 +1383,7 @@ const encoderOf = (
   alternative: MediaAlternative,
   defs: Defs,
   formName: string,
+  media: typeof Identifier.Type,
 ): Effect.Effect<Option.Option<Encoder>, ApiEmitError> =>
   Effect.gen(function* encoder() {
     const required = bool(command.operation.body?.required ?? false);
@@ -932,6 +1398,9 @@ const encoderOf = (
       );
       const options = obj([
         ["properties", arr(properties)],
+        ...(refusedFieldsOf(alternative).length > 0
+          ? ([["refused", member(ident(media), M("refused"))]] as const)
+          : []),
         ["required", required],
       ]);
 
@@ -946,6 +1415,11 @@ const encoderOf = (
       return Option.some(bytesEncoder);
     }
 
+    // A positional body is its parts' bytes in order, streamed by `Serialize.mixed`.
+    if (isPositionalBody(alternative)) {
+      return mixedEncoder(alternative, defs, required);
+    }
+
     const parts = formParts(command, alternative, defs);
     if (Result.isFailure(parts)) {
       return Option.none();
@@ -957,8 +1431,15 @@ const encoderOf = (
     const aliases: Statement[] = [];
     const keyed: Field[] = [];
     const sends: ((form: Expr) => Expr)[] = [];
-    for (const { contentEncoding, contentType, key, name } of parts.success) {
+    for (const part of parts.success) {
+      const { contentEncoding, contentType, key, name } = part;
       const encoding = contentEncoding === undefined ? [] : [str(contentEncoding)];
+      const nesting = nestingForm(part);
+      if (nesting !== undefined) {
+        sends.push(() => arr([str(name), nesting]));
+        continue;
+      }
+
       if (key === undefined && contentType._tag === "Declared") {
         sends.push(() => arr([str(name), str(contentType.mediaType), ...encoding]));
         continue;
@@ -1036,6 +1517,7 @@ const chosenParts = (
   defs: Defs,
   name: typeof Identifier.Type,
   formName: string,
+  media: typeof Identifier.Type,
 ) =>
   Effect.gen(function* chosen() {
     const declarations: Statement[] = [];
@@ -1044,7 +1526,7 @@ const chosenParts = (
     for (const alternative of command.operation.body?.alternatives ?? []) {
       const forms = declarations.length;
       const numbered = forms === 0 ? formName : `${formName}${forms + 1}`;
-      const found = yield* encoderOf(command, alternative, defs, numbered);
+      const found = yield* encoderOf(command, alternative, defs, numbered, media);
       if (Option.isNone(found)) {
         continue;
       }
@@ -1091,6 +1573,7 @@ const bodyParts = (
   defs: Defs,
   bodies: typeof Identifier.Type,
   formName: string,
+  media: typeof Identifier.Type,
 ): Effect.Effect<BodyParts, ApiEmitError> =>
   Effect.gen(function* parts() {
     const alternatives = command.operation.body?.alternatives ?? [];
@@ -1100,13 +1583,13 @@ const bodyParts = (
     }
 
     if (encodesByKey(alternatives)) {
-      return yield* chosenParts(command, defs, bodies, formName);
+      return yield* chosenParts(command, defs, bodies, formName, media);
     }
 
     const input = ident(I("input"));
     const value = member(input, M("body"));
     if (alternatives.length === 1 && !isRange(first.mediaType)) {
-      const found = yield* encoderOf(command, first, defs, formName);
+      const found = yield* encoderOf(command, first, defs, formName, media);
       const encoder = Option.getOrElse(found, () => bytesEncoder);
 
       return {
@@ -1229,7 +1712,7 @@ const commandStatements = (
       parameterParts(entry, context),
     );
     const bodies = yield* identifier(`${capitalized}Bodies`);
-    const body = yield* bodyParts(command, context.defs, bodies, `${capitalized}Form`);
+    const body = yield* bodyParts(command, context.defs, bodies, `${capitalized}Form`, mediaName);
     const cookies = parameters.flatMap((part) => (part.cookie === undefined ? [] : [part.cookie]));
     const parts: (readonly [string, Expr])[] = [
       [
@@ -1262,7 +1745,9 @@ const commandStatements = (
       fn("request", [str(operation.key.method), obj(parts)]),
       typeRef(I("Serialize"), [M("Request")]),
     );
+    const refused = refusedEntry(operation.body?.alternatives ?? []);
     const media = obj([
+      ...(Option.isSome(refused) ? ([["refused", refused.value]] as const) : []),
       ["request", strings(mediaTypes(operation.body?.alternatives ?? []))],
       [
         "responses",
@@ -1394,6 +1879,51 @@ const groupPrefix = (group: PlannedGroup, byTag: ReadonlyMap<string, PlannedGrou
 const deprecation = (scheme: SecurityScheme): readonly (readonly [string, Expr])[] =>
   scheme.deprecated ? [["deprecated", bool(true)]] : [];
 
+type OAuthFlows = Extract<SecurityScheme["kind"], { readonly type: "oauth2Token" }>["flows"];
+
+type OAuthFlow = NonNullable<OAuthFlows[keyof OAuthFlows]>;
+
+const flowKinds = [
+  "authorizationCode",
+  "clientCredentials",
+  "deviceAuthorization",
+  "implicit",
+  "password",
+] as const satisfies readonly (keyof OAuthFlows)[];
+
+// An optional help-only string field prints only when the spec gave it.
+const present = (name: string, value: string | undefined): readonly (readonly [string, Expr])[] =>
+  value === undefined ? [] : [[name, str(value)]];
+
+const flowExpr = (flow: OAuthFlow): Expr =>
+  obj([
+    ...present("authorizationUrl", flow.authorizationUrl),
+    ...present("deviceAuthorizationUrl", flow.deviceAuthorizationUrl),
+    ...present("refreshUrl", flow.refreshUrl),
+    [
+      "scopes",
+      arr(
+        flow.scopes.map((scope) =>
+          obj([
+            ["description", str(scope.description)],
+            ["name", str(scope.name)],
+          ]),
+        ),
+      ),
+    ],
+    ...present("tokenUrl", flow.tokenUrl),
+  ]);
+
+// An `oauth2` scheme's flows, help-only data the runtime never sends (design 9 I3).
+const flowsExpr = (flows: OAuthFlows): Expr =>
+  obj(
+    flowKinds.flatMap((flowKind) => {
+      const flow = flows[flowKind];
+
+      return flow === undefined ? [] : [[flowKind, flowExpr(flow)] as const];
+    }),
+  );
+
 const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr, ApiEmitError> => {
   const { kind } = scheme;
   if (kind.type === "apiKey") {
@@ -1419,22 +1949,69 @@ const runtimeScheme = (scheme: SecurityScheme, env: string): Effect.Effect<Expr,
     );
   }
 
+  if (kind.type === "oauth2Token") {
+    return Effect.succeed(
+      obj([
+        ...deprecation(scheme),
+        ["env", str(env)],
+        ["flows", flowsExpr(kind.flows)],
+        ["kind", str("oauth2")],
+      ]),
+    );
+  }
+
+  if (kind.type === "oidcToken") {
+    return Effect.succeed(
+      obj([
+        ...deprecation(scheme),
+        ["env", str(env)],
+        ["kind", str("openIdConnect")],
+        ["openIdConnectUrl", str(kind.openIdConnectUrl)],
+      ]),
+    );
+  }
+
   return Effect.fail(refuse("unsupported-scheme", scheme.name));
 };
 
+// A `mutualTLS` scheme's descriptor: the certificate environment names the plan derived (design
+// 4.4), which the runtime reads `Config` by; never a header.
+const certificateScheme = (scheme: SecurityScheme, names: PlannedCertificate): Expr =>
+  obj([
+    ["caEnv", str(names.caEnv)],
+    ["certEnv", str(names.certEnv)],
+    ...deprecation(scheme),
+    ["keyEnv", str(names.keyEnv)],
+    ["kind", str("mutualTLS")],
+  ]);
+
+const byEntryScheme = Order.mapInput(
+  Order.String,
+  (entry: { readonly scheme: string }) => entry.scheme,
+);
+
 const securityFile = (api: Api, plan: NamePlan) =>
   Effect.gen(function* file() {
+    const entries = Arr.sort(
+      [
+        ...plan.credentials.map((credential) => ({
+          describe: (scheme: SecurityScheme) => runtimeScheme(scheme, credential.env),
+          scheme: credential.scheme,
+        })),
+        ...plan.certificates.map((names) => ({
+          describe: (scheme: SecurityScheme) => Effect.succeed(certificateScheme(scheme, names)),
+          scheme: names.scheme,
+        })),
+      ],
+      byEntryScheme,
+    );
     const schemes = yield* Effect.all(
-      plan.credentials.map((credential) => {
-        const scheme = api.securitySchemes.find(
-          (candidate) => candidate.name === credential.scheme,
-        );
+      entries.map((entry) => {
+        const scheme = api.securitySchemes.find((candidate) => candidate.name === entry.scheme);
 
         return scheme === undefined
-          ? Effect.fail(refuse("unknown-scheme", credential.scheme))
-          : runtimeScheme(scheme, credential.env).pipe(
-              Effect.map((value) => [credential.scheme, value] as const),
-            );
+          ? Effect.fail(refuse("unknown-scheme", entry.scheme))
+          : entry.describe(scheme).pipe(Effect.map((value) => [entry.scheme, value] as const));
       }),
     );
     const content = yield* printModule({
@@ -1514,7 +2091,9 @@ export const emitApi = (
       document: (uri) => documentLabel(api.entry, uri),
       line: api.line,
       memo: new Map(),
-      schemes: new Set(plan.credentials.map((credential) => credential.scheme)),
+      schemes: new Set(
+        [...plan.credentials, ...plan.certificates].map((credential) => credential.scheme),
+      ),
     };
     const byTag = new Map(plan.groups.map((group) => [group.tag, group] as const));
     const withPrimaries = plan.groups.filter((group) => primaries(group.commands).length > 0);

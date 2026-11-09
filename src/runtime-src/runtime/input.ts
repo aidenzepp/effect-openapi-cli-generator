@@ -5,6 +5,7 @@ import {
   Layer,
   Option,
   Predicate,
+  Redacted,
   Ref,
   Schema,
   Stdio,
@@ -14,6 +15,8 @@ import { Argument, CliError, Flag } from "effect/cli";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
+import type { Secret } from "./redact.ts";
+import { RunCredentials } from "./redact.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import * as Negotiate from "./negotiate.ts";
 
@@ -22,6 +25,13 @@ import * as Negotiate from "./negotiate.ts";
  * I5 says only "bounded". It matches the 64 MiB the generator proposes for a specification (§3).
  */
 export const maxBodyBytes = 67_108_864;
+
+/**
+ * Ceiling for a secret-file field value, in bytes: the credential file bound (`auth.ts`
+ * `maxCredentialBytes`), because the value is scrubbed like one and every error excerpt read
+ * budgets for its longest form.
+ */
+export const maxSecretBytes = 65_536;
 
 const bodyFileName = "body-file";
 
@@ -87,8 +97,11 @@ const usage = (flag: string, cause: string): UsageError =>
 
 const cannotReadIn = (flag: string): UsageError => usage(flag, "cannot read the file or stdin");
 
-const overLimitIn = (flag: string, limit: number = maxBodyBytes): UsageError =>
-  usage(flag, `the body is over ${limit} bytes`);
+const overLimitIn = (
+  flag: string,
+  limit: number = maxBodyBytes,
+  subject = "the body",
+): UsageError => usage(flag, `${subject} is over ${limit} bytes`);
 
 const cannotRead = (): UsageError => cannotReadIn(bodyFileName);
 
@@ -136,31 +149,45 @@ const toUsage = (
   cause: OverLimit | ReadFailed,
   flag: string = bodyFileName,
   limit: number = maxBodyBytes,
-): UsageError => (cause instanceof OverLimit ? overLimitIn(flag, limit) : cannotReadIn(flag));
+  subject?: string,
+): UsageError =>
+  cause instanceof OverLimit ? overLimitIn(flag, limit, subject) : cannotReadIn(flag);
+
+// What a bounded read of a flag's file refuses past: `limit` bytes, named as `subject`.
+interface ReadBound {
+  readonly limit: number;
+  readonly subject?: string;
+}
+
+const bodyBound: ReadBound = { limit: maxBodyBytes };
 
 const collect = (
   source: Stream.Stream<Uint8Array, unknown>,
   flag: string = bodyFileName,
+  bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError> =>
-  bounded(source).pipe(
+  bounded(source, bound.limit).pipe(
     Stream.runCollect,
     Effect.map(concat),
-    Effect.mapError((cause) => toUsage(cause, flag)),
+    Effect.mapError((cause) => toUsage(cause, flag, bound.limit, bound.subject)),
   );
 
 // A bounded read of a path, or of stdin for `-` under the one stdin claim, failing in `flag`.
 const readFlagFile = (
   path: string,
   flag: string,
+  bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
   path === "-"
     ? Effect.service(StdinClaim).pipe(
         Effect.flatMap((claim) => claim.claim(flag)),
         Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => collect(stdio.stdin, flag)),
+        Effect.flatMap((stdio) => collect(stdio.stdin, flag, bound)),
       )
     : Effect.service(FileSystem.FileSystem).pipe(
-        Effect.flatMap((fs) => collect(fs.stream(path, { bytesToRead: maxBodyBytes + 1 }), flag)),
+        Effect.flatMap((fs) =>
+          collect(fs.stream(path, { bytesToRead: bound.limit + 1 }), flag, bound),
+        ),
       );
 
 /**
@@ -375,8 +402,51 @@ export class FileField {
   }
 }
 
+/**
+ * A secret-file field flag's value (design 13.1 R4): a path, or `-` for stdin, to the value of a
+ * `format: password` string property. The runtime reads it, bounded, holds it `Redacted` until the
+ * body is serialized, and records it so every error path scrubs it. `flag` is the flag's name: the
+ * only thing a failure names, and the label its placeholder carries.
+ */
+export class SecretField {
+  readonly flag: string;
+  readonly path: string;
+
+  constructor(options: { readonly flag: string; readonly path: string }) {
+    this.flag = options.flag;
+    this.path = options.path;
+  }
+}
+
+const secretFileNote = "Read the value from a file or stdin (-); it is never echoed";
+
+// A secret flag's help: the property's description, when given, then the secret-file note.
+const secretHelp = (description: string | undefined): string =>
+  description === undefined ? secretFileNote : `${description} ${secretFileNote}`;
+
+/**
+ * A secret-file field flag, `--<prop>-file <path|->`. `Flag.String` keeps `-` literal; the value
+ * is a path, so argv never holds the secret. Help shows the property's description, when given,
+ * then the note that the value is read from a file or stdin.
+ */
+export const secretFileFlag = (name: string, description?: string) =>
+  Flag.String(name).pipe(
+    Flag.withMetavar("path|-"),
+    Flag.optional,
+    Flag.withDescription(secretHelp(description)),
+  );
+
+/**
+ * A multipart `format: password` part's flag, `--<part> <path|->` (ruling DR4): a file part, so
+ * argv holds a path, never the secret. Help reads as `secretFileFlag`'s. The caller adds the
+ * presence step (`Flag.optional`, or `Flag.atLeast` for a repeated part); a read failure names
+ * the flag, never the path (`Multipart.fileBody`).
+ */
+export const secretPartFlag = (name: string, description?: string) =>
+  Flag.String(name).pipe(Flag.withMetavar("path|-"), Flag.withDescription(secretHelp(description)));
+
 export type Fields = Readonly<
-  Record<string, Option.Option<FieldValue | FileField> | readonly FieldValue[]>
+  Record<string, Option.Option<FieldValue | FileField | SecretField> | readonly FieldValue[]>
 >;
 
 export type JsonNode =
@@ -696,7 +766,7 @@ const setAt = (
   return Effect.void;
 };
 
-const supplied = (value: Fields[string]): FieldValue | FileField | undefined => {
+const supplied = (value: Fields[string]): FieldValue | FileField | SecretField | undefined => {
   if (Option.isOption(value)) {
     return Option.getOrUndefined(value);
   }
@@ -777,6 +847,38 @@ const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, Usag
     catch: () => usage(flag, "is not valid UTF-8"),
     try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
   });
+
+// Records `secret` for the run when `RunCredentials` is present. It is optional so `mergeBody` and
+// `structuredBody` keep their requirements for callers that pass no secret field; every emitted
+// entry provides it, because `finalCatch` and `send` require it.
+const record = (secret: Secret): Effect.Effect<void> =>
+  Effect.serviceOption(RunCredentials).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (recorded) => Ref.update(recorded, (entries) => [...entries, secret]),
+      }),
+    ),
+  );
+
+/**
+ * Strips one trailing `\r?\n`: the line end `echo value > file` writes. The one rule for a secret
+ * read from a file, shared by credential files (`auth.ts`) and secret-file field flags; a second
+ * line end is the value's own.
+ */
+export const stripLineEnd = (text: string): string => text.replace(/\r?\n$/u, "");
+
+// A secret-file value: the text, bounded and UTF-8, with one trailing line end stripped (as a
+// credential file), recorded for the run before anything else can fail, and held `Redacted` until
+// the merge writes it.
+const readSecret = (
+  field: SecretField,
+): Effect.Effect<Redacted.Redacted, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  readFlagFile(field.path, field.flag, { limit: maxSecretBytes, subject: "the value" }).pipe(
+    Effect.flatMap((bytes) => decodeText(bytes, field.flag)),
+    Effect.map((text) => Redacted.make(stripLineEnd(text))),
+    Effect.tap((value) => record({ kind: "secret", label: field.flag, value })),
+  );
 
 const sourceOf = (options: {
   readonly body: Option.Option<string>;
@@ -881,6 +983,13 @@ const mergeSources = (
     }
 
     for (const [pointer, given] of overrides) {
+      if (given instanceof SecretField) {
+        const secret = yield* readSecret(given);
+
+        yield* setAt(base, pointer, Redacted.value(secret));
+        continue;
+      }
+
       const value = given instanceof FileField ? yield* readEncoded(given) : given;
       const verdict = inspectField(value);
 

@@ -1,0 +1,80 @@
+{
+  "openapi": "3.1.2",
+  "info": { "title": "Field refusal", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [{ "name": "customers", "description": "Stripe-shaped form bodies." }],
+  "components": {
+    "schemas": {
+      "Filters": {
+        "anyOf": [
+          { "type": "object", "properties": { "status": { "type": "string" } } },
+          { "type": "string", "enum": [""] }
+        ]
+      },
+      "Metadata": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "object", "properties": { "id": { "type": "string" } } }
+        }
+      },
+      "CustomerUpdate": {
+        "type": "object",
+        "properties": {
+          "filters": { "$ref": "#/components/schemas/Filters" },
+          "metadata": { "$ref": "#/components/schemas/Metadata" },
+          "name": { "type": "string" }
+        }
+      },
+      "CustomerCreate": {
+        "type": "object",
+        "properties": {
+          "filters": { "$ref": "#/components/schemas/Filters" },
+          "name": { "type": "string" }
+        },
+        "required": ["filters"]
+      }
+    }
+  },
+  "paths": {
+    "/customers/{id}": {
+      "post": {
+        "operationId": "customers-update",
+        "summary": "Update a customer.",
+        "tags": ["customers"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/CustomerUpdate" },
+              "encoding": {
+                "filters": { "style": "deepObject", "explode": true },
+                "metadata": { "style": "deepObject", "explode": true }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Updated." } }
+      }
+    },
+    "/customers": {
+      "post": {
+        "operationId": "customers-create",
+        "summary": "Create a customer.",
+        "tags": ["customers"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/CustomerCreate" },
+              "encoding": { "filters": { "style": "deepObject", "explode": true } }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Created." } }
+      }
+    }
+  }
+}

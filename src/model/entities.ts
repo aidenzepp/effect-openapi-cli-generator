@@ -63,14 +63,19 @@ const responseHeaders = Schema.Array(
   Schema.Struct({ deprecated: Schema.Boolean, name: HeaderName, required: Schema.Boolean }),
 );
 
-// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
-// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
-// convention. Set only from the author config, never defaulted or inferred; absent is strict.
+// The non-standard serializations the author config opted into for one entry (design 6.1, D-OQ1
+// (b)), one marker per switch: `nonStandard` (`deepObjectBrackets`) sends a `deepObject` value's
+// nested members in the bracket convention; `nonStandardScalars` (`deepObjectScalars`) sends a
+// scalar `deepObject` value as `name=value`. Set only from the author config, never defaulted or
+// inferred; absent is strict.
 const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
+
+const nonStandardScalars = Schema.optionalKey(Schema.Literal("deepObjectScalars"));
 
 /**
  * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
- * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
+ * author config sends in the bracket convention, and `nonStandardScalars` one whose scalar value it
+ * sends as `name=value`. `objectValued` says the schema, through `$ref`,
  * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
  * by its style.
  */
@@ -79,6 +84,7 @@ export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleS
   explode: Schema.Boolean,
   kind: Schema.Literal("style"),
   nonStandard,
+  nonStandardScalars,
   objectValued: Schema.Boolean,
   origin: Origin,
   rows,
@@ -145,14 +151,20 @@ const nestedEncodingRule = Schema.Struct({
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
  * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
  * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
- * `nonStandard` marks a form property the author config sends in the bracket convention.
+ * `nonStandard` marks a form property the author config sends in the bracket convention, and
+ * `nonStandardScalars` one whose scalar value it sends as `name=value`.
+ * `nested` holds the one nested level's rules (design 6.3, HT:B16), by name and by position, and is
+ * present whenever the part nests; `nestedItem` is the nested `itemEncoding`, the rule of every
+ * nested position after the nested `prefixEncoding` (ENC-09).
  */
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
   contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
   headers: partHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
+  nestedItem: Schema.optionalKey(nestedEncodingRule),
   nonStandard,
+  nonStandardScalars,
   origin: Origin,
   rows,
   serialization: Schema.optionalKey(explicitStyle),
@@ -182,7 +194,9 @@ export const DiscriminatorHint = Schema.Struct({
 
 /**
  * One media type a body or response offers; `codec` is derived from the media type.
- * `discriminator` is set on a request body alternative only.
+ * `discriminator` and `refusedFields` are set on a request body alternative only. `refusedFields`
+ * names the alternative's properties refused at `field` scope, in property order (design 8.5);
+ * absent, none is refused.
  */
 export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlternative")({
   codec: Schema.Literals([
@@ -203,6 +217,7 @@ export class MediaAlternative extends Schema.Class<MediaAlternative>("MediaAlter
   mediaType: Schema.Union([MediaType, MediaRange]),
   origin: Origin,
   prefixEncoding: Schema.Array(EncodingRule),
+  refusedFields: Schema.optionalKey(Schema.Array(WireName)),
   rows,
   schema: Schema.optionalKey(SchemaRef),
 }) {}
@@ -269,6 +284,27 @@ export class Server extends Schema.Class<Server>("Server")({
   ),
 }) {}
 
+// One OAuth flow as help text: its URLs when the spec gives them and its scopes by name. No URL here
+// ever becomes a request target (design 9 I3).
+const OAuthFlow = Schema.Struct({
+  authorizationUrl: Schema.optionalKey(SafeText),
+  deviceAuthorizationUrl: Schema.optionalKey(SafeText),
+  refreshUrl: Schema.optionalKey(SafeText),
+  scopes: Schema.Array(Schema.Struct({ description: SafeText, name: SafeText })),
+  tokenUrl: Schema.optionalKey(SafeText),
+});
+
+/**
+ * The flows of an `oauth2` scheme by flow kind, recorded for help only.
+ */
+export const OAuthFlows = Schema.Struct({
+  authorizationCode: Schema.optionalKey(OAuthFlow),
+  clientCredentials: Schema.optionalKey(OAuthFlow),
+  deviceAuthorization: Schema.optionalKey(OAuthFlow),
+  implicit: Schema.optionalKey(OAuthFlow),
+  password: Schema.optionalKey(OAuthFlow),
+});
+
 const schemeKind = Schema.Union([
   Schema.Struct({
     in: Schema.Literal("cookie"),
@@ -286,8 +322,13 @@ const schemeKind = Schema.Union([
     type: Schema.Literal("apiKey"),
   }),
   Schema.Struct({ scheme: Schema.Literals(["basic", "bearer"]), type: Schema.Literal("http") }),
-  Schema.Struct({ flows: Docs, type: Schema.Literal("oauth2Token") }),
-  Schema.Struct({ type: Schema.Literal("oidcToken"), url: Docs }),
+  // `oauth2MetadataUrl` (3.2) is shown in help and never fetched (design 9 I3).
+  Schema.Struct({
+    flows: OAuthFlows,
+    oauth2MetadataUrl: Schema.optionalKey(SafeText),
+    type: Schema.Literal("oauth2Token"),
+  }),
+  Schema.Struct({ openIdConnectUrl: SafeText, type: Schema.Literal("oidcToken") }),
   Schema.Struct({ type: Schema.Literal("mutualTls") }),
 ]);
 

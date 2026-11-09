@@ -237,6 +237,7 @@ interface StylePlan {
   readonly explode: boolean;
   readonly kind: "style";
   readonly nonStandard?: "deepObjectBrackets";
+  readonly nonStandardScalars?: "deepObjectScalars";
   readonly row: string;
   readonly style: StyleName;
 }
@@ -376,11 +377,37 @@ const nonObjectSchema = refusal(
   "Give the parameter an object schema, or use style: form",
 );
 
+/**
+ * The code of the bracket switch's notice (design 6.1 Bracket switch), on parameters and bodies.
+ */
+export const bracketChoiceCode = "PRM-27/bracket-author-choice";
+
+/**
+ * The code of the scalar switch's notice (design 6.1 Scalar switch), on parameters and bodies.
+ */
+export const scalarChoiceCode = "PRM-27/scalar-author-choice";
+
+/**
+ * The notices of the author config's deepObject switches, which go with an element that is not
+ * sent (design 8.5 rule 7).
+ */
+export const authorChoiceCodes: ReadonlySet<string> = new Set([
+  bracketChoiceCode,
+  scalarChoiceCode,
+]);
+
 const bracketAuthorChoice = notice(
-  "PRM-27/bracket-author-choice",
+  bracketChoiceCode,
   "style-values",
   "Parameter style deepObject",
   "The author config's nonStandard.deepObjectBrackets sends this nested deepObject value in the bracket convention, which the specification does not define.",
+);
+
+const scalarAuthorChoice = notice(
+  scalarChoiceCode,
+  "style-values",
+  "Parameter style deepObject",
+  "The author config's nonStandard.deepObjectScalars sends a scalar value of this deepObject parameter as name=value, which the specification does not define.",
 );
 
 const cookieName = refusal(
@@ -506,11 +533,27 @@ const styleNotices = (
 };
 
 /**
+ * What the author config's scalar switch makes of a `deepObject` schema (design 6.1 Scalar
+ * switch). `Strict`: the switch is off, or the schema has no scalar branch or has a branch no
+ * switch covers (`null`, untyped, unresolved), so the strict rules decide (`PRM-27/non-object-
+ * schema` when it admits a non-object). `Uncovered`: a nested branch the bracket switch is off for,
+ * or a member union neither switch defines (`PRM-27/compound-nested`). `Covered`: every branch is
+ * covered and a scalar one by the scalar switch; `nested` when the bracket switch covers one.
+ */
+export type ScalarCover =
+  | { readonly _tag: "Covered"; readonly nested: boolean }
+  | { readonly _tag: "Strict" }
+  | { readonly _tag: "Uncovered" };
+
+const strictCover: ScalarCover = { _tag: "Strict" };
+
+/**
  * What the schema shape and the author config add to a parameter's decision: `multiple` for a
  * cookie over an array or object (PRM-34), `nested` for a `deepObject` value beyond one level
  * (PRM-27), `nonObject` for a `deepObject` schema that admits a value that is not an object
- * (PRM-27), `primitive` for a schema that declares only primitive types (STY-17, STY-21) and
- * `brackets` for the author config's bracket switch.
+ * (PRM-27), `primitive` for a schema that declares only primitive types (STY-17, STY-21),
+ * `brackets` for the author config's bracket switch and `scalars` for what its scalar switch makes
+ * of a `deepObject` schema (design 6.1 Scalar switch).
  */
 interface Traits {
   readonly brackets: boolean;
@@ -518,6 +561,7 @@ interface Traits {
   readonly nested: boolean;
   readonly nonObject: boolean;
   readonly primitive: boolean;
+  readonly scalars: ScalarCover;
 }
 
 // The style table's applicability checks (design 6.1): explode true where no value type fits,
@@ -537,6 +581,34 @@ const inapplicable = (
   }
 
   return style === "deepObject" && traits.nonObject ? nonObjectSchema : undefined;
+};
+
+// Which deepObject switches send a value, or none when an uncovered nested branch refuses it
+// (PRM-27/compound-nested): under the scalar switch the branch walk decides; otherwise the strict
+// nested test, which the bracket switch marks instead of refusing.
+interface Marks {
+  readonly nested: boolean;
+  readonly scalars: boolean;
+}
+
+const deepObjectMarks = (
+  cover: ScalarCover,
+  strictNested: boolean,
+  brackets: boolean,
+): Marks | undefined => {
+  if (cover._tag === "Uncovered") {
+    return undefined;
+  }
+
+  const nested = cover._tag === "Covered" ? cover.nested : strictNested;
+
+  return nested && !brackets ? undefined : { nested, scalars: cover._tag === "Covered" };
+};
+
+const markedPlan = (plan: StylePlan, marks: Marks): StylePlan => {
+  const bracketed: StylePlan = marks.nested ? { ...plan, nonStandard: "deepObjectBrackets" } : plan;
+
+  return marks.scalars ? { ...bracketed, nonStandardScalars: "deepObjectScalars" } : bracketed;
 };
 
 const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision => {
@@ -562,19 +634,23 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
     return refuse(styleLocation);
   }
 
-  // PRM-27: a deepObject over a schema that admits non-objects is refused, bracket switch or not.
-  const blocked = inapplicable(row, style, traits);
+  // PRM-27: a deepObject over a schema that admits non-objects is refused, bracket switch or not,
+  // unless the scalar switch's branch walk decides it (design 6.1 Scalar switch).
+  const cover = deepRow === undefined ? strictCover : traits.scalars;
+  const blocked = inapplicable(
+    row,
+    style,
+    cover._tag === "Strict" ? traits : { ...traits, nonObject: false },
+  );
   if (blocked !== undefined) {
     return refuse(blocked);
   }
 
-  // PRM-27: strict refuses a nested deepObject value; the bracket switch marks it instead.
-  const nested = deepRow !== undefined && traits.nested;
-  if (nested && !traits.brackets) {
+  const marks = deepObjectMarks(cover, deepRow !== undefined && traits.nested, traits.brackets);
+  if (marks === undefined) {
     return refuse(compoundNested);
   }
 
-  const notices = styleNotices(node, line, honored, deepRow);
   const plan: StylePlan = {
     allowReserved,
     explode: explode || deepRow !== undefined,
@@ -583,13 +659,15 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
     style,
   };
 
-  return nested
-    ? {
-        _tag: "Build",
-        findings: [...notices, bracketAuthorChoice],
-        plan: { ...plan, nonStandard: "deepObjectBrackets" },
-      }
-    : { _tag: "Build", findings: notices, plan };
+  return {
+    _tag: "Build",
+    findings: [
+      ...styleNotices(node, line, honored, deepRow),
+      ...(marks.nested ? [bracketAuthorChoice] : []),
+      ...(marks.scalars ? [scalarAuthorChoice] : []),
+    ],
+    plan: markedPlan(plan, marks),
+  };
 };
 
 const decideName = (node: ParameterNode): Decision | undefined => {
@@ -839,18 +917,6 @@ const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<
   return typesAt(resolution, childKey(source.target, "schema")).pipe(Effect.map(compound));
 };
 
-// Whether a parameter's schema, through `$ref`, declares types and none of them is an array or
-// object. An untyped schema is not primitive.
-const declaresPrimitive = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
-  if (source.node.schema === undefined) {
-    return Effect.succeed(false);
-  }
-
-  return typesAt(resolution, childKey(source.target, "schema")).pipe(
-    Effect.map((types) => types.length > 0 && !compound(types)),
-  );
-};
-
 // Whether a deepObject query parameter's schema, through `$ref`, is an array or declares a
 // property or `additionalProperties` schema of an object or array type (PRM-27). An untyped
 // member is not nested.
@@ -977,21 +1043,31 @@ const objectOnly = (
     return only;
   });
 
-// Whether a deepObject query parameter's schema admits a value that is not an object (PRM-27).
-const admitsNonObject = (
+// The value traits of one schema site, through `$ref`, that the style table's applicability checks
+// read (`inapplicable`): `primitive` when it declares types and none of them is an array or object
+// (an untyped schema is not primitive), and, for a `deepObject` value only, `nonObject` when it
+// admits a value that is not an object (PRM-27). `limits` bounds that walk, which fails closed. No
+// schema has neither trait. Parameters and form Encoding entries share it.
+const valueTraits = (
   resolution: Resolution,
-  source: Source,
+  schema: CanonicalKey | undefined,
+  deepObject: boolean,
   limits: SchemaLimits,
-): Effect.Effect<boolean> => {
-  const { node, target } = source;
-  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
-    return Effect.succeed(false);
-  }
+): Effect.Effect<Pick<Traits, "nonObject" | "primitive">> =>
+  Effect.gen(function* traitsOf() {
+    if (schema === undefined) {
+      return { nonObject: false, primitive: false };
+    }
 
-  return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, true)).pipe(
-    Effect.map((only) => !only),
-  );
-};
+    const types = yield* typesAt(resolution, schema);
+    const nonObject = deepObject && !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+
+    return { nonObject, primitive: types.length > 0 && !compound(types) };
+  });
+
+// A parameter's own schema site, or `undefined` for a `content` parameter.
+const schemaOf = (source: Source): CanonicalKey | undefined =>
+  source.node.schema === undefined ? undefined : childKey(source.target, "schema");
 
 // Whether a styled parameter's value is an object (design 6.1): its schema, through `$ref`, admits
 // only objects, by `type: object`, by `properties` with no type, or by anyOf and oneOf members that
@@ -1007,6 +1083,267 @@ const objectValued = (
   }
 
   return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, false));
+};
+
+// One branch of a `deepObject` schema (design 6.1 Scalar switch): an object with scalar members
+// (`flat`, the standard rule), an object with nested members or an array (`nested`, the bracket
+// switch's), a scalar (`scalar`, the scalar switch's), an object with a member whose union mixes
+// objects with other values (`mixed`, which neither switch defines), or anything else (`other`:
+// `null`, untyped, unresolved, a cycle or a spent budget).
+type Branch = "flat" | "mixed" | "nested" | "other" | "scalar";
+
+// One branch walk: each resolved schema is classified once (`memo`), a schema already on the
+// current path is a cycle, and every schema classified is charged to the call's node budget.
+interface BranchWalk {
+  readonly budget: Budget;
+  readonly memo: Map<string, ReadonlySet<Branch>>;
+  readonly path: Set<string>;
+}
+
+const BranchSchema = Schema.Struct({
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  const: Schema.optionalKey(Schema.Unknown),
+  enum: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  nullable: Schema.optionalKey(Schema.Unknown),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  properties: Schema.optionalKey(Schema.Unknown),
+  type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+});
+
+// The `enum` or `const` values of a scalar branch: strings, numbers and booleans.
+const ScalarValues = Schema.NonEmptyArray(
+  Schema.Union([Schema.String, Schema.Number, Schema.Boolean]),
+);
+
+const scalarTypes: ReadonlySet<string> = new Set(["boolean", "integer", "number", "string"]);
+
+// What one resolved schema declares on its own, before any member is walked: the branches it
+// settles (`kinds`), the anyOf and oneOf members whose branches it is the union of (`union`), and
+// the members of its object branch (`object`), when it has one.
+interface OwnBranches {
+  readonly kinds: readonly Branch[];
+  readonly object?: readonly CanonicalKey[];
+  readonly union: readonly CanonicalKey[];
+}
+
+const settled = (kinds: readonly Branch[]): OwnBranches => ({ kinds, union: [] });
+
+// The property and additionalProperties member sites of an object branch at `home`.
+const memberSites = (resolution: Resolution, home: CanonicalKey) =>
+  nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(MemberSchemas)),
+    Effect.orElseSucceed((): typeof MemberSchemas.Type => ({})),
+    Effect.map((declared) => [
+      ...Object.keys(declared.properties ?? {}).map((name) => childKey(home, "properties", name)),
+      ...(declared.additionalProperties === undefined
+        ? []
+        : [childKey(home, "additionalProperties")]),
+    ]),
+  );
+
+// The branches of a `type` list, the object branch's members read once for `object`.
+const typedBranches = (
+  resolution: Resolution,
+  home: CanonicalKey,
+  declared: typeof BranchSchema.Type,
+): Effect.Effect<OwnBranches> =>
+  Effect.gen(function* typed() {
+    const types = [declared.type ?? []].flat();
+    const kinds: Branch[] = [];
+    if (types.length === 0 && declared.properties === undefined) {
+      return settled(["other"]);
+    }
+
+    for (const name of types) {
+      if (name === "array") {
+        kinds.push("nested");
+      } else if (name !== "object") {
+        kinds.push(scalarTypes.has(name) ? "scalar" : "other");
+      }
+    }
+
+    const objects = types.length === 0 || types.includes("object");
+
+    return objects
+      ? { kinds, object: yield* memberSites(resolution, home), union: [] }
+      : settled(kinds);
+  });
+
+// One resolved schema's own branches: an anyOf or oneOf beside no constraint of its own is the union
+// of its members' branches (beside `type`, `enum`, `const` or `properties` it fails closed); an
+// `enum` or `const` of strings, numbers and booleans is a scalar branch; then the `type` list, or
+// an untyped schema with `properties` (an object).
+const ownBranches = (resolution: Resolution, home: CanonicalKey): Effect.Effect<OwnBranches> =>
+  Effect.gen(function* own() {
+    const decoded = yield* nodeIn(resolution, home).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(BranchSchema)),
+      Effect.option,
+    );
+    if (Option.isNone(decoded)) {
+      return settled(["other"]);
+    }
+
+    const declared = decoded.value;
+    // A 3.0 `nullable: true` admits `null`, which neither switch sends.
+    if (resolution.line === "3.0" && declared.nullable === true) {
+      return settled(["other"]);
+    }
+
+    const constant = Object.hasOwn(declared, "const");
+    const union = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
+      (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
+    );
+    if (union.length > 0) {
+      const constrained =
+        declared.type !== undefined ||
+        declared.enum !== undefined ||
+        constant ||
+        declared.properties !== undefined;
+
+      return constrained ? settled(["other"]) : { kinds: [], union };
+    }
+
+    if (constant || declared.enum !== undefined) {
+      const values = constant ? [declared.const] : declared.enum;
+      const scalar = Option.isSome(Schema.decodeUnknownOption(ScalarValues)(values));
+
+      return settled([scalar ? "scalar" : "other"]);
+    }
+
+    return yield* typedBranches(resolution, home, declared);
+  });
+
+// How a member of an object branch nests: its declared type is an object or array (`nested`, as
+// the strict nested test reads it), it is an anyOf or oneOf union (`union`, walked), or neither
+// (`flat`: an untyped member is scalar, as it is today).
+const memberNesting = (
+  resolution: Resolution,
+  member: CanonicalKey,
+): Effect.Effect<"flat" | "nested" | "union"> =>
+  Effect.gen(function* nesting() {
+    if (compound(yield* typesAt(resolution, member))) {
+      return "nested";
+    }
+
+    const composed = yield* nodeIn(resolution, follow(resolution, member)).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
+      Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
+    );
+
+    return composed.anyOf === undefined && composed.oneOf === undefined ? "flat" : "union";
+  });
+
+// A member union holding objects nests (`nested`); objects beside other values is `mixed`; a
+// union with no object is a scalar member (`flat`).
+const unionMember = (kinds: ReadonlySet<Branch>): Branch => {
+  const objects = kinds.has("flat") || kinds.has("mixed") || kinds.has("nested");
+  if (kinds.has("mixed") || (objects && (kinds.has("scalar") || kinds.has("other")))) {
+    return "mixed";
+  }
+
+  return objects ? "nested" : "flat";
+};
+
+// An object branch from its members' kinds: `mixed` over `nested` over `flat`.
+const objectBranch = (members: readonly Branch[]): Branch => {
+  if (members.includes("mixed")) {
+    return "mixed";
+  }
+
+  return members.includes("nested") ? "nested" : "flat";
+};
+
+// The branches the schema at `key` admits, through `$ref`. A cycle or a spent budget is `other`,
+// which refuses the entry, so memoizing a result reached through either is sound.
+const branchesOf = (
+  resolution: Resolution,
+  key: CanonicalKey,
+  walk: BranchWalk,
+): Effect.Effect<ReadonlySet<Branch>> =>
+  Effect.gen(function* branches() {
+    const home = follow(resolution, key);
+    const id = keyOf(home);
+    const known = walk.memo.get(id);
+    if (known !== undefined) {
+      return known;
+    }
+
+    if (walk.path.has(id) || !charge(walk.budget)) {
+      return new Set<Branch>(["other"]);
+    }
+
+    walk.path.add(id);
+
+    const own = yield* ownBranches(resolution, home);
+    const kinds = new Set<Branch>(own.kinds);
+    for (const member of own.union) {
+      for (const kind of yield* branchesOf(resolution, member, walk)) {
+        kinds.add(kind);
+      }
+    }
+
+    if (own.object !== undefined) {
+      const members: Branch[] = [];
+      for (const member of own.object) {
+        const nesting = yield* memberNesting(resolution, member);
+        members.push(
+          nesting === "union" ? unionMember(yield* branchesOf(resolution, member, walk)) : nesting,
+        );
+      }
+
+      kinds.add(objectBranch(members));
+    }
+
+    walk.path.delete(id);
+    walk.memo.set(id, kinds);
+
+    return kinds;
+  });
+
+/**
+ * Classifies the `deepObject` schema at `schema` branch by branch, through `$ref`, `anyOf`,
+ * `oneOf`, a `type` list, `enum` and `const`, memoized and bounded by `limits` (failing closed),
+ * and decides it under the author config's `switches`. Query parameters and form Encoding entries
+ * share it (design 6.1, 6.3).
+ */
+export const scalarCover = (
+  resolution: Resolution,
+  schema: CanonicalKey,
+  switches: AuthorConfig["nonStandard"],
+  limits: SchemaLimits = {},
+): Effect.Effect<ScalarCover> =>
+  Effect.gen(function* decideCover() {
+    if (switches?.deepObjectScalars !== true) {
+      return strictCover;
+    }
+
+    const walk: BranchWalk = { budget: budgetOf(limits), memo: new Map(), path: new Set() };
+    const kinds = yield* branchesOf(resolution, schema, walk);
+    if (!kinds.has("scalar") || kinds.has("other")) {
+      return strictCover;
+    }
+
+    const nested = kinds.has("nested");
+    if (kinds.has("mixed") || (nested && switches.deepObjectBrackets !== true)) {
+      return { _tag: "Uncovered" };
+    }
+
+    return { _tag: "Covered", nested };
+  });
+
+// The scalar switch's decision for a deepObject query parameter; `Strict` for any other.
+const scalarsOf = (
+  resolution: Resolution,
+  site: ParameterSite,
+  source: Source,
+  limits: SchemaLimits,
+): Effect.Effect<ScalarCover> => {
+  const { node, target } = source;
+  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
+    return Effect.succeed(strictCover);
+  }
+
+  return scalarCover(resolution, childKey(target, "schema"), site.nonStandard, limits);
 };
 
 /**
@@ -1039,15 +1376,9 @@ export const formStyleRefusal = (
       return Option.none();
     }
 
-    const types = schema === undefined ? [] : yield* typesAt(resolution, schema);
-    const nonObject =
-      style === "deepObject" &&
-      schema !== undefined &&
-      !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+    const traits = yield* valueTraits(resolution, schema, style === "deepObject", limits);
 
-    return Option.fromUndefinedOr(
-      inapplicable(row, style, { nonObject, primitive: types.length > 0 && !compound(types) }),
-    );
+    return Option.fromUndefinedOr(inapplicable(row, style, traits));
   });
 
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
@@ -1094,9 +1425,14 @@ const serializationOf = (
     style: plan.style,
   };
 
-  return plan.nonStandard === undefined
-    ? serialization
-    : { ...serialization, nonStandard: plan.nonStandard };
+  const bracketed =
+    plan.nonStandard === undefined
+      ? serialization
+      : { ...serialization, nonStandard: plan.nonStandard };
+
+  return plan.nonStandardScalars === undefined
+    ? bracketed
+    : { ...bracketed, nonStandardScalars: plan.nonStandardScalars };
 };
 
 const parameterRows = (node: ParameterNode, plan: ContentPlan | StylePlan): readonly string[] => {
@@ -1169,12 +1505,15 @@ export const normalizeParameter = (
       return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
     }
 
+    const deepObject = source.node.in === "query" && source.node.style === "deepObject";
+    const values = yield* valueTraits(resolution, schemaOf(source), deepObject, limits);
     const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source), {
       brackets: site.nonStandard?.deepObjectBrackets === true,
       multiple: yield* carriesMultiple(resolution, source),
       nested: yield* nestsDeeply(resolution, source),
-      nonObject: yield* admitsNonObject(resolution, source, limits),
-      primitive: yield* declaresPrimitive(resolution, source),
+      nonObject: values.nonObject,
+      primitive: values.primitive,
+      scalars: yield* scalarsOf(resolution, site, source, limits),
     });
     const diagnostics = (findings: readonly Finding[]) =>
       toDiagnostics(resolution, site, source.related, source.node.name, findings);
@@ -1263,7 +1602,8 @@ export const partHeader = (
       multiple: false,
       nested: yield* nestsDeeply(resolution, source),
       nonObject: false,
-      primitive: yield* declaresPrimitive(resolution, source),
+      primitive: (yield* valueTraits(resolution, schemaOf(source), false, {})).primitive,
+      scalars: strictCover,
     };
     const decision = Option.match(yield* mediaOf(resolution, source), {
       onNone: () => decideStyle(node, resolution.line, traits),

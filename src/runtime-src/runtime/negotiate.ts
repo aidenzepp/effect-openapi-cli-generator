@@ -4,9 +4,11 @@ import { UsageError } from "../domain/errors.ts";
 
 /**
  * An operation's declared media: request keys, and response keys per response key, in document
- * order.
+ * order. `refused` lists, per request key, the body properties refused at `field` scope (design
+ * 8.5); absent, none is. It is the one list the form serializer's `--body` guard reads.
  */
 export interface MediaDeclaration {
+  readonly refused?: { readonly [requestKey: string]: readonly string[] };
   readonly request: readonly string[];
   readonly responses: { readonly [responseKey: string]: readonly string[] };
 }

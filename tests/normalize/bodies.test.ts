@@ -80,7 +80,7 @@ const only = <T>(values: readonly T[]): T => {
 const alternativeOf = (line: Line, mediaType: string, media: Json = {}): MediaAlternative =>
   only(implemented(line, { content: { [mediaType]: media } }).body.alternatives);
 
-const targetOf = (rule: EncodingRule): string =>
+const targetOf = (rule: Pick<EncodingRule, "target">): string =>
   rule.target.kind === "property" ? rule.target.name : `#${rule.target.index}`;
 
 const typesOf = (rules: readonly EncodingRule[]): Record<string, string[]> =>
@@ -390,7 +390,7 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     ]);
     expect(outcome.diagnostics.map(({ scope, severity }) => [scope, severity])).toEqual([
       ["element", "notice"],
-      ["element", "refusal"],
+      ["field", "refusal"],
     ]);
     expect(rule.rows.map(String)).toEqual(["ENC-01", "ENC-04", "ENC-05", "ENC-13", "ENC-40"]);
   });
@@ -655,6 +655,47 @@ describe("MED-07 MED-08 MED-13 3.2 positional and nested encoding", () => {
     expect(alternative.rows.map(String)).toEqual(["MED-01", "MED-03", "MED-08"]);
   });
 
+  test("M3-MP1: a multipart/mixed array body gives every prefixItems position a rule and items an item rule, by the default table", () => {
+    const alternative = alternativeOf("3.2", "multipart/mixed", {
+      prefixEncoding: [{ contentType: "text/csv" }],
+      schema: {
+        items: { type: "integer" },
+        prefixItems: [string, { type: "object" }],
+        type: "array",
+      },
+    });
+
+    expect(typesOf(alternative.prefixEncoding)).toEqual({
+      "#0": ["text/csv"],
+      "#1": ["application/json"],
+    });
+    expect(
+      alternative.itemEncoding === undefined ? undefined : targetOf(alternative.itemEncoding),
+    ).toBe("#2");
+    expect(alternative.itemEncoding?.contentType.map(String)).toEqual(["text/plain"]);
+  });
+
+  test("M3-MP1: items false gives no item rule, and itemSchema alone gives one", () => {
+    const closed = alternativeOf("3.2", "multipart/mixed", {
+      schema: { items: false, prefixItems: [string], type: "array" },
+    });
+    const streamed = alternativeOf("3.2", "multipart/mixed", { itemSchema: { type: "object" } });
+
+    expect(typesOf(closed.prefixEncoding)).toEqual({ "#0": ["text/plain"] });
+    expect(closed.itemEncoding).toBeUndefined();
+    expect(streamed.prefixEncoding).toEqual([]);
+    expect(streamed.itemEncoding?.contentType.map(String)).toEqual(["application/json"]);
+  });
+
+  test("M3-MP1: an array body on another multipart subtype gets no default position rules", () => {
+    const alternative = alternativeOf("3.2", "multipart/related", {
+      schema: { items: string, prefixItems: [string], type: "array" },
+    });
+
+    expect(alternative.prefixEncoding).toEqual([]);
+    expect(alternative.itemEncoding).toBeUndefined();
+  });
+
   test("MED-13 encoding beside prefixEncoding or itemEncoding refuses the alternative", () => {
     const outcome = refused(
       "3.2",
@@ -712,15 +753,64 @@ describe("MED-07 MED-08 MED-13 3.2 positional and nested encoding", () => {
     expect(codes(outcome)).toEqual(["ENC-16/nesting-too-deep"]);
   });
 
-  test("ENC-09 a nested itemEncoding has no place in the model and is refused", () => {
-    const outcome = refused(
+  test("ENC-09 a nested itemEncoding is the nested item rule, after the nested positions", () => {
+    const outcome = implemented(
       "3.2",
-      multipart(object({ batch: { type: "object" } }), {
+      multipart(object({ batch: { type: "array" } }), {
+        encoding: {
+          batch: {
+            contentType: "multipart/mixed",
+            itemEncoding: { contentType: "image/png" },
+            prefixEncoding: [{ contentType: "application/json" }],
+          },
+        },
+      }),
+    );
+    const rule = only(only(outcome.body.alternatives).encoding);
+    const item = rule.nestedItem;
+
+    expect(rule.nested?.map((nested) => targetOf(nested))).toEqual(["#0"]);
+    expect([
+      item === undefined ? undefined : targetOf(item),
+      item?.contentType.map(String),
+    ]).toEqual(["#1", ["image/png"]]);
+    expect(["ENC-08", "ENC-09"].filter((row) => rule.rows.map(String).includes(row))).toEqual([
+      "ENC-08",
+      "ENC-09",
+    ]);
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-09 a nested itemEncoding alone nests by position with an item rule only", () => {
+    const outcome = implemented(
+      "3.2",
+      multipart(object({ batch: { type: "array" } }), {
         encoding: { batch: { contentType: "multipart/mixed", itemEncoding: {} } },
       }),
     );
+    const rule = only(only(outcome.body.alternatives).encoding);
 
-    expect(codes(outcome)).toEqual(["ENC-09/nested-item-encoding"]);
+    expect([
+      rule.nested,
+      rule.nestedItem === undefined ? undefined : targetOf(rule.nestedItem),
+    ]).toEqual([[], "#0"]);
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-16 a nested itemEncoding that nests again is refused", () => {
+    const outcome = refused(
+      "3.2",
+      multipart(object({ batch: { type: "array" } }), {
+        encoding: {
+          batch: {
+            contentType: "multipart/mixed",
+            itemEncoding: { contentType: "multipart/mixed", itemEncoding: {} },
+          },
+        },
+      }),
+    );
+
+    expect(codes(outcome)).toEqual(["ENC-16/nesting-too-deep"]);
   });
 });
 
@@ -1221,11 +1311,11 @@ describe("ENC-12 a form deepObject with explode false or omitted is exploded wit
   });
 });
 
-const styledForm = (property: Json, encoding: Json): Json => ({
+const styledForm = (property: Json, encoding: Json, required = false): Json => ({
   content: {
     "application/x-www-form-urlencoded": {
       encoding: { a: encoding },
-      schema: object({ a: property }),
+      schema: object({ a: property }, required ? { required: ["a"] } : {}),
     },
   },
 });
@@ -1252,8 +1342,8 @@ describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table
 
   for (const line of lines) {
     for (const [code, property, encoding] of cases) {
-      test(`${code} ${line} refuses the form alternative at element scope`, () => {
-        const outcome = refused(line, styledForm(property, encoding));
+      test(`${code} ${line} on a required property refuses the form alternative at element scope`, () => {
+        const outcome = refused(line, styledForm(property, encoding, true));
         const diagnostic = only(outcome.diagnostics);
 
         expect(diagnostic.code).toBe(code);
@@ -1262,6 +1352,19 @@ describe("STY-17 to STY-24 PRM-27 form Encoding styles get the query style table
         expect(diagnostic.related?.map((at) => String(at.pointer))).toEqual([
           "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
         ]);
+      });
+
+      test(`${code} ${line} on an optional property is refused at field scope and the alternative stays`, () => {
+        const outcome = implemented(line, styledForm(property, encoding));
+        const diagnostic = only(outcome.diagnostics);
+
+        expect(diagnostic.code).toBe(code);
+        expect(diagnostic.scope).toBe("field");
+        expect(String(diagnostic.pointer)).toBe(
+          "/paths/~1a/post/requestBody/content/application~1x-www-form-urlencoded/encoding/a",
+        );
+        expect(diagnostic.related).toBeUndefined();
+        expect(only(outcome.body.alternatives).refusedFields?.map(String)).toEqual(["a"]);
       });
     }
   }

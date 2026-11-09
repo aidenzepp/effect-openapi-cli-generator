@@ -26,6 +26,7 @@ import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 // The format fixes of m2-fmtfx: a 3.1 or 3.2 `format: byte` property is a plain string flag sent
@@ -165,7 +166,7 @@ const sent = (args: readonly string[]) =>
         Effect.provide(
           Layer.mergeAll(
             Stdio.layerTest({ stderr: () => Sink.drain, stdout: () => Sink.drain }),
-            Output.runCredentialsLayer,
+            runCredentialsLayer,
             Input.stdinClaimLayer,
           ),
         ),

@@ -582,10 +582,12 @@ export const generate = (
       boundOrigins: (servers) => boundOrigins(servers, serversContext).origins,
       plan,
     });
+    // Help's REFUSED line reads `plan.diagnostics`, so the plan given to `emitCli` carries every
+    // diagnostic so far, normalize's element and field refusals among them, not the plan's own.
     const cli = yield* emitCli({
       api,
       config: author.value,
-      plan,
+      plan: { ...plan, diagnostics: planned },
       validationEdits: schemas.validation.edits,
     });
     const commands = commandOrder(plan);

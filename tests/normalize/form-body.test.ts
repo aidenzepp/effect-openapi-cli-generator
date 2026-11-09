@@ -36,8 +36,8 @@ const normalize = (line: Line, requestBody: Json): BodyOutcome => {
   );
 };
 
-const form = (properties: Members, extra: Members = {}): Json => ({
-  content: { [formMedia]: { schema: { properties, type: "object" }, ...extra } },
+const form = (properties: Members, extra: Members = {}, schema: Members = {}): Json => ({
+  content: { [formMedia]: { schema: { properties, type: "object", ...schema }, ...extra } },
   required: true,
 });
 
@@ -191,11 +191,15 @@ describe("ENC-17 to ENC-26 the default contentType table when no style field is 
     expect(rowsOf(ruleOf(found, "meta"))).toContain("ENC-02");
   });
 
-  test("ENC-02 any other explicit contentType is refused at element scope, never dropped", () => {
+  test("ENC-02 any other explicit contentType on a required property refuses the alternative, never dropped", () => {
     for (const line of lines) {
       const outcome = normalize(
         line,
-        form({ meta: { type: "object" } }, { encoding: { meta: { contentType: "text/plain" } } }),
+        form(
+          { meta: { type: "object" } },
+          { encoding: { meta: { contentType: "text/plain" } } },
+          { required: ["meta"] },
+        ),
       );
 
       expect(outcome._tag).toBe("Refused");
@@ -203,6 +207,21 @@ describe("ENC-17 to ENC-26 the default contentType table when no style field is 
         [media, "ENC-02/form-content-type", "element", "refusal"],
       ]);
       expect(relatedOf(outcome.diagnostics)).toEqual([[`${media}/encoding/meta/contentType`]]);
+    }
+  });
+
+  test("ENC-02 any other explicit contentType on an optional property is refused at field scope", () => {
+    for (const line of lines) {
+      const outcome = implemented(
+        line,
+        form({ meta: { type: "object" } }, { encoding: { meta: { contentType: "text/plain" } } }),
+      );
+
+      expect(findings(outcome.diagnostics)).toEqual([
+        [`${media}/encoding/meta`, "ENC-02/form-content-type", "field", "refusal"],
+      ]);
+      expect(relatedOf(outcome.diagnostics)).toEqual([[`${media}/encoding/meta/contentType`]]);
+      expect(only(outcome.body.alternatives).refusedFields?.map(String)).toEqual(["meta"]);
     }
   });
 });

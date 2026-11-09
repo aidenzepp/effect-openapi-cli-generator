@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import * as Output from "../../src/runtime-src/runtime/output.ts";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
 import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
@@ -394,12 +395,19 @@ describe("I4 the canary credential never reaches output", () => {
 
   test("a transport failure to a closed port exits 4 without the canary", async () => {
     const cli = await run(["--base-url", closedOrigin, "status", "get", "closed"]);
+    const lines = cli.stderr.trim().split("\n");
 
+    // The transport error line ends with the reason; the GET is idempotent, so the retry hint
+    // follows on its own line (SM-16).
     expect({
       exitCode: cli.exitCode,
+      hint: lines.includes(Output.retryHint),
       leaked: leaked(cli),
-      reason: cli.stderr.trim().split(" ").at(-1),
-    }).toEqual({ exitCode: 4, leaked: [], reason: "connect" });
+      reason: lines
+        .find((line) => line.startsWith("Error: "))
+        ?.split(" ")
+        .at(-1),
+    }).toEqual({ exitCode: 4, hint: true, leaked: [], reason: "connect" });
   }, 60_000);
 });
 

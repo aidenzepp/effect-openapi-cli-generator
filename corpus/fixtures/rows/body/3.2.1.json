@@ -465,6 +465,39 @@
         }
       }
     },
+    "/ordered": {
+      "post": {
+        "operationId": "ordered-upload",
+        "requestBody": {
+          "content": {
+            "multipart/mixed": {
+              "schema": {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 3,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
     "/parts": {
       "get": {
         "operationId": "parts-get",
@@ -481,6 +514,76 @@
               }
             },
             "description": "ok"
+          }
+        }
+      }
+    },
+    "/positional": {
+      "post": {
+        "operationId": "positional-upload",
+        "requestBody": {
+          "content": {
+            "multipart/mixed": {
+              "itemEncoding": {
+                "contentType": "image/png"
+              },
+              "prefixEncoding": [
+                {
+                  "contentType": "application/json"
+                }
+              ],
+              "schema": {
+                "items": {
+                  "contentMediaType": "image/png"
+                },
+                "prefixItems": [
+                  {
+                    "type": "object"
+                  }
+                ],
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/positional/extra": {
+      "post": {
+        "operationId": "positional-extra-upload",
+        "requestBody": {
+          "content": {
+            "multipart/mixed": {
+              "prefixEncoding": [
+                {
+                  "contentType": "text/csv"
+                },
+                {
+                  "contentType": "application/xml"
+                }
+              ],
+              "schema": {
+                "items": false,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "204": {
+            "description": "done"
           }
         }
       }
@@ -576,6 +679,26 @@
             }
           },
           "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
+    },
+    "/stream": {
+      "post": {
+        "operationId": "stream-upload",
+        "requestBody": {
+          "content": {
+            "multipart/mixed": {
+              "itemSchema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": false
         },
         "responses": {
           "204": {

@@ -11,7 +11,8 @@ const Entry = Schema.Struct({
   row: Schema.String,
 });
 
-// A walk element (design 8.3) by its use site, its kind and the kind's value.
+// A walk element (design 8.3) by its use site, its kind and the kind's value, or a `field` refusal
+// no command agrees with (rule 6) by its pointer, request media type and property name.
 const site = { document: DocumentUri, pointer: JsonPointer };
 
 const Element = Schema.Union([
@@ -20,6 +21,12 @@ const Element = Schema.Union([
     ...site,
     in: Schema.String,
     kind: Schema.Literal("parameter"),
+    name: Schema.String,
+  }),
+  Schema.Struct({
+    ...site,
+    kind: Schema.Literal("refusedField"),
+    mediaType: Schema.String,
     name: Schema.String,
   }),
   Schema.Struct({ ...site, kind: Schema.Literal("requestMedia"), mediaType: Schema.String }),
@@ -37,6 +44,12 @@ const claim = { path: Schema.Array(Schema.String) };
 
 const Invented = Schema.Union([
   Schema.Struct({ ...claim, kind: Schema.Literal("command") }),
+  Schema.Struct({
+    ...claim,
+    kind: Schema.Literal("refusedField"),
+    mediaType: Schema.String,
+    name: Schema.String,
+  }),
   Schema.Struct({ ...claim, kind: Schema.Literal("requestMedia"), mediaType: Schema.String }),
   Schema.Struct({ ...claim, key: Schema.String, kind: Schema.Literal("response") }),
   Schema.Struct({
@@ -71,7 +84,7 @@ export const Verdict = Schema.Struct({
     nonStandard: Count,
     notices: Count,
     operations: Schema.Struct({ generated: Count, refused: Count, total: Count }),
-    refusals: Schema.Struct({ document: Count, element: Count, operation: Count }),
+    refusals: Schema.Struct({ document: Count, element: Count, field: Count, operation: Count }),
   }),
   coverage: VerdictCoverage,
   generator: Schema.Struct({ config: Schema.String, configSha256: Sha256, version: Schema.String }),
@@ -83,7 +96,7 @@ export const Verdict = Schema.Struct({
   refusals: Schema.Array(
     Schema.Struct({
       ...Entry.fields,
-      scope: Schema.Literals(["document", "operation", "element"]),
+      scope: Schema.Literals(["document", "operation", "element", "field"]),
     }),
   ),
   spec: Schema.Struct({ id: Schema.String, openapi: Schema.String, sha256: Sha256 }),
