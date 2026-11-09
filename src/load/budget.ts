@@ -1,7 +1,8 @@
-import { Array as Arr, ByteSize, Data, Effect, FileSystem, Option, Schema, Stream } from "effect";
+import { Array as Arr, ByteSize, Data, Effect, FileSystem, Option, Stream } from "effect";
 import type { PlatformError } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic, DiagnosticInput } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -62,14 +63,17 @@ export interface RefusalDetail {
   readonly position?: Position;
 }
 
-const diagnosticFields = (document: Document, code: LoadCode, pointer: string) => ({
+const diagnosticFields = (
+  document: Document,
+  code: LoadCode,
+  pointer: string,
+): DiagnosticInput => ({
   code,
   document,
   element: "document",
   message: messages[code],
   openapi: "unknown",
   pointer,
-  row: "DOC-14",
   scope: "document",
   severity: "refusal",
   specSection: "https://spec.openapis.org/oas/v3.1.2.html#format",
@@ -85,11 +89,10 @@ export const refuse = (
 ): Effect.Effect<never, LoadRefusal> => {
   const fields = diagnosticFields(document, code, detail.pointer ?? "");
   const { position } = detail;
-  const input =
+  const input: DiagnosticInput =
     position === undefined ? fields : { ...fields, column: position.column, line: position.line };
 
-  return Schema.decodeUnknownEffect(Diagnostic)(input).pipe(
-    Effect.orDie,
+  return makeDiagnostic(input).pipe(
     Effect.flatMap((diagnostic) =>
       Effect.fail(
         new LoadRefusal(
