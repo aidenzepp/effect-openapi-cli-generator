@@ -11,7 +11,8 @@ import type { SpecLine } from "../model/spec-section.ts";
 /**
  * What a flag carries: a typed scalar, a JSON text (`--<prop> <json>`), a file path or `-` (a
  * binary multipart part, or a base64 body property or multipart part the runtime encodes from the
- * file), or the whole body.
+ * file), the whole body, or the ordered parts of a positional body (`part`, repeated, each a file
+ * path or `-`).
  */
 export type BodyFlagKind =
   | "body"
@@ -21,6 +22,7 @@ export type BodyFlagKind =
   | "integer"
   | "json"
   | "number"
+  | "part"
   | "string";
 
 /**
@@ -702,14 +704,26 @@ const walkParts = (
   return Result.succeed({ flags, skipped });
 };
 
-const wholeBody = (kind: "body" | "body-file"): BodyFlag => ({
+const wholeBody = (kind: "body" | "body-file" | "part"): BodyFlag => ({
   kind,
   name: kind,
   notes: [],
   pointer: "",
-  repeated: false,
+  repeated: kind === "part",
   schemaPointer: "",
 });
+
+type Positional = Pick<MediaAlternative, "codec" | "mediaType"> &
+  Partial<Pick<MediaAlternative, "itemEncoding" | "prefixEncoding">>;
+
+/**
+ * Whether an alternative is a 3.2 positional `multipart/mixed` body (design 6.3, HT:B15): normalize
+ * gave it a rule per position, so its parts are sent in order from one repeated `--part` flag.
+ */
+export const isPositionalBody = (alternative: Positional): boolean =>
+  alternative.codec === "multipart" &&
+  (alternative.mediaType.split(";")[0] ?? "").trim().toLowerCase() === "multipart/mixed" &&
+  (alternative.itemEncoding !== undefined || (alternative.prefixEncoding ?? []).length > 0);
 
 const flagOrder = Order.combine(
   Order.mapInput(Order.String, (flag: BodyFlag) => flag.name),
@@ -737,7 +751,8 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * conflicting `allOf`) is one JSON-valued flag. `defs` is the schema store's `$defs` map and
  * `alternative.schema` is the root's key in it. JSON and form bodies get field flags plus `--body`
  * and `--body-file`; a binary or XML body only `--body-file`; a multipart body one flag per
- * top-level part and no whole-body flag (design 6.3, D-ENC1 a); any other codec both whole-body
+ * top-level part and no whole-body flag (design 6.3, D-ENC1 a), except a positional
+ * `multipart/mixed` body, whose one flag is the repeated `--part`; any other codec both whole-body
  * flags and no field flags. A multipart part reads its transfer encoding from
  * `alternative.encoding` (absent: no rules), never from its schema. Work is bounded: each `$defs`
  * key is classified once per call, and node visits, including every property entry, share one
@@ -751,10 +766,19 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
 export const flattenBody = (
   defs: Defs,
   alternative: Pick<MediaAlternative, "codec" | "schema"> &
-    Partial<Pick<MediaAlternative, "encoding" | "refusedFields">>,
+    Partial<
+      Pick<
+        MediaAlternative,
+        "encoding" | "itemEncoding" | "mediaType" | "prefixEncoding" | "refusedFields"
+      >
+    >,
   line: SpecLine,
 ): Result.Result<FlattenedBody, FlattenError> => {
-  const { codec } = alternative;
+  const { codec, mediaType } = alternative;
+  if (mediaType !== undefined && isPositionalBody({ ...alternative, mediaType })) {
+    return Result.succeed({ flags: [wholeBody("part")], reserved: [], skipped: [] });
+  }
+
   if (codec === "binary") {
     return Result.succeed({ flags: [wholeBody("body-file")], reserved: [], skipped: [] });
   }

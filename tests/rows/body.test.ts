@@ -18,9 +18,9 @@ import { setEnv } from "../support/env.ts";
 // The Milestone 2 witness for the Request Body, Media Type and Binary data rows (RQB-*, MED-*,
 // BIN-*): one generated package per version line, built once, run against the capture server; the
 // generation rows call `generate()` in process. A row the product gets wrong is a `test.todo` with
-// what was observed. MED-03's response half, MED-07, MED-08, MED-15 and MED-16 to MED-20 are
-// deferred to Milestone 3; the M2 refusal tests pin today's refusal of MED-07, MED-08 and MED-15
-// until M3-MP1 replaces them.
+// what was observed. MED-03's response half and MED-16 to MED-20 are deferred to Milestone 3.
+// MED-07, MED-08, MED-15 and MED-26 send a 3.2 positional multipart/mixed body from one repeatable,
+// ordered --part flag (M3-MP1).
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -80,6 +80,9 @@ const three = encoder.encode("abc");
 // One valid JSON line and one that is not: a sequential upload is sent as given, never parsed.
 const jsonLines = encoder.encode('{"a":1}\nnot json\n');
 
+// A JSON document sent as one positional part's raw bytes, never parsed.
+const meta = encoder.encode('{"id":1}');
+
 const file = (name: string): string => nodePath.join(work, name);
 
 const multipartResponse =
@@ -91,6 +94,7 @@ beforeAll(async () => {
   nodeFs.writeFileSync(file("ten.bin"), ten);
   nodeFs.writeFileSync(file("three.bin"), three);
   nodeFs.writeFileSync(file("lines.jsonl"), jsonLines);
+  nodeFs.writeFileSync(file("meta.json"), meta);
 
   capture.script("/json", {
     body: '{"b": 1,"a":[2]}',
@@ -373,24 +377,6 @@ const content = "/paths/~1a/post/requestBody/content";
 
 const withResponse = (line: Line, response: Members): Members =>
   members(line, { paths: { "/a": { get: { responses: { "200": response } } } } });
-
-// What a refused operation leaves: the one EMT-1 refusal, no command, and a CLI that never calls
-// the operation's request builder, so nothing can be sent for it.
-const refusedOperation = (found: Generated) => ({
-  builderCalled: nodeFs
-    .readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8")
-    .includes("postA"),
-  commands: found.commands,
-  diagnostics: summary(found),
-});
-
-const unsupportedBody = {
-  builderCalled: false,
-  commands: [],
-  diagnostics: [["EMT-1/unsupported-body", "refusal", "operation", "/paths/~1a/post"]],
-};
-
-const string: Members = { type: "string" };
 
 describe("RQB, MED and BIN rows through the built CLI", () => {
   for (const line of lines) {
@@ -774,6 +760,110 @@ describe("RQB, MED and BIN rows through the built CLI", () => {
     ]);
     expect(usage(notInteger)).toEqual(refusedBeforeSending);
   }, 60_000);
+
+  // A positional multipart/mixed part is raw bytes from a file or `-`, typed by its position's
+  // rule; no part has a Content-Disposition.
+  test("MED-07: prefixEncoding types the leading part, and the parts are sent in --part order (3.2.1)", async () => {
+    const sent = sentOnce(
+      await run("3.2.1", [
+        "positional-upload",
+        "--part",
+        file("meta.json"),
+        "--part",
+        file("small.bin"),
+      ]),
+    );
+
+    expect(sent.contentType).toMatch(/^multipart\/mixed; boundary=/u);
+    expect(partsOf(sent)).toEqual([
+      { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+      { body: smallText, headers: ["Content-Type: image/png"] },
+    ]);
+  }, 60_000);
+
+  test("MED-08: itemEncoding types every remaining part alike, stdin included; a required body with no part is the close delimiter alone (3.2.1)", async () => {
+    const sent = sentOnce(
+      await run(
+        "3.2.1",
+        [
+          "positional-upload",
+          "--part",
+          file("meta.json"),
+          "--part",
+          file("ten.bin"),
+          "--part",
+          "-",
+        ],
+        three,
+      ),
+    );
+    const empty = sentOnce(await run("3.2.1", ["positional-upload"]));
+
+    expect(partsOf(sent)).toEqual([
+      { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+      { body: "0123456789", headers: ["Content-Type: image/png"] },
+      { body: "abc", headers: ["Content-Type: image/png"] },
+    ]);
+    expect(empty.contentType).toMatch(/^multipart\/mixed; boundary=/u);
+    expect(partsOf(empty)).toEqual([]);
+  }, 60_000);
+
+  test("MED-15: a prefixEncoding entry beyond the schema's items is unused, a part beyond them is refused before sending, and an optional body with no part is none (3.2.1)", async () => {
+    const one = sentOnce(
+      await run("3.2.1", ["positional-extra-upload", "--part", file("three.bin")]),
+    );
+    const two = await run("3.2.1", [
+      "positional-extra-upload",
+      "--part",
+      file("three.bin"),
+      "--part",
+      file("ten.bin"),
+    ]);
+    const none = sentOnce(await run("3.2.1", ["positional-extra-upload"]));
+
+    expect(partsOf(one)).toEqual([{ body: "abc", headers: ["Content-Type: text/csv"] }]);
+    expect(usage(two)).toEqual(refusedBeforeSending);
+    expect([none.body, none.contentType]).toEqual(["", undefined]);
+  }, 60_000);
+
+  test("MED-26: an array schema or itemSchema fixes the part order, each position typed by the default table, and minItems and maxItems bound the parts (3.2.1)", async () => {
+    const ordered = sentOnce(
+      await run("3.2.1", [
+        "ordered-upload",
+        "--part",
+        file("meta.json"),
+        "--part",
+        file("three.bin"),
+        "--part",
+        file("ten.bin"),
+      ]),
+    );
+    const few = await run("3.2.1", ["ordered-upload", "--part", file("meta.json")]);
+    const many = await run("3.2.1", [
+      "ordered-upload",
+      ...[1, 2, 3, 4].flatMap(() => ["--part", file("three.bin")]),
+    ]);
+    const items = sentOnce(
+      await run("3.2.1", [
+        "stream-upload",
+        "--part",
+        file("meta.json"),
+        "--part",
+        file("three.bin"),
+      ]),
+    );
+
+    expect(partsOf(ordered)).toEqual([
+      { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+      { body: "abc", headers: ["Content-Type: text/plain"] },
+      { body: "0123456789", headers: ["Content-Type: text/plain"] },
+    ]);
+    expect([usage(few), usage(many)]).toEqual([refusedBeforeSending, refusedBeforeSending]);
+    expect(partsOf(items)).toEqual([
+      { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+      { body: "abc", headers: ["Content-Type: application/json"] },
+    ]);
+  }, 60_000);
 });
 
 describe("RQB, MED and BIN rows through generate()", () => {
@@ -965,56 +1055,9 @@ describe("RQB, MED and BIN rows through generate()", () => {
     ]);
   });
 
-  // Milestone 3 (M3-MP1) sends positional multipart/mixed bodies; until then the operation is
-  // refused, and these tests pin that refusal.
-  test("M2 refusal of MED-07 (M3-MP1): a multipart/mixed body with prefixEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", {
-        content: {
-          "multipart/mixed": {
-            prefixEncoding: [{ contentType: "text/plain" }],
-            schema: { prefixItems: [string], type: "array" },
-          },
-        },
-      }),
-    );
-
-    expect(refusedOperation(found)).toEqual(unsupportedBody);
-  });
-
-  test("M2 refusal of MED-08 (M3-MP1): a multipart/mixed body with itemEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", {
-        content: {
-          "multipart/mixed": {
-            itemEncoding: { contentType: "text/plain" },
-            schema: { items: string, type: "array" },
-          },
-        },
-      }),
-    );
-
-    expect(refusedOperation(found)).toEqual(unsupportedBody);
-  });
-
-  test("M2 refusal of MED-15 (M3-MP1): a multipart/mixed body with more prefixEncoding entries than items refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", {
-        content: {
-          "multipart/mixed": {
-            prefixEncoding: [{}, {}],
-            schema: { items: false, prefixItems: [string], type: "array" },
-          },
-        },
-      }),
-    );
-
-    expect(refusedOperation(found)).toEqual(unsupportedBody);
-  });
-
-  // Milestone 3 (M3-MP1) sends a fixed part order; until then the array body is refused, and this
-  // test pins that refusal.
-  test("M2 refusal of MED-26 (M3-MP1): a multipart/form-data array body is refused at element scope (3.2.1)", async () => {
+  // HT:B15 does not design a multipart/form-data body as an array of name/value objects, so it
+  // stays refused until the Mind settles design 15 R77 (1).
+  test("MED-26: a multipart/form-data array body of name/value objects stays refused at element scope (3.2.1)", async () => {
     const found = await inProcess(
       withBody("3.2.1", {
         content: {

@@ -5,6 +5,7 @@ import { formatPointer } from "../model/pointer.ts";
 import type { SchemaEdit } from "../normalize/schemas.ts";
 import type { SpecLine } from "../model/spec-section.ts";
 import { packageImports, rootNamespaceImports, runtimeNamespaces } from "../names/domain.ts";
+import { isPositionalBody } from "../names/flatten.ts";
 import { foldIdentifier } from "../names/fold.ts";
 import type {
   NamePlan,
@@ -21,10 +22,11 @@ import {
   formParts,
   inputKeys,
   isScalarArraySchema,
+  mixedParts,
   scalarTypeOf,
   takesJsonContent,
 } from "./api.ts";
-import type { FormPart, PartHeader } from "./api.ts";
+import type { FormPart, MixedPlan, PartHeader } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpBodyField, HelpFlag, HelpPartOption } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
@@ -175,7 +177,11 @@ const essence = (mediaType: string): string => (mediaType.split(";")[0] ?? "").t
 const isRange = (mediaType: string): boolean => essence(mediaType).endsWith("/*");
 
 const isWholeBody = (flag: PlannedFlag): boolean =>
-  flag.source._tag === "Body" && (flag.source.kind === "body" || flag.source.kind === "body-file");
+  flag.source._tag === "Body" &&
+  (flag.source.kind === "body" || flag.source.kind === "body-file" || flag.source.kind === "part");
+
+const isPartFlag = (flag: PlannedFlag): boolean =>
+  flag.source._tag === "Body" && flag.source.kind === "part";
 
 const isFieldFlag = (flag: PlannedFlag): boolean =>
   flag.source._tag === "Body" && !isWholeBody(flag);
@@ -771,15 +777,40 @@ const partOptionEntry = (
     return [flag.identifier, pipe(head, steps)] as const;
   });
 
+// The flag of a whole-body input: `--body`, `--body-file`, or a positional body's `--part`
+// (HT:B15), repeated and kept in invocation order, each a path or `-`; `undefined` for any other.
+const wholeBodyEntry = (flag: PlannedFlag): Expr | undefined => {
+  const { source } = flag;
+  if (source._tag !== "Body") {
+    return undefined;
+  }
+
+  if (source.kind === "body") {
+    return path("Input.bodyFlag");
+  }
+
+  if (source.kind === "body-file") {
+    return path("Input.bodyFileFlag");
+  }
+
+  return source.kind === "part"
+    ? pipe(fn("Flag.String", str(flag.name)), [
+        fn("Flag.withMetavar", str("path|-")),
+        fn("Flag.atLeast", num(0)),
+        fn(
+          "Flag.withDescription",
+          str("Ordered multipart/mixed part from a file or stdin; repeat in order"),
+        ),
+      ])
+    : undefined;
+};
+
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
     const { source } = flag;
-    if (source._tag === "Body" && source.kind === "body") {
-      return [flag.identifier, path("Input.bodyFlag")] as const;
-    }
-
-    if (source._tag === "Body" && source.kind === "body-file") {
-      return [flag.identifier, path("Input.bodyFileFlag")] as const;
+    const whole = wholeBodyEntry(flag);
+    if (whole !== undefined) {
+      return [flag.identifier, whole] as const;
     }
 
     if (source._tag === "Parameter") {
@@ -1203,6 +1234,41 @@ const formBody = (
     } satisfies BodyPlan;
   });
 
+// The media alternatives a body or part option flag applies to; a parameter applies to none.
+const sourceMedia = (flag: PlannedFlag): readonly string[] =>
+  flag.source._tag === "Parameter" ? [] : flag.source.media;
+
+// A positional `multipart/mixed` alternative's body (design 6.3, HT:B15): each `--part` path opened
+// in invocation order, or stdin for `-` under the invocation's one stdin claim, for the `api/`
+// builder's `Serialize.mixed`. Part bytes are never parsed or asserted against the schema.
+const positionalBody = (
+  command: PlannedCommand,
+  alternative: MediaAlternative,
+  context: CommandContext,
+) =>
+  Effect.gen(function* positional() {
+    const mixed = mixedParts(alternative, context.defs);
+    if (Result.isFailure(mixed)) {
+      return yield* refuse("unsupported-body", mixed.failure);
+    }
+
+    const flag = command.flags.find(
+      (candidate) =>
+        isPartFlag(candidate) && sourceMedia(candidate).includes(alternative.mediaType),
+    );
+    if (flag === undefined) {
+      return yield* refuse("unsupported-body", `a --part flag for ${alternative.mediaType}`);
+    }
+
+    const source = ident(I("source"));
+
+    return fn(
+      "Effect.forEach",
+      yield* flagValue(flag.identifier),
+      arrow([{ name: I("source") }], fn("Multipart.fileBody", str(flag.name), source)),
+    );
+  });
+
 // The body flags that do not apply to one alternative, each mapped to whether the operator gave
 // it (`Input.selectBody`'s `foreign`): a field, part or part option flag whose media does not list
 // the key, and `--body` and `--body-file` for a multipart key (D-ENC1 a). A binary or XML key keeps
@@ -1216,9 +1282,12 @@ const foreignFlags = (command: PlannedCommand, alternative: MediaAlternative) =>
         continue;
       }
 
-      const applies = isWholeBody(flag)
-        ? alternative.codec !== "multipart"
-        : source.media.includes(alternative.mediaType);
+      // `--part` applies to its positional key alone, `--body` and `--body-file` to no multipart
+      // key, and every other body flag to the keys its media lists.
+      const applies =
+        isWholeBody(flag) && !isPartFlag(flag)
+          ? alternative.codec !== "multipart"
+          : source.media.includes(alternative.mediaType);
       if (applies) {
         continue;
       }
@@ -1244,6 +1313,10 @@ const choiceEntry = (
       return yield* alternativeBody(command, alternative, required, context);
     }
 
+    if (isPositionalBody(alternative)) {
+      return { domain: [], value: yield* positionalBody(command, alternative, context) };
+    }
+
     const form = yield* formBody(command, alternative, context);
 
     return { domain: form.domain, value: pipe(form.head, form.steps ?? []) };
@@ -1263,6 +1336,15 @@ const bodyPlan = (
     const [first] = body?.alternatives ?? [];
     if (body === undefined || first === undefined) {
       return Option.none();
+    }
+
+    if (!choosesType && isPositionalBody(first)) {
+      return Option.some({
+        args: [["body", ident(I("parts"))]],
+        domain: [],
+        head: yield* positionalBody(command, first, context),
+        parameter: "parts",
+      });
     }
 
     if (!choosesType && first.codec === "multipart") {
@@ -1356,6 +1438,32 @@ const helpPartOption = (
       };
 };
 
+// What help says of `--part`: each position's content type, then every later part's.
+const partsHelp = (
+  command: PlannedCommand,
+  flag: PlannedFlag,
+  store: FieldStore,
+): HelpFlag["source"] | undefined => {
+  const alternative = command.operation.body?.alternatives.find(
+    (candidate) => isPositionalBody(candidate) && sourceMedia(flag).includes(candidate.mediaType),
+  );
+  const mixed: Result.Result<MixedPlan, string> =
+    alternative === undefined
+      ? Result.fail("no positional body")
+      : mixedParts(alternative, store.defs);
+
+  if (Result.isFailure(mixed)) {
+    return undefined;
+  }
+
+  const { item, prefix } = mixed.success;
+  const types = prefix.map((rule) => rule.contentType);
+
+  return item === undefined
+    ? { _tag: "Parts", prefix: types }
+    : { _tag: "Parts", item: item.contentType, prefix: types };
+};
+
 const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFlag[] => {
   const { operation } = command;
   const positionals = command.positionals.flatMap((positional) => {
@@ -1369,6 +1477,11 @@ const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFla
             source: { _tag: "Parameter", negatable: false, parameter },
           } as const,
         ];
+  });
+  const parts = command.flags.filter(isPartFlag).flatMap((flag): readonly HelpFlag[] => {
+    const plan = partsHelp(command, flag, store);
+
+    return plan === undefined ? [] : [{ name: flag.name, source: plan }];
   });
   const named = command.flags
     .filter((flag) => !isWholeBody(flag))
@@ -1395,7 +1508,7 @@ const helpFlags = (command: PlannedCommand, store: FieldStore): readonly HelpFla
         : [{ name: flag.name, source: { _tag: "Parameter", negatable: flag.boolean, parameter } }];
     });
 
-  return [...positionals, ...named];
+  return [...positionals, ...parts, ...named];
 };
 
 const record = (entries: Readonly<Record<string, string>>): Expr =>

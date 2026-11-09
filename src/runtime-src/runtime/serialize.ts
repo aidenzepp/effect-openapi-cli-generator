@@ -1445,6 +1445,66 @@ export const formData = (fields: FormFields, options: FormDataOptions): RequestB
 });
 
 /**
+ * The part bodies of a 3.2 positional `multipart/mixed` body, in the order the operator gave them.
+ */
+export type MixedParts = readonly Multipart.LeafPart["body"][];
+
+/**
+ * The rules of a positional body (design 6.3, HT:B15): part `i` takes `prefixEncoding[i]` and every
+ * later part `itemEncoding`. `maxParts` and `minParts` are the schema's bounds on the part count.
+ */
+export interface MixedOptions {
+  readonly itemEncoding?: Multipart.PartEncoding;
+  readonly maxParts?: number;
+  readonly minParts?: number;
+  readonly prefixEncoding: readonly Multipart.PartEncoding[];
+  readonly required: boolean;
+}
+
+// The one flag a positional body's parts come from (the names plan never renames it).
+const partFlag = "part";
+
+const partCount = (count: number) => `${count} part${count === 1 ? "" : "s"}`;
+
+const partCountError = (bound: string) =>
+  new UsageError({ flag: partFlag, message: `--${partFlag}: this body takes ${bound}` });
+
+const mixedOf = (bodies: MixedParts, options: MixedOptions) =>
+  Effect.gen(function* mixedEvaluation() {
+    if (bodies.length === 0 && !options.required) {
+      return HttpBody.empty;
+    }
+
+    // With no item rule a part beyond the position rules has no rule to be sent under.
+    const ruled = options.itemEncoding === undefined ? options.prefixEncoding.length : Infinity;
+    const most = Math.min(ruled, options.maxParts ?? Infinity);
+    if (bodies.length > most) {
+      return yield* Effect.fail(partCountError(`at most ${partCount(most)}`));
+    }
+
+    const least = options.minParts ?? 0;
+    if (bodies.length < least) {
+      return yield* Effect.fail(partCountError(`at least ${partCount(least)}`));
+    }
+
+    return yield* Multipart.mixed(Multipart.positionalParts(bodies, options));
+  });
+
+/**
+ * A 3.2 positional `multipart/mixed` body streamed through the multipart writer (design 6.3,
+ * HT:B15): each part's raw bytes in the given order, part `i` under `prefixEncoding[i]` and later
+ * parts under `itemEncoding`, with no `Content-Disposition`; `prefixEncoding` entries beyond the
+ * parts are unused (MED-15). More parts than rules, or a count outside `minParts` and `maxParts`,
+ * is a `UsageError` naming `--part` before any request. With no part a required body is the close
+ * delimiter alone and an optional one is empty. `request` sends the writer's `Content-Type`.
+ */
+export const mixed = (bodies: MixedParts, options: MixedOptions): RequestBody => ({
+  expand: mixedOf(bodies, options),
+  mediaType: "multipart/mixed",
+  ownsContentType: true,
+});
+
+/**
  * An Encoding Object's RFC 6570 fields for one form-urlencoded property. With none of the three the
  * property is encoded by its default `contentType` (design 6.3).
  */

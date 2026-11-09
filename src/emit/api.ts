@@ -19,6 +19,7 @@ import type {
   PlannedFlag,
   PlannedGroup,
 } from "../names/index.ts";
+import { isPositionalBody } from "../names/flatten.ts";
 import { isBooleanSchema, suffixed } from "../names/plan.ts";
 import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
@@ -869,6 +870,143 @@ export const formParts = (
   return Result.succeed(Arr.sort(parts, byOrder).map(({ order: _order, ...part }) => part));
 };
 
+/**
+ * One position rule of a positional body as the writer takes it: one concrete content type and,
+ * when the part is sent base64 encoded, its transfer encoding.
+ */
+export interface PositionRule {
+  readonly contentEncoding?: "base64";
+  readonly contentType: string;
+}
+
+/**
+ * A positional `multipart/mixed` body's rules (design 6.3, HT:B15): `prefix[i]` for part `i`,
+ * `item` for every later part, and the schema's bounds on the part count.
+ */
+export interface MixedPlan {
+  readonly item?: PositionRule;
+  readonly maxParts?: number;
+  readonly minParts?: number;
+  readonly prefix: readonly PositionRule[];
+}
+
+// One position rule the writer sends exactly, or the reason it does not.
+const positionRule = (rule: EncodingRule, index: number): Result.Result<PositionRule, string> => {
+  const at = `positional part ${index + 1}`;
+  if (rule.headers.length > 0) {
+    return Result.fail(`part headers of ${at}`);
+  }
+
+  if (rule.nested !== undefined) {
+    return Result.fail(`nested parts in ${at}`);
+  }
+
+  if (rule.serialization !== undefined && !sendsFormPairs(rule.serialization)) {
+    return Result.fail(`a style for ${at}`);
+  }
+
+  const [only, ...more] = rule.contentType;
+  if (only === undefined || more.length > 0 || only.includes("*")) {
+    return Result.fail(`one content type for ${at}`);
+  }
+
+  return Result.succeed(
+    rule.contentEncoding === undefined
+      ? { contentType: only }
+      : { contentEncoding: rule.contentEncoding, contentType: only },
+  );
+};
+
+interface PartBounds {
+  maxParts?: number;
+  minParts?: number;
+}
+
+// The part count bounds of a positional body's array schema, from its own node and its `allOf`
+// members: the tightest `minItems` and `maxItems`, and `items: false`, which admits no part beyond
+// `prefixItems`.
+const partBounds = (defs: Defs, key: string | undefined): PartBounds => {
+  const bounds: PartBounds = {};
+  const seen = new Set<JsonNode>();
+  const pending: (Schema.Json | undefined)[] = key === undefined ? [] : [own(defs, key)];
+  const tighten = (
+    field: keyof PartBounds,
+    value: number,
+    pick: (a: number, b: number) => number,
+  ) => {
+    const known = bounds[field];
+    bounds[field] = known === undefined ? value : pick(known, value);
+  };
+  while (pending.length > 0 && seen.size < maxPartNodes) {
+    const node = settle(defs, pending.pop(), key ?? "");
+    if (Result.isFailure(node) || seen.has(node.success)) {
+      continue;
+    }
+
+    seen.add(node.success);
+
+    const { allOf, items, maxItems, minItems, prefixItems } = node.success;
+    if (Predicate.isNumber(maxItems)) {
+      tighten("maxParts", maxItems, Math.min);
+    }
+
+    if (Predicate.isNumber(minItems)) {
+      tighten("minParts", minItems, Math.max);
+    }
+
+    if (items === false) {
+      tighten("maxParts", Array.isArray(prefixItems) ? prefixItems.length : 0, Math.min);
+    }
+
+    if (Array.isArray(allOf)) {
+      pending.push(...Arr.reverse(allOf.filter(isNode)));
+    }
+  }
+
+  return bounds;
+};
+
+/**
+ * The rules a positional `multipart/mixed` command sends (design 6.3, HT:B15), or the reason the
+ * writer cannot send them exactly (a `CliRefusal` subject). Refused, not guessed: a position with
+ * part headers (a stretch HT:B15 does not commit), a nested part (M3-MP3), a style other than
+ * exploded `form`, and a rule whose `contentType` lists several types or a range.
+ */
+export const mixedParts = (
+  alternative: MediaAlternative,
+  defs: Defs,
+): Result.Result<MixedPlan, string> => {
+  const prefix: PositionRule[] = [];
+  for (const [index, rule] of alternative.prefixEncoding.entries()) {
+    const built = positionRule(rule, index);
+    if (Result.isFailure(built)) {
+      return Result.fail(built.failure);
+    }
+
+    prefix.push(built.success);
+  }
+
+  const plan: Types.Mutable<MixedPlan> = { ...partBounds(defs, alternative.schema?.key), prefix };
+  if (alternative.itemEncoding !== undefined) {
+    const item = positionRule(alternative.itemEncoding, prefix.length);
+    if (Result.isFailure(item)) {
+      return Result.fail(item.failure);
+    }
+
+    plan.item = item.success;
+  }
+
+  return Result.succeed(plan);
+};
+
+const positionEntry = (rule: PositionRule): Expr =>
+  obj([
+    ...(rule.contentEncoding === undefined
+      ? []
+      : ([["contentEncoding", str(rule.contentEncoding)]] as const)),
+    ["contentType", str(rule.contentType)],
+  ]);
+
 interface BodyParts {
   readonly declarations: readonly Statement[];
   readonly entry?: readonly [string, Expr];
@@ -936,6 +1074,35 @@ const bytesEncoder: Encoder = {
   typed: true,
 };
 
+// A positional `multipart/mixed` body's encoder (HT:B15): its part bodies in order, sent by
+// `Serialize.mixed` under the position rules and the schema's count bounds, or none when the writer
+// cannot send the rules exactly.
+const mixedEncoder = (
+  alternative: MediaAlternative,
+  defs: Defs,
+  required: Expr,
+): Option.Option<Encoder> => {
+  const mixed = mixedParts(alternative, defs);
+  if (Result.isFailure(mixed)) {
+    return Option.none();
+  }
+
+  const { item, maxParts, minParts, prefix } = mixed.success;
+  const options = obj([
+    ...(item === undefined ? [] : ([["itemEncoding", positionEntry(item)]] as const)),
+    ...(maxParts === undefined ? [] : ([["maxParts", num(maxParts)]] as const)),
+    ...(minParts === undefined ? [] : ([["minParts", num(minParts)]] as const)),
+    ["prefixEncoding", arr(prefix.map(positionEntry))],
+    ["required", required],
+  ]);
+
+  return Option.some<Encoder>({
+    encode: (value) => fn("mixed", [value, options]),
+    type: typeRef(I("Serialize"), [M("MixedParts")]),
+    typed: false,
+  });
+};
+
 // One alternative's encoder (design 4.5, 6.3). A form body is its JSON value, or `undefined` for
 // no body input, encoded by `Serialize.urlEncoded` over the schema's properties in document order;
 // a form alternative with refused fields passes its operation's `media` declaration's `refused`
@@ -979,6 +1146,11 @@ const encoderOf = (
 
     if (alternative.codec !== "multipart") {
       return Option.some(bytesEncoder);
+    }
+
+    // A positional body is its parts' bytes in order, streamed by `Serialize.mixed`.
+    if (isPositionalBody(alternative)) {
+      return mixedEncoder(alternative, defs, required);
     }
 
     const parts = formParts(command, alternative, defs);
