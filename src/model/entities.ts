@@ -63,14 +63,19 @@ const responseHeaders = Schema.Array(
   Schema.Struct({ deprecated: Schema.Boolean, name: HeaderName, required: Schema.Boolean }),
 );
 
-// A non-standard serialization the author config opted into for one entry (design 6.1, D-OQ1
-// (b)): `deepObjectBrackets` sends a `deepObject` value's nested members in the bracket
-// convention. Set only from the author config, never defaulted or inferred; absent is strict.
+// The non-standard serializations the author config opted into for one entry (design 6.1, D-OQ1
+// (b)), one marker per switch: `nonStandard` (`deepObjectBrackets`) sends a `deepObject` value's
+// nested members in the bracket convention; `nonStandardScalars` (`deepObjectScalars`) sends a
+// scalar `deepObject` value as `name=value`. Set only from the author config, never defaulted or
+// inferred; absent is strict.
 const nonStandard = Schema.optionalKey(Schema.Literal("deepObjectBrackets"));
+
+const nonStandardScalars = Schema.optionalKey(Schema.Literal("deepObjectScalars"));
 
 /**
  * A parameter written in `style` form. `nonStandard` marks a `deepObject` query parameter the
- * author config sends in the bracket convention. `objectValued` says the schema, through `$ref`,
+ * author config sends in the bracket convention, and `nonStandardScalars` one whose scalar value it
+ * sends as `name=value`. `objectValued` says the schema, through `$ref`,
  * admits only objects (design 6.1): the operator gives the value as JSON, which the runtime expands
  * by its style.
  */
@@ -79,6 +84,7 @@ export class StyleSerialization extends Schema.Class<StyleSerialization>("StyleS
   explode: Schema.Boolean,
   kind: Schema.Literal("style"),
   nonStandard,
+  nonStandardScalars,
   objectValued: Schema.Boolean,
   origin: Origin,
   rows,
@@ -145,7 +151,8 @@ const nestedEncodingRule = Schema.Struct({
  * A per-property or per-position encoding rule of a media alternative (design 2.2).
  * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
  * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
- * `nonStandard` marks a form property the author config sends in the bracket convention.
+ * `nonStandard` marks a form property the author config sends in the bracket convention, and
+ * `nonStandardScalars` one whose scalar value it sends as `name=value`.
  * `nested` holds the one nested level's rules (design 6.3, HT:B16), by name and by position, and is
  * present whenever the part nests; `nestedItem` is the nested `itemEncoding`, the rule of every
  * nested position after the nested `prefixEncoding` (ENC-09).
@@ -157,6 +164,7 @@ export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
   nestedItem: Schema.optionalKey(nestedEncodingRule),
   nonStandard,
+  nonStandardScalars,
   origin: Origin,
   rows,
   serialization: Schema.optionalKey(explicitStyle),

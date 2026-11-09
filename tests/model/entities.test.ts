@@ -7,6 +7,7 @@ import {
   Informational,
   MediaAlternative,
   Operation,
+  Origin,
   Parameter,
   SchemaStore,
   SecurityPolicy,
@@ -15,6 +16,7 @@ import {
   Server,
   ResponseCase,
 } from "../../src/model/entities.ts";
+import { isNonStandard, nonStandardUses } from "../../src/model/non-standard.ts";
 
 type Plain = Record<string, Schema.Json>;
 
@@ -307,5 +309,81 @@ describe("model entities", () => {
     expect(
       decodes(SecurityScheme, { ...header, kind: { in: "header", name: "X-Key", type: "apiKey" } }),
     ).toBe(true);
+  });
+
+  test("the scalar marker is its own literal beside the bracket marker", () => {
+    expect(
+      decodes(Serialization, { ...serialization, nonStandardScalars: "deepObjectScalars" }),
+    ).toBe(true);
+    expect(
+      decodes(EncodingRule, { ...encodingRule, nonStandardScalars: "deepObjectScalars" }),
+    ).toBe(true);
+    expect(
+      decodes(Serialization, {
+        ...serialization,
+        nonStandard: "deepObjectBrackets",
+        nonStandardScalars: "deepObjectScalars",
+      }),
+    ).toBe(true);
+    expect(
+      decodes(Serialization, { ...serialization, nonStandardScalars: "deepObjectBrackets" }),
+    ).toBe(false);
+    expect(decodes(EncodingRule, { ...encodingRule, nonStandard: "deepObjectScalars" })).toBe(
+      false,
+    );
+    expect(Schema.decodeUnknownSync(EncodingRule)(encodingRule).nonStandardScalars).toBeUndefined();
+  });
+});
+
+const style = (marks: Plain) =>
+  Schema.decodeUnknownSync(Serialization)({ ...serialization, ...marks });
+
+const choices = (marks: Plain) => nonStandardUses(style(marks)).map((use) => use.choice);
+
+describe("non-standard use sites", () => {
+  test("a scalar-marked style serialization is one use site with the scalar choice", () => {
+    const marked = style({ nonStandardScalars: "deepObjectScalars" });
+
+    expect(nonStandardUses(marked)).toEqual([
+      { choice: "deepObjectScalars", origin: Schema.decodeUnknownSync(Origin)(origin) },
+    ]);
+    expect(isNonStandard(marked)).toBe(true);
+  });
+
+  test("each marker is its own use site, bracket choice first", () => {
+    expect(choices({ nonStandard: "deepObjectBrackets" })).toEqual(["deepObjectBrackets"]);
+    expect(
+      choices({ nonStandard: "deepObjectBrackets", nonStandardScalars: "deepObjectScalars" }),
+    ).toEqual(["deepObjectBrackets", "deepObjectScalars"]);
+    expect(choices({})).toEqual([]);
+    expect(isNonStandard(style({}))).toBe(false);
+  });
+
+  test("querystring form rules give one use site per marker, at each rule's origin", () => {
+    const ruleOrigin = { document: "file:///spec.json", pointer: "/paths/~1q/encoding/ids" };
+    const content = Schema.decodeUnknownSync(Serialization)({
+      encoding: [
+        { contentType: [], headers: [], origin, rows, target: { kind: "property", name: "a" } },
+        {
+          contentType: [],
+          headers: [],
+          nonStandardScalars: "deepObjectScalars",
+          origin: ruleOrigin,
+          rows,
+          target: { kind: "property", name: "ids" },
+        },
+      ],
+      kind: "content",
+      mediaType: "application/x-www-form-urlencoded",
+      origin,
+      rows,
+      rules: "oas-3.2",
+      schema: schemaRef,
+    });
+
+    expect(nonStandardUses(content)).toEqual([
+      { choice: "deepObjectScalars", origin: Schema.decodeUnknownSync(Origin)(ruleOrigin) },
+    ]);
+    expect(isNonStandard(content)).toBe(true);
   });
 });
