@@ -1,4 +1,5 @@
 import { JsonPointer } from "effect";
+import { isRefusal } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 
 const unsafeCharacter = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
@@ -39,7 +40,7 @@ const fieldLabel = (diagnostic: Diagnostic): string => {
  * `line`, `column`, `hint` and `related` stay out of the line.
  */
 export const humanLine = (diagnostic: Diagnostic): string => {
-  const severity = diagnostic.severity === "refusal" ? "refused" : "notice";
+  const severity = isRefusal(diagnostic) ? "refused" : "notice";
   const where = `#${sanitizeField(diagnostic.pointer)}`;
   const operation = diagnostic.operation === undefined ? "" : operationLabel(diagnostic.operation);
   const field = diagnostic.scope === "field" ? fieldLabel(diagnostic) : "";

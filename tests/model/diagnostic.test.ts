@@ -3,6 +3,8 @@ import { Array as Arr, Cause, Effect, Exit, Schema } from "effect";
 import {
   Diagnostic,
   diagnosticOf,
+  isDocumentRefusal,
+  isRefusal,
   makeDiagnostic,
   sortDiagnostics,
 } from "../../src/model/diagnostic.ts";
@@ -224,5 +226,16 @@ describe("diagnosticOf and makeDiagnostic", () => {
       Object.keys(Schema.encodeSync(Diagnostic)(direct)),
     );
     expect(built).toEqual(direct);
+  });
+
+  test("refusal predicates read severity and scope", () => {
+    const at = (severity: "refusal" | "notice", scope: "document" | "element") =>
+      Schema.decodeUnknownSync(Diagnostic)({ ...base, scope, severity });
+
+    expect(isRefusal(at("refusal", "element"))).toBe(true);
+    expect(isRefusal(at("notice", "document"))).toBe(false);
+    expect(isDocumentRefusal(at("refusal", "document"))).toBe(true);
+    expect(isDocumentRefusal(at("refusal", "element"))).toBe(false);
+    expect(isDocumentRefusal(at("notice", "document"))).toBe(false);
   });
 });

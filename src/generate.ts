@@ -20,7 +20,13 @@ import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { decodeAuthorConfig } from "./model/author-config.ts";
 import type { AuthorConfig } from "./model/author-config.ts";
 import type { DocumentUri } from "./model/brands.ts";
-import { Diagnostic, makeDiagnostic, sortDiagnostics } from "./model/diagnostic.ts";
+import {
+  Diagnostic,
+  isDocumentRefusal,
+  isRefusal,
+  makeDiagnostic,
+  sortDiagnostics,
+} from "./model/diagnostic.ts";
 import { Api } from "./model/entities.ts";
 import type { Operation } from "./model/entities.ts";
 import { planNames } from "./names/index.ts";
@@ -145,11 +151,6 @@ const emitHints: Readonly<Record<CliRefusal["reason"], string | undefined>> = {
 const GeneratorVersion = Schema.Struct({ version: Schema.String });
 
 const DeclaredOpenapi = Schema.Struct({ openapi: Schema.String });
-
-const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
-
-const isDocumentRefusal = (diagnostic: Diagnostic): boolean =>
-  isRefusal(diagnostic) && diagnostic.scope === "document";
 
 const refused =
   (reason: GenerateRefused["reason"]) =>

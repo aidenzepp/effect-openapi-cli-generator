@@ -2,7 +2,7 @@ import { Array as Arr, Effect, Order, Schema } from "effect";
 import type { Types } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
-import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
+import { Diagnostic, isRefusal, pointerOrder } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
 import type { NonStandardUse } from "../model/non-standard.ts";
 import { markedUses, nonStandardUses } from "../model/non-standard.ts";
@@ -220,8 +220,8 @@ export const makeGenerationReport = (input: GenerationReportInput): GenerationRe
     generator: { version: input.version },
     inputs: input.inputs,
     nonStandard: input.nonStandard ?? [],
-    notices: input.diagnostics.filter((diagnostic) => diagnostic.severity === "notice"),
-    refusals: input.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal"),
+    notices: input.diagnostics.filter((diagnostic) => !isRefusal(diagnostic)),
+    refusals: input.diagnostics.filter(isRefusal),
     renames: input.renames,
     skipped: input.skipped ?? [],
   };
@@ -250,7 +250,7 @@ export const generatorExitStatus = (outcome: GeneratorOutcome): 0 | 1 => {
     return 1;
   }
 
-  const refusals = outcome.diagnostics.filter((diagnostic) => diagnostic.severity === "refusal");
+  const refusals = outcome.diagnostics.filter(isRefusal);
 
   if (refusals.some((diagnostic) => diagnostic.scope === "document")) {
     return 1;

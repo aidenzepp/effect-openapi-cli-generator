@@ -1,5 +1,6 @@
 import { Array as Arr, JsonPointer, Order } from "effect";
 import { AuthorConfig, runtimeSettings } from "../model/author-config.ts";
+import { isRefusal } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Api } from "../model/entities.ts";
 import type { NamePlan } from "../names/index.ts";
@@ -269,9 +270,7 @@ const exits = (): string =>
   ].join("\n\n");
 
 const refusals = (input: ReadmeInput): string => {
-  const refusedDiagnostics = input.diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "refusal",
-  );
+  const refusedDiagnostics = input.diagnostics.filter(isRefusal);
   const refusedOperations = refusedDiagnostics.flatMap((diagnostic) =>
     diagnostic.scope === "operation" && diagnostic.operation !== undefined
       ? [{ method: diagnostic.operation.method, path: diagnostic.operation.path }]

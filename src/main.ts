@@ -20,7 +20,7 @@ import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { makeDocumentSet, parseDocumentPair } from "./load/document-set.ts";
 import type { DocumentSet } from "./load/document-set.ts";
 import { DocumentUri } from "./model/brands.ts";
-import { sortDiagnostics } from "./model/diagnostic.ts";
+import { isDocumentRefusal, sortDiagnostics } from "./model/diagnostic.ts";
 import type { Diagnostic } from "./model/diagnostic.ts";
 import { distinctDiagnostics } from "./normalize/operations.ts";
 import { humanLine, sanitizeField } from "./report/human.ts";
@@ -280,9 +280,6 @@ export const generateCommand = Command.make(
       return status === 0 ? undefined : yield* Effect.fail(new GeneratorExit());
     }),
 ).pipe(Command.withDescription("Generate a CLI package from an OpenAPI document."));
-
-const isDocumentRefusal = (diagnostic: Diagnostic): boolean =>
-  diagnostic.severity === "refusal" && diagnostic.scope === "document";
 
 // The load, validate, resolve and check stages (design 3) over the document set; nothing is
 // written.
