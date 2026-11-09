@@ -1,4 +1,4 @@
-import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { Line } from "../validate/index.ts";
@@ -13,15 +13,14 @@ import {
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
 import {
-  evaluateTokens,
-  parseFragment,
-  parsePointer,
+  parseFragmentResult,
+  parsePointerResult,
   formatPointer,
   childPointer,
 } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { isObject, isArray } from "../model/json-tree.ts";
+import { isObject, isArray, nodeAt } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
@@ -429,27 +428,13 @@ const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
 
-const tokensOf = (pointer: string): readonly string[] | undefined => {
-  const exit = Effect.runSyncExit(parsePointer(pointer));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
-
-export const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const tokens = tokensOf(pointer);
-  if (tokens === undefined) {
-    return undefined;
-  }
-
-  const exit = Effect.runSyncExit(evaluateTokens(root, tokens));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
+const tokensOf = (pointer: string): readonly string[] | undefined =>
+  Result.getOrUndefined(parsePointerResult(pointer));
 
 const fragmentPointer = (fragment: string): string | undefined => {
-  const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
+  const tokens = Result.getOrUndefined(parseFragmentResult(`#${fragment}`));
 
-  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
+  return tokens === undefined ? undefined : formatPointer(tokens);
 };
 
 const memberOf = (node: Json, token: string): Json | undefined => {
