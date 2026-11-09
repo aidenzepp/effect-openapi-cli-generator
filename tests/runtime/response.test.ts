@@ -4,6 +4,7 @@ import { HttpClientError, HttpClientRequest, HttpClientResponse, UrlParams } fro
 import { ApiResponseError, TransportError } from "../../src/runtime-src/domain/errors.ts";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
 import { renderError } from "../../src/runtime-src/runtime/output.ts";
+import type { ScrubEntry } from "../../src/runtime-src/runtime/redact.ts";
 import type { ResponseTable } from "../../src/runtime-src/runtime/response.ts";
 import {
   classify,
@@ -158,6 +159,18 @@ describe("classify", () => {
 
     expect(error.requestId).toBe(`${"r".repeat(230)}<redacted:bearer>`);
     expect(rendered).not.toContain("SECRETTOKEN");
+  });
+
+  test("a secret-file value is scrubbed from the request id before it is bounded (audit F2)", () => {
+    const secret: ScrubEntry = {
+      kind: "secret",
+      label: "password-file",
+      value: Redacted.make("hunter2-PASSWORD-xyz"),
+    };
+    const header = `${"r".repeat(250)}hunter2-PASSWORD-xyz`;
+    const error = toApiResponseError(table, respond(404, { "x-request-id": header }), "", [secret]);
+
+    expect(error.requestId).toBe(`${"r".repeat(250)}<redac`);
   });
 
   test("a credential holding characters sanitize removes is scrubbed from the request id (audit S2)", () => {
