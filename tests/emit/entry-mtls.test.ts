@@ -20,9 +20,6 @@ const config = Schema.decodeUnknownSync(AuthorConfig)({
   package: { name: "example-cli", version: "1.2.3" },
 });
 
-// The sha256 of `src/bin.ts` as the emitter wrote it before mutualTLS (m3/integration 530690b).
-const previousBinSha256 = "465c26bcf4028fc631cc27475bc8cdf3abef75b4f148e1852070a1124a02b489";
-
 const scheme = (name: string, kind: (typeof SecurityScheme.Encoded)["kind"]) =>
   Schema.decodeUnknownSync(SecurityScheme)({
     credentialSources: [],
@@ -47,8 +44,6 @@ const contentOf = (schemes: readonly SecurityScheme[], path: string): string => 
 
   return file?.content ?? "";
 };
-
-const sha256 = (text: string): string => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 
 // `vp fmt --stdin-filepath` runs the formatter `vp fmt --check` runs: output equal to input passes.
 const formatted = (path: string, text: string) =>
@@ -167,7 +162,9 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
 
   test("an unreadable path renders through the final catch before the run", () => {
     const bin = contentOf([client], "src/bin.ts");
-    expect(bin).toContain("Output.finalCatch([])");
+    // A pre-run error follows the parse-time rule: it reads `<PREFIX>_ERROR_FORMAT` (design 7.4).
+    expect(bin).toContain('Output.finalCatch([], { envPrefix: "EXAMPLE_CLI" })');
+    expect(bin).not.toContain("Output.finalCatch([])");
     expect(bin).toContain(
       "Layer.provide(Layer.mergeAll(BunServices.layer, Output.runCredentialsLayer))",
     );
@@ -193,9 +190,12 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
     expect(main).toBe(contentOf([], "src/main.ts"));
   });
 
-  test("without a mutualTLS scheme bin.ts is byte-identical to before", () => {
-    expect(sha256(contentOf([], "src/bin.ts"))).toBe(previousBinSha256);
-    expect(sha256(contentOf([bearer, apiKey], "src/bin.ts"))).toBe(previousBinSha256);
+  // Not a pinned hash: other features change `bin.ts` too. Without a mutualTLS scheme the schemes
+  // leave it as it is with none, and it has no client-certificate part (audit of m3/wi1b, F1).
+  test("without a mutualTLS scheme bin.ts is byte-identical to one with no schemes", () => {
+    const bin = contentOf([bearer, apiKey], "src/bin.ts");
+    expect(bin).toBe(contentOf([], "src/bin.ts"));
+    expect(bin).not.toContain("ClientCertificate");
   });
 
   test(

@@ -34,10 +34,12 @@ export const runtimeNamespaces: readonly (readonly [string, string])[] = [
 
 /**
  * The namespaces `cli/root.ts` imports besides the fixed ones, as [name, module specifier]: the
- * `Groups` runtime namespace and the `Arr` array namespace of the lazy root.
+ * `Groups` runtime namespace and the `Arr` array namespace of the lazy root, and the `Client`
+ * runtime namespace whose timeout, retry and verbose settings only the root registers.
  */
 export const rootNamespaceImports: readonly (readonly [string, string])[] = [
   ["Arr", "effect/Array"],
+  ["Client", "../runtime/client.ts"],
   ["Groups", "../runtime/groups.ts"],
 ];
 
