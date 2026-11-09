@@ -316,6 +316,11 @@ interface FieldSchema {
    * chain (an array's `items` too, for `enum`), and whether any node is read-only or deprecated.
    */
   readonly notes: HelpBodyField;
+  /**
+   * Whether any node on the scalar's `$ref` chain (an array's `items` for a repeated flag) is
+   * `format: password`, so a multipart file part's flag reads as a secret (ruling DR4).
+   */
+  readonly password: boolean;
 }
 
 // The node chain a schema reaches through `$ref`, starting at the schema itself; `settled` when
@@ -451,6 +456,7 @@ const fieldSchema = (
     maxLength: bounds.length === 0 ? undefined : Math.min(...bounds),
     mediaType: last?.contentMediaType,
     notes,
+    password: (repeated ? items : field).nodes.some((node) => node.format === "password"),
   };
 };
 
@@ -461,6 +467,7 @@ const unknownField: FieldSchema = {
   maxLength: undefined,
   mediaType: undefined,
   notes: { default: undefined, deprecated: false, enum: undefined, readOnly: false },
+  password: false,
 };
 
 type BodyFlagSource = Extract<PlannedFlag["source"], { readonly _tag: "Body" }>;
@@ -807,6 +814,30 @@ const wholeBodyEntry = (flag: PlannedFlag): Expr | undefined => {
     : undefined;
 };
 
+// A multipart `format: password` part is a file part (ruling DR4) whose help reads as the
+// secret-file flag's: `Input.secretPartFlag` carries the `path|-` metavar and the note.
+const isSecretPart = (
+  source: BodyFlagSource,
+  alternative: MediaAlternative | undefined,
+  schema: FieldSchema,
+): boolean => source.kind === "file" && alternative?.codec === "multipart" && schema.password;
+
+const secretPartEntry = (
+  flag: PlannedFlag,
+  alternative: MediaAlternative | undefined,
+  schema: FieldSchema,
+) =>
+  Effect.gen(function* secretPart() {
+    const description = describedBy(yield* fieldDescription(flag, alternative, schema));
+    const repeated = flag.source._tag === "Body" && flag.source.repeated;
+    const presence = repeated ? fn("Flag.atLeast", num(0)) : path("Flag.optional");
+
+    return [
+      flag.identifier,
+      pipe(fn("Input.secretPartFlag", str(flag.name), ...description), [presence]),
+    ] as const;
+  });
+
 const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandContext) =>
   Effect.gen(function* entry() {
     const { source } = flag;
@@ -862,6 +893,10 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       const description = describedBy(yield* fieldDescription(flag, alternative, schema));
 
       return [flag.identifier, fn("Input.secretFileFlag", str(flag.name), ...description)] as const;
+    }
+
+    if (isSecretPart(source, alternative, schema)) {
+      return yield* secretPartEntry(flag, alternative, schema);
     }
 
     if (source.kind === "integer" && schema.integer === "unsettled") {

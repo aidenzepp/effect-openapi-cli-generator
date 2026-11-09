@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
 import { Cause, Console, Effect, Exit, Layer, Runtime, Schema, Sink, Stdio } from "effect";
-import { CliOutput, Command } from "effect/cli";
+import { CliOutput, Command, Flag } from "effect/cli";
 import { constVoid } from "effect/Function";
 import { emitCli } from "../../src/emit/cli.ts";
 import { decodeAuthorConfig } from "../../src/model/author-config.ts";
@@ -16,6 +16,8 @@ import * as Output from "../../src/runtime-src/runtime/output.ts";
 // `format: password` string property (design 13.1 R4): `--<prop>-file` through the m3-pw2 helper,
 // its value wrapped as an `Input.SecretField` so the runtime reads it from a file or stdin.
 // m3-pw1h: the flag's help carries the property's sanitized description, then the helper's note.
+// m3-pwmh: a multipart `format: password` part (a file part, ruling DR4) gets the same help: the
+// `path|-` metavar, the sanitized description and the never-echoed note, through Input.secretPartFlag.
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///pw/openapi.json");
 
@@ -60,15 +62,41 @@ const specWith = (password: Schema.Json = plainPassword): Schema.Json => ({
   },
 });
 
+// A multipart/form-data body whose `secret` part is the given schema.
+const multipartWith = (secret: Schema.Json = plainPassword): Schema.Json => ({
+  info: { title: "Pw", version: "1.0.0" },
+  openapi: "3.1.1",
+  paths: {
+    "/users": {
+      post: {
+        operationId: "users-create",
+        requestBody: {
+          content: {
+            "multipart/form-data": {
+              schema: {
+                properties: { name: { type: "string" }, secret },
+                type: "object",
+              },
+            },
+          },
+          required: true,
+        },
+        responses: { "204": { description: "Created." } },
+        tags: ["users"],
+      },
+    },
+  },
+});
+
 // The formatter may break lines; the structure is what the test pins.
 const squeezed = (text: string): string => text.replaceAll(/\s+/gu, " ");
 
 // The emitted `users` module, squeezed, and the emit refusals.
-const emitted = (password?: Schema.Json) =>
+const emittedFrom = (spec: Schema.Json) =>
   Effect.runPromise(
     Effect.gen(function* generate() {
       const author = yield* decodeAuthorConfig(config, { document: configDocument });
-      const resolution = yield* resolve({ document, line: "3.1", value: specWith(password) });
+      const resolution = yield* resolve({ document, line: "3.1", value: spec });
       const { api } = yield* normalize(resolution, {
         checkFindings: [],
         config: author,
@@ -82,6 +110,8 @@ const emitted = (password?: Schema.Json) =>
     }),
   );
 
+const emitted = (password?: Schema.Json) => emittedFrom(specWith(password));
+
 // Help prints through `Console`; the test reads the exit code and the printed text.
 // Object.assign keeps the host console methods; spreading a Console instance drops its prototype.
 // oxlint-disable-next-line prefer-object-spread
@@ -90,8 +120,8 @@ const silent: Console.Console = Object.assign({}, globalThis.console, {
   log: constVoid,
 });
 
-// `--help` of a command whose one flag is the emitted secret-file flag, run in process.
-const help = (description?: string) =>
+// `--help` of a command whose one flag is `flag`, run in process.
+const helpOf = (flag: Flag.Flag<unknown>) =>
   Effect.runPromise(
     Effect.suspend(() => {
       const printed: string[] = [];
@@ -101,16 +131,7 @@ const help = (description?: string) =>
           printed.push(parts.join(" "));
         },
       });
-      const command = Command.make(
-        "create",
-        {
-          passwordFile:
-            description === undefined
-              ? Input.secretFileFlag("password-file")
-              : Input.secretFileFlag("password-file", description),
-        },
-        () => Effect.void,
-      );
+      const command = Command.make("create", { flag }, () => Effect.void);
 
       return Command.runWith(command, { renderErrors: false, version: "0" })(["--help"]).pipe(
         Output.exitForHelp,
@@ -133,6 +154,14 @@ const help = (description?: string) =>
         })),
       );
     }),
+  );
+
+// `--help` of a command whose one flag is the emitted secret-file flag.
+const help = (description?: string) =>
+  helpOf(
+    description === undefined
+      ? Input.secretFileFlag("password-file")
+      : Input.secretFileFlag("password-file", description),
   );
 
 describe("m3-pw1b secret-file field flag", () => {
@@ -207,5 +236,54 @@ describe("m3-pw1b secret-file field flag", () => {
     const { content } = await emitted({ description: "", format: "password", type: "string" });
 
     expect(content).toContain('Input.secretFileFlag("password-file"),');
+  });
+});
+
+describe("m3-pwmh multipart password part flag", () => {
+  test("a format password part is --secret through Input.secretPartFlag, not a bare path flag", async () => {
+    const { content, refusals } = await emittedFrom(multipartWith());
+
+    expect(refusals).toEqual([]);
+    expect(content).toMatch(/Input\.secretPartFlag\("secret"\)\.pipe\( ?Flag\.optional,? ?\)/u);
+    expect(content).not.toContain('Flag.String("secret")');
+    expect(content).toContain('Flag.String("name")');
+  });
+
+  test("the part carries the property's sanitized description", async () => {
+    const { content, refusals } = await emittedFrom(
+      multipartWith({
+        description: "The\u001B[31m account\u202E secret.",
+        format: "password",
+        type: "string",
+      }),
+    );
+
+    expect(refusals).toEqual([]);
+    expect(content).toMatch(
+      /Input\.secretPartFlag\( ?"secret", "The\[31m account secret\.",? ?\)\.pipe\( ?Flag\.optional,? ?\)/u,
+    );
+    expect(content).not.toContain("\u001B");
+    expect(content).not.toContain("\u202E");
+  });
+
+  test("a binary part keeps its plain path flag", async () => {
+    const { content } = await emittedFrom(multipartWith({ format: "binary", type: "string" }));
+
+    expect(content).toContain('Flag.String("secret")');
+    expect(content).not.toContain("Input.secretPartFlag");
+  });
+
+  test("help for the part shows path|-, the description, then the never-echoed note", async () => {
+    const { code, printed } = await helpOf(
+      Input.secretPartFlag("secret", "The account secret.").pipe(Flag.optional),
+    );
+    const described = printed.indexOf("The account secret.");
+
+    expect(code).toBe(0);
+    expect(printed).toContain("--secret path|-");
+    expect(described).toBeGreaterThanOrEqual(0);
+    expect(
+      printed.indexOf("Read the value from a file or stdin (-); it is never echoed"),
+    ).toBeGreaterThan(described);
   });
 });
