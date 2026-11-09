@@ -2135,11 +2135,13 @@ export const send =
       // The bound origins alone: the certificate's set, which the flag never widens.
       const bound = credentialOrigins({ ...gate, allowUnboundBase: false });
       const headers = credentials.filter(({ definition }) => definition.kind !== "mutualTLS");
+      // The certificate is a credential of the chosen alternative (design 6.5, 9 I3; audit F1):
+      // presented and withheld by this one fact.
+      const certificateChosen = headers.length < credentials.length;
       // Only header credentials reach the base; the certificate never rides the flag.
       const sendsToBase = headers.length > 0 && origins.includes(baseOrigin);
       const headersWithheld = headers.length > 0 && !sendsToBase;
-      const certificateWithheld =
-        headers.length < credentials.length && !bound.includes(baseOrigin);
+      const certificateWithheld = certificateChosen && !bound.includes(baseOrigin);
 
       if (headersWithheld || certificateWithheld) {
         yield* printStderr(withheldNotice(headersWithheld ? headers : [], certificateWithheld));
@@ -2177,7 +2179,11 @@ export const send =
           policy.direct,
           policy.allowed,
           // Per hop, from the operation's bound origins: the flag never extends the certificate.
-          (url) => certificateInitFor(url, servers.boundOrigins),
+          // An alternative without mutualTLS presents it on no hop.
+          (url) =>
+            certificateChosen
+              ? certificateInitFor(url, servers.boundOrigins)
+              : Effect.succeed(Option.none()),
         ),
         retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
@@ -2193,7 +2199,7 @@ export const send =
         Effect.catchTag("HttpClientError", mapClientError),
         Effect.tap((response) => warnMissingHeaders(meta, response)),
         Effect.flatMap((response) =>
-          classify(table, response, credentials).pipe(
+          classify(table, response, scrubbed).pipe(
             Effect.matchEffect({
               onFailure: () =>
                 readExcerpt(bodyOf(response, idleSeconds), scrubbed).pipe(
@@ -2208,7 +2214,7 @@ export const send =
                         table,
                         response,
                         excerpt,
-                        credentials,
+                        scrubbed,
                         retryAfterCapSeconds(response),
                       ),
                     ),

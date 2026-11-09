@@ -150,6 +150,32 @@ describe("Output.send client certificate", () => {
     expect(result.notices).toEqual([]);
   });
 
+  // The certificate is a credential of the chosen alternative (design 6.5, 9 I3; audit F1).
+  test.each([
+    ["a bearer-only alternative", ["bearerAuth"], `Bearer ${SECRET}`],
+    ["the anonymous alternative", [], undefined],
+  ] as const)(
+    "%s presents no certificate to a bound origin",
+    async (_name, alternative, authorization) => {
+      const result = await run({ alternative });
+
+      expect(Exit.isSuccess(result.exit)).toBe(true);
+      expect(result.seen).toEqual([
+        { authorization, init: undefined, url: "https://api.example.com/v1/items" },
+      ]);
+      expect(result.notices).toEqual([]);
+    },
+  );
+
+  test("a certificate-only alternative presents the certificate to a bound origin", async () => {
+    const result = await run({ alternative: ["clientCert"] });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.seen).toEqual([
+      { authorization: undefined, init: certificate, url: "https://api.example.com/v1/items" },
+    ]);
+  });
+
   test("a request to an unbound --base-url carries no certificate init", async () => {
     const result = await run({ baseUrl: UNBOUND });
 
