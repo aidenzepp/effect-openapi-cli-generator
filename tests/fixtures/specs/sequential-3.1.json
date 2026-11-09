@@ -1,0 +1,47 @@
+{
+  "openapi": "3.1.2",
+  "info": { "title": "Sequential response fixture, 3.1.2 line", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": { "port": { "default": "80" } }
+    }
+  ],
+  "paths": {
+    "/events": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-events",
+        "responses": {
+          "200": {
+            "description": "Server-sent events, sequential by media type.",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lines": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-lines",
+        "responses": {
+          "200": {
+            "description": "Newline-delimited JSON, sequential by media type.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "n": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
