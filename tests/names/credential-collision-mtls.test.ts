@@ -9,7 +9,8 @@ import { resolve } from "../../src/resolve/index.ts";
 // A mutualTLS scheme's certificate environment names (`<PREFIX>_<SCHEME>_CERT`, `_KEY`, `_CA`)
 // join the SSC-01 credential collision check: a name another certificate or a token credential
 // also takes refuses every operation using the scheme, and a scheme name folding to nothing is
-// SSC-01/empty-name (design 4.4).
+// SSC-01/empty-name (design 4.4). Certificate names have no override key, so a certificate's
+// hint names the colliding token's `security["<token>"].env`, or else the operation's skip (R87).
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///mtls/openapi.json");
 
@@ -100,6 +101,10 @@ const planned = (
     }),
   );
 
+// The hint for an operation whose colliding certificate names have no override key (R87 B).
+const skip = (operation: string): string =>
+  `Skip the operation with naming.operations[${JSON.stringify(operation)}].skip.`;
+
 const refusal = (code: string, operation: string, hint?: string) => ({
   code,
   hint,
@@ -109,7 +114,7 @@ const refusal = (code: string, operation: string, hint?: string) => ({
 });
 
 describe("certificate environment names join the SSC-01 collision check", () => {
-  test("two mutualTLS schemes folding to one slug refuse each operation using either", async () => {
+  test("two mutualTLS schemes folding to one slug refuse each operation, hinting the skip", async () => {
     const result = await planned({ Client: mutualTls, client: mutualTls }, [
       ["lower", "client"],
       ["upper", "Client"],
@@ -117,12 +122,12 @@ describe("certificate environment names join the SSC-01 collision check", () => 
 
     expect(result.commands).toEqual(["open"]);
     expect(result.diagnostics).toEqual([
-      refusal("SSC-01/credential-collision", "lower", 'security["client"].env'),
-      refusal("SSC-01/credential-collision", "upper", 'security["Client"].env'),
+      refusal("SSC-01/credential-collision", "lower", skip("lower")),
+      refusal("SSC-01/credential-collision", "upper", skip("upper")),
     ]);
   });
 
-  test("a certificate name equal to a token env name refuses both operations", async () => {
+  test("a certificate name equal to a token env name refuses both, hinting the token's env", async () => {
     const result = await planned({ client: mutualTls, "client-cert": bearer }, [
       ["certified", "client"],
       ["tokened", "client-cert"],
@@ -130,7 +135,7 @@ describe("certificate environment names join the SSC-01 collision check", () => 
 
     expect(result.commands).toEqual(["open"]);
     expect(result.diagnostics).toEqual([
-      refusal("SSC-01/credential-collision", "certified", 'security["client"].env'),
+      refusal("SSC-01/credential-collision", "certified", 'security["client-cert"].env'),
       refusal("SSC-01/credential-collision", "tokened", 'security["client-cert"].env'),
     ]);
   });
