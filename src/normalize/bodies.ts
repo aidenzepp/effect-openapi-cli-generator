@@ -16,7 +16,15 @@ import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
-import { deepObjectExplodeText, formStyleRefusal, partHeader, scalarCover } from "./parameters.ts";
+import {
+  authorChoiceCodes,
+  bracketChoiceCode,
+  deepObjectExplodeText,
+  formStyleRefusal,
+  partHeader,
+  scalarChoiceCode,
+  scalarCover,
+} from "./parameters.ts";
 import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
@@ -2026,8 +2034,6 @@ const compoundNested = (input: RuleInput): Finding =>
     ),
   );
 
-const bracketChoiceCode = "PRM-27/bracket-author-choice";
-
 const bracketChoice = (input: RuleInput): Finding =>
   notice(
     bracketChoiceCode,
@@ -2037,8 +2043,6 @@ const bracketChoice = (input: RuleInput): Finding =>
     input.actual,
   );
 
-const scalarChoiceCode = "PRM-27/scalar-author-choice";
-
 const scalarChoice = (input: RuleInput): Finding =>
   notice(
     scalarChoiceCode,
@@ -2047,9 +2051,6 @@ const scalarChoice = (input: RuleInput): Finding =>
     `The author config sends a scalar deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} as name=value, which the specification does not define.`,
     input.actual,
   );
-
-// The notices of the author config's switches, which go with an entry that is not sent.
-const authorChoiceCodes: ReadonlySet<string> = new Set([bracketChoiceCode, scalarChoiceCode]);
 
 // The scalar switch's decision for a form deepObject entry, by the query parameter rule (design
 // 6.1 Scalar switch); `Strict` for any other style.
