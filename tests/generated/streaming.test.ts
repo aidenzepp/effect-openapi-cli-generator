@@ -279,11 +279,7 @@ describe("sequential output through a generated CLI", () => {
     expect(watched.lines.map((line) => line.text)).toEqual(['{"n":1}', '{"n":2}', '{"n":3}']);
   }, 60_000);
 
-  // Product defect, witness m3-ws1a: jsonSeqRecords closes a record only at the next U+001E or at
-  // the end of the body, so with `\u001E{"n":N}\n` paced 400 ms apart, record N reaches stdout
-  // after chunk N+1 is sent (arrivedBeforeNext false), not before it (design 4.6: emitted as each
-  // item arrives).
-  test.todo("MED-16: a json-seq record reaches stdout after the next record's chunk is sent vs before the next chunk is sent", async () => {
+  test("MED-16: each json-seq record reaches stdout at its closing LF, before the next chunk is sent", async () => {
     capture.script(
       "/records",
       paced(

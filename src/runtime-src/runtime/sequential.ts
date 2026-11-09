@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import { Sse } from "effect/encoding";
 import { ResponseStreamError } from "../domain/errors.ts";
 
@@ -70,15 +70,19 @@ const separators = new Set([",", ":"]);
 const firstStringCodePoint = 0x20;
 
 /**
- * The JSON-seq framer's state between body chunks: the open record's text and UTF-8 size, the index
- * the next record takes, whether the first separator has arrived, and whether the stream failed.
+ * The JSON-seq framer's state between body chunks: the open record's text, UTF-8 size and scan,
+ * the index the next record takes, whether a record is open (a separator has arrived and no LF
+ * has closed its record since), whether the open record can no longer close at an LF, and whether
+ * the stream failed.
  */
 interface SeqState {
   bytes: number;
   failed: boolean;
   itemIndex: number;
+  open: boolean;
   record: string;
-  started: boolean;
+  scan: Scan;
+  settled: boolean;
 }
 
 /**
@@ -122,6 +126,17 @@ interface Scan {
   inScalar: boolean;
   inString: boolean;
 }
+
+/**
+ * Construct the scan at the start of a record.
+ */
+const freshScan = (): Scan => ({
+  afterValue: false,
+  depth: 0,
+  escaped: false,
+  inScalar: false,
+  inString: false,
+});
 
 /**
  * Advance the scan over one character inside a string. Returns false for a raw character below
@@ -182,13 +197,7 @@ const scanToken = (scan: Scan, char: string): boolean => {
  * the compactor cannot alter passes unchanged.
  */
 const compact = (record: string): Compacted => {
-  const scan: Scan = {
-    afterValue: false,
-    depth: 0,
-    escaped: false,
-    inScalar: false,
-    inString: false,
-  };
+  const scan = freshScan();
   let text = "";
   let start = 0;
 
@@ -309,8 +318,10 @@ const seqState = (): SeqState => ({
   bytes: 0,
   failed: false,
   itemIndex: 0,
+  open: false,
   record: "",
-  started: false,
+  scan: freshScan(),
+  settled: false,
 });
 
 /**
@@ -323,6 +334,8 @@ const closeRecord = (state: SeqState, maxRecordBytes: number): Framed | undefine
 
   state.bytes = 0;
   state.record = "";
+  state.scan = freshScan();
+  state.settled = false;
 
   if (compacted.status === "complete" && compacted.text === "") {
     return undefined;
@@ -346,58 +359,128 @@ const closeRecord = (state: SeqState, maxRecordBytes: number): Framed | undefine
 };
 
 /**
- * Add text between separators to the open JSON-seq record, or check the text before the first
- * separator. Fails as soon as the record passes the bound with one byte left for its closing LF.
+ * Advance the open record's scan over text added to it, until the scan finds text the compactor
+ * would change; the record then closes only at the next separator or the end of the body.
+ */
+const scanRecord = (state: SeqState, text: string): void => {
+  const { scan } = state;
+
+  for (const char of state.settled ? "" : text) {
+    if (!(scan.inString ? scanString(scan, char) : scanToken(scan, char))) {
+      state.settled = true;
+
+      return;
+    }
+  }
+};
+
+/**
+ * Decode text as one JSON text; `None` when it is not one.
+ */
+const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+/**
+ * Whether the open record's text, which ends at an LF, is a complete JSON text, so the record
+ * closes at that LF (RFC 7464 ends each record with LF) instead of at the next separator. The
+ * scan rules out text inside a string or a container without parsing; decoding decides the rest.
+ * Past a top-level value only whitespace may follow, so text that does not decode here never will,
+ * and the record settles: it closes at the next separator or the end of the body.
+ */
+const completeAtLineFeed = (state: SeqState): boolean => {
+  const { scan } = state;
+
+  if (state.settled || scan.inString || scan.depth > 0 || !scan.afterValue) {
+    return false;
+  }
+
+  const decodes = Option.isSome(decodeJsonText(state.record));
+
+  state.settled = !decodes;
+
+  return decodes;
+};
+
+/**
+ * Add text between separators to the open JSON-seq record, closing it into `out` at the LF that
+ * completes its JSON text, or check text outside a record: before the first separator, or after a
+ * record closed at its LF, where only whitespace may appear. Fails as soon as the record passes
+ * the bound with one byte left for its closing LF.
  */
 const appendRecord = (
   state: SeqState,
   part: string,
   maxRecordBytes: number,
+  out: Framed[],
 ): ResponseStreamError | undefined => {
-  const { itemIndex } = state;
+  let start = 0;
 
-  if (!state.started) {
-    return nonWhitespace.test(part)
-      ? new ResponseStreamError({ itemIndex, reason: "invalidFraming" })
-      : undefined;
+  while (start < part.length) {
+    const { itemIndex } = state;
+
+    if (!state.open) {
+      return nonWhitespace.test(part.slice(start))
+        ? new ResponseStreamError({ itemIndex, reason: "invalidFraming" })
+        : undefined;
+    }
+
+    const lineFeed = part.indexOf("\n", start);
+    const end = lineFeed === -1 ? part.length : lineFeed + 1;
+    const text = part.slice(start, end);
+    const bytes = state.bytes + utf8Length(text);
+
+    if (bytes > maxRecordBytes + 1) {
+      return new ResponseStreamError({ itemIndex, reason: "recordTooLarge" });
+    }
+
+    state.bytes = bytes;
+    state.record += text;
+    scanRecord(state, text);
+    start = end;
+
+    if (lineFeed !== -1 && completeAtLineFeed(state)) {
+      const closed = closeRecord(state, maxRecordBytes);
+
+      state.open = false;
+
+      if (closed instanceof ResponseStreamError) {
+        return closed;
+      }
+
+      if (closed !== undefined) {
+        out.push(closed);
+      }
+    }
   }
-
-  const bytes = state.bytes + utf8Length(part);
-
-  if (bytes > maxRecordBytes + 1) {
-    return new ResponseStreamError({ itemIndex, reason: "recordTooLarge" });
-  }
-
-  state.bytes = bytes;
-  state.record += part;
 
   return undefined;
 };
 
 /**
- * Frame one chunk of decoded JSON-seq text: every record a separator in the chunk closes, then the
- * first failure, after which the framer takes no more input.
+ * Frame one chunk of decoded JSON-seq text: every record a separator or an LF in the chunk closes,
+ * then the first failure, after which the framer takes no more input.
  */
 const frameChunk = (state: SeqState, chunk: string, maxRecordBytes: number): Framed[] => {
   const out: Framed[] = [];
 
   for (const [position, part] of (state.failed ? [] : chunk.split(recordSeparator)).entries()) {
-    const closed = position > 0 && state.started ? closeRecord(state, maxRecordBytes) : undefined;
+    const closed = position > 0 && state.open ? closeRecord(state, maxRecordBytes) : undefined;
 
-    state.started ||= position > 0;
+    state.open ||= position > 0;
+
+    if (closed !== undefined && !(closed instanceof ResponseStreamError)) {
+      out.push(closed);
+    }
 
     const failure =
-      closed instanceof ResponseStreamError ? closed : appendRecord(state, part, maxRecordBytes);
+      closed instanceof ResponseStreamError
+        ? closed
+        : appendRecord(state, part, maxRecordBytes, out);
 
     if (failure !== undefined) {
       state.failed = true;
       out.push(failure);
 
       return out;
-    }
-
-    if (closed !== undefined) {
-      out.push(closed);
     }
   }
 
@@ -408,8 +491,11 @@ const frameChunk = (state: SeqState, chunk: string, maxRecordBytes: number): Fra
  * Frame a JSON-seq response body (RFC 7464, `application/json-seq` and `+json-seq`) as one
  * compacted JSON text per record, without a line terminator, emitted as each record closes.
  *
- * Records are split on U+001E, not on lines, because a record may contain LF. The body may open
- * with whitespace; any other text before the first separator fails with `invalidFraming`. An empty
+ * A record opens at U+001E and closes at the first LF after which its text decodes as JSON, so it
+ * is emitted as it arrives; an LF inside the text is whitespace and keeps the record open. A
+ * record that never decodes at an LF closes at the next separator or the end of the body. The body
+ * may open with whitespace; any other text before the first separator, or after a record's closing
+ * LF and before the next separator, fails with `invalidFraming`. An empty
  * record (separators in a row, or only whitespace) is skipped and takes no index. A record over
  * `maxRecordBytes` UTF-8 bytes, not counting its closing LF, fails with `recordTooLarge` as soon as
  * the bound is passed; a record that does not end with LF, or ends inside a string or an open
@@ -430,7 +516,7 @@ export const jsonSeqRecords =
         {
           onHalt: (state) => {
             const last =
-              state.failed || !state.started ? undefined : closeRecord(state, maxRecordBytes);
+              state.failed || !state.open ? undefined : closeRecord(state, maxRecordBytes);
 
             return last === undefined ? [] : [last];
           },
