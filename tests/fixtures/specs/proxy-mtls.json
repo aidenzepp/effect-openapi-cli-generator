@@ -1,0 +1,33 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Mutual TLS through a proxy fixture", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "https://127.0.0.1:{port}",
+      "variables": { "port": { "default": "443" } }
+    }
+  ],
+  "paths": {
+    "/pets/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["pets"],
+        "operationId": "pets-get",
+        "security": [{ "client": [] }],
+        "responses": {
+          "200": {
+            "description": "The pet.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "client": { "type": "mutualTLS", "description": "A client certificate." }
+    }
+  }
+}
