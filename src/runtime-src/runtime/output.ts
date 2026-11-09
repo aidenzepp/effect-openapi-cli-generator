@@ -4,7 +4,6 @@ import {
   Config,
   Console,
   Context,
-  Data,
   Duration,
   Effect,
   FileSystem,
@@ -269,7 +268,7 @@ const stdoutPath = "-";
 /**
  * The reader went away: stop streaming, report success (design 13.1 R5).
  */
-class StdoutClosed extends Data.TaggedError("StdoutClosed") {}
+class StdoutClosed extends Schema.TaggedError<StdoutClosed>()("StdoutClosed", {}) {}
 
 const stdoutFailure = (failure: PlatformError.PlatformError): OutputError | StdoutClosed =>
   isBrokenPipe(failure)
@@ -711,7 +710,7 @@ export const valueFreeFormatter: CliOutput.Formatter = {
 /**
  * Exit 70: a failure no error class names, a defect in the program. It is already printed.
  */
-export class InternalError extends Data.TaggedError("InternalError") {
+export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {
   readonly [Runtime.errorExitCode] = 70;
 
   readonly [Runtime.errorReported] = false;
