@@ -20,7 +20,7 @@ import {
 } from "effect";
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
-import { Headers, HttpClient, HttpClientRequest, UrlParams } from "effect/http";
+import { Headers, HttpClient, HttpClientRequest, Url, UrlParams } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
@@ -2123,7 +2123,8 @@ export const send =
       const scrubbed = yield* Ref.updateAndGet(recorded, (entries) => [...entries, ...credentials]);
 
       const { table: security } = yield* Schemes;
-      const baseOrigin = new URL(baseUrl).origin;
+      // The base URL was validated when it was selected, so it parses.
+      const { origin: baseOrigin } = yield* Effect.orDie(Effect.fromResult(Url.fromString(baseUrl)));
       const gate = {
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
         baseOrigin,

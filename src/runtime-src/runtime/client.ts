@@ -281,12 +281,11 @@ const nextHop = (
   }
 
   const hash = target.hash === "" ? Option.none() : Option.some(target.hash.slice(1));
-  target.hash = "";
 
   return Effect.succeedSome(
     HttpClientRequest.makeWith(
       next.method,
-      target.href,
+      Url.setHash(target, "").href,
       UrlParams.empty,
       hash,
       target.origin === from.origin
@@ -897,11 +896,11 @@ const verboseUrl = (
   names: readonly (string | RegExp)[],
 ): string => {
   const url = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash));
-  if (Result.isSuccess(url)) {
-    url.success.hash = "";
-  }
 
-  return redactUriText(Result.isSuccess(url) ? url.success.href : request.url, names);
+  return redactUriText(
+    Result.isSuccess(url) ? Url.setHash(url.success, "").href : request.url,
+    names,
+  );
 };
 
 // Each `<URI-reference>` of a `Link` value (RFC 8288).
