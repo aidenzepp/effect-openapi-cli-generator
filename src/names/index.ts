@@ -911,6 +911,29 @@ const planCredentials = (
     );
   };
 
+  // Certificate names have no override key (R87 B): a certificate's collision names the token
+  // that takes one of its names, since renaming the token frees both operations, or else the
+  // operation's skip. A token names its own override.
+  const sites = new Map(named.map((entry) => [entry.operation, entry.site]));
+  const collisionHint = (scheme: string, operation: Operation): string => {
+    const credential = names.get(scheme);
+    if (credential?._tag !== "Certificate") {
+      return `security[${JSON.stringify(scheme)}].env`;
+    }
+
+    const certificateEnvs = new Set(envsOf(credential));
+    const token = [...names].find(
+      ([, other]) => other._tag === "Token" && certificateEnvs.has(other.env),
+    );
+    if (token !== undefined) {
+      return `security[${JSON.stringify(token[0])}].env`;
+    }
+
+    const site = sites.get(operation) ?? overrideSite(config, operation);
+
+    return `Skip the operation with ${site.configKey}.skip.`;
+  };
+
   for (const operation of operations) {
     const uses = usesOf(operation);
     const empty = uses.filter((scheme) => names.get(scheme.name)?.slug === "");
@@ -939,7 +962,7 @@ const planCredentials = (
         "Security scheme",
         "Two credential names collide.",
         {
-          hint: `security[${JSON.stringify(first.name)}].env`,
+          hint: collisionHint(first.name, operation),
           related: clashing.map(schemeSite),
         },
       );
