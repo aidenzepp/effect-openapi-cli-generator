@@ -54,6 +54,25 @@ const spec = {
       pathOperation("matrix", "matrix", false),
       pathOperation("matrix-x", "matrix", true),
     ]),
+    // A JSON-valued body field (`oneOf` string or array, as Resend's `to`) takes JSON (W1).
+    "/emails": {
+      post: {
+        operationId: "emails",
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: {
+                  to: { oneOf: [{ type: "string" }, { items: { type: "string" }, type: "array" }] },
+                },
+                type: "object",
+              },
+            },
+          },
+        },
+        responses: ok,
+      },
+    },
     "/headers": {
       get: {
         operationId: "headers",
@@ -258,5 +277,14 @@ describe("help", () => {
 
     expect(query).toContain("--qf json");
     expect(path).toContain("  o json");
+  }, 60_000);
+
+  test("a JSON-valued body field flag shows that it takes JSON, and a bare string is refused as not JSON", async () => {
+    const help = await invoke(["emails", "--help"]);
+    const bare = await invoke(["emails", "--to", "a@b.c"]);
+
+    expect(latin1(help.stdout)).toMatch(/--to json\b/u);
+    expect(bare.exitCode).toBe(2);
+    expect(latin1(bare.stderr)).toContain("--to: is not valid JSON");
   }, 60_000);
 });

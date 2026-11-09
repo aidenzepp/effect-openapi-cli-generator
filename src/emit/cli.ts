@@ -621,8 +621,12 @@ interface BodyFlagHead {
 // An `integer` or `number` field is checked against the same grammar as an `integer` or `number`
 // parameter (an `int64` one as digits by `Input.int64Flag`), never parsed to a JavaScript number.
 const bodyFlagHead = (flag: PlannedFlag, kind: string, integer: IntegerWidth): BodyFlagHead => {
+  // A JSON-valued field takes JSON text, named in help as an object parameter's is.
   if (kind === "json") {
-    return { head: fn("Input.jsonFlag", str(flag.name)), steps: [] };
+    return {
+      head: fn("Input.jsonFlag", str(flag.name)),
+      steps: [fn("Flag.withMetavar", str("json"))],
+    };
   }
 
   if (kind === "integer" && integer === "int64") {
