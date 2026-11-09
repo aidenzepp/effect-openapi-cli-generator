@@ -397,6 +397,9 @@ describe("generate", () => {
       severity: "refusal",
       specSection: "https://spec.openapis.org/oas/v3.1.2.html#operation-object",
     });
+    expect(refusals[0]?.hint).toBe(
+      "Text and form request bodies, and multipart bodies the runtime writer cannot send exactly, are not emitted yet.",
+    );
     expect(observed.cliNotes).toBeUndefined();
     expect(observed.cliUsers).toBe(readFixture("expected/src/cli/users.ts"));
     expect(observed.result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
