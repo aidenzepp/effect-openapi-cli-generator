@@ -169,27 +169,48 @@ const byStartThenLongest = Order.combine(
   Order.mapInput(Order.flip(Order.Number), (range: Covered) => range.end),
 );
 
+// A placeholder token as placeholder mode, the name-based lists or an earlier pass wrote it:
+// `<redacted>` or `<redacted:<label>>`.
+const placeholderToken = /<redacted(?::[^<>]*)?>/gu;
+
+const placeholderTokens = (text: string): readonly Covered[] =>
+  Array.from(text.matchAll(placeholderToken), (match) => ({
+    end: match.index + match[0].length,
+    placeholder: match[0],
+    start: match.index,
+  }));
+
 /**
  * Every occurrence of every wire form of every credential as a character range, overlapping
- * occurrences included.
+ * occurrences included, except one that lies wholly inside a placeholder token already in the
+ * text (hater m3 HB1): a placeholder is opaque, so a credential shorter than one, such as `a`, is
+ * never spelled out inside it. An occurrence that only overlaps a token is kept and merged, so no
+ * character of a form survives.
  */
 const occurrences = (
   text: string,
   entries: readonly ScrubEntry[],
   formsOf: (entry: ScrubEntry) => readonly string[],
-): readonly Covered[] =>
-  entries.flatMap((entry) =>
+): readonly Covered[] => {
+  const tokens = placeholderTokens(text);
+  const insideToken = (start: number, end: number): boolean =>
+    tokens.some((token) => token.start <= start && end <= token.end);
+
+  return entries.flatMap((entry) =>
     formsOf(entry).flatMap((form) => {
       const placeholder = placeholderOf(entry);
       const found: Covered[] = [];
 
       for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
-        found.push({ end: at + form.length, placeholder, start: at });
+        if (!insideToken(at, at + form.length)) {
+          found.push({ end: at + form.length, placeholder, start: at });
+        }
       }
 
       return found;
     }),
   );
+};
 
 /**
  * Merge ranges that overlap or touch. A merged run keeps the placeholder of its earliest,

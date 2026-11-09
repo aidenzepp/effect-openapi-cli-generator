@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Redacted } from "effect";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
+import { sanitize } from "../../src/runtime-src/runtime/output.ts";
 import type { Secret } from "../../src/runtime-src/runtime/redact.ts";
 import {
   dropTrailingFragment,
   queryWireForm,
   scrub,
+  scrubAround,
 } from "../../src/runtime-src/runtime/redact.ts";
 
 // Audit M F1 probe values: each is sent percent-encoded with no `+` for a space, and the URL parser
@@ -129,4 +131,46 @@ describe("a secret's echoed forms are scrubbed", () => {
   test("a value that is only a newline scrubs no empty form", () => {
     expect(scrub("a b", [secretOf("password-file", "\n")])).toBe("a b");
   });
+});
+
+// Hater m3 HB1: a credential shorter than its placeholder, such as `a` inside `<redacted:...>`, is
+// never rewritten inside a placeholder already in the text, from placeholder mode or a first pass.
+describe("a placeholder already in the text is opaque (HB1)", () => {
+  const short: Credential = {
+    definition: { kind: "http", scheme: "bearer" },
+    scheme: "bearerAuth",
+    value: Redacted.make("a"),
+  };
+  const secret = secretOf("password-file", "e");
+
+  test("a one-character credential is scrubbed around a placeholder, never inside it", () => {
+    expect(scrubAround("Bearer <redacted:bearerAuth> a", [short], sanitize)).toBe(
+      "Be<redacted:bearerAuth>rer <redacted:bearerAuth> <redacted:bearerAuth>",
+    );
+  });
+
+  test("the bare <redacted> placeholder is opaque too", () => {
+    expect(scrub("cookie: <redacted> a", [short])).toBe("cookie: <redacted> <redacted:bearerAuth>");
+  });
+
+  test("an occurrence that only overlaps a placeholder is still scrubbed", () => {
+    const overlap: Credential = { ...short, value: Redacted.make(">x") };
+
+    expect(scrub("<redacted:bearerAuth>x", [overlap])).toBe(
+      "<redacted:bearerAuth<redacted:bearerAuth>",
+    );
+  });
+
+  for (const [name, text, entries] of [
+    ["a credential", "Bearer <redacted:bearerAuth> a", [short]],
+    ["a secret entry", "password: <redacted:password-file> e", [secret]],
+    ["both", "a <redacted:password-file> e <redacted:bearerAuth>", [short, secret]],
+  ] as const) {
+    test(`scrubAround is idempotent for ${name}`, () => {
+      const once = scrubAround(text, entries, sanitize);
+
+      expect(once).not.toContain("<red<");
+      expect(scrubAround(once, entries, sanitize)).toBe(once);
+    });
+  }
 });
