@@ -586,9 +586,11 @@ export const evaluate = (
   });
 
 /**
- * A scheme `--dry-run` shows as `<redacted:<scheme>>`: a credential without its value.
+ * A scheme `--dry-run` shows as `<redacted:<scheme>>`. A configured scheme carries its value, which
+ * is checked as `attach` checks it but never written; an unconfigured one carries none.
  */
-export type Placeholder = Pick<Credential, "definition" | "scheme">;
+export type Placeholder = Pick<Credential, "definition" | "scheme"> &
+  Partial<Pick<Credential, "value">>;
 
 /**
  * What `--dry-run` shows (design 4.6, D-OUT3): the configured credentials of the chosen
@@ -943,8 +945,8 @@ export const attach =
 export const placeholder = (scheme: string): string => `<redacted:${scheme}>`;
 
 // Write the placeholder where the credential would go, with the scheme's prefix (`Bearer`,
-// `Basic`), so no value is read and none can be refused.
-const placeholderOne = (
+// `Basic`); the value, if any, is never written.
+const writePlaceholder = (
   request: HttpClientRequest.HttpClientRequest,
   { definition, scheme }: Placeholder,
 ): Effect.Effect<HttpClientRequest.HttpClientRequest> => {
@@ -975,16 +977,30 @@ const placeholderOne = (
   return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
 };
 
+// A configured value gets the check `attach` applies (`attachOne`, its request discarded), so the
+// preview fails where the real run would (M3-DR1); then the placeholder is written.
+const placeholderOne = (
+  request: HttpClientRequest.HttpClientRequest,
+  entry: Placeholder,
+): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
+  const { value } = entry;
+  const checked =
+    value === undefined ? Effect.void : Effect.asVoid(attachOne(request, { ...entry, value }));
+
+  return Effect.andThen(checked, () => writePlaceholder(request, entry));
+};
+
 /**
  * The placeholder mode of the one attach transform, for `--dry-run` (design 7.5, CO-24): the same
  * strip and origin binding as `attach`, writing `<redacted:<scheme>>` (`placeholder`) for each
- * scheme of the chosen alternative instead of its value.
+ * scheme of the chosen alternative instead of its value. A configured value `attach` would refuse
+ * is the same `UsageError` here; an unconfigured scheme is never refused.
  */
 export const attachPlaceholders =
   (table: SecurityTable, placeholders: readonly Placeholder[], origins: readonly string[]) =>
   (
     request: HttpClientRequest.HttpClientRequest,
-  ): Effect.Effect<HttpClientRequest.HttpClientRequest> =>
+  ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> =>
     attachWith(table, placeholders, origins, request, placeholderOne);
 
 /**

@@ -12,6 +12,7 @@ import {
   Queue,
   Redacted,
   Ref,
+  Runtime,
   Sink,
   Stdio,
   Stream,
@@ -167,6 +168,24 @@ const run = async (world: World) => {
     stderr: Buffer.concat(stderr).toString("utf-8"),
     stdout: Buffer.concat(stdout).toString("utf-8"),
   };
+};
+
+// m3-hb5: the preview of a request that cannot be built is wrong (M3-DR1), so a configured value
+// the real run refuses is refused under `--dry-run` with the same `UsageError`.
+const refusedLikeTheRealRun = async (world: World) => {
+  const dry = await run({ ...world, dryRun: true });
+  const real = await run({ ...world, dryRun: false });
+
+  expect(dry.failure).toMatchObject({ _tag: "UsageError" });
+  expect(dry.failure?.[Runtime.errorExitCode]).toBe(2);
+  expect(real.failure).toMatchObject({ _tag: "UsageError" });
+  expect(dry.stderr).toBe(real.stderr);
+  expect(dry.stderr).not.toBe("");
+  expect(dry.stdout).toBe("");
+  expect(dry.sent).toBe(0);
+  expect(real.sent).toBe(0);
+
+  return dry;
 };
 
 describe("Output.send --dry-run", () => {
@@ -498,5 +517,39 @@ describe("Output.send --dry-run", () => {
     expect(result.stdout).not.toContain(canary);
     expect(result.stdout).toContain("cookie: a=<redacted:bearerAuth>; session=<redacted>\n");
     expect(result.stdout).toContain("authorization: Bearer <redacted:bearerAuth>\n");
+  });
+
+  test("a configured bearer credential holding CR LF is refused as the real run refuses it", async () => {
+    const result = await refusedLikeTheRealRun({
+      env: { EXAMPLE_BEARER_AUTH: "tok\r\nX-Evil: 1" },
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(result.stderr).toContain("the credential for bearerAuth has a CR, LF, NUL");
+    expect(result.stderr).not.toContain("X-Evil");
+  });
+
+  test("a configured apiKey holding U+0100 is refused as the real run refuses it", async () => {
+    const result = await refusedLikeTheRealRun({
+      env: { EXAMPLE_API_KEY: "key\u0100" },
+      operation: meta("GET", [["apiKey"]]),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(result.stderr).toContain("the credential for apiKey has a CR, LF, NUL");
+  });
+
+  test("a valid configured apiKey still prints its placeholder", async () => {
+    const result = await run({
+      env: { EXAMPLE_API_KEY: KEY },
+      operation: meta("GET", [["apiKey"]]),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout).toContain("x-key: <redacted:apiKey>\n");
+    expect(result.stdout).not.toContain(KEY);
   });
 });
