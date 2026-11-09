@@ -1,7 +1,9 @@
 import { Effect, Schema } from "effect";
+import { runtimeSettings } from "../model/author-config.ts";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { SecurityScheme } from "../model/entities.ts";
 import { methodTokens } from "../model/method-tokens.ts";
+import { envPrefixOf } from "../names/plan.ts";
 import type { EmittedFile } from "./package.ts";
 import {
   Identifier,
@@ -71,13 +73,32 @@ const constant = (name: string, value: Expr, exported = false): Statement => ({
 });
 
 /**
+ * The fallback object of the `ConfigProvider` `main.ts` composes (design D-AD7): each runtime
+ * setting `runtimeSettings` resolves, keyed by the explicit prefixed env name its runtime resolver
+ * reads (`<PREFIX>_IDLE_TIMEOUT`, `<PREFIX>_RETRIES`, `<PREFIX>_TIMEOUT`; memo 6f21e261), in key
+ * order. Nothing is nested, so an environment value of the same name wins.
+ */
+export const runtimeFallback = (config: AuthorConfig) => {
+  const prefix = envPrefixOf(config);
+  const settings = runtimeSettings(config);
+
+  return {
+    [`${prefix}_IDLE_TIMEOUT`]: settings.idleTimeoutSeconds,
+    [`${prefix}_RETRIES`]: settings.retries,
+    [`${prefix}_TIMEOUT`]: settings.timeoutSeconds,
+  };
+};
+
+/**
  * `main.ts` (design 4.1 Lazy root, 14 D5): reads the arguments from `Stdio`, builds the root with
  * `cli/root.ts` `root` (which loads only the groups the arguments select), then `Command.run` over
  * that root with `renderErrors: false` (the final catch is the only renderer), provided with the
  * root's `services` and `CliOutput.layer(Output.formatter(root))`, then `Output.exitForHelp` (help
- * with parse errors exits 2) inside `Output.finalCatch`. The credentials the handler evaluated
- * reach the catch through `RunCredentials`, so its own list is empty. M1 carries no runtime
- * defaults, so there is no `ConfigProvider` fallback.
+ * with parse errors exits 2) inside `Output.finalCatch`, which reads `<PREFIX>_ERROR_FORMAT` for a
+ * parse-time error. The credentials the handler evaluated reach the catch through
+ * `RunCredentials`, so its own list is empty. The whole run reads config through
+ * `ConfigProvider.orElse(<env>, ConfigProvider.fromUnknown(runtimeFallback(config)))`, so an author
+ * default applies when its env name is unset (design D-AD7).
  */
 const mainModule = (config: AuthorConfig): Module => {
   const runRoot = fn(
@@ -94,15 +115,24 @@ const mainModule = (config: AuthorConfig): Module => {
     fn("CliOutput.layer", fn("Output.formatter", path("command"))),
   );
   const args = fn("Stdio.Stdio.use", arrow([{ name: I("stdio") }], path("stdio.args")));
+  const fallback = Object.entries(runtimeFallback(config)).map(
+    ([name, value]): readonly [string, Expr] => [name, num(value)],
+  );
+  const provider = fn(
+    "ConfigProvider.orElse",
+    fn("ConfigProvider.fromEnv"),
+    fn("ConfigProvider.fromUnknown", obj(fallback)),
+  );
 
   return {
     imports: [
-      named("effect", ["Effect", "Layer", "Stdio"]),
+      named("effect", ["ConfigProvider", "Effect", "Layer", "Stdio"]),
       named("effect/cli", ["CliOutput", "Command"]),
       named("./cli/root.ts", ["root", "services"]),
       namespace("./runtime/output.ts", "Output"),
     ],
     statements: [
+      constant("provider", provider),
       constant(
         "run",
         call(member(args, M("pipe")), [
@@ -115,7 +145,8 @@ const mainModule = (config: AuthorConfig): Module => {
             ),
           ),
           path("Output.exitForHelp"),
-          fn("Output.finalCatch", arr([])),
+          fn("Output.finalCatch", arr([]), obj([["envPrefix", str(envPrefixOf(config))]])),
+          fn("Effect.provideService", path("ConfigProvider.ConfigProvider"), path("provider")),
         ]),
         true,
       ),
@@ -259,12 +290,13 @@ const clientCertificateStatements = (): readonly Statement[] => {
  * Bun services, the Bun HTTP client with manual redirects and no client timeout or `proxy` key,
  * the `FileBody` layer over `Bun.file` (spike S3), the client policy (the method allowlist of
  * design 6.7, the runtime's `Client.directRoute` for loopback hops of design 6.5, the
- * `User-Agent` name and version), `RunCredentials` outside the final catch, the
+ * `User-Agent` name and version), the run-scoped `RunCredentials`, `RunRecord` (the error format
+ * and retry-hint record) and `RunWarnings` (the once-per-run warnings) outside the final catch, the
  * runtime presenter with no second formatter, the runtime's built-in flags (`Output.builtIns`:
  * every effect default but `--wizard`, help and version without `-h`/`-v`), logs to stderr and
  * no trace propagation. `runMain` reports no error: the final catch already rendered it. With a
  * `mutualTLS` scheme it also provides the client certificate (`clientCertificateStatements`);
- * without one it is the Milestone 2 module, byte for byte.
+ * without one it has no client-certificate part.
  */
 const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
   const fileBody = fn(
@@ -305,6 +337,8 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
     path("fileBody"),
     ...(mutualTls ? [path("clientCertificate")] : []),
     path("Output.runCredentialsLayer"),
+    path("Output.runRecordLayer"),
+    path("Output.runWarningsLayer"),
     fn("CliOutput.layerPresenter", path("Output.presenter")),
     fn("CliConfig.layer", obj([["builtIns", path("Output.builtIns")]])),
     fn("Layer.succeed", path("References.LogToStderr"), bool(true)),
