@@ -28,13 +28,32 @@ export const sequentialMediaTypes: ReadonlyMap<string, SequentialCodec> = new Ma
 const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
 
 /**
+ * A media type's essence: parameters dropped, trimmed, lowercased. The one place the runtime
+ * splits a media type at `;`.
+ */
+export const mediaEssence = (mediaType: string): string => {
+  const [head = ""] = mediaType.split(";", 1);
+
+  return head.trim().toLowerCase();
+};
+
+/**
+ * Whether `mediaType` is JSON media: `application/json` or a `+json` suffix, parameters and case
+ * ignored.
+ */
+export const isJsonFamily = (mediaType: string): boolean => {
+  const essence = mediaEssence(mediaType);
+
+  return essence === "application/json" || essence.endsWith("+json");
+};
+
+/**
  * The sequential codec a media type selects, or `undefined` for a non-sequential type: its essence
  * (lowercased, parameters dropped) is looked up in `sequentialMediaTypes`, and any other
  * `+json-seq` essence is JSON-seq.
  */
 export const sequentialCodecOf = (mediaType: string): SequentialCodec | undefined => {
-  const [head = ""] = mediaType.split(";", 1);
-  const essence = head.trim().toLowerCase();
+  const essence = mediaEssence(mediaType);
 
   return sequentialMediaTypes.get(essence) ?? (jsonSeqSuffix.test(essence) ? "jsonseq" : undefined);
 };

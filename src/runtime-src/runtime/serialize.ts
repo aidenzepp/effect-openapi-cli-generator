@@ -6,6 +6,7 @@ import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
+import { isJsonFamily, mediaEssence } from "./sequential.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -982,11 +983,7 @@ export interface RequestBody {
  * Whether `mediaType` is JSON media: `application/json` or a `+json` suffix, parameters and case
  * ignored. A body or `content` value under it is written as JSON text.
  */
-export const isJsonMedia = (mediaType: string): boolean => {
-  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
-
-  return essence === "application/json" || essence.endsWith("+json");
-};
+export const isJsonMedia: (mediaType: string) => boolean = isJsonFamily;
 
 /**
  * Whether `value` holds a number `JSON.stringify` cannot write as given: a non-finite number, which
@@ -2100,7 +2097,7 @@ export interface ContentOptions {
 export interface QuerystringOptions extends ContentOptions, Partial<UrlEncodedOptions> {}
 
 const isFormMedia = (mediaType: string) =>
-  (mediaType.split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
+  mediaEssence(mediaType) === "application/x-www-form-urlencoded";
 
 /**
  * A content-based parameter with no value: an optional one sends nothing and a required one is
