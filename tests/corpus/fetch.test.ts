@@ -166,6 +166,7 @@ describe("corpus files", () => {
       "resend",
       "stripe",
       "stripe-brackets",
+      "stripe-brackets-scalars",
     ]);
     expect(
       Arr.sort(
