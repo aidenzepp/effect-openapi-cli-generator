@@ -11,7 +11,10 @@ import { setEnv } from "../support/env.ts";
 // the format `recordRun` records is the one `finalCatch` renders in, and the emitted `main.ts`
 // passes the env prefix to `finalCatch`, so a parse-time error reads `<PREFIX>_ERROR_FORMAT`.
 // Both are read with `Effect.serviceOption` and a text default, so a missing layer or prefix
-// compiles and renders text; these cases are the guard (memo 36fb61b3, audit ad9f808b F2).
+// compiles and renders text; these cases are the guard (memo 36fb61b3, audit ad9f808b F2). The
+// emitted `bin.ts` also provides `RunWarnings`, so the plaintext warning prints once in a run, and
+// its client-certificate check renders through a `finalCatch` given the same prefix (audit of
+// m3/wi1b, F2 and F3).
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -28,8 +31,15 @@ const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 const scope = Effect.runSync(Scope.make());
 
-// One operation with a required query flag and a required JSON body.
+// One operation with a required query flag and a required JSON body, secured by a header
+// credential or a `mutualTLS` client certificate, so `bin.ts` has its client-certificate part.
 const spec = {
+  components: {
+    securitySchemes: {
+      client: { type: "mutualTLS" },
+      headerKey: { in: "header", name: "X-Key", type: "apiKey" },
+    },
+  },
   info: { title: "Run scoped", version: "1.0.0" },
   openapi: "3.1.0",
   paths: {
@@ -46,6 +56,7 @@ const spec = {
           required: true,
         },
         responses: { "204": { description: "Created" } },
+        security: [{ headerKey: [] }, { client: [] }],
         tags: ["items"],
       },
     },
@@ -147,6 +158,62 @@ describe("run-scoped layers: the built CLI", () => {
 
     expect(result.exitCode).toBe(2);
     expect(jsonErrorKinds(result.stderr)).toEqual(["MissingOption"]);
+    expect(hasTextError(result.stderr)).toBe(false);
+  });
+
+  // Each command sends once, so the two sends are the two attempts of a retried 503 in one run.
+  // The base is plaintext and not loopback, so the requests reach it through `HTTP_PROXY`.
+  test("an http base with a header credential warns once across a retried 503", async () => {
+    const seen: string[] = [];
+    const proxy = Bun.serve({
+      fetch: (request) => {
+        seen.push(request.headers.get("x-key") ?? "");
+
+        return new Response("busy", { headers: { "retry-after": "0" }, status: 503 });
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    try {
+      const result = await run(
+        [
+          "--owner",
+          "o",
+          "--body",
+          "{}",
+          "--base-url",
+          "http://plain.example.test",
+          "--allow-credentials-for-base-url",
+          "--retry-unsafe",
+          "--retries",
+          "1",
+        ],
+        { HTTP_PROXY: `http://127.0.0.1:${proxy.port}`, RUNS_HEADER_KEY: "run-scoped-key" },
+      );
+      const warnings = decode(result.stderr)
+        .split("\n")
+        .filter((line) => line.startsWith("Warning:"));
+
+      expect(seen).toEqual(["run-scoped-key", "run-scoped-key"]);
+      expect(result.exitCode).not.toBe(0);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("plain.example.test");
+    } finally {
+      await proxy.stop(true);
+    }
+  });
+
+  test("RUNS_ERROR_FORMAT=json and an unreadable certificate path render one JSON object", async () => {
+    const missing = nodePath.join(work, "missing.pem");
+    const result = await run(["--owner", "o", "--body", "{}"], {
+      RUNS_CLIENT_CERT: missing,
+      RUNS_CLIENT_KEY: missing,
+      RUNS_ERROR_FORMAT: "json",
+    });
+
+    expect(result.exitCode).toBe(2);
+    expect(jsonErrorKinds(result.stderr)).toEqual(["UsageError"]);
     expect(hasTextError(result.stderr)).toBe(false);
   });
 });

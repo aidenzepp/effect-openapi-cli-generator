@@ -159,12 +159,13 @@ const mainModule = (config: AuthorConfig): Module => {
  * for a package with a `mutualTLS` scheme. At start-up it reads each `mutualTLS` scheme of
  * `api/security.ts` through the runtime's `Auth.clientCertificatePaths` (the names the scheme
  * carries are the one derivation), checks each configured path readable (an unreadable one is a
- * `UsageError` naming its environment variable, exit 2, rendered once by `Output.finalCatch`), and
+ * `UsageError` naming its environment variable, exit 2, rendered once by `Output.finalCatch`, which
+ * reads `<PREFIX>_ERROR_FORMAT` as for a parse-time error, design 7.4), and
  * provides `{ tls: { cert, key, ca? } }` over `Bun.file` as `Auth.ClientCertificate`, the first
  * configured scheme's. The runtime sets it per hop on bound origins only; `layerOptions` never
  * gets a `tls` key, because a client-wide one presents the certificate to every host (I3).
  */
-const clientCertificateStatements = (): readonly Statement[] => {
+const clientCertificateStatements = (config: AuthorConfig): readonly Statement[] => {
   const unreadable = arrow(
     [stringParam("message")],
     newExpr(path("UsageError"), [obj([["message", path("message")]])]),
@@ -267,7 +268,7 @@ const clientCertificateStatements = (): readonly Statement[] => {
           path("certificateInits"),
           arrow([{ name: I("all") }], fn("Option.firstSomeOf", path("all"))),
         ),
-        fn("Output.finalCatch", arr([])),
+        fn("Output.finalCatch", arr([]), obj([["envPrefix", str(envPrefixOf(config))]])),
       ),
     ),
     fn(
@@ -369,7 +370,7 @@ const binModule = (config: AuthorConfig, mutualTls: boolean): Module => {
     statements: [
       constant("fileBody", fileBody),
       constant("clientPolicy", clientPolicy),
-      ...(mutualTls ? clientCertificateStatements() : []),
+      ...(mutualTls ? clientCertificateStatements(config) : []),
       constant("entry", entry),
       {
         _tag: "Expression",
