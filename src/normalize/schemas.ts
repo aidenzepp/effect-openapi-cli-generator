@@ -14,13 +14,13 @@ import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
 import { defsKey, keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
-import { defaultLimits, nodeAt } from "../resolve/index.ts";
+import { defaultLimits } from "../resolve/index.ts";
 import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
 import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { isObject, isArray, stringMember } from "../model/json-tree.ts";
+import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { nodeIn, referenceIn } from "./document-set.ts";
 

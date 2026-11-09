@@ -6,7 +6,8 @@ import { Effect, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { normalizeSchemas } from "../../src/normalize/schemas.ts";
 import type { Json } from "../../src/model/pointer.ts";
-import { nodeAt, resolve } from "../../src/resolve/index.ts";
+import { nodeAt } from "../../src/model/json-tree.ts";
+import { resolve } from "../../src/resolve/index.ts";
 import { GenerationReport } from "../../src/report/index.ts";
 import type { Line } from "../../src/validate/index.ts";
 
