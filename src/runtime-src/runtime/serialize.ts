@@ -1137,17 +1137,30 @@ export interface NestedForm {
 }
 
 /**
+ * The one nested level of a part by position (design 6.3, HT:B16, ENC-08, ENC-09): one
+ * `multipart/mixed` nested part from the files of the part's repeated file flag `flag`, in order,
+ * file `i` under `positions[i]` and every later file under `item`. With no `item` a file beyond
+ * the positions has no rule.
+ */
+export interface PositionalForm {
+  readonly flag: string;
+  readonly item?: string;
+  readonly kind: "mixed";
+  readonly positions: readonly string[];
+}
+
+/**
  * One declared part: its name, its `Content-Type` and, when the part is sent base64 encoded, its
  * transfer encoding (design 6.3 Multipart transfer encoding). The writer then encodes the part's
  * bytes and writes the one `Content-Transfer-Encoding` header. A string is the one type the
  * Encoding `contentType` lists, and the part's values are the fields under its name. A `NestedForm`
- * sends the part as one nested part from the `FormNested` values under its name. A `ChosenPart`
- * brings its own type, values and headers, and `undefined` is a keyed part not sent; the fields
- * hold neither name.
+ * sends the part as one nested part from the `FormNested` values under its name, and a
+ * `PositionalForm` as one nested part from the files under its name. A `ChosenPart` brings its own
+ * type, values and headers, and `undefined` is a keyed part not sent; the fields hold neither name.
  */
 export type FormPartEntry = readonly [
   name: string,
-  contentType: string | ChosenPart | NestedForm | undefined,
+  contentType: string | ChosenPart | NestedForm | PositionalForm | undefined,
   contentEncoding?: "base64",
 ];
 
@@ -1176,7 +1189,10 @@ const isFormNested = (value: FormValue): value is FormNested =>
   Predicate.isObject(value) && "nested" in value;
 
 const isNestedForm = (sent: FormPartEntry[1]): sent is NestedForm =>
-  Predicate.isObject(sent) && "kind" in sent;
+  Predicate.isObject(sent) && "parts" in sent;
+
+const isPositionalForm = (sent: FormPartEntry[1]): sent is PositionalForm =>
+  Predicate.isObject(sent) && "positions" in sent;
 
 const formText = (value: Exclude<LeafValue, FormFile>) => {
   if (isFormJson(value)) {
@@ -1205,7 +1221,7 @@ const utf8 = new TextEncoder();
 const sentPart = (
   fields: FormFields,
   name: string,
-  sent: Exclude<FormPartEntry[1], NestedForm>,
+  sent: Exclude<FormPartEntry[1], NestedForm | PositionalForm>,
 ): ChosenPart | undefined =>
   Predicate.isString(sent)
     ? { contentType: sent, values: Object.hasOwn(fields, name) ? (fields[name] ?? []) : [] }
@@ -1273,6 +1289,40 @@ const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
     return { kind: nesting.kind, name, parts: leaves } satisfies Multipart.NestedPart;
   });
 
+// A part nested by position (design 6.3, HT:B16): the part's files in order, file `i` under
+// `positions[i]` and later files under `item`, as one `multipart/mixed` nested part with no
+// nested names, or nothing when no file is given. A file beyond the positions with no item rule is
+// a `UsageError` naming the flag.
+const positionalParts = (fields: FormFields, name: string, nesting: PositionalForm) =>
+  Effect.gen(function* positional() {
+    const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+    if (values.length === 0) {
+      return [];
+    }
+
+    const ruled = nesting.item === undefined ? nesting.positions.length : Infinity;
+    if (values.length > ruled) {
+      return yield* Effect.fail(
+        new UsageError({
+          flag: nesting.flag,
+          message: `--${nesting.flag}: this part takes at most ${String(ruled)} file${ruled === 1 ? "" : "s"}`,
+        }),
+      );
+    }
+
+    const leaves: Multipart.LeafPart[] = [];
+    for (const [index, value] of values.entries()) {
+      const contentType = nesting.positions[index] ?? nesting.item;
+      if (!isFormFile(value) || contentType === undefined) {
+        return yield* Effect.die(new Error("formData: a positional nested part holds a non-file"));
+      }
+
+      leaves.push({ body: value.stream, contentType });
+    }
+
+    return [{ kind: nesting.kind, name, parts: leaves } satisfies Multipart.NestedPart];
+  });
+
 const formDataOf = (fields: FormFields, options: FormDataOptions) =>
   Effect.gen(function* formDataEvaluation() {
     const declared = new Set(options.parts.map(([name]) => name));
@@ -1283,6 +1333,11 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
     const sent: Multipart.Part[] = [];
     for (const entry of options.parts) {
       const [name, rule] = entry;
+      if (isPositionalForm(rule)) {
+        sent.push(...(yield* positionalParts(fields, name, rule)));
+        continue;
+      }
+
       if (isNestedForm(rule)) {
         const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
         for (const value of values) {
@@ -1470,11 +1525,12 @@ const failingFlag = (options: FormSchemaOptions, failing: ReadonlySet<string | u
 
 /**
  * The part values asserted against the body's schema before any request (design 4.5, C2): text
- * parts as their typed values, each supplied file part for presence only, never its content, and a
- * by-name nested part as its object (HT:B16). A failure is a `UsageError` naming the first failing
- * part's flag in declared order, a nested part's dotted flag for its nested parts, never a value.
- * An optional body with no value is not asserted; a required one is asserted as `{}`, so a missing
- * required part fails. The values pass through unchanged.
+ * parts as their typed values, each supplied file part for presence only, never its content (the
+ * files of a part nested by position among them), and a by-name nested part as its object (HT:B16).
+ * A failure is a `UsageError` naming the first failing part's flag in declared order, a nested
+ * part's dotted flag for its nested parts, never a value. An optional body with no value is not
+ * asserted; a required one is asserted as `{}`, so a missing required part fails. The values pass
+ * through unchanged.
  */
 export const assertFormData =
   (options: FormSchemaOptions) =>

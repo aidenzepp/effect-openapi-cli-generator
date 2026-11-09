@@ -218,3 +218,117 @@ describe("Serialize.assertFormData: a by-name nested value is asserted as its ob
     expect([error._tag, error.flag]).toEqual(["UsageError", "form.y"]);
   });
 });
+
+// M3-MP3 (design 6.3, HT:B16): one nested level by position. The part's repeated file flag gives the
+// files in order; file i is sent under the nested prefixEncoding[i] and every later file under the
+// nested itemEncoding, as one multipart/mixed nested part with no nested names. The assertion reads
+// the files for presence only.
+
+const file = (body: string): Serialize.FormFile => ({
+  filename: `${body}.bin`,
+  stream: Stream.succeed(encoder.encode(body)),
+});
+
+const pages: Serialize.PositionalForm = {
+  flag: "pages",
+  item: "image/png",
+  kind: "mixed",
+  positions: ["application/json", "text/csv"],
+};
+
+describe("Serialize.formData: one nested level by position", () => {
+  test("ENC-08 ENC-09: file i goes under positions[i] and later files under the item rule, with no names or filenames", async () => {
+    const built = await build(
+      { pages: [file("j"), file("c"), file("p")] },
+      { parts: [["pages", pages]], required: true },
+    );
+
+    expect(await normalized(built)).toBe(
+      [
+        "--<outer>",
+        'Content-Disposition: form-data; name="pages"',
+        "Content-Type: multipart/mixed; boundary=<nested>",
+        "",
+        "--<nested>",
+        "Content-Type: application/json",
+        "",
+        "j",
+        "--<nested>",
+        "Content-Type: text/csv",
+        "",
+        "c",
+        "--<nested>",
+        "Content-Type: image/png",
+        "",
+        "p",
+        "--<nested>--",
+        "--<outer>--",
+        "",
+      ].join("\r\n"),
+    );
+  });
+
+  test("ENC-08: with no item rule, a file beyond the positions is a UsageError naming the part's flag", async () => {
+    const { item: _item, ...prefixOnly } = pages;
+    const error = await Effect.runPromise(
+      Effect.flip(
+        Serialize.request("POST", {
+          body: Serialize.formData(
+            { pages: [file("a"), file("b"), file("c")] },
+            { parts: [["pages", prefixOnly]], required: true },
+          ),
+          headers: [],
+          path: Serialize.path("/uploads", []),
+          query: [],
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect([error._tag, error.flag]).toEqual(["UsageError", "pages"]);
+  });
+
+  test("a part nested by position with no file is not sent", async () => {
+    const built = await build(
+      { pages: [], title: ["t"] },
+      {
+        parts: [
+          ["pages", pages],
+          ["title", "text/plain"],
+        ],
+        required: true,
+      },
+    );
+
+    expect(await normalized(built)).not.toContain('name="pages"');
+  });
+});
+
+const positionalBody = Schema.Struct({
+  pages: Schema.Tuple([Schema.Struct({ id: Schema.Int })]),
+});
+
+const positionalOptions: Serialize.FormSchemaOptions = {
+  flags: { pages: "pages" },
+  repeated: ["pages"],
+  required: true,
+  schema: positionalBody,
+};
+
+describe("Serialize.assertFormData: positional nested files are asserted for presence only", () => {
+  test("ENC-08: files pass whatever the item schemas say", async () => {
+    const fields: Serialize.FormFields = { pages: [file("a")] };
+
+    expect(await Effect.runPromise(Serialize.assertFormData(positionalOptions)(fields))).toBe(
+      fields,
+    );
+  });
+
+  test("ENC-08: a required part nested by position with no file is a UsageError naming its flag", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(Serialize.assertFormData(positionalOptions)({})),
+    );
+
+    expect([error._tag, error.flag]).toEqual(["UsageError", "pages"]);
+  });
+});

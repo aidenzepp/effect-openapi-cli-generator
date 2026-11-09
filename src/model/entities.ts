@@ -146,12 +146,16 @@ const nestedEncodingRule = Schema.Struct({
  * `contentEncoding` is the part's transfer encoding: base64, the one the runtime supports, from
  * 3.0 `format: byte` (ENC-38) or 3.1+ `contentEncoding` (ENC-37); absent, the part is sent as is.
  * `nonStandard` marks a form property the author config sends in the bracket convention.
+ * `nested` holds the one nested level's rules (design 6.3, HT:B16), by name and by position, and is
+ * present whenever the part nests; `nestedItem` is the nested `itemEncoding`, the rule of every
+ * nested position after the nested `prefixEncoding` (ENC-09).
  */
 export class EncodingRule extends Schema.Class<EncodingRule>("EncodingRule")({
   contentEncoding: Schema.optionalKey(Schema.Literal("base64")),
   contentType: Schema.Array(MediaRange),
   headers: partHeaders,
   nested: Schema.optionalKey(Schema.Array(nestedEncodingRule)),
+  nestedItem: Schema.optionalKey(nestedEncodingRule),
   nonStandard,
   origin: Origin,
   rows,

@@ -111,6 +111,7 @@ interface SchemaNode {
   readonly items?: Schema.Json;
   readonly oneOf?: Schema.Json;
   readonly properties?: JsonObject;
+  readonly required?: Schema.Json;
   readonly type?: string | readonly string[];
 }
 
@@ -156,7 +157,14 @@ interface Property {
 }
 
 type Classified =
-  | { readonly _tag: "Object"; readonly properties: ReadonlyMap<string, Property> }
+  | {
+      readonly _tag: "Object";
+      readonly properties: ReadonlyMap<string, Property>;
+      /**
+       * The names its `required` arrays list, its own and those of its `allOf` members.
+       */
+      readonly required: ReadonlySet<string>;
+    }
   | { readonly _tag: "Opaque" }
   | { readonly _tag: "Scalar"; readonly kind: Scalar; readonly repeated: boolean };
 
@@ -197,6 +205,11 @@ interface Ctx {
    */
   readonly nestedParts: ReadonlySet<string>;
   /**
+   * Multipart only: the parts whose Encoding rule nests by position (HT:B16, ENC-08, ENC-09). Each
+   * is one repeated file flag, its files in order, whatever its schema (the raw posture of HT:B15).
+   */
+  readonly positionalParts: ReadonlySet<string>;
+  /**
    * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5). Each
    * gets no flag and no notice, as a style-refused part gets none.
    */
@@ -235,6 +248,18 @@ const nestedPartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<stri
     ),
   );
 
+// The property parts of a multipart alternative whose rule nests by position (ENC-08, ENC-09).
+const positionalPartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.target.kind === "property" &&
+      (rule.nestedItem !== undefined ||
+        (rule.nested ?? []).some((nested) => nested.target.kind === "position"))
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
 // The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
 const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
   new Set(
@@ -261,6 +286,7 @@ const newCtx = (
   fileParts: codec === "multipart",
   memo: new Map(),
   nestedParts: codec === "multipart" ? nestedPartsOf(encoding) : new Set(),
+  positionalParts: codec === "multipart" ? positionalPartsOf(encoding) : new Set(),
   readOnlyOmitted: line === "3.0",
   refusedFields: new Set(refusedFields),
   styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
@@ -271,6 +297,10 @@ const below = (site: Site, ...tokens: readonly string[]): Site => ({
   key: site.key,
   tokens: [...site.tokens, ...tokens],
 });
+
+// The names a schema's own `required` array lists; a keyword of another shape lists none.
+const requiredOf = (schema: SchemaNode): ReadonlySet<string> =>
+  new Set(Arr.isArray(schema.required) ? schema.required.filter(Predicate.isString) : []);
 
 const propertiesAt = (
   properties: Readonly<Record<string, Schema.Json>>,
@@ -419,9 +449,14 @@ const mergeObjects = (
   members: readonly Classified[],
 ): Result.Result<Classified, BodyBudgetExceeded> => {
   const merged = new Map<string, Property>();
+  const required = new Set<string>();
   for (const member of members) {
     if (member._tag !== "Object") {
       return Result.succeed(opaque);
+    }
+
+    for (const name of member.required) {
+      required.add(name);
     }
 
     for (const [key, property] of member.properties) {
@@ -442,7 +477,7 @@ const mergeObjects = (
     }
   }
 
-  return Result.succeed({ _tag: "Object", properties: merged });
+  return Result.succeed({ _tag: "Object", properties: merged, required });
 };
 
 type RefLookup =
@@ -531,7 +566,13 @@ const classify = (
     const own: readonly Classified[] =
       schema.properties === undefined
         ? []
-        : [{ _tag: "Object", properties: propertiesAt(schema.properties, site) }];
+        : [
+            {
+              _tag: "Object",
+              properties: propertiesAt(schema.properties, site),
+              required: requiredOf(schema),
+            },
+          ];
 
     return Result.all(
       schema.allOf.map((member, index) =>
@@ -547,7 +588,11 @@ const classify = (
 
     return Result.succeed(
       closedOrFree
-        ? { _tag: "Object", properties: propertiesAt(schema.properties ?? {}, site) }
+        ? {
+            _tag: "Object",
+            properties: propertiesAt(schema.properties ?? {}, site),
+            required: requiredOf(schema),
+          }
         : opaque,
     );
   }
@@ -694,17 +739,22 @@ const nestedKind = (part: Classified): BodyFlagKind | undefined => {
  * named `<part>.<property>` with the dotted body-field naming, by the top-level part kinds. A
  * nested scalar array is one JSON part (3.2 sends a nested array as `application/json`, ENC-24),
  * so it is one JSON flag; an array of files has no flag. Nested parts carry no transfer encoding:
- * normalize refuses one (ENC-37/nested-transfer-encoding).
+ * normalize refuses one (ENC-37/nested-transfer-encoding). None when a required nested
+ * property gets no flag: no run could send the part whole, so the part itself is unrepresentable
+ * (design 8.5 at generation, the Mind's ruling on M3-MP3).
  */
 const nestedFlags = (
   ctx: Ctx,
-  properties: ReadonlyMap<string, Property>,
+  part: {
+    readonly properties: ReadonlyMap<string, Property>;
+    readonly required: ReadonlySet<string>;
+  },
   key: string,
   folded: { readonly name: string; readonly notes: readonly FoldNote[] },
-): Result.Result<Walk, FlattenError> => {
+): Result.Result<Option.Option<Walk>, FlattenError> => {
   const flags: BodyFlag[] = [];
   const skipped: SkippedProperty[] = [];
-  for (const [member, { schema: child, site }] of properties) {
+  for (const [member, { schema: child, site }] of part.properties) {
     ctx.visits += 1;
     if (ctx.visits > maxVisits) {
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
@@ -717,6 +767,10 @@ const nestedFlags = (
     const pointer = formatPointer([key, member]);
     const memberFolded = foldKebab(member);
     if (Result.isFailure(memberFolded)) {
+      if (part.required.has(member)) {
+        return Result.succeed(Option.none());
+      }
+
       skipped.push({ pointer, reason: "EmptyFold" });
       continue;
     }
@@ -728,6 +782,10 @@ const nestedFlags = (
 
     const kind = nestedKind(classified.success);
     if (kind === undefined) {
+      if (part.required.has(member)) {
+        return Result.succeed(Option.none());
+      }
+
       skipped.push({ pointer, reason: "UnsupportedPart" });
       continue;
     }
@@ -742,7 +800,7 @@ const nestedFlags = (
     });
   }
 
-  return Result.succeed({ flags, skipped });
+  return Result.succeed(Option.some({ flags, skipped }));
 };
 
 /**
@@ -751,7 +809,9 @@ const nestedFlags = (
  * them a repeated file part) or its rule sends it base64 encoded, or a `json` flag for an object
  * part, sent as one JSON part (ENC-22); any other shape is skipped with a reason. A part whose
  * style normalize refused (ENC-40) or that it refused at `field` scope gets nothing. An object part
- * whose rule nests by name gets one dotted flag per nested property (`nestedFlags`).
+ * whose rule nests by name gets one dotted flag per nested property (`nestedFlags`), or none when a
+ * required nested property has none; a part whose rule nests by position gets one repeated file
+ * flag.
  */
 const walkParts = (
   ctx: Ctx,
@@ -776,6 +836,20 @@ const walkParts = (
       continue;
     }
 
+    // A part nested by position is raw files in order, one repeated file flag (HT:B16), so every
+    // position has a flag and the schema is not classified.
+    if (ctx.positionalParts.has(key)) {
+      flags.push({
+        kind: "file",
+        name: folded.success.name,
+        notes: folded.success.notes,
+        pointer,
+        repeated: true,
+        schemaPointer: sourcePointer(site),
+      });
+      continue;
+    }
+
     const classified = classify(ctx, child, site, 0);
     if (Result.isFailure(classified)) {
       return Result.fail(classified.failure);
@@ -783,13 +857,19 @@ const walkParts = (
 
     const part = classified.success;
     if (part._tag === "Object" && ctx.nestedParts.has(key)) {
-      const inner = nestedFlags(ctx, part.properties, key, folded.success);
+      const inner = nestedFlags(ctx, part, key, folded.success);
       if (Result.isFailure(inner)) {
         return Result.fail(inner.failure);
       }
 
-      flags.push(...inner.success.flags);
-      skipped.push(...inner.success.skipped);
+      // A part with a required nested property no flag carries gets no flag at all.
+      if (Option.isNone(inner.success)) {
+        skipped.push({ pointer, reason: "UnsupportedPart" });
+        continue;
+      }
+
+      flags.push(...inner.success.value.flags);
+      skipped.push(...inner.success.value.skipped);
       continue;
     }
 

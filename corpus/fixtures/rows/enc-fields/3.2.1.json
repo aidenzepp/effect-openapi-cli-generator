@@ -283,6 +283,62 @@
           }
         }
       }
+    },
+    "/positions": {
+      "post": {
+        "operationId": "positions-send",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "pages": {
+                  "contentType": "multipart/mixed",
+                  "itemEncoding": {
+                    "contentType": "image/png"
+                  },
+                  "prefixEncoding": [
+                    {
+                      "contentType": "application/json"
+                    },
+                    {
+                      "contentType": "text/csv"
+                    }
+                  ]
+                },
+                "pair": {
+                  "contentType": "multipart/mixed",
+                  "prefixEncoding": [
+                    {
+                      "contentType": "text/plain"
+                    }
+                  ]
+                }
+              },
+              "schema": {
+                "properties": {
+                  "pages": {
+                    "items": {},
+                    "prefixItems": [{}, {}],
+                    "type": "array"
+                  },
+                  "pair": {
+                    "prefixItems": [{}],
+                    "type": "array"
+                  }
+                },
+                "required": ["pages"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "done"
+          }
+        }
+      }
     }
   },
   "servers": [

@@ -19,9 +19,8 @@ import { setEnv } from "../support/env.ts";
 // from `contentType`, part headers, `style`, `explode` and `allowReserved` on form and multipart
 // bodies, and 3.2 nested encoding. One generated package per version line, built once, run against
 // the capture server; the diagnostic rows call `generate()` in process. A row the product gets
-// wrong is a `test.todo` with what was observed. One nested level by name (ENC-07, ENC-16) is sent
-// since M3-MP2; nested by position (ENC-08, ENC-09) is deferred to M3-MP3, and the M2 refusal tests
-// pin today's refusal of it until M3-MP3 replaces them.
+// wrong is a `test.todo` with what was observed. One nested level is sent: by name (ENC-07, ENC-16)
+// since M3-MP2, by position (ENC-08, ENC-09) since M3-MP3.
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
@@ -235,6 +234,11 @@ const nestedSent = async (args: readonly string[]): Promise<readonly Part[]> =>
   partsOf(await sentOnce("3.2.1", ["nested-send", ...args]));
 
 const nestedRun = (args: readonly string[]) => invoke("3.2.1", ["nested-send", ...args]);
+
+const positionsSent = async (args: readonly string[]): Promise<readonly Part[]> =>
+  partsOf(await sentOnce("3.2.1", ["positions-send", ...args]));
+
+const positionsRun = (args: readonly string[]) => invoke("3.2.1", ["positions-send", ...args]);
 
 describe("ENC field rows through the built CLI", () => {
   for (const line of lines) {
@@ -702,8 +706,7 @@ describe("ENC field rows through generate()", () => {
     ]);
   });
 
-  // Milestone 3 sends one nested level: by name here (M3-MP2), by position under M3-MP3, whose
-  // ENC-08 and ENC-09 refusals stay pinned until it lands.
+  // Milestone 3 sends one nested level: by name (M3-MP2) and by position (M3-MP3).
   test("ENC-07: a nested encoding by name under a multipart/mixed part sends one nested part from its dotted part flags, in nested property order, with no nested part names (3.2.1)", async () => {
     const sent = await nestedSent([
       "--envelope.scan",
@@ -737,34 +740,80 @@ describe("ENC field rows through generate()", () => {
     ]);
   }, 60_000);
 
-  test("M2 refusal of ENC-08 (M3-MP3): a multipart/mixed part with a nested prefixEncoding refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", multipart, {
-        encoding: { a: { contentType: mixedPart, prefixEncoding: [{}] } },
-        schema: objectOf({ a: strings }),
-      }),
-    );
+  test("ENC-08: a nested prefixEncoding under a multipart/mixed part sends one nested part from the part's repeated file flag, file i under prefixEncoding[i], with no nested names (3.2.1)", async () => {
+    nodeFs.writeFileSync(file("meta.json"), '{"id":1}');
+    nodeFs.writeFileSync(file("rows.csv"), "a,b");
 
-    expect(refusedOperation(found)).toEqual(unsupportedBody);
-  });
+    const sent = await positionsSent(["--pages", file("meta.json"), "--pages", file("rows.csv")]);
 
-  test("M2 refusal of ENC-09 (M3-MP3): a multipart/mixed part with a nested itemEncoding is refused with ENC-09/nested-item-encoding at element scope (3.2.1)", async () => {
-    const found = await inProcess(
-      withBody("3.2.1", multipart, {
-        encoding: { a: { contentType: mixedPart, itemEncoding: {} } },
-        schema: objectOf({ a: strings }),
-      }),
-    );
+    expect(sent.map(withoutBoundary)).toEqual([
+      {
+        headers: [
+          'Content-Disposition: form-data; name="pages"',
+          "Content-Type: multipart/mixed; boundary=<nested>",
+        ],
+        parts: [
+          { body: '{"id":1}', headers: ["Content-Type: application/json"] },
+          { body: "a,b", headers: ["Content-Type: text/csv"] },
+        ],
+      },
+    ]);
+  }, 60_000);
 
-    expect(summary(found)).toEqual([
+  test("ENC-08: a part nested by position with no itemEncoding takes at most its prefixEncoding count of files, else exits 2 and nothing is sent (3.2.1)", async () => {
+    const before = capture.requests().length;
+    const over = await positionsRun([
+      "--pages",
+      file("three.bin"),
+      "--pair",
+      file("three.bin"),
+      "--pair",
+      file("three.bin"),
+    ]);
+    const between = capture.requests().length;
+    const sent = await positionsSent(["--pages", file("three.bin"), "--pair", file("three.bin")]);
+
+    expect([over.exitCode, between - before]).toEqual([2, 0]);
+    expect(sent.map(withoutBoundary).map(({ parts: nested }) => nested)).toEqual([
+      [{ body: "abc", headers: ["Content-Type: application/json"] }],
+      [{ body: "abc", headers: ["Content-Type: text/plain"] }],
+    ]);
+  }, 60_000);
+
+  test("ENC-09: a nested itemEncoding sends every file after the nested prefixEncoding under its rule (3.2.1)", async () => {
+    const sent = await positionsSent([
+      "--pages",
+      file("three.bin"),
+      "--pages",
+      file("three.bin"),
+      "--pages",
+      file("three.bin"),
+      "--pages",
+      file("three.bin"),
+    ]);
+
+    expect(
+      sent.map(withoutBoundary).map(({ parts: nested }) => nested.map(({ headers }) => headers)),
+    ).toEqual([
       [
-        "ENC-09/nested-item-encoding",
-        "refusal",
-        "element",
-        multipartAt,
-        `${multipartAt}/encoding/a/itemEncoding`,
+        ["Content-Type: application/json"],
+        ["Content-Type: text/csv"],
+        ["Content-Type: image/png"],
+        ["Content-Type: image/png"],
       ],
     ]);
+  }, 60_000);
+
+  test("ENC-09: a nested itemEncoding is a nested item rule, not a refusal, and the operation is generated (3.2.1)", async () => {
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, itemEncoding: { contentType: "image/png" } } },
+        schema: objectOf({ a: strings }),
+      }),
+    );
+
+    expect(found.commands.length).toBe(1);
+    expect(summary(found)).toEqual([]);
   });
 
   test("ENC-16: one nested level is sent: a multipart/form-data part's nested parts carry their names and rules (3.2.1)", async () => {
@@ -800,8 +849,7 @@ describe("ENC field rows through generate()", () => {
     expect([given.exitCode, capture.requests().length - between]).toEqual([0, 1]);
   }, 60_000);
 
-  // M3-MP3 sends one nested level by position; until then that operation is refused.
-  test("Pending M3-MP3: one nested encoding level by position refuses the operation with EMT-1/unsupported-body, so nothing is sent (3.2.1)", async () => {
+  test("ENC-08: one nested encoding level by position generates the operation with no refusal (3.2.1)", async () => {
     const byPosition = await inProcess(
       withBody("3.2.1", multipart, {
         encoding: { a: { contentType: mixedPart, prefixEncoding: [{ contentType: mixedPart }] } },
@@ -809,7 +857,67 @@ describe("ENC field rows through generate()", () => {
       }),
     );
 
-    expect(refusedOperation(byPosition)).toEqual(unsupportedBody);
+    expect([byPosition.commands.length, summary(byPosition)]).toEqual([1, []]);
+  });
+
+  // A part nested by position is one repeated file flag, so no position is left without a flag
+  // (design 8.5 at generation, the Mind's ruling on M3-MP3): a required one is checked for presence.
+  test("ENC-09: a required part nested by position gets its repeated file flag: with no file it exits 2 before any request, with one it is sent (3.2.1)", async () => {
+    const before = capture.requests().length;
+    const missing = await positionsRun(["--pair", file("three.bin")]);
+    const between = capture.requests().length;
+    const given = await positionsRun(["--pages", file("three.bin")]);
+
+    expect([missing.exitCode, between - before]).toEqual([2, 0]);
+    expect([given.exitCode, capture.requests().length - between]).toEqual([0, 1]);
+  }, 60_000);
+
+  // A nested property that gets no flag (an array of files) is never left to fail every run: a
+  // required one makes its part unrepresentable, so a required part refuses the operation and an
+  // optional part is not offered (design 8.5 at generation, the Mind's ruling on M3-MP3).
+  test("ENC-07: a required nested property with no flag refuses the operation when its part is required, so nothing is sent (3.2.1)", async () => {
+    const files: Members = { items: { format: "binary", type: "string" }, type: "array" };
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, encoding: { note: {} } } },
+        schema: {
+          properties: { a: { ...objectOf({ files, note: string }), required: ["files"] } },
+          required: ["a"],
+          type: "object",
+        },
+      }),
+    );
+
+    expect(refusedOperation(found)).toEqual({
+      ...unsupportedBody,
+      diagnostics: [
+        ["EMT-1/unsupported-body", "refusal", "operation", "/paths/~1a/post", "undefined"],
+        ["RQB-03/unnamed-property", "notice", "element", multipartAt, "undefined"],
+      ],
+    });
+  });
+
+  test("ENC-07: a required nested property with no flag leaves an optional part without flags, so the part is never sent half-built (3.2.1)", async () => {
+    const files: Members = { items: { format: "binary", type: "string" }, type: "array" };
+    const found = await inProcess(
+      withBody("3.2.1", multipart, {
+        encoding: { a: { contentType: mixedPart, encoding: { note: {} } } },
+        schema: objectOf({
+          a: { ...objectOf({ files, note: string }), required: ["files"] },
+          b: string,
+        }),
+      }),
+    );
+    const cli = nodeFs.readFileSync(nodePath.join(found.out ?? "", "src/cli/root.ts"), "utf-8");
+
+    expect([found.commands.length, cli.includes('"a.note"'), cli.includes('"b"')]).toEqual([
+      1,
+      false,
+      true,
+    ]);
+    expect(summary(found)).toEqual([
+      ["RQB-03/unnamed-property", "notice", "element", multipartAt, "undefined"],
+    ]);
   });
 
   test("ENC-16: encoding nested two levels deep is refused at element scope, by name and by position (3.2.1)", async () => {
