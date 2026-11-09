@@ -388,6 +388,101 @@ describe("Output.send --dry-run", () => {
     expect(result.stderr).not.toContain(SECRET);
   });
 
+  test("an application/x-ndjson body from a file prints its records with a recorded value replaced", async () => {
+    const password = "pw-NDJSON-SECRET";
+    const text = `{"id":1,"password":"${password}"}\n{"id":2}\n`;
+    const cut = text.indexOf(password) + 3;
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      recorded: [{ kind: "secret", label: "password-file", value: Redacted.make(password) }],
+      request: HttpClientRequest.post("/items").pipe(
+        HttpClientRequest.setBody(
+          HttpBody.stream(
+            Stream.make(bytes(text.slice(0, cut)), bytes(text.slice(cut))),
+            "application/x-ndjson",
+            text.length,
+          ),
+        ),
+        HttpClientRequest.setHeader("content-type", "application/x-ndjson"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout.slice(result.stdout.indexOf("\n\n") + 2)).toBe(
+      '{"id":1,"password":"<redacted:password-file>"}\n{"id":2}\n',
+    );
+    expect(result.stdout).not.toContain(password);
+    expect(result.stdout).not.toContain("<binary body");
+  });
+
+  test("a text-family stdin body prints <body from stdin> without reading stdin", async () => {
+    let read = false;
+    const stdin = Stream.fromEffect(
+      Effect.sync(() => {
+        read = true;
+
+        return bytes('{"name":"a"}');
+      }),
+    );
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      request: HttpClientRequest.post("/items").pipe(
+        HttpClientRequest.setBody(HttpBody.stream(stdin, "application/json")),
+        HttpClientRequest.setHeader("content-type", "application/json"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(read).toBe(false);
+    expect(result.stdout.endsWith("\n\n<body from stdin>\n")).toBe(true);
+  });
+
+  test("a sequential stdin body prints <body from stdin> without reading stdin", async () => {
+    let read = false;
+    const stdin = Stream.fromEffect(
+      Effect.sync(() => {
+        read = true;
+
+        return bytes('{"id":1}\n');
+      }),
+    );
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      request: HttpClientRequest.post("/items").pipe(
+        HttpClientRequest.setBody(HttpBody.stream(stdin, "application/x-ndjson")),
+        HttpClientRequest.setHeader("content-type", "application/x-ndjson"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(read).toBe(false);
+    expect(result.stdout.endsWith("\n\n<body from stdin>\n")).toBe(true);
+  });
+
+  test("an application/octet-stream body still prints <binary body, N bytes>", async () => {
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      request: HttpClientRequest.post("/items").pipe(
+        HttpClientRequest.setBody(
+          HttpBody.stream(Stream.make(bytes("RAWDATA")), "application/octet-stream", 7),
+        ),
+        HttpClientRequest.setHeader("content-type", "application/octet-stream"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout.endsWith("\n\n<binary body, 7 bytes>\n")).toBe(true);
+    expect(result.stdout).not.toContain("RAWDATA");
+  });
+
   test("a redacted header is exempt only when it is exactly a placeholder form", async () => {
     const canary = "canary-COOKIE-SECRET";
     const result = await run({

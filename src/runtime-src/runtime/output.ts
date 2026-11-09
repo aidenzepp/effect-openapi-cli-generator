@@ -356,6 +356,13 @@ const framerFor = (mediaType: string | undefined): Framer | undefined => {
   return key === "text/event-stream" ? sseRecords : undefined;
 };
 
+/**
+ * Whether a body of this media type is printed as text: text-family (`isText`) or a sequential
+ * type (`framerFor`). The binary terminal guard and the `--dry-run` body both decide by it.
+ */
+const printsAsText = (mediaType: string | undefined): boolean =>
+  isText(mediaType) || framerFor(mediaType) !== undefined;
+
 // A root that registers no `--raw` or `--max-record-bytes` gets their defaults.
 const rawRequested = Effect.map(
   Effect.serviceOption(Raw),
@@ -423,14 +430,11 @@ const writeStream = <E, R>(
  * Write a response body as received to its destination: stdout, or with `--output <path>` a temp
  * sibling renamed into place (an existing path is refused unless `--force`). `--output -` is
  * stdout. Binary media to a terminal is refused before the body is read unless `--output -` is
- * given; the sequential types (`framerFor`) are text, so their raw bytes (`--raw`) are not. EPIPE
- * on stdout stops the stream and succeeds.
+ * given; the sequential types (`printsAsText`) are text, so their raw bytes (`--raw`) are not.
+ * EPIPE on stdout stops the stream and succeeds.
  */
 export const writeBody = <E, R>(response: ResponseBody<E, R>) =>
-  writeStream(
-    response.bytes,
-    !isText(response.mediaType) && framerFor(response.mediaType) === undefined,
-  );
+  writeStream(response.bytes, !printsAsText(response.mediaType));
 
 /**
  * Write a 2xx response body by its matched media key (design 4.6): a sequential type
@@ -1817,12 +1821,12 @@ const endWithNewline = <E, R>(
 const line = (text: string): Stream.Stream<Uint8Array> => Stream.succeed(encoder.encode(text));
 
 /**
- * The `--dry-run` body (design 4.6, DM3-8): a text-family body as given, with every recorded value
- * replaced (`scrub`, or `StreamScrubber` for a streamed one); a multipart body summarized by
- * `MultipartSummary`; a binary body as `<binary body, N bytes>` from its declared length, or, with
- * no length, which is stdin, as `<binary body from stdin>` (`<body from stdin>` for a text-family
- * one) without reading it. A file the runtime streams arrives with its size only, so its path
- * cannot be named here.
+ * The `--dry-run` body (design 4.6, DM3-8): a text body (`printsAsText`: text-family or sequential)
+ * as given, with every recorded value replaced (`scrub`, or `StreamScrubber` for a streamed one); a
+ * multipart body summarized by `MultipartSummary`; a binary body as `<binary body, N bytes>` from
+ * its declared length, or, with no length, which is stdin, as `<binary body from stdin>` (`<body
+ * from stdin>` for a text one) without reading it. A file the runtime streams arrives with its size
+ * only, so its path cannot be named here.
  */
 const dryRunBody = (
   request: HttpClientRequest.HttpClientRequest,
@@ -1839,7 +1843,7 @@ const dryRunBody = (
   );
 
   if (body._tag === "Uint8Array") {
-    return isText(mediaType)
+    return printsAsText(mediaType)
       ? line(scrubValues(new TextDecoder().decode(body.body), recorded))
       : line(`<binary body, ${body.body.length} bytes>`);
   }
@@ -1860,10 +1864,10 @@ const dryRunBody = (
   }
 
   if (body.contentLength === undefined) {
-    return line(isText(mediaType) ? "<body from stdin>" : "<binary body from stdin>");
+    return line(printsAsText(mediaType) ? "<body from stdin>" : "<binary body from stdin>");
   }
 
-  return isText(mediaType)
+  return printsAsText(mediaType)
     ? body.stream.pipe(
         Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
         scrubStream(recorded),
