@@ -1,4 +1,13 @@
-import { Effect, Option, Predicate, Result, Schema, SchemaIssue, SchemaParser } from "effect";
+import {
+  Effect,
+  Option,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+  SchemaIssue,
+  SchemaParser,
+} from "effect";
 import type { Stream } from "effect";
 import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
@@ -1131,6 +1140,15 @@ type LeafValue = Exclude<FormValue, FormNested>;
 export type FormFields = Readonly<Record<string, readonly FormValue[]>>;
 
 /**
+ * The values filed under an own field name; none when the name is absent or holds `undefined`.
+ */
+const fieldValues = (fields: FormFields, name: string): readonly FormValue[] =>
+  Rec.get(fields, name).pipe(
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly FormValue[] => []),
+  );
+
+/**
  * A part that travels whole beside the form's fields: its `Content-Type`, chosen among the types
  * its Encoding `contentType` lists (design 6.3, ENC-10) or the one it lists, its values, and its
  * declared headers (ENC-03, HDR-01), each a header parameter, sent together or not at all. Every
@@ -1294,7 +1312,7 @@ const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
     const leaves: Multipart.LeafPart[] = [];
     for (const entry of nesting.parts) {
       const [member, contentType] = entry;
-      for (const value of Object.hasOwn(fields, member) ? (fields[member] ?? []) : []) {
+      for (const value of fieldValues(fields, member)) {
         if (isFormNested(value)) {
           return yield* Effect.die(new Error("formData: a nested part nests again"));
         }
@@ -1312,7 +1330,7 @@ const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
 // a `UsageError` naming the flag.
 const positionalParts = (fields: FormFields, name: string, nesting: PositionalForm) =>
   Effect.gen(function* positional() {
-    const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+    const values = fieldValues(fields, name);
     if (values.length === 0) {
       return [];
     }
@@ -1356,7 +1374,7 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
       }
 
       if (isNestedForm(rule)) {
-        const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+        const values = fieldValues(fields, name);
         for (const value of values) {
           if (!isFormNested(value)) {
             return yield* Effect.die(new Error("formData: a nested part has a plain value"));
@@ -1371,7 +1389,7 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
         continue;
       }
 
-      if (!Predicate.isString(rule) && Object.hasOwn(fields, name)) {
+      if (!Predicate.isString(rule) && Rec.has(fields, name)) {
         return yield* Effect.die(new Error("formData: a chosen part is also a field"));
       }
 
@@ -1634,7 +1652,7 @@ export const chooseParts =
       const named = new Set(Object.values(choices).map(([part]) => part));
       const chosen: (readonly [string, ChosenPart])[] = [];
       for (const [key, [part, contentType, headers]] of Object.entries(choices)) {
-        const values = Object.hasOwn(fields, part) ? (fields[part] ?? []) : [];
+        const values = fieldValues(fields, part);
         if (values.length === 0) {
           continue;
         }
@@ -1996,9 +2014,10 @@ const refusedNamesOf = (
   mediaType: string,
   refused: MediaDeclaration["refused"],
 ): readonly string[] => {
-  const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
-
-  return (listed ? refused[mediaType] : undefined) ?? [];
+  return Option.fromNullishOr(refused).pipe(
+    Option.flatMap((names) => Rec.get(names, mediaType)),
+    Option.getOrElse((): readonly string[] => []),
+  );
 };
 
 /**
