@@ -174,3 +174,48 @@ describe("a placeholder already in the text is opaque (HB1)", () => {
     });
   }
 });
+
+// Security review of m3-hb1: only a placeholder the runtime emits is opaque. Text that only looks
+// like one, such as a server echoing `<redacted:` + credential + `>`, is scrubbed as usual.
+describe("only an exact runtime placeholder is opaque (HB1b)", () => {
+  const token: Credential = {
+    definition: { kind: "http", scheme: "bearer" },
+    scheme: "bearerAuth",
+    value: Redacted.make("s3cr3t-token"),
+  };
+  const short: Credential = { ...token, value: Redacted.make("a") };
+  const secret = secretOf("password-file", "e");
+
+  test("a credential echoed inside a placeholder-shaped token is scrubbed", () => {
+    expect(scrub("echo <redacted:s3cr3t-token> end", [token])).toBe(
+      "echo <redacted:<redacted:bearerAuth>> end",
+    );
+  });
+
+  test("a credential after an unclosed placeholder prefix is scrubbed", () => {
+    const text = "echo <redacted:s3cr3t-token and more> end";
+
+    expect(scrub(text, [token])).not.toContain("s3cr3t-token");
+    expect(scrubAround(text, [token], sanitize)).not.toContain("s3cr3t-token");
+  });
+
+  test("an unknown label is ordinary input, and the credential elsewhere is scrubbed", () => {
+    const text = "<redacted:unknownlabel> <redacted:other-s3cr3t-token> s3cr3t-token";
+
+    expect(scrub(text, [token])).toBe(
+      "<redacted:unknownlabel> <redacted:other-<redacted:bearerAuth>> <redacted:bearerAuth>",
+    );
+    expect(scrub("<redacted:unknownlabel>", [short])).toBe(
+      "<red<redacted:bearerAuth>cted:unknownl<redacted:bearerAuth>bel>",
+    );
+  });
+
+  test("a one-character credential still nests in no placeholder the runtime emits", () => {
+    const text = "<redacted:bearerAuth> <redacted:password-file> <redacted> a e";
+
+    expect(scrub(text, [short, secret])).toBe(
+      "<redacted:bearerAuth> <redacted:password-file> <redacted> <redacted:bearerAuth> <redacted:password-file>",
+    );
+    expect(scrubAround(text, [short, secret], sanitize)).toBe(scrub(text, [short, secret]));
+  });
+});

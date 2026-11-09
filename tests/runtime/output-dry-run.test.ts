@@ -593,3 +593,25 @@ describe("a one-character credential is never recoverable from output (HB1)", ()
     }
   });
 });
+
+// Security review of m3-hb1: a server that wraps the credential in placeholder-shaped text cannot
+// make it print in an error body.
+describe("a credential echoed inside placeholder-shaped text is scrubbed (HB1b)", () => {
+  const echo = `{"echo":"<redacted:${SECRET}>","open":"<redacted:${SECRET} tail>"}`;
+
+  test("an error body under <PREFIX>_ERROR_FORMAT=json", async () => {
+    const result = await run({
+      dryRun: false,
+      env: { EXAMPLE_BEARER_AUTH: SECRET, EXAMPLE_ERROR_FORMAT: "json" },
+      operation: meta("GET"),
+      reply: () =>
+        new Response(echo, { headers: { "content-type": "application/json" }, status: 400 }),
+      request: HttpClientRequest.get("/items"),
+    });
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+    expect(result.stderr).toContain("<redacted:bearerAuth>");
+    expect(result.stdout).not.toContain(SECRET);
+    expect(result.stderr).not.toContain(SECRET);
+  });
+});
