@@ -3,6 +3,7 @@ import type { Schema } from "effect";
 import type { MediaAlternative } from "../model/entities.ts";
 import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
+import { defsKeyOf, defsRefPrefix, maxDefsRefHops } from "../model/defs-ref.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { SpecLine } from "../model/spec-section.ts";
@@ -85,10 +86,6 @@ type FlattenError = BodyBudgetExceeded | UnresolvedBodyRef;
 const maxDepth = 2;
 
 const maxVisits = 10_000;
-
-const maxRefHops = 64;
-
-const refPrefix = "#/$defs/";
 
 interface JsonObject {
   readonly [key: string]: Schema.Json;
@@ -488,12 +485,10 @@ const lookupRef = (
   ref: string,
   hops: number,
 ): Result.Result<RefLookup, UnresolvedBodyRef> => {
-  const name = ref.startsWith(refPrefix)
-    ? ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~")
-    : undefined;
+  const name = defsKeyOf(ref);
   const target = name === undefined ? undefined : ctx.defs[name];
   const seen = name === undefined ? undefined : ctx.memo.get(name);
-  if (name === undefined || target === undefined || hops >= maxRefHops || seen === inProgress) {
+  if (name === undefined || target === undefined || hops >= maxDefsRefHops || seen === inProgress) {
     return Result.fail(new UnresolvedBodyRef({ ref }));
   }
 
@@ -623,11 +618,12 @@ const isReadOnly = (ctx: Ctx, schema: Schema.Json): boolean => {
   }
 
   const { $ref } = schema;
-  if (!Predicate.isString($ref) || !$ref.startsWith(refPrefix)) {
+  const key = Predicate.isString($ref) ? defsKeyOf($ref) : undefined;
+  if (key === undefined) {
     return false;
   }
 
-  const target = ctx.defs[$ref.slice(refPrefix.length).replaceAll("~1", "/").replaceAll("~0", "~")];
+  const target = ctx.defs[key];
 
   return isObject(target) && target.readOnly === true;
 };
@@ -1006,7 +1002,7 @@ export const flattenBody = (
   );
   const root = defs[key];
   if (root === undefined) {
-    return Result.fail(new UnresolvedBodyRef({ ref: `${refPrefix}${key}` }));
+    return Result.fail(new UnresolvedBodyRef({ ref: `${defsRefPrefix}${key}` }));
   }
 
   const classified = classify(ctx, root, { key, tokens: [] }, 0);

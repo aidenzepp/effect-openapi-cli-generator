@@ -12,6 +12,7 @@ import type {
   MutualTlsScheme,
   SecurityScheme as RuntimeScheme,
 } from "../runtime-src/runtime/auth.ts";
+import { defsKeyOf, maxDefsRefHops } from "../model/defs-ref.ts";
 import { flattenBody } from "./flatten.ts";
 import type { BodyFlag, BodyFlagKind, SkippedProperty } from "./flatten.ts";
 import type {
@@ -380,18 +381,12 @@ export class UnresolvedSchemaRef extends Data.TaggedError("UnresolvedSchemaRef")
   readonly key: string;
 }> {}
 
-const maxRefHops = 64;
-
-const refPrefix = "#/$defs/";
-
 const decodeTyped = Schema.decodeUnknownOption(
   Schema.Struct({
     $ref: Schema.optionalKey(Schema.String),
     type: Schema.optionalKey(Schema.Json),
   }),
 );
-
-const unescapeKey = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
 
 /**
  * Whether a stored schema is `type: "boolean"` after its `$ref` chain. Each key is settled once per
@@ -412,7 +407,7 @@ export const isBooleanSchema = (
   };
 
   let current = key;
-  for (let hop = 0; hop <= maxRefHops; hop += 1) {
+  for (let hop = 0; hop <= maxDefsRefHops; hop += 1) {
     const known = memo.get(current);
     if (known !== undefined) {
       return settle(known);
@@ -430,11 +425,12 @@ export const isBooleanSchema = (
       return settle(type === "boolean");
     }
 
-    if (!ref.startsWith(refPrefix)) {
+    const next = defsKeyOf(ref);
+    if (next === undefined) {
       return Result.fail(new UnresolvedSchemaRef({ key: current }));
     }
 
-    current = unescapeKey(ref.slice(refPrefix.length));
+    current = next;
   }
 
   return Result.fail(new UnresolvedSchemaRef({ key }));
@@ -922,7 +918,7 @@ const dereference = (
   json: Schema.Json | undefined,
   hops = 0,
 ): JsonObject | undefined => {
-  if (!isJsonObject(json) || hops > maxRefHops) {
+  if (!isJsonObject(json) || hops > maxDefsRefHops) {
     return undefined;
   }
 
@@ -931,9 +927,9 @@ const dereference = (
     return json;
   }
 
-  return Predicate.isString($ref) && $ref.startsWith(refPrefix)
-    ? dereference(defs, own(defs, unescapeKey($ref.slice(refPrefix.length))), hops + 1)
-    : undefined;
+  const key = Predicate.isString($ref) ? defsKeyOf($ref) : undefined;
+
+  return key === undefined ? undefined : dereference(defs, own(defs, key), hops + 1);
 };
 
 // The schema of member `key` of an object schema, found the way the body walk merged it: through
@@ -981,7 +977,7 @@ const isPassword = (
   hops = 0,
 ): boolean => {
   budget.visits += 1;
-  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+  if (hops > maxDefsRefHops || budget.visits > maxSchemaVisits) {
     return true;
   }
 
@@ -994,10 +990,8 @@ const isPassword = (
   }
 
   const { $ref, allOf, anyOf, oneOf } = json;
-  const target =
-    Predicate.isString($ref) && $ref.startsWith(refPrefix)
-      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
-      : undefined;
+  const key = Predicate.isString($ref) ? defsKeyOf($ref) : undefined;
+  const target = key === undefined ? undefined : own(defs, key);
 
   return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
     isPassword(defs, branch, budget, hops + 1),
@@ -1014,7 +1008,7 @@ const hasPasswordItems = (
   hops = 0,
 ): boolean => {
   budget.visits += 1;
-  if (hops > maxRefHops || budget.visits > maxSchemaVisits) {
+  if (hops > maxDefsRefHops || budget.visits > maxSchemaVisits) {
     return true;
   }
 
@@ -1027,10 +1021,8 @@ const hasPasswordItems = (
     return true;
   }
 
-  const target =
-    Predicate.isString($ref) && $ref.startsWith(refPrefix)
-      ? own(defs, unescapeKey($ref.slice(refPrefix.length)))
-      : undefined;
+  const key = Predicate.isString($ref) ? defsKeyOf($ref) : undefined;
+  const target = key === undefined ? undefined : own(defs, key);
 
   return [target, ...branchesOf(allOf), ...branchesOf(anyOf), ...branchesOf(oneOf)].some((branch) =>
     hasPasswordItems(defs, branch, budget, hops + 1),
