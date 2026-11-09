@@ -438,6 +438,64 @@ const promptTarget = <R>(
   });
 
 /**
+ * A per-evaluation credential reader: each scheme is resolved once, so stdin is claimed at most
+ * once. A scheme the table does not define cannot be configured.
+ */
+const resolver = (envPrefix: string, table: SecurityTable) => {
+  const resolved = new Map<string, Option.Option<Credential>>();
+
+  return Effect.fnUntraced(function* resolveScheme(scheme: string) {
+    const known = resolved.get(scheme);
+    if (known !== undefined) {
+      return known;
+    }
+
+    const definition = table.schemes[scheme];
+    const found =
+      definition === undefined ? Option.none() : yield* credentialOf(scheme, definition, envPrefix);
+    resolved.set(scheme, found);
+
+    return found;
+  });
+};
+
+/**
+ * The first alternative, in document order, that names a scheme and whose every scheme has a
+ * configured credential (design 6.5 Run-time choice). `{}` never qualifies here.
+ */
+const configuredAlternative = <R>(
+  requirement: SecurityRequirement,
+  resolve: (scheme: string) => Effect.Effect<Option.Option<Credential>, UsageError, R>,
+): Effect.Effect<Option.Option<readonly Credential[]>, UsageError, R> =>
+  Effect.gen(function* findConfigured() {
+    for (const alternative of requirement) {
+      if (alternative.length === 0) {
+        continue;
+      }
+
+      const credentials: Credential[] = [];
+      for (const scheme of alternative) {
+        const credential = yield* resolve(scheme);
+        if (Option.isNone(credential)) {
+          break;
+        }
+
+        credentials.push(credential.value);
+      }
+
+      if (credentials.length === alternative.length) {
+        return Option.some(credentials);
+      }
+    }
+
+    return Option.none();
+  });
+
+// No requirement, or a `{}` alternative: sending no credentials is allowed.
+const allowsAnonymous = (requirement: SecurityRequirement): boolean =>
+  requirement.length === 0 || requirement.some((alternative) => alternative.length === 0);
+
+/**
  * Choose the credentials one operation sends (design 6.5 Run-time choice): the first alternative,
  * in document order, that names a scheme and whose every scheme has a configured credential. A `{}`
  * alternative, or no requirement at all, sends no credentials and is used only when no credentialed
@@ -465,46 +523,16 @@ export const evaluate = (
 > =>
   Effect.gen(function* evaluateRequirement() {
     const { envPrefix, table } = yield* Schemes;
-    const resolved = new Map<string, Option.Option<Credential>>();
-    const resolve = Effect.fnUntraced(function* resolveScheme(scheme: string) {
-      const known = resolved.get(scheme);
-      if (known !== undefined) {
-        return known;
-      }
+    const resolve = resolver(envPrefix, table);
 
-      const definition = table.schemes[scheme];
-      const found =
-        definition === undefined
-          ? Option.none()
-          : yield* credentialOf(scheme, definition, envPrefix);
-      resolved.set(scheme, found);
+    const chosen = yield* configuredAlternative(requirement, resolve);
+    if (Option.isSome(chosen)) {
+      yield* noticeDeprecated(chosen.value);
 
-      return found;
-    });
-
-    for (const alternative of requirement) {
-      if (alternative.length === 0) {
-        continue;
-      }
-
-      const credentials: Credential[] = [];
-      for (const scheme of alternative) {
-        const credential = yield* resolve(scheme);
-        if (Option.isNone(credential)) {
-          break;
-        }
-
-        credentials.push(credential.value);
-      }
-
-      if (credentials.length === alternative.length) {
-        yield* noticeDeprecated(credentials);
-
-        return credentials;
-      }
+      return chosen.value;
     }
 
-    if (requirement.length === 0 || requirement.some((alternative) => alternative.length === 0)) {
+    if (allowsAnonymous(requirement)) {
       return [];
     }
 
@@ -554,6 +582,48 @@ export const evaluate = (
       ),
       operation,
     });
+  });
+
+/**
+ * A scheme `--dry-run` shows as `<redacted:<scheme>>`: a credential without its value.
+ */
+export type Placeholder = Pick<Credential, "definition" | "scheme">;
+
+/**
+ * What `--dry-run` shows (design 4.6, D-OUT3): the configured credentials of the chosen
+ * alternative, and the schemes whose placeholders the printed request carries.
+ */
+export interface Preview {
+  readonly credentials: readonly Credential[];
+  readonly placeholders: readonly Placeholder[];
+}
+
+/**
+ * The requirement evaluated for `--dry-run`: the alternative `evaluate` would choose from the file
+ * flags and the environment, else none when `{}` or no requirement allows anonymous access, else
+ * the first alternative's schemes, unconfigured. It never raises `CredentialMissing` and never
+ * prompts: the TTY prompt source is skipped under `--dry-run`.
+ */
+export const preview = (
+  requirement: SecurityRequirement,
+): Effect.Effect<Preview, UsageError, Schemes | FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
+  Effect.gen(function* previewRequirement() {
+    const { envPrefix, table } = yield* Schemes;
+    const configured = yield* configuredAlternative(requirement, resolver(envPrefix, table));
+    if (Option.isSome(configured)) {
+      yield* noticeDeprecated(configured.value);
+
+      return { credentials: configured.value, placeholders: configured.value };
+    }
+
+    const first = allowsAnonymous(requirement) ? [] : (requirement[0] ?? []);
+    const placeholders = first.flatMap((scheme): Placeholder[] => {
+      const definition = table.schemes[scheme];
+
+      return definition === undefined ? [] : [{ definition, scheme }];
+    });
+
+    return { credentials: [], placeholders };
   });
 
 /**
@@ -833,6 +903,25 @@ const attachOne = (
   return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
 };
 
+// Strip every managed credential, then write each entry with `one` only when the request's origin
+// is in `origins`.
+const attachWith = <C, E>(
+  table: SecurityTable,
+  entries: readonly C[],
+  origins: readonly string[],
+  request: HttpClientRequest.HttpClientRequest,
+  one: (
+    request: HttpClientRequest.HttpClientRequest,
+    entry: C,
+  ) => Effect.Effect<HttpClientRequest.HttpClientRequest, E>,
+): Effect.Effect<HttpClientRequest.HttpClientRequest, E> => {
+  const clean = strip(table, request);
+
+  return isBound(clean.url, origins)
+    ? Effect.reduce(entries, () => clean, one)
+    : Effect.succeed(clean);
+};
+
 /**
  * The one attach transform (design 6.5 Origin binding). It strips every managed credential from
  * the request, then attaches the configured credentials only when the request's origin is in
@@ -844,13 +933,58 @@ export const attach =
   (table: SecurityTable, attachment: Attachment) =>
   (
     request: HttpClientRequest.HttpClientRequest,
-  ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> => {
-    const clean = strip(table, request);
+  ): Effect.Effect<HttpClientRequest.HttpClientRequest, UsageError> =>
+    attachWith(table, attachment.credentials, attachment.origins, request, attachOne);
 
-    return isBound(clean.url, attachment.origins)
-      ? Effect.reduce(attachment.credentials, () => clean, attachOne)
-      : Effect.succeed(clean);
-  };
+/**
+ * The placeholder `--dry-run` writes for a scheme's credential (design 7.5).
+ */
+export const placeholder = (scheme: string): string => `<redacted:${scheme}>`;
+
+// Write the placeholder where the credential would go, with the scheme's prefix (`Bearer`,
+// `Basic`), so no value is read and none can be refused.
+const placeholderOne = (
+  request: HttpClientRequest.HttpClientRequest,
+  { definition, scheme }: Placeholder,
+): Effect.Effect<HttpClientRequest.HttpClientRequest> => {
+  const text = placeholder(scheme);
+  if (definition.kind === "mutualTLS") {
+    return Effect.succeed(request);
+  }
+
+  if (definition.kind !== "apiKey") {
+    const prefix = definition.kind === "http" && definition.scheme === "basic" ? "Basic" : "Bearer";
+
+    return Effect.succeed(
+      HttpClientRequest.setHeader(request, "authorization", `${prefix} ${text}`),
+    );
+  }
+
+  if (definition.in === "header") {
+    return Effect.succeed(HttpClientRequest.setHeader(request, definition.name, text));
+  }
+
+  if (definition.in === "query") {
+    return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, text));
+  }
+
+  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
+  const pairs = [...cookiePairs(existing), `${definition.name}=${text}`];
+
+  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+};
+
+/**
+ * The placeholder mode of the one attach transform, for `--dry-run` (design 7.5, CO-24): the same
+ * strip and origin binding as `attach`, writing `<redacted:<scheme>>` (`placeholder`) for each
+ * scheme of the chosen alternative instead of its value.
+ */
+export const attachPlaceholders =
+  (table: SecurityTable, placeholders: readonly Placeholder[], origins: readonly string[]) =>
+  (
+    request: HttpClientRequest.HttpClientRequest,
+  ): Effect.Effect<HttpClientRequest.HttpClientRequest> =>
+    attachWith(table, placeholders, origins, request, placeholderOne);
 
 /**
  * Extend `Headers.CurrentRedactedNames` with every `apiKey` header name and
