@@ -1,4 +1,4 @@
-import { Predicate, Schema } from "effect";
+import { JsonPointer, Predicate, Schema } from "effect";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
@@ -140,7 +140,7 @@ const choicesOf = (uses: readonly NonStandardUse[]): readonly NonStandardChoice[
 
 // The first pointer token, unescaped: the form property a body flag writes.
 const propertyOf = (pointer: string): string =>
-  (pointer.split("/")[1] ?? "").replaceAll("~1", "/").replaceAll("~0", "~");
+  JsonPointer.unescapeToken(pointer.split("/")[1] ?? "");
 
 // The use sites the author config marked on the form property a body flag writes (design 6.1).
 const bodyMarked = (operation: Operation, pointer: string): readonly NonStandardUse[] => {

@@ -1,4 +1,14 @@
-import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  JsonPointer,
+  Option,
+  Order,
+  Predicate,
+  Result,
+  Schema,
+} from "effect";
 import type { Types } from "effect";
 import type {
   Api,
@@ -124,8 +134,6 @@ const own = (record: JsonNode, key: string): Schema.Json | undefined =>
 const isNode = (json: Schema.Json | undefined): json is JsonNode =>
   Predicate.isObject(json) && !Array.isArray(json);
 
-const unescape = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
-
 // The node a schema reaches after its `$ref` chain through the store, or the key that does not
 // resolve. A chain stops at 64 hops, as `isBooleanSchema` does (design 3.3).
 const settle = (
@@ -149,7 +157,7 @@ const settle = (
       return Result.fail(key);
     }
 
-    key = unescape(ref.slice(refPrefix.length));
+    key = JsonPointer.unescapeToken(ref.slice(refPrefix.length));
     current = own(defs, key);
   }
 
@@ -885,7 +893,7 @@ const positionalPartOf = (
 const partOf = (flag: PartFlag, context: PartContext): Result.Result<OrderedPart, string> => {
   const { alternative } = context;
   const pointer = flag.source.wireName;
-  const [name, ...rest] = pointer.split("/").slice(1).map(unescape);
+  const [name, ...rest] = pointer.split("/").slice(1).map(JsonPointer.unescapeToken);
   if (name === undefined || rest.length > 0) {
     return Result.fail(`the nested multipart part ${pointer}`);
   }
@@ -1012,7 +1020,7 @@ const nestedPartOf = (
 
   const members: { readonly order: number; readonly part: NestedFormPart }[] = [];
   for (const flag of flags) {
-    const [, nestedName] = flag.source.wireName.split("/").slice(1).map(unescape);
+    const [, nestedName] = flag.source.wireName.split("/").slice(1).map(JsonPointer.unescapeToken);
     const built = nestedName === undefined ? undefined : nestedMemberOf(flag, nestedName, rule);
     if (built === undefined || Result.isFailure(built)) {
       return Result.fail(built?.failure ?? `the nested multipart part ${flag.source.wireName}`);
@@ -1077,7 +1085,10 @@ export const formParts = (
       continue;
     }
 
-    const [name, nestedName, ...rest] = flag.source.wireName.split("/").slice(1).map(unescape);
+    const [name, nestedName, ...rest] = flag.source.wireName
+      .split("/")
+      .slice(1)
+      .map(JsonPointer.unescapeToken);
     if (name !== undefined && nestedName !== undefined && rest.length === 0) {
       nested.set(name, [...(nested.get(name) ?? []), flag]);
       continue;
