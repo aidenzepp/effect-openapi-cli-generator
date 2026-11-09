@@ -26,7 +26,7 @@ import {
   scalarTypeOf,
   takesJsonContent,
 } from "./api.ts";
-import type { FormPart, MixedPlan, PartHeader } from "./api.ts";
+import type { FormPart, MixedPlan, NestedFormPart, PartHeader } from "./api.ts";
 import { operationHelp, sanitizeProse } from "./help.ts";
 import type { HelpBodyField, HelpFlag, HelpPartOption } from "./help.ts";
 import type { EmittedFile } from "./package.ts";
@@ -1031,12 +1031,11 @@ const alternativeBody = (
     };
   });
 
-// A part's values as `Serialize.FormFields` takes them: a list, empty when the flag is absent. A
-// JSON part's value is `Serialize.jsonPart`'s (ENC-22). A file part opens each path, or stdin for
-// `-` under the invocation's one stdin claim.
-const partValues = (part: FormPart) =>
+// One part flag's values as `Serialize.FormFields` takes them: a list, empty when the flag is
+// absent. A JSON part's value is `Serialize.jsonPart`'s (ENC-22). A file part opens each path, or
+// stdin for `-` under the invocation's one stdin claim; `name` is the filename `-` gives.
+const flagValues = (flag: PlannedFlag, name: string) =>
   Effect.gen(function* values() {
-    const { flag } = part;
     const repeated = flag.source._tag === "Body" && flag.source.repeated;
     const value = yield* flagValue(flag.identifier);
     if (flag.source._tag === "Body" && flag.source.kind === "json" && !repeated) {
@@ -1053,7 +1052,7 @@ const partValues = (part: FormPart) =>
 
     const source = ident(I("source"));
     const file = obj([
-      ["filename", fn("Multipart.partFilename", source, str(part.name))],
+      ["filename", fn("Multipart.partFilename", source, str(name))],
       ["stream", ident(I("bytes"))],
     ]);
 
@@ -1070,6 +1069,37 @@ const partValues = (part: FormPart) =>
       ),
     );
   });
+
+// A part's values: its flag's, or for a part nested by name (HT:B16) its nested parts' values,
+// each as a part's, gathered by `Serialize.nestedValues`.
+const partValues = (part: FormPart) =>
+  Effect.gen(function* values() {
+    if (part.nested === undefined) {
+      return yield* flagValues(part.flag, part.name);
+    }
+
+    const members: Entry[] = [];
+    for (const inner of part.nested.parts) {
+      members.push([inner.name, yield* flagValues(inner.flag, inner.name)]);
+    }
+
+    return fn("Effect.map", fn("Effect.all", obj(members)), path("Serialize.nestedValues"));
+  });
+
+const isRepeatedPart = (flag: PlannedFlag): boolean =>
+  flag.source._tag === "Body" && flag.source.repeated;
+
+// The names of the parts among `parts` whose flag repeats.
+const repeatedNames = (parts: readonly { readonly flag: PlannedFlag; readonly name: string }[]) =>
+  arr(parts.filter((part) => isRepeatedPart(part.flag)).map((part) => str(part.name)));
+
+// A nested body's `Serialize.FormPartFlags`: each nested part's flag and the nested parts that
+// repeat.
+const partFlags = (parts: readonly NestedFormPart[]): Expr =>
+  obj([
+    ["flags", obj(parts.map((part) => [part.name, str(part.flag.name)] as const))],
+    ["repeated", repeatedNames(parts)],
+  ]);
 
 // The step that asserts the part values against the body's schema before the request (design
 // 4.5, C2), and the domain name it imports; none for a multipart body that declares no schema.
@@ -1091,12 +1121,15 @@ const formAssertion = (
       return yield* refuse("unresolved-schema", "multipart/form-data");
     }
 
-    const repeated = parts.filter(
-      (part) => part.flag.source._tag === "Body" && part.flag.source.repeated,
+    // A part nested by name is asserted as its object, its nested parts by their own flags; it
+    // is named by its first nested flag when missing (HT:B16).
+    const nested = parts.flatMap((part) =>
+      part.nested === undefined ? [] : [[part.name, partFlags(part.nested.parts)] as const],
     );
     const options = obj([
       ["flags", obj(parts.map((part) => [part.name, str(part.flag.name)] as const))],
-      ["repeated", arr(repeated.map((part) => str(part.name)))],
+      ...(nested.length === 0 ? [] : ([["nested", obj(nested)]] as const)),
+      ["repeated", repeatedNames(parts.filter((part) => part.nested === undefined))],
       ["required", bool(body.required)],
       ["schema", ident(yield* identifier(schemaName))],
     ]);
@@ -1112,9 +1145,6 @@ const gaveFlag = (flag: PlannedFlag, repeated: boolean) =>
   Effect.map(flagValue(flag.identifier), (value) =>
     repeated ? fn("Option.isSome", fn("Option.fromIterable", value)) : fn("Option.isSome", value),
   );
-
-const isRepeatedPart = (flag: PlannedFlag): boolean =>
-  flag.source._tag === "Body" && flag.source.repeated;
 
 // One part header's value as a header parameter (ENC-03, HDR-01), serialized by its style or
 // content as a header parameter is, and never required on its own: `Input.partOptions` settles

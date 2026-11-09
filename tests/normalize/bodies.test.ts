@@ -80,7 +80,7 @@ const only = <T>(values: readonly T[]): T => {
 const alternativeOf = (line: Line, mediaType: string, media: Json = {}): MediaAlternative =>
   only(implemented(line, { content: { [mediaType]: media } }).body.alternatives);
 
-const targetOf = (rule: EncodingRule): string =>
+const targetOf = (rule: Pick<EncodingRule, "target">): string =>
   rule.target.kind === "property" ? rule.target.name : `#${rule.target.index}`;
 
 const typesOf = (rules: readonly EncodingRule[]): Record<string, string[]> =>
@@ -753,15 +753,64 @@ describe("MED-07 MED-08 MED-13 3.2 positional and nested encoding", () => {
     expect(codes(outcome)).toEqual(["ENC-16/nesting-too-deep"]);
   });
 
-  test("ENC-09 a nested itemEncoding has no place in the model and is refused", () => {
-    const outcome = refused(
+  test("ENC-09 a nested itemEncoding is the nested item rule, after the nested positions", () => {
+    const outcome = implemented(
       "3.2",
-      multipart(object({ batch: { type: "object" } }), {
+      multipart(object({ batch: { type: "array" } }), {
+        encoding: {
+          batch: {
+            contentType: "multipart/mixed",
+            itemEncoding: { contentType: "image/png" },
+            prefixEncoding: [{ contentType: "application/json" }],
+          },
+        },
+      }),
+    );
+    const rule = only(only(outcome.body.alternatives).encoding);
+    const item = rule.nestedItem;
+
+    expect(rule.nested?.map((nested) => targetOf(nested))).toEqual(["#0"]);
+    expect([
+      item === undefined ? undefined : targetOf(item),
+      item?.contentType.map(String),
+    ]).toEqual(["#1", ["image/png"]]);
+    expect(["ENC-08", "ENC-09"].filter((row) => rule.rows.map(String).includes(row))).toEqual([
+      "ENC-08",
+      "ENC-09",
+    ]);
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-09 a nested itemEncoding alone nests by position with an item rule only", () => {
+    const outcome = implemented(
+      "3.2",
+      multipart(object({ batch: { type: "array" } }), {
         encoding: { batch: { contentType: "multipart/mixed", itemEncoding: {} } },
       }),
     );
+    const rule = only(only(outcome.body.alternatives).encoding);
 
-    expect(codes(outcome)).toEqual(["ENC-09/nested-item-encoding"]);
+    expect([
+      rule.nested,
+      rule.nestedItem === undefined ? undefined : targetOf(rule.nestedItem),
+    ]).toEqual([[], "#0"]);
+    expect(codes(outcome)).toEqual([]);
+  });
+
+  test("ENC-16 a nested itemEncoding that nests again is refused", () => {
+    const outcome = refused(
+      "3.2",
+      multipart(object({ batch: { type: "array" } }), {
+        encoding: {
+          batch: {
+            contentType: "multipart/mixed",
+            itemEncoding: { contentType: "multipart/mixed", itemEncoding: {} },
+          },
+        },
+      }),
+    );
+
+    expect(codes(outcome)).toEqual(["ENC-16/nesting-too-deep"]);
   });
 });
 

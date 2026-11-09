@@ -536,6 +536,75 @@ describe("flattenBody: multipart and xml", () => {
   });
 });
 
+// A by-name nested rule (ENC-07): the part's Encoding `contentType` and one nested rule per name.
+const nestedRule = (name: string, contentType: string, members: readonly string[]) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentType: [contentType],
+    headers: [],
+    nested: members.map((member) => ({
+      contentType: ["text/plain"],
+      headers: [],
+      target: { kind: "property", name: member },
+    })),
+    origin: { document: "file:///spec.json", pointer: `/encoding/${name}` },
+    rows: [],
+    target: { kind: "property", name },
+  });
+
+describe("flattenBody: one nested level by name (design 6.3, HT:B16)", () => {
+  const defs = {
+    Root: object({
+      envelope: object({
+        list: { items: { type: "string" }, type: "array" },
+        meta: object({ id: { type: "integer" } }),
+        note: { type: "string" },
+        pass: { format: "password", type: "string" },
+        rows: { items: object({ a: { type: "string" } }), type: "array" },
+        scan: { format: "binary", type: "string" },
+      }),
+      plain: object({ a: { type: "string" } }),
+    }),
+  } satisfies Defs;
+
+  const flatten = (encoding: readonly EncodingRule[]) => {
+    const result = flattenBody(
+      defs,
+      { codec: "multipart", encoding, schema: { key: "Root" } },
+      "3.2",
+    );
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return result.success;
+  };
+
+  test("ENC-07: a part with a nested rule by name gets one dotted part flag per nested property, by the top-level part kinds", () => {
+    const flattened = flatten([
+      nestedRule("envelope", "multipart/mixed", ["list", "meta", "note", "rows", "scan"]),
+    ]);
+
+    expect(
+      flattened.flags.map(({ kind, name, pointer, repeated }) => [name, kind, pointer, repeated]),
+    ).toEqual([
+      ["envelope.list", "json", "/envelope/list", false],
+      ["envelope.meta", "json", "/envelope/meta", false],
+      ["envelope.note", "string", "/envelope/note", false],
+      ["envelope.pass", "file", "/envelope/pass", false],
+      ["envelope.scan", "file", "/envelope/scan", false],
+      ["plain", "json", "/plain", false],
+    ]);
+    expect(flattened.flags.find(({ name }) => name === "envelope.note")?.schemaPointer).toBe(
+      "/components/schemas/Root/properties/envelope/properties/note",
+    );
+    expect(flattened.skipped).toEqual([{ pointer: "/envelope/rows", reason: "UnsupportedPart" }]);
+  });
+
+  test("a part with no nested rule by name keeps its one JSON flag", () => {
+    expect(flatten([]).flags.map(({ name }) => name)).toEqual(["envelope", "plain"]);
+  });
+});
+
 describe("flattenBody: 3.0 readOnly (S30-31, D-SCH2)", () => {
   const defs = {
     Id: { readOnly: true, type: "string" },

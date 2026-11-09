@@ -658,6 +658,7 @@ interface PlainNested {
 interface PlainRule extends PlainNested {
   contentEncoding?: Transfer;
   nested?: readonly PlainNested[];
+  nestedItem?: PlainNested;
   nonStandard?: "deepObjectBrackets";
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
@@ -1014,22 +1015,49 @@ const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.E
 
 interface NestedEntry {
   readonly actual: CanonicalKey;
-  readonly node: EncodingNode;
+  readonly node: EncodingNode | undefined;
   readonly target: Target;
 }
 
-const nestedEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] => [
-  ...Object.entries(node.encoding ?? {}).map(([name, child]): NestedEntry => ({
-    actual: childKey(actual, "encoding", name),
-    node: child,
-    target: { kind: "property", name },
-  })),
-  ...(node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
+const positionalEntries = (node: EncodingNode, actual: CanonicalKey): readonly NestedEntry[] =>
+  (node.prefixEncoding ?? []).map((child, index): NestedEntry => ({
     actual: childKey(actual, "prefixEncoding", String(index)),
     node: child,
     target: { index, kind: "position" },
-  })),
-];
+  }));
+
+// The nested rules' entries: by name (HT:B16, ENC-07), every property of the part's schema in
+// property order, its Encoding Object or else the default table, then each encoding key that names
+// no property; by position, each `prefixEncoding` entry.
+const nestedEntries = (
+  node: EncodingNode,
+  actual: CanonicalKey,
+  members: Members,
+): readonly NestedEntry[] => {
+  const byName = node.encoding;
+  const declared = new Set(members.properties.map(([name]) => name));
+  const properties =
+    byName === undefined
+      ? []
+      : members.properties.map(([name, schema]): NestedEntry => {
+          const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+
+          return {
+            actual: explicit === undefined ? schema : childKey(actual, "encoding", name),
+            node: explicit,
+            target: { kind: "property", name },
+          };
+        });
+  const undeclared = Object.entries(byName ?? {})
+    .filter(([name]) => !declared.has(name))
+    .map(([name, child]): NestedEntry => ({
+      actual: childKey(actual, "encoding", name),
+      node: child,
+      target: { kind: "property", name },
+    }));
+
+  return [...properties, ...undeclared, ...positionalEntries(node, actual)];
+};
 
 const toNested = (rule: PlainRule): PlainNested => {
   const nested: PlainNested = {
@@ -1053,6 +1081,10 @@ const nestingRefusal = (
 
 interface Nesting {
   readonly findings: readonly Finding[];
+  /**
+   * The nested `itemEncoding`'s rule, after the nested positions (ENC-09).
+   */
+  readonly item: PlainNested | undefined;
   readonly nested: readonly PlainNested[];
   readonly refused: boolean;
   readonly rows: readonly string[];
@@ -1060,6 +1092,7 @@ interface Nesting {
 
 const refuseNesting = (finding: Finding): Nesting => ({
   findings: [finding],
+  item: undefined,
   nested: [],
   refused: true,
   rows: [],
@@ -1079,10 +1112,12 @@ type BuildAll = (
 const nestedRows = (node: EncodingNode): readonly string[] => [
   ...(node.encoding === undefined ? [] : ["ENC-07"]),
   ...(node.prefixEncoding === undefined ? [] : ["ENC-08"]),
+  ...(node.itemEncoding === undefined ? [] : ["ENC-09"]),
 ];
 
-// ENC-07 to ENC-09, ENC-16: one nested level by name and by position; a deeper level, and a nested
-// itemEncoding (which `EncodingRule.nested` cannot hold), are refused.
+// ENC-07 to ENC-09, ENC-16: one nested level by name and by position, the nested `itemEncoding`
+// the rule of every position after the nested `prefixEncoding` (HT:B16); a deeper level is
+// refused.
 const nestingOf = (
   ctx: Context,
   input: RuleInput,
@@ -1090,8 +1125,9 @@ const nestingOf = (
   buildAll: BuildAll,
 ): Effect.Effect<Nesting, BodyNodeBudget> =>
   Effect.gen(function* nesting() {
-    const entries = nestedEntries(node, input.actual);
-    if (input.depth === 1 && (entries.length > 0 || node.itemEncoding !== undefined)) {
+    const nests =
+      Object.keys(node.encoding ?? {}).length > 0 || (node.prefixEncoding ?? []).length > 0;
+    if (input.depth === 1 && (nests || node.itemEncoding !== undefined)) {
       return refuseNesting(
         nestingRefusal(
           "ENC-16/nesting-too-deep",
@@ -1102,37 +1138,42 @@ const nestingOf = (
       );
     }
 
-    if (node.itemEncoding !== undefined) {
-      return refuseNesting(
-        nestingRefusal(
-          "ENC-09/nested-item-encoding",
-          "Nested itemEncoding",
-          "A nested itemEncoding has no place in the model.",
-          childKey(input.actual, "itemEncoding"),
-        ),
-      );
-    }
-
+    const item = node.itemEncoding;
     const children =
-      entries.length === 0 || input.schema === undefined
+      (!nests && item === undefined) || input.schema === undefined
         ? noMembers
         : yield* membersOf(ctx.walk, input.schema);
-    const built = yield* buildAll(
-      ctx,
-      entries.map((entry): RuleInput => ({
-        actual: entry.actual,
-        depth: 1,
-        formData: false,
-        honorsStyle: false,
-        node: entry.node,
-        schema: memberSchema(children, entry.target),
-        target: entry.target,
-      })),
-    );
+    const entries = nestedEntries(node, input.actual, children);
+    const inputs = entries.map((entry): RuleInput => ({
+      actual: entry.actual,
+      depth: 1,
+      formData: false,
+      honorsStyle: false,
+      node: entry.node,
+      schema: memberSchema(children, entry.target),
+      target: entry.target,
+    }));
+    const itemInput: readonly RuleInput[] =
+      item === undefined
+        ? []
+        : [
+            {
+              actual: childKey(input.actual, "itemEncoding"),
+              depth: 1,
+              formData: false,
+              honorsStyle: false,
+              node: item,
+              schema: children.items,
+              target: { index: (node.prefixEncoding ?? []).length, kind: "position" },
+            },
+          ];
+    const built = yield* buildAll(ctx, [...inputs, ...itemInput]);
+    const rules = built.rules.map((rule) => toNested(rule));
 
     return {
       findings: built.findings,
-      nested: built.rules.map((rule) => toNested(rule)),
+      item: item === undefined ? undefined : rules[entries.length],
+      nested: rules.slice(0, entries.length),
       refused: built.refused,
       rows: nestedRows(node),
     };
@@ -1277,6 +1318,18 @@ const transferConflict = (
         );
   });
 
+// A nesting part's rules on its rule: `nested` is present whenever the part nests, so an item rule
+// alone still marks it, and `nestedItem` holds the nested `itemEncoding`'s rule (ENC-09).
+const withNesting = (rule: PlainRule, nesting: Nesting): void => {
+  if (nesting.nested.length > 0 || nesting.item !== undefined) {
+    rule.nested = nesting.nested;
+  }
+
+  if (nesting.item !== undefined) {
+    rule.nestedItem = nesting.item;
+  }
+};
+
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
 const buildRule = (
   ctx: Context,
@@ -1343,10 +1396,7 @@ const buildRule = (
       rule.contentEncoding = transfer.encoding;
     }
 
-    if (nesting.nested.length > 0) {
-      rule.nested = nesting.nested;
-    }
-
+    withNesting(rule, nesting);
     if (typing.serialization !== undefined) {
       rule.serialization = typing.serialization;
     }
