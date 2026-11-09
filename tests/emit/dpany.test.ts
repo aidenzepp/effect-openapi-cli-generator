@@ -85,7 +85,12 @@ const spec = {
   servers: [{ url: "https://api.example.com" }],
 };
 
-const runWith = (deepObjectBrackets: boolean) =>
+interface Switches {
+  readonly deepObjectBrackets?: boolean;
+  readonly deepObjectScalars?: boolean;
+}
+
+const runWith = (nonStandard: Switches) =>
   Effect.runPromise(
     Effect.gen(function* run() {
       const dir = nodeFs.mkdtempSync(nodePath.join(work, "run-"));
@@ -98,7 +103,7 @@ const runWith = (deepObjectBrackets: boolean) =>
         JSON.stringify({
           binName: "dpany",
           envPrefix: "DPANY",
-          nonStandard: { deepObjectBrackets },
+          nonStandard,
           package: { name: "dpany-cli", version: "0.1.0" },
         }),
       );
@@ -132,7 +137,10 @@ const runWith = (deepObjectBrackets: boolean) =>
     }).pipe(Effect.provide(layer)),
   );
 
-const runs = { off: await runWith(false), on: await runWith(true) };
+const runs = {
+  off: await runWith({ deepObjectBrackets: false }),
+  on: await runWith({ deepObjectBrackets: true }),
+};
 
 describe("PRM-27: a deepObject over a schema that admits non-objects", () => {
   for (const [label, run] of Object.entries(runs)) {
@@ -194,4 +202,31 @@ describe("m2-objfact: a deepObject over all-object anyOf or oneOf takes JSON", (
   test("the JSON flag's object is sent as window[at]=v", async () => {
     expect(await sent('{"at":"v"}')).toBe("window%5Bat%5D=v");
   });
+});
+
+// m3-sc5 (design 6.1 Scalar switch): with `nonStandard.deepObjectScalars`, `created`'s integer
+// branch is a scalar branch the switch covers, so the parameter is generated, marked and noticed,
+// and the operation that requires it is kept; it takes one JSON value.
+const scalarRuns = {
+  both: await runWith({ deepObjectBrackets: true, deepObjectScalars: true }),
+  scalars: await runWith({ deepObjectScalars: true }),
+};
+
+describe("PRM-27 scalar switch: a deepObject over anyOf of an object and an integer", () => {
+  for (const [label, run] of Object.entries(scalarRuns)) {
+    test(`${label}: generated with the scalar notice, and the required operation kept`, () => {
+      expect(run.facts).toEqual([
+        ["PRM-27/scalar-author-choice", "element", "/paths/~1charges/get/parameters/0"],
+        ["PRM-27/scalar-author-choice", "element", "/paths/~1events/get/parameters/0"],
+      ]);
+      expect(run.api).toContain('Serialize.deepObject("created"');
+      expect(run.api).toContain("scalars: true");
+      expect(run.api).toContain("events");
+    });
+
+    test(`${label}: created takes one JSON flag`, () => {
+      expect(run.cli).toContain('created: Input.jsonFlag("created")');
+      expect(run.cli).not.toContain('Flag.String("created")');
+    });
+  }
 });

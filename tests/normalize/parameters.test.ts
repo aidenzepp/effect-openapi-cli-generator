@@ -984,3 +984,132 @@ describe("STY-43 querystring form content with Encoding Objects reaches the body
     expect(parameter.serialization).toMatchObject({ encoding: [], kind: "content" });
   });
 });
+
+// Design 6.1 Scalar switch (M3-D92 C; R86): with `nonStandard.deepObjectScalars`, a deepObject
+// whose every branch is covered (an object with scalar members by the standard rule, a nested
+// object or array by the bracket switch when set, a scalar by the scalar switch) is generated and
+// marked; any uncovered branch keeps the refusal it has today.
+interface Switches {
+  readonly deepObjectBrackets?: boolean;
+  readonly deepObjectScalars?: boolean;
+}
+
+const markersOf = (outcome: ParameterOutcome) => {
+  if (outcome._tag !== "Implemented") {
+    throw new Error(`expected Implemented, got ${outcome._tag}`);
+  }
+
+  const { serialization } = outcome.parameter;
+  if (serialization.kind !== "style") {
+    throw new Error("expected a style serialization");
+  }
+
+  return [serialization.nonStandard, serialization.nonStandardScalars];
+};
+
+const switched = (parameter: Json, nonStandard: Switches): ParameterOutcome => {
+  const value: Json = {
+    info: { title: "t", version: "1" },
+    openapi: openapi["3.2"],
+    paths: {
+      "/a": { get: { parameters: [parameter], responses: { "200": { description: "ok" } } } },
+    },
+  };
+  const resolution = Effect.runSync(resolve({ document: entry, line: "3.2", value }));
+
+  return Effect.runSync(
+    normalizeParameter(resolution, { nonStandard, openapi: openapi["3.2"], pointer: site }),
+  );
+};
+
+describe("PRM-27 scalar switch: a covered deepObject union is generated and marked", () => {
+  const empty: Json = { enum: [""], type: "string" };
+
+  const nested: Json = {
+    properties: { owner: { properties: { id: string }, type: "object" } },
+    type: "object",
+  };
+
+  const scalars = { deepObjectScalars: true };
+
+  const both = { deepObjectBrackets: true, deepObjectScalars: true };
+
+  const flatOrEmpty = deep({ schema: { anyOf: [flat, empty] } });
+
+  const nestedOrEmpty = deep({ schema: { anyOf: [nested, empty] } });
+
+  const numberOrNow = deep({
+    required: true,
+    schema: { anyOf: [{ type: "integer" }, { enum: ["now"], type: "string" }] },
+  });
+
+  test('PRM-27 anyOf of a one-level object and "" is generated, marked and noticed', () => {
+    const outcome = switched(flatOrEmpty, scalars);
+
+    expect(codes(outcome)).toEqual(["PRM-27/scalar-author-choice"]);
+    expect(outcome.diagnostics[0]?.severity).toBe("notice");
+    expect(String(outcome.diagnostics[0]?.pointer)).toBe(site);
+    expect(markersOf(outcome)).toEqual([undefined, "deepObjectScalars"]);
+  });
+
+  test('PRM-27 a required number | "now" is generated and stays required', () => {
+    const outcome = switched(numberOrNow, scalars);
+
+    expect(codes(outcome)).toEqual(["PRM-27/scalar-author-choice"]);
+    expect(markersOf(outcome)).toEqual([undefined, "deepObjectScalars"]);
+    expect(outcome._tag === "Implemented" && outcome.parameter.required).toBe(true);
+  });
+
+  test("PRM-27 a const and a type list of scalars are scalar branches", () => {
+    for (const schema of [
+      { anyOf: [flat, { const: "" }] },
+      { oneOf: [flat, { type: "boolean" }] },
+      { type: ["string", "number"] },
+    ]) {
+      expect(codes(switched(deep({ schema }), scalars))).toEqual(["PRM-27/scalar-author-choice"]);
+    }
+  });
+
+  test('PRM-27 with both switches, anyOf of a nested object and "" carries both markers', () => {
+    const outcome = switched(nestedOrEmpty, both);
+
+    expect(codes(outcome)).toEqual(["PRM-27/bracket-author-choice", "PRM-27/scalar-author-choice"]);
+    expect(markersOf(outcome)).toEqual(["deepObjectBrackets", "deepObjectScalars"]);
+  });
+
+  test('PRM-27 with the scalar switch alone, anyOf of a nested object and "" stays refused', () => {
+    expect(codes(switched(nestedOrEmpty, scalars))).toEqual(["PRM-27/compound-nested"]);
+  });
+
+  test("PRM-27 a null or untyped branch stays refused under either switch", () => {
+    for (const schema of [{ anyOf: [flat, { type: "null" }] }, {}, { anyOf: [flat, {}] }]) {
+      for (const nonStandard of [scalars, both]) {
+        expect(codes(switched(deep({ schema }), nonStandard))).toEqual([
+          "PRM-27/non-object-schema",
+        ]);
+      }
+    }
+  });
+
+  test("PRM-27 a union member nested inside an object stays refused under either switch", () => {
+    const member: Json = { anyOf: [flat, empty] };
+    const schema: Json = { anyOf: [{ properties: { k: member }, type: "object" }, empty] };
+    for (const nonStandard of [scalars, both]) {
+      expect(codes(switched(deep({ schema }), nonStandard))).toEqual(["PRM-27/compound-nested"]);
+    }
+  });
+
+  test("PRM-27 without the scalar switch every case refuses as today", () => {
+    for (const nonStandard of [{}, { deepObjectBrackets: true }, { deepObjectScalars: false }]) {
+      for (const parameter of [flatOrEmpty, nestedOrEmpty, numberOrNow]) {
+        expect(codes(switched(parameter, nonStandard))).toEqual(["PRM-27/non-object-schema"]);
+      }
+    }
+  });
+
+  test("PRM-27 an object-only schema is unchanged by the scalar switch", () => {
+    expect(codes(switched(deep({}), scalars))).toEqual([]);
+    expect(markersOf(switched(deep({}), scalars))).toEqual([undefined, undefined]);
+    expect(codes(switched(deep({ schema: nested }), scalars))).toEqual(["PRM-27/compound-nested"]);
+  });
+});

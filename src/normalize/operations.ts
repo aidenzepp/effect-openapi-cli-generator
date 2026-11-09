@@ -788,11 +788,17 @@ interface Assembly {
   readonly operation?: Operation;
 }
 
+// The notices of the author config's deepObject switches (design 6.1 Bracket and Scalar switch).
+const authorChoiceCodes: ReadonlySet<string> = new Set([
+  "PRM-27/bracket-author-choice",
+  "PRM-27/scalar-author-choice",
+]);
+
 // An operation refused whole sends nothing, so none of its elements is sent in the bracket
-// convention: its bracket notices go with it (design 8.5 rule 7, option A), as a refused form
-// alternative's do in the body assembly. `nonStandard` reads generated operations only.
-const withoutBracketNotices = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
-  diagnostics.filter((diagnostic) => diagnostic.code !== "PRM-27/bracket-author-choice");
+// convention or as a scalar pair: their notices go with it (design 8.5 rule 7, option A), as a
+// refused form alternative's do in the body assembly. `nonStandard` reads generated operations only.
+const withoutAuthorChoiceNotices = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
+  diagnostics.filter((diagnostic) => !authorChoiceCodes.has(diagnostic.code));
 
 const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly, OperationsError> =>
   Effect.gen(function* assemble() {
@@ -849,7 +855,7 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       ...raises,
     ];
     if (raises.length > 0) {
-      return { diagnostics: withoutBracketNotices(diagnostics) };
+      return { diagnostics: withoutAuthorChoiceNotices(diagnostics) };
     }
 
     const fields: Plain<typeof Operation.Encoded> = {

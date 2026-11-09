@@ -667,3 +667,81 @@ describe("bracket notices of an operation refused whole", () => {
     see(nonStandardEntries(api, [entry]).map((found) => found.pointer)).toEqual([keptPointer]);
   });
 });
+
+// Design 6.1 Scalar switch and 8.5 rule 7: the scalar switch's notice follows what is sent as the
+// bracket notice does, so an operation refused whole keeps no `PRM-27/scalar-author-choice`.
+describe("scalar notices of an operation refused whole", () => {
+  const scalarConfig = Schema.decodeUnknownSync(AuthorConfig)({
+    binName: "example",
+    nonStandard: { deepObjectScalars: true },
+    package: { name: "example-cli", version: "1.0.0" },
+  });
+
+  const scalarRun = (paths: Json, rest: Members = {}) =>
+    Effect.runSync(
+      resolve({
+        document: entry,
+        line: "3.1",
+        value: { info: { title: "t", version: "1" }, openapi: openapi["3.1"], paths, ...rest },
+      }).pipe(
+        Effect.flatMap((resolution) =>
+          normalize(resolution, {
+            checkFindings: [],
+            config: scalarConfig,
+            configDocument: configUri,
+          }),
+        ),
+      ),
+    );
+
+  // A deepObject query parameter over anyOf of a one-level object and "": the scalar switch sends
+  // it and marks it.
+  const marked: Json = {
+    explode: true,
+    in: "query",
+    name: "expand",
+    schema: {
+      anyOf: [
+        { properties: { name: { type: "string" } }, type: "object" },
+        { enum: [""], type: "string" },
+      ],
+    },
+    style: "deepObject",
+  };
+
+  const keptPointer = "/paths/~1kept/get/parameters/0";
+
+  const kept: Json = { get: { ...ok, parameters: [marked] } };
+
+  const cases: readonly (readonly [string, Json, Members])[] = [
+    [
+      "OPR-08/required-parameter-refused",
+      { get: { ...ok, parameters: [marked, refusedQuery(true)] } },
+      {},
+    ],
+    [
+      "OPR-09/required-body-refused",
+      { post: { ...ok, parameters: [marked], requestBody: refusedBody(true) } },
+      {},
+    ],
+    [
+      "SEC-06/no-satisfiable-alternative",
+      { get: { ...ok, parameters: [marked], security: [{ refused: [] }] } },
+      refusedSchemes,
+    ],
+  ];
+
+  test.each(cases)("%s keeps no scalar-author-choice notice", (raise, item, rest) => {
+    const { api, diagnostics } = scalarRun({ "/items": item, "/kept": kept }, rest);
+    const notices = diagnostics.filter(
+      (diagnostic) => diagnostic.code === "PRM-27/scalar-author-choice",
+    );
+
+    see(api.operations.map((found) => found.key.path)).toEqual(["/kept"]);
+    see(raised(diagnostics)).toEqual([raise]);
+    see(notices.map((diagnostic) => diagnostic.pointer)).toEqual([keptPointer]);
+    see(nonStandardEntries(api, [entry]).map((found) => [found.pointer, found.choice])).toEqual([
+      [keptPointer, "deepObjectScalars"],
+    ]);
+  });
+});
