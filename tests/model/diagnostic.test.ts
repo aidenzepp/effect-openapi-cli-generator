@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { Array as Arr, Exit, Schema } from "effect";
-import { Diagnostic, sortDiagnostics } from "../../src/model/diagnostic.ts";
+import { Array as Arr, Cause, Effect, Exit, Schema } from "effect";
+import {
+  Diagnostic,
+  diagnosticOf,
+  makeDiagnostic,
+  sortDiagnostics,
+} from "../../src/model/diagnostic.ts";
 import { Verdict } from "../../src/model/verdict.ts";
 
 const base: typeof Diagnostic.Encoded = {
@@ -181,5 +186,43 @@ describe("Verdict", () => {
     expect(Exit.isFailure(Schema.decodeUnknownExit(Verdict)({ ...verdict, verdict: "ok" }))).toBe(
       true,
     );
+  });
+});
+
+describe("diagnosticOf and makeDiagnostic", () => {
+  const { row: _row, ...input } = base;
+
+  test("an undefined key is absent from the result", async () => {
+    const diagnostic = await Effect.runPromise(makeDiagnostic({ ...input, hint: undefined }));
+
+    expect(Object.keys(diagnostic)).not.toContain("hint");
+  });
+
+  test("row equals the code prefix", async () => {
+    const diagnostic = await Effect.runPromise(makeDiagnostic(input));
+
+    expect(diagnostic.row).toBe("PRM-27");
+  });
+
+  test("an invalid code dies through makeDiagnostic and fails with SchemaError through diagnosticOf", async () => {
+    const bad = { ...input, code: "nonsense" };
+
+    expect(Exit.isFailure(await Effect.runPromiseExit(makeDiagnostic(bad)))).toBe(true);
+    const failed = await Effect.runPromise(Effect.flip(diagnosticOf(bad)));
+
+    expect(Schema.isSchemaError(failed)).toBe(true);
+    const exit = await Effect.runPromiseExit(makeDiagnostic(bad));
+
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+  });
+
+  test("the encoded key order equals that of a directly decoded Diagnostic", async () => {
+    const built = await Effect.runPromise(makeDiagnostic({ ...input, hint: "h" }));
+    const direct = Schema.decodeUnknownSync(Diagnostic)({ ...base, hint: "h" });
+
+    expect(Object.keys(Schema.encodeSync(Diagnostic)(built))).toEqual(
+      Object.keys(Schema.encodeSync(Diagnostic)(direct)),
+    );
+    expect(built).toEqual(direct);
   });
 });
