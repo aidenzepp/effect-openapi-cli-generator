@@ -4,7 +4,8 @@ import { printJson } from "../emit/printer.ts";
 import { DocumentUri, JsonLiteral, JsonPointer } from "../model/brands.ts";
 import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
 import type { Api, Operation, SecurityScheme } from "../model/entities.ts";
-import { nonStandardOrigins } from "../model/non-standard.ts";
+import type { NonStandardUse } from "../model/non-standard.ts";
+import { markedUses, nonStandardUses } from "../model/non-standard.ts";
 
 const Sha256 = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)));
 
@@ -45,8 +46,8 @@ export const CommandName = Schema.Struct({
  * the config key that made it, the element's use site, and the row it departs from.
  */
 export const NonStandardEntry = Schema.Struct({
-  choice: Schema.Literal("deepObjectBrackets"),
-  configKey: Schema.Literal("nonStandard.deepObjectBrackets"),
+  choice: Schema.Literals(["deepObjectBrackets", "deepObjectScalars"]),
+  configKey: Schema.Literals(["nonStandard.deepObjectBrackets", "nonStandard.deepObjectScalars"]),
   document: DocumentUri,
   pointer: JsonPointer,
   row: Schema.Literal("PRM-27"),
@@ -144,10 +145,10 @@ const useSiteOrder = (documents: readonly string[]): Order.Order<UseSite> =>
     Order.mapInput(pointerOrder, (entry: UseSite) => entry.pointer),
   );
 
-const entryAt = (origin: { readonly document: string; readonly pointer: string }) =>
+const entryAt = ({ choice, origin }: NonStandardUse) =>
   Schema.decodeUnknownSync(NonStandardEntry)({
-    choice: "deepObjectBrackets",
-    configKey: "nonStandard.deepObjectBrackets",
+    choice,
+    configKey: `nonStandard.${choice}`,
     document: origin.document,
     pointer: origin.pointer,
     row: "PRM-27",
@@ -156,26 +157,29 @@ const entryAt = (origin: { readonly document: string; readonly pointer: string }
 /**
  * The elements of the normalized model that carry the non-standard marker (design 6.1): query
  * parameters, and form Encoding entries of bodies and of `querystring` form content, that the
- * author config sends in the bracket convention. The
- * marker is read as the model holds it, never inferred; a model with none lists none. Entries are
- * in diagnostic order over `documents`.
+ * author config sends in the bracket convention (`deepObjectBrackets`) or whose scalar value it
+ * sends as `name=value` (`deepObjectScalars`). The markers are read as the model holds them, never
+ * inferred; a model with none lists none. An element both switches mark is listed once per
+ * choice. Entries are in diagnostic order over `documents`, then by choice.
  */
 export const nonStandardEntries = (
   api: Api,
   documents: readonly string[],
 ): GenerationReportValue["nonStandard"] => {
   const marked = api.operations.flatMap((operation) => [
-    ...operation.parameters.flatMap(({ serialization }) =>
-      nonStandardOrigins(serialization).map(entryAt),
-    ),
+    ...operation.parameters.flatMap(({ serialization }) => nonStandardUses(serialization)),
     ...(operation.body?.alternatives ?? []).flatMap((alternative) =>
-      alternative.encoding.flatMap((rule) =>
-        rule.nonStandard === undefined ? [] : [entryAt(rule.origin)],
-      ),
+      alternative.encoding.flatMap(markedUses),
     ),
   ]);
 
-  return Arr.sort(marked, useSiteOrder(documents));
+  return Arr.sort(
+    marked.map(entryAt),
+    Order.combine(
+      useSiteOrder(documents),
+      Order.mapInput(Order.String, (entry: NonStandardEntryValue) => entry.choice),
+    ),
+  );
 };
 
 /**
