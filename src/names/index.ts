@@ -176,6 +176,7 @@ const operationOf = (operation: Operation) =>
 
 const toDiagnostic = (api: Api, finding: Finding): Effect.Effect<Diagnostic> => {
   const { anchor } = finding;
+
   return makeDiagnostic({
     code: finding.code,
     document: finding.document,

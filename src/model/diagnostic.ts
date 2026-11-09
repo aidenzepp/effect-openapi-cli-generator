@@ -68,11 +68,15 @@ type EncodedWithoutRow = Omit<typeof Diagnostic.Encoded, "row">;
  */
 export type DiagnosticInput = {
   readonly [
-    Key in keyof EncodedWithoutRow as {} extends Pick<EncodedWithoutRow, Key> ? never : Key
+    Key in keyof EncodedWithoutRow as Record<never, never> extends Pick<EncodedWithoutRow, Key>
+      ? never
+      : Key
   ]: EncodedWithoutRow[Key];
 } & {
   readonly [
-    Key in keyof EncodedWithoutRow as {} extends Pick<EncodedWithoutRow, Key> ? Key : never
+    Key in keyof EncodedWithoutRow as Record<never, never> extends Pick<EncodedWithoutRow, Key>
+      ? Key
+      : never
   ]?: EncodedWithoutRow[Key] | undefined;
 };
 
@@ -85,7 +89,7 @@ export const diagnosticOf = (
   input: DiagnosticInput,
 ): Effect.Effect<Diagnostic, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(Diagnostic)({
-    ...Record.filter<string, unknown>(input, Predicate.isNotUndefined),
+    ...Record.filter<string, unknown>(Predicate.isNotUndefined)(input),
     row: rowOfCode(input.code),
   });
 

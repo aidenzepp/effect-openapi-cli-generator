@@ -22,9 +22,8 @@ export const isArray = (value: Json | undefined): value is readonly Json[] => Ar
 /**
  * The node at `pointer`, or undefined when the pointer is malformed or names no node.
  */
-export const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  return Result.getOrUndefined(evaluatePointerResult(root, pointer));
-};
+export const nodeAt = (root: Json, pointer: string): Json | undefined =>
+  Result.getOrUndefined(evaluatePointerResult(root, pointer));
 
 /**
  * The own member `name` of an object when it is a string.

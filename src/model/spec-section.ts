@@ -4,6 +4,7 @@ import { Schema } from "effect";
  * An OpenAPI line: the major.minor of a supported specification release. Defined once here so
  * every stage can cite the specification without importing validate.
  */
+// oxlint-disable-next-line no-redeclare -- a type and its schema value share one name
 export const SpecLine = Schema.Literals(["3.0", "3.1", "3.2"]);
 
 export type SpecLine = typeof SpecLine.Type;
