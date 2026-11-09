@@ -53,6 +53,7 @@ const scrub = (text: string): string =>
   text.replaceAll(TOKEN, "<redacted:bearer>").replaceAll(KEY, "<redacted:key>");
 
 interface Run {
+  readonly hash?: string;
   readonly retries?: boolean;
   readonly verbose?: boolean;
 }
@@ -72,6 +73,8 @@ const run = async (answers: readonly Answer[], options: Run = {}) => {
     HttpClientRequest.setHeader("x-first", "1"),
     HttpClientRequest.setHeader("authorization", `Bearer ${TOKEN}`),
     HttpClientRequest.setHeader("x-last", "z"),
+    (built) =>
+      options.hash === undefined ? built : HttpClientRequest.setHash(built, options.hash),
   );
   const exchange = Effect.scoped(
     client.execute(request).pipe(Effect.map((response) => response.status)),
@@ -155,6 +158,12 @@ describe("--verbose", () => {
       "< 200",
     ]);
     expect(lines.filter((line) => line.startsWith("Notice: "))).toHaveLength(1);
+  });
+
+  test("a verbose URL whose request carries a fragment prints it without the fragment", async () => {
+    const { exit, lines } = await run([{ status: 200 }], { hash: "frag" });
+    expect(exit).toEqual(Exit.succeed(200));
+    expect(lines).toEqual([...requestBlock("/a?key=<redacted>&page=2"), "< 200"]);
   });
 
   test("without --verbose nothing is written", async () => {

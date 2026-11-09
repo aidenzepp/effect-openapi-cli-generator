@@ -238,6 +238,22 @@ describe("effective servers: an operation override", () => {
   });
 });
 
+describe("invalid base URL messages", () => {
+  const messages = [
+    ["https-only scheme", "ftp://example.org", "the scheme must be http or https"],
+    ["userinfo", "https://user@example.org", "the URL must not contain userinfo"],
+    ["query", "https://example.org/?a=1", "the URL must not contain a query"],
+    ["fragment", "https://example.org/#a", "the URL must not contain a fragment"],
+  ] as const;
+
+  test.each(messages)("%s", async (_cause, value, cause) => {
+    const error = failure(
+      await Effect.runPromiseExit(BaseUrl.validateBaseUrl("--base-url", value)),
+    );
+    expect(error.message).toBe(`--base-url: ${cause}`);
+  });
+});
+
 describe("invalid values never echo the value", () => {
   const badUrls = [
     ["scheme", `ftp://${canary}.example.org`],
