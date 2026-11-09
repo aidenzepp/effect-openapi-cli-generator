@@ -1,4 +1,5 @@
 import { Effect, FileSystem, Stdio, Stream } from "effect";
+import { Base64, Hex } from "effect/encoding";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { StdinClaim } from "./input.ts";
@@ -61,7 +62,7 @@ const isNested = (part: Part): part is NestedPart => "parts" in part;
 const randomBoundary = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
 
-  return `----EffectFormBoundary${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  return `----EffectFormBoundary${Hex.encode(bytes)}`;
 };
 
 /**
@@ -181,11 +182,11 @@ const base64Stream = (
 
         return [
           joined.slice(whole),
-          whole === 0 ? [] : [encoder.encode(joined.subarray(0, whole).toBase64())],
+          whole === 0 ? [] : [encoder.encode(Base64.encode(joined.subarray(0, whole)))],
         ] as const;
       },
       {
-        onHalt: (carry) => (carry.length === 0 ? [] : [encoder.encode(carry.toBase64())]),
+        onHalt: (carry) => (carry.length === 0 ? [] : [encoder.encode(Base64.encode(carry))]),
       },
     ),
   );
