@@ -321,4 +321,86 @@ describe("Output.send --dry-run", () => {
     expect(result.stdout).toContain('{"password":"<redacted:password-file>"}');
     expect(result.stdout).not.toContain(password);
   });
+
+  test("a streamed text body never prints a recorded secret-file value or a credential", async () => {
+    const password = "pw-STREAM-SECRET";
+    const text = `{"password":"${password}","token":"${SECRET}"}\n`;
+    const cut = text.indexOf(password) + 4;
+    const chunks = [
+      bytes(text.slice(0, cut)),
+      bytes(text.slice(cut, cut + 9)),
+      bytes(text.slice(cut + 9)),
+    ];
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      recorded: [{ kind: "secret", label: "password-file", value: Redacted.make(password) }],
+      request: HttpClientRequest.post("/items").pipe(
+        HttpClientRequest.setBody(
+          HttpBody.stream(Stream.fromIterable(chunks), "text/plain", text.length),
+        ),
+        HttpClientRequest.setHeader("content-type", "text/plain"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout).toContain(
+      '{"password":"<redacted:password-file>","token":"<redacted:bearerAuth>"}\n',
+    );
+    expect(result.stdout).not.toContain(password);
+    expect(result.stdout).not.toContain(SECRET);
+    expect(result.stderr).not.toContain(password);
+    expect(result.stderr).not.toContain(SECRET);
+  });
+
+  test("a multipart text part never prints a recorded secret-file value or a credential", async () => {
+    const password = "pw-PART-SECRET";
+    const text = `note ${password} and ${SECRET}`;
+    const cut = text.indexOf(SECRET) + 5;
+    const body = await Effect.runPromise(
+      Multipart.formData(
+        [
+          {
+            body: Stream.make(bytes(text.slice(0, cut)), bytes(text.slice(cut))),
+            contentType: "text/plain",
+            name: "note",
+          },
+        ],
+        { boundary: "BOUNDARY" },
+      ),
+    );
+    const result = await run({
+      env: { EXAMPLE_BEARER_AUTH: SECRET },
+      operation: meta("POST"),
+      recorded: [{ kind: "secret", label: "password-file", value: Redacted.make(password) }],
+      request: HttpClientRequest.post("/items").pipe(HttpClientRequest.setBody(body)),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout).toContain(
+      "\r\n\r\nnote <redacted:password-file> and <redacted:bearerAuth>\r\n--BOUNDARY--",
+    );
+    expect(result.stdout).not.toContain(password);
+    expect(result.stdout).not.toContain(SECRET);
+    expect(result.stderr).not.toContain(password);
+    expect(result.stderr).not.toContain(SECRET);
+  });
+
+  test("a redacted header is exempt only when it is exactly a placeholder form", async () => {
+    const canary = "canary-COOKIE-SECRET";
+    const result = await run({
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items").pipe(
+        HttpClientRequest.setHeader("cookie", `a=<redacted:bearerAuth>; session=${canary}`),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(result.stdout).not.toContain(canary);
+    expect(result.stdout).toContain("cookie: a=<redacted:bearerAuth>; session=<redacted>\n");
+    expect(result.stdout).toContain("authorization: Bearer <redacted:bearerAuth>\n");
+  });
 });

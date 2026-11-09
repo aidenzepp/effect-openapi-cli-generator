@@ -1533,9 +1533,65 @@ const partFilename = /;\s*filename="(?<filename>[^"]*)"/u;
 
 const partContentType = /^content-type:\s*(?<type>[^\r\n]*)$/imu;
 
+const unchanged = (text: string): string => text;
+
+/**
+ * The recorded-value scrub over text that arrives in chunks, for the `--dry-run` body: each piece
+ * is emitted scrubbed (`scrub`) once it ends with no proper prefix of any recorded form, found by
+ * `dropTrailingFragment` repeated until it holds, so every occurrence lies whole inside one emitted
+ * piece, as a scrub of the whole text would find it. What it holds back is shorter than the longest
+ * form, so memory stays bound. The text is decoded as UTF-8 across chunk ends.
+ */
+class StreamScrubber {
+  private readonly decoder = new TextDecoder();
+  private pending = "";
+  private readonly recorded: readonly ScrubEntry[];
+
+  constructor(recorded: readonly ScrubEntry[]) {
+    this.recorded = recorded;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    const text = this.pending + this.decoder.decode(chunk, { stream: true });
+    let safe = text;
+    let shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    while (shorter.length < safe.length) {
+      safe = shorter;
+      shorter = dropTrailingFragment(safe, this.recorded, unchanged);
+    }
+
+    this.pending = text.slice(safe.length);
+
+    return this.emit(safe);
+  }
+
+  end(): readonly Uint8Array[] {
+    const rest = this.pending + this.decoder.decode();
+    this.pending = "";
+
+    return this.emit(rest);
+  }
+
+  private emit(text: string): readonly Uint8Array[] {
+    return text === "" ? [] : [encoder.encode(scrubValues(text, this.recorded))];
+  }
+}
+
+const scrubStream =
+  (recorded: readonly ScrubEntry[]) =>
+  <E, R>(body: Stream.Stream<Uint8Array, E, R>): Stream.Stream<Uint8Array, E, R> =>
+    body.pipe(
+      Stream.mapAccum(
+        () => new StreamScrubber(recorded),
+        (scrubber, chunk: Uint8Array) => [scrubber, scrubber.push(chunk)] as const,
+        { onHalt: (scrubber) => scrubber.end() },
+      ),
+    );
+
 /**
  * The `--dry-run` view of a multipart body (design 4.6), as a streaming state machine over the
- * bytes the writer produced: delimiters, part heads and text parts as given; a file part's content
+ * bytes the writer produced: delimiters, part heads and text parts as given, the heads and text
+ * through the recorded-value scrub (`StreamScrubber`); a file part's content
  * (one with a `filename`) as `<file <basename>, N bytes>`, and any other part with a binary content
  * type as `<binary part, N bytes>`, counted, never held. One nested multipart level is walked with
  * its own boundary. Every delimiter is read as CRLF `--<boundary>`, so a CRLF is put before the
@@ -1547,10 +1603,13 @@ class MultipartSummary {
   private first = true;
   private mode: "content" | "epilogue" | "head" | "opaque" = "content";
   private pending: Uint8Array = crlf;
+  private readonly recorded: readonly ScrubEntry[];
   private summary: string | undefined = undefined;
+  private text: StreamScrubber | undefined = undefined;
 
-  constructor(boundary: string) {
+  constructor(boundary: string, recorded: readonly ScrubEntry[]) {
     this.boundaries = [boundary];
+    this.recorded = recorded;
   }
 
   push(chunk: Uint8Array): readonly Uint8Array[] {
@@ -1560,24 +1619,41 @@ class MultipartSummary {
   }
 
   end(): readonly Uint8Array[] {
-    return this.drain(true);
+    const out = [...this.drain(true)];
+    this.flushText(out);
+
+    return out;
   }
 
+  // Text is emitted through the recorded-value scrub; a summarized part is only counted.
   private content(bytes: Uint8Array, out: Uint8Array[]): void {
     if (this.summary === undefined) {
-      out.push(bytes);
+      this.text ??= new StreamScrubber(this.recorded);
+      out.push(...this.text.push(bytes));
     } else {
       this.counted += bytes.length;
     }
   }
 
+  private flushText(out: Uint8Array[]): void {
+    if (this.text !== undefined) {
+      out.push(...this.text.end());
+      this.text = undefined;
+    }
+  }
+
   private closePart(out: Uint8Array[]): void {
+    this.flushText(out);
     if (this.summary !== undefined) {
-      out.push(encoder.encode(`<${this.summary}, ${this.counted} bytes>`));
+      out.push(this.scrubbed(`<${this.summary}, ${this.counted} bytes>`));
     }
 
     this.summary = undefined;
     this.counted = 0;
+  }
+
+  private scrubbed(text: string): Uint8Array {
+    return encoder.encode(scrubValues(text, this.recorded));
   }
 
   private drain(final: boolean): readonly Uint8Array[] {
@@ -1591,7 +1667,7 @@ class MultipartSummary {
 
   private step(final: boolean, out: Uint8Array[]): boolean {
     if (this.mode === "epilogue") {
-      out.push(this.pending);
+      this.content(this.pending, out);
       this.pending = new Uint8Array(0);
 
       return false;
@@ -1614,7 +1690,7 @@ class MultipartSummary {
     const at = indexOfBytes(this.pending, headEnd);
     if (at === -1) {
       if (final) {
-        out.push(this.pending);
+        this.content(this.pending, out);
         this.pending = new Uint8Array(0);
       } else if (this.pending.length > maxPartHeadBytes) {
         this.mode = "opaque";
@@ -1629,7 +1705,7 @@ class MultipartSummary {
     const contentType = partContentType.exec(head)?.groups?.type;
     const nested = boundaryOf(contentType);
     if (nested === undefined) {
-      out.push(encoder.encode(`${head}\r\n\r\n`));
+      out.push(this.scrubbed(`${head}\r\n\r\n`));
       this.pending = this.pending.subarray(at + headEnd.length);
       const filename = partFilename.exec(head)?.groups?.filename;
       if (filename !== undefined) {
@@ -1639,7 +1715,7 @@ class MultipartSummary {
       }
     } else {
       // The head's last CRLF starts the nested body's first delimiter.
-      out.push(encoder.encode(`${head}\r\n`));
+      out.push(this.scrubbed(`${head}\r\n`));
       this.pending = this.pending.subarray(at + 2);
       this.boundaries.push(nested);
     }
@@ -1703,10 +1779,11 @@ class MultipartSummary {
 const summarizeMultipart = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
   boundary: string,
+  recorded: readonly ScrubEntry[],
 ): Stream.Stream<Uint8Array, E, R> =>
   body.pipe(
     Stream.mapAccum(
-      () => new MultipartSummary(boundary),
+      () => new MultipartSummary(boundary, recorded),
       (summary, chunk: Uint8Array) => [summary, summary.push(chunk)] as const,
       { onHalt: (summary) => summary.end() },
     ),
@@ -1731,10 +1808,11 @@ const line = (text: string): Stream.Stream<Uint8Array> => Stream.succeed(encoder
 
 /**
  * The `--dry-run` body (design 4.6, DM3-8): a text-family body as given, with every recorded value
- * replaced (`scrub`); a multipart body summarized by `MultipartSummary`; a binary body as
- * `<binary body, N bytes>` from its declared length, or, with no length, which is stdin, as
- * `<binary body from stdin>` (`<body from stdin>` for a text-family one) without reading it. A
- * file the runtime streams arrives with its size only, so its path cannot be named here.
+ * replaced (`scrub`, or `StreamScrubber` for a streamed one); a multipart body summarized by
+ * `MultipartSummary`; a binary body as `<binary body, N bytes>` from its declared length, or, with
+ * no length, which is stdin, as `<binary body from stdin>` (`<body from stdin>` for a text-family
+ * one) without reading it. A file the runtime streams arrives with its size only, so its path
+ * cannot be named here.
  */
 const dryRunBody = (
   request: HttpClientRequest.HttpClientRequest,
@@ -1767,6 +1845,7 @@ const dryRunBody = (
         Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
       ),
       boundary,
+      recorded,
     );
   }
 
@@ -1777,6 +1856,7 @@ const dryRunBody = (
   return isText(mediaType)
     ? body.stream.pipe(
         Stream.mapError(() => new UsageError({ message: "cannot read the request body" })),
+        scrubStream(recorded),
       )
     : line(`<binary body, ${body.contentLength} bytes>`);
 };
@@ -1843,9 +1923,9 @@ const dryRunUrl = (
  * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
  * `METHOD <absolute URL> HTTP/1.1`, the headers in send order, a blank line and `dryRunBody`. The
  * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
- * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it carries a
- * placeholder; every line is scrubbed of the values the run recorded, secret-file values among
- * them, and sanitized.
+ * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
+ * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
+ * the run recorded, secret-file values among them, and sanitized.
  */
 const printDryRun = (
   request: HttpClientRequest.HttpClientRequest,
@@ -1856,17 +1936,38 @@ const printDryRun = (
     const written = new Set(placeholders.map(({ scheme }) => placeholder(scheme)));
     const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
     const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
-    const carriesPlaceholder = (value: string): boolean =>
-      [...written].some((text) => value.includes(text));
+    const exact = new Set(
+      [...written].flatMap((text) => [text, `Bearer ${text}`, `Basic ${text}`]),
+    );
+    // A redacted header keeps only an exact placeholder form; a `Cookie` keeps each pair whose
+    // value is exactly a placeholder and redacts the value of every other pair.
+    const shownValue = (name: string, value: string): string => {
+      if (!Headers.isRedactedName(name, headerNames)) {
+        return value;
+      }
+
+      if (name.toLowerCase() !== "cookie") {
+        return exact.has(value) ? value : "<redacted>";
+      }
+
+      return value
+        .split(";")
+        .map((pair) => pair.trim())
+        .filter((pair) => pair !== "")
+        .map((pair) => {
+          const equals = pair.indexOf("=");
+          if (equals === -1) {
+            return "<redacted>";
+          }
+
+          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=<redacted>`;
+        })
+        .join("; ");
+    };
     const lines = [
       `${request.method} ${dryRunUrl(request, written, queryNames)} HTTP/1.1`,
       ...Object.entries(request.headers).map(
-        ([name, value]) =>
-          `${name}: ${
-            Headers.isRedactedName(name, headerNames) && !carriesPlaceholder(value)
-              ? "<redacted>"
-              : value
-          }`,
+        ([name, value]) => `${name}: ${shownValue(name, value)}`,
       ),
     ].map((text) => scrubbedAndSanitized(text, recorded));
 
