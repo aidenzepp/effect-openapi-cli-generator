@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect";
 import { Flag } from "effect/cli";
 import { UsageError } from "../domain/errors.ts";
+import { isJsonFamily, mediaEssence as essence } from "./sequential.ts";
 
 /**
  * An operation's declared media: request keys, and response keys per response key, in document
@@ -39,18 +40,6 @@ const concreteType = /^[!#$%&'+.^_`|~0-9a-z-]+\/[!#$%&'+.^_`|~0-9a-z-]+$/u;
 export const contentTypeFlag = Flag.String("content-type").pipe(Flag.optional);
 
 export const acceptFlag = Flag.String("accept").pipe(Flag.optional);
-
-const essence = (mediaType: string): string => {
-  const [head = ""] = mediaType.split(";", 1);
-
-  return head.trim().toLowerCase();
-};
-
-const isJsonFamily = (key: string): boolean => {
-  const type = essence(key);
-
-  return type === "application/json" || type.endsWith("+json");
-};
 
 const isRange = (key: string): boolean => essence(key).endsWith("/*");
 

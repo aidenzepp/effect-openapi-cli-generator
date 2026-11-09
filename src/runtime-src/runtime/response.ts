@@ -4,6 +4,7 @@ import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
 import type { ScrubEntry } from "./redact.ts";
 import { scrubAround } from "./redact.ts";
+import { mediaEssence } from "./sequential.ts";
 
 /**
  * What the matcher needs of one operation: its display name, its declared response keys (an
@@ -56,10 +57,9 @@ export const isBodiless = (response: HttpClientResponse.HttpClientResponse): boo
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 
 const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | undefined =>
-  Option.getOrUndefined(Headers.get(response.headers, "content-type"))
-    ?.split(";")[0]
-    ?.trim()
-    .toLowerCase();
+  Option.map(Headers.get(response.headers, "content-type"), mediaEssence).pipe(
+    Option.getOrUndefined,
+  );
 
 /**
  * The characters `sanitize` in `output.ts` removes (C0 except LF and TAB, DEL, C1, format
