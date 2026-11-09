@@ -420,6 +420,10 @@ export class SecretField {
 
 const secretFileNote = "Read the value from a file or stdin (-); it is never echoed";
 
+// A secret flag's help: the property's description, when given, then the secret-file note.
+const secretHelp = (description: string | undefined): string =>
+  description === undefined ? secretFileNote : `${description} ${secretFileNote}`;
+
 /**
  * A secret-file field flag, `--<prop>-file <path|->`. `Flag.String` keeps `-` literal; the value
  * is a path, so argv never holds the secret. Help shows the property's description, when given,
@@ -429,10 +433,17 @@ export const secretFileFlag = (name: string, description?: string) =>
   Flag.String(name).pipe(
     Flag.withMetavar("path|-"),
     Flag.optional,
-    Flag.withDescription(
-      description === undefined ? secretFileNote : `${description} ${secretFileNote}`,
-    ),
+    Flag.withDescription(secretHelp(description)),
   );
+
+/**
+ * A multipart `format: password` part's flag, `--<part> <path|->` (ruling DR4): a file part, so
+ * argv holds a path, never the secret. Help reads as `secretFileFlag`'s. The caller adds the
+ * presence step (`Flag.optional`, or `Flag.atLeast` for a repeated part); a read failure names
+ * the flag, never the path (`Multipart.fileBody`).
+ */
+export const secretPartFlag = (name: string, description?: string) =>
+  Flag.String(name).pipe(Flag.withMetavar("path|-"), Flag.withDescription(secretHelp(description)));
 
 export type Fields = Readonly<
   Record<string, Option.Option<FieldValue | FileField | SecretField> | readonly FieldValue[]>
