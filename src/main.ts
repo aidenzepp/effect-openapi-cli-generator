@@ -1,4 +1,15 @@
-import { Data, Effect, FileSystem, Option, Path, Runtime, Schema, Stdio, Stream } from "effect";
+import {
+  Data,
+  Effect,
+  FileSystem,
+  Match,
+  Option,
+  Path,
+  Runtime,
+  Schema,
+  Stdio,
+  Stream,
+} from "effect";
 import { Argument, CliError, Command, Flag } from "effect/cli";
 import { checkSpecText } from "./check/index.ts";
 import { generate, otherDocumentPathItems, setMembers, versionRefused } from "./generate.ts";
@@ -122,48 +133,45 @@ const configOf = (configPath: string) =>
 /**
  * One line for a failure that is not a diagnostic (design 8.1).
  */
-export const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string => {
-  if (error._tag === "RunLockHeld") {
-    return "error: another run holds the output directory's lock";
-  }
+export const failureLine = (error: Exclude<GenerateError, { _tag: "GenerateRefused" }>): string =>
+  Match.value(error).pipe(
+    Match.tag("RunLockHeld", () => "error: another run holds the output directory's lock"),
+    Match.tag("WriteRefused", (refused) => `error: the output was not written (${refused.reason})`),
+    Match.orElse((failure) => {
+      const reason = Option.match(Schema.decodeUnknownOption(FailureReason)(failure), {
+        onNone: () => "",
+        onSome: (found) => ` reason ${sanitizeField(found.reason)}`,
+      });
+      const subject = Option.match(Schema.decodeUnknownOption(FailureSubject)(failure), {
+        onNone: () => "",
+        onSome: (found) => ` subject ${sanitizeField(JSON.stringify(found.subject))}`,
+      });
 
-  if (error._tag === "WriteRefused") {
-    return `error: the output was not written (${error.reason})`;
-  }
-
-  const reason = Option.match(Schema.decodeUnknownOption(FailureReason)(error), {
-    onNone: () => "",
-    onSome: (found) => ` reason ${sanitizeField(found.reason)}`,
-  });
-  const subject = Option.match(Schema.decodeUnknownOption(FailureSubject)(error), {
-    onNone: () => "",
-    onSome: (found) => ` subject ${sanitizeField(JSON.stringify(found.subject))}`,
-  });
-
-  return `error: generation failed (${error._tag})${reason}${subject}`;
-};
+      return `error: generation failed (${failure._tag})${reason}${subject}`;
+    }),
+  );
 
 // Every failure prints and exits 1: a refusal as its diagnostic lines, anything else as one line.
 // A `GeneratorExit` has printed already.
 const reportFailure = (
   error: GenerateError | GeneratorExit,
-): Effect.Effect<never, GeneratorExit, Stdio.Stdio> => {
-  if (error._tag === "GeneratorExit") {
-    return Effect.fail(error);
-  }
-
-  return error._tag === "GenerateRefused"
-    ? exit(error.diagnostics.map(humanLine))
-    : exit([failureLine(error)]);
-};
+): Effect.Effect<never, GeneratorExit, Stdio.Stdio> =>
+  Match.value(error).pipe(
+    Match.tag("GeneratorExit", (done) => Effect.fail(done)),
+    Match.tag("GenerateRefused", (refused) => exit(refused.diagnostics.map(humanLine))),
+    Match.orElse((failure) => exit([failureLine(failure)])),
+  );
 
 // A document refusal is a verdict (`refused`); any other failure leaves none.
 const verdictDiagnostics = (
   error: GenerateError | GeneratorExit,
 ): Effect.Effect<readonly Diagnostic[], GeneratorExit, Stdio.Stdio> =>
-  error._tag === "GenerateRefused" && error.reason === "document"
-    ? Effect.succeed(error.diagnostics)
-    : reportFailure(error);
+  Match.value(error).pipe(
+    Match.when({ _tag: "GenerateRefused", reason: "document" }, (refused) =>
+      Effect.succeed(refused.diagnostics),
+    ),
+    Match.orElse(reportFailure),
+  );
 
 const setupFailed = (what: string) => () => exit([`error: ${what}`]);
 
