@@ -115,4 +115,35 @@ describe("m3-wi1a: the Milestone 3 global settings and the run record", () => {
     expect(root).toContain('export const health = Command.make("health", {}, () =>');
     expect(occurrences(root, recordRun)).toBe(1);
   });
+
+  test("a schema keyed Client takes the planner's rename beside the root's Client namespace", async () => {
+    const value = {
+      ...spec,
+      components: {
+        ...decodeRecord(spec.components),
+        schemas: {
+          ...decodeRecord(decodeRecord(spec.components).schemas),
+          Client: { properties: { id: { type: "string" } }, type: "object" },
+        },
+      },
+      paths: {
+        ...decodeRecord(spec.paths),
+        "/clients": {
+          post: {
+            operationId: "createClient",
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Client" } } },
+              required: true,
+            },
+            responses: { "204": { description: "created" } },
+          },
+        },
+      },
+    };
+    const output = await emit(value);
+    const root = contentOf(output, "src/cli/root.ts");
+    expect(occurrences(root, 'import * as Client from "../runtime/client.ts";')).toBe(1);
+    expect(root).toContain("Client2");
+    expect(root).not.toMatch(/import \{[^}]*\bClient\b[^}]*\} from "\.\.\/domain\/schemas\.ts";/u);
+  });
 });
