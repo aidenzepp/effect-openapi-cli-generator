@@ -15,6 +15,7 @@ import * as Output from "../../src/runtime-src/runtime/output.ts";
 // m3-pw1b: the V1 cli emitter builds the `secret-file` field flag m3-pw1a plans for a flattened
 // `format: password` string property (design 13.1 R4): `--<prop>-file` through the m3-pw2 helper,
 // its value wrapped as an `Input.SecretField` so the runtime reads it from a file or stdin.
+// m3-pw1h: the flag's help carries the property's sanitized description, then the helper's note.
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///pw/openapi.json");
 
@@ -27,7 +28,10 @@ const config: Schema.Json = {
   servers: { accepted: ["https://api.example.com"] },
 };
 
-const spec: Schema.Json = {
+const plainPassword: Schema.Json = { format: "password", type: "string" };
+
+// The spec, its `password` property replaced when a test gives one.
+const specWith = (password: Schema.Json = plainPassword): Schema.Json => ({
   info: { title: "Pw", version: "1.0.0" },
   openapi: "3.1.1",
   paths: {
@@ -40,7 +44,7 @@ const spec: Schema.Json = {
               schema: {
                 properties: {
                   name: { type: "string" },
-                  password: { format: "password", type: "string" },
+                  password,
                   passwords: { items: { format: "password", type: "string" }, type: "array" },
                 },
                 type: "object",
@@ -54,17 +58,17 @@ const spec: Schema.Json = {
       },
     },
   },
-};
+});
 
 // The formatter may break lines; the structure is what the test pins.
 const squeezed = (text: string): string => text.replaceAll(/\s+/gu, " ");
 
 // The emitted `users` module, squeezed, and the emit refusals.
-const emitted = () =>
+const emitted = (password?: Schema.Json) =>
   Effect.runPromise(
     Effect.gen(function* generate() {
       const author = yield* decodeAuthorConfig(config, { document: configDocument });
-      const resolution = yield* resolve({ document, line: "3.1", value: spec });
+      const resolution = yield* resolve({ document, line: "3.1", value: specWith(password) });
       const { api } = yield* normalize(resolution, {
         checkFindings: [],
         config: author,
@@ -87,7 +91,7 @@ const silent: Console.Console = Object.assign({}, globalThis.console, {
 });
 
 // `--help` of a command whose one flag is the emitted secret-file flag, run in process.
-const help = () =>
+const help = (description?: string) =>
   Effect.runPromise(
     Effect.suspend(() => {
       const printed: string[] = [];
@@ -99,7 +103,12 @@ const help = () =>
       });
       const command = Command.make(
         "create",
-        { passwordFile: Input.secretFileFlag("password-file") },
+        {
+          passwordFile:
+            description === undefined
+              ? Input.secretFileFlag("password-file")
+              : Input.secretFileFlag("password-file", description),
+        },
         () => Effect.void,
       );
 
@@ -158,5 +167,45 @@ describe("m3-pw1b secret-file field flag", () => {
     expect(code).toBe(0);
     expect(printed).toContain("--password-file path|-");
     expect(printed).toContain("Read the value from a file or stdin");
+  });
+
+  test("secret-file flag help carries the property description", async () => {
+    const { content, refusals } = await emitted({
+      description: "The account password.",
+      format: "password",
+      type: "string",
+    });
+
+    expect(refusals).toEqual([]);
+    expect(content).toMatch(
+      /Input\.secretFileFlag\( ?"password-file", "The account password\.",? ?\)/u,
+    );
+
+    const { code, printed } = await help("The account password.");
+    const described = printed.indexOf("The account password.");
+
+    expect(code).toBe(0);
+    expect(described).toBeGreaterThanOrEqual(0);
+    expect(printed.indexOf("Read the value from a file or stdin")).toBeGreaterThan(described);
+  });
+
+  test("a hostile property description is sanitized before it reaches the flag", async () => {
+    const { content } = await emitted({
+      description: "The\u001B[31m account\u202E password.",
+      format: "password",
+      type: "string",
+    });
+
+    expect(content).toMatch(
+      /Input\.secretFileFlag\( ?"password-file", "The\[31m account password\.",? ?\)/u,
+    );
+    expect(content).not.toContain("\u001B");
+    expect(content).not.toContain("\u202E");
+  });
+
+  test("a property without a description emits today's call", async () => {
+    const { content } = await emitted({ description: "", format: "password", type: "string" });
+
+    expect(content).toContain('Input.secretFileFlag("password-file"),');
   });
 });

@@ -323,6 +323,13 @@ const documentLabel = (entry: string, document: string): string => {
 const brackets = (marker: EncodingRule["nonStandard"]): readonly (readonly [string, Expr])[] =>
   marker === "deepObjectBrackets" ? [["brackets", bool(true)]] : [];
 
+// The scalar switch's option, `scalars: true`, for an entry the model marks (design 6.1 Scalar
+// switch); nothing for an unmarked one (C16).
+const scalars = (
+  marker: EncodingRule["nonStandardScalars"],
+): readonly (readonly [string, Expr])[] =>
+  marker === "deepObjectScalars" ? [["scalars", bool(true)]] : [];
+
 interface ParameterParts {
   readonly cookie?: Expr;
   readonly field: Field;
@@ -540,9 +547,10 @@ const parameterParts = (
     }
 
     // An object's value is JSON data, as a `content` parameter's is; the runtime refuses a member
-    // that is itself an object or array.
+    // that is itself an object or array. A scalar-marked union is one JSON value too (design 6.1
+    // Scalar switch).
     let valueType = typeKeyword(boolean.success ? "boolean" : "string");
-    if (serialization.objectValued) {
+    if (serialization.objectValued || serialization.nonStandardScalars !== undefined) {
       valueType = typeRef(I("Serialize"), [M("Json")]);
     } else if (array.success) {
       valueType = typeReadonlyArray(typeKeyword("string"));
@@ -572,6 +580,7 @@ const parameterParts = (
         ...brackets(serialization.nonStandard),
         ["explode", bool(explode)],
         ["required", required],
+        ...scalars(serialization.nonStandardScalars),
       ]);
 
       return { field, query: fn(style, [wire, value, options]) };
@@ -1263,6 +1272,8 @@ const formEncoding = (
   if (serialization?.explode !== undefined) {
     entries.push(["explode", bool(serialization.explode)]);
   }
+
+  entries.push(...scalars(rule?.nonStandardScalars));
 
   const style = serialization?.style;
   if (style !== undefined && !queryStyles.has(style)) {

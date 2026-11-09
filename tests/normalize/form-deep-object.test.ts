@@ -483,3 +483,119 @@ describe("field scope under a $ref request body", () => {
     expect(coverage.invented).toEqual([]);
   });
 });
+
+// Design 6.1 Scalar switch (M3-D92 C; R86): a form deepObject Encoding entry follows the query
+// parameter rule. With `nonStandard.deepObjectScalars`, an entry whose every branch is covered is
+// generated with the scalar marker and its notice; an uncovered branch keeps today's refusal.
+interface Switches {
+  readonly deepObjectBrackets?: boolean;
+  readonly deepObjectScalars?: boolean;
+}
+
+const bodyUnder = (requestBody: Json, nonStandard: Switches): BodyOutcome =>
+  Effect.runSync(normalizeBody(resolutionOf(requestBody), { nonStandard, openapi, pointer: site }));
+
+const ruleMarkers = (found: MediaAlternative): Record<string, readonly (string | undefined)[]> =>
+  Object.fromEntries(
+    found.encoding.map((rule: EncodingRule) => [
+      rule.target.kind === "property" ? rule.target.name : `#${rule.target.index}`,
+      [rule.nonStandard, rule.nonStandardScalars],
+    ]),
+  );
+
+const scalarChoice = (name: string) => ({
+  code: "PRM-27/scalar-author-choice",
+  pointer: `${media}/encoding/${name}`,
+  related: [],
+  row: "PRM-27",
+  scope: "element",
+  severity: "notice",
+});
+
+const nestedOrEmpty: Json = {
+  anyOf: [nestedProperties.metadata ?? {}, { enum: [""], type: "string" }],
+};
+
+describe("PRM-27 scalar switch: a covered form deepObject union is generated and marked", () => {
+  test('PRM-27: anyOf of a one-level object and "" is generated, marked and noticed', () => {
+    const outcome = bodyUnder(fieldBody({ expand: objectOrEmpty, name: string }, ["expand"]), {
+      deepObjectScalars: true,
+    });
+    const found = formAlternative(outcome);
+
+    expect(found.refusedFields ?? []).toEqual([]);
+    expect(ruleMarkers(found)).toEqual({
+      expand: [undefined, "deepObjectScalars"],
+      name: [undefined, undefined],
+    });
+    expect(findings(outcome.diagnostics)).toEqual([scalarChoice("expand")]);
+  });
+
+  test('PRM-27: with both switches, anyOf of a nested object and "" carries both markers', () => {
+    const outcome = bodyUnder(fieldBody({ expand: nestedOrEmpty }, ["expand"]), {
+      deepObjectBrackets: true,
+      deepObjectScalars: true,
+    });
+
+    expect(ruleMarkers(formAlternative(outcome))).toEqual({
+      expand: ["deepObjectBrackets", "deepObjectScalars"],
+    });
+    expect(findings(outcome.diagnostics)).toEqual([
+      bracketChoice("expand"),
+      scalarChoice("expand"),
+    ]);
+  });
+
+  test('PRM-27: with the scalar switch alone, anyOf of a nested object and "" is refused at field scope', () => {
+    const outcome = bodyUnder(fieldBody({ expand: nestedOrEmpty, name: string }, ["expand"]), {
+      deepObjectScalars: true,
+    });
+
+    expect(formAlternative(outcome).refusedFields?.map(String)).toEqual(["expand"]);
+    expect(findings(outcome.diagnostics).map((found) => [found.code, found.scope])).toEqual([
+      ["PRM-27/compound-nested", "field"],
+    ]);
+  });
+
+  test("PRM-27: a null or untyped branch stays refused under either switch", () => {
+    for (const schema of [{ anyOf: [nestedProperties.metadata ?? {}, { type: "null" }] }, {}]) {
+      for (const deepObjectBrackets of [false, true]) {
+        const outcome = bodyUnder(fieldBody({ expand: schema, name: string }, ["expand"]), {
+          deepObjectBrackets,
+          deepObjectScalars: true,
+        });
+
+        expect(findings(outcome.diagnostics).map((found) => [found.code, found.scope])).toEqual([
+          ["PRM-27/non-object-schema", "field"],
+        ]);
+      }
+    }
+  });
+
+  test("PRM-27: a refused alternative keeps no scalar notice", () => {
+    const outcome = bodyUnder(
+      bodyOf({ expand: objectOrEmpty, items: nestedProperties.items ?? {} }),
+      {
+        deepObjectScalars: true,
+      },
+    );
+
+    expect(outcome._tag).toBe("Refused");
+    expect(findings(outcome.diagnostics)).toEqual([compoundNested("items")]);
+  });
+
+  test("PRM-27: without the scalar switch every case refuses as today", () => {
+    for (const nonStandard of [{}, { deepObjectBrackets: true }, { deepObjectScalars: false }]) {
+      for (const schema of [objectOrEmpty, nestedOrEmpty]) {
+        const outcome = bodyUnder(
+          fieldBody({ expand: schema, name: string }, ["expand"]),
+          nonStandard,
+        );
+
+        expect(findings(outcome.diagnostics).map((found) => found.code)).toEqual([
+          "PRM-27/non-object-schema",
+        ]);
+      }
+    }
+  });
+});

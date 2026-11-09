@@ -72,3 +72,42 @@ describe("author config nonStandard.deepObjectBrackets", () => {
     expect(Schema.encodeSync(AuthorConfig)(config)).toEqual(base);
   });
 });
+
+describe("author config nonStandard.deepObjectScalars", () => {
+  test("deepObjectScalars true decodes with the key kept and round-trips", () => {
+    const config = decode({ ...base, nonStandard: { deepObjectScalars: true } });
+    expect(config.nonStandard?.deepObjectScalars).toBe(true);
+    expect(config.nonStandard?.deepObjectBrackets).toBeUndefined();
+    expect(Schema.encodeSync(AuthorConfig)(config)).toEqual({
+      ...base,
+      nonStandard: { deepObjectScalars: true },
+    });
+  });
+
+  test("deepObjectScalars false decodes", () => {
+    const config = decode({ ...base, nonStandard: { deepObjectScalars: false } });
+    expect(config.nonStandard?.deepObjectScalars).toBe(false);
+  });
+
+  test("the two switches are independent keys", () => {
+    const both = { deepObjectBrackets: false, deepObjectScalars: true };
+    const config = decode({ ...base, nonStandard: both });
+    expect(config.nonStandard).toEqual(both);
+    expect(Schema.encodeSync(AuthorConfig)(config)).toEqual({ ...base, nonStandard: both });
+  });
+
+  test("a non-boolean is refused as an invalid value", () => {
+    expect(refusals({ ...base, nonStandard: { deepObjectScalars: "true" } })).toEqual([
+      "/nonStandard/deepObjectScalars|CFG-1/invalid-value",
+    ]);
+    expect(refusals({ ...base, nonStandard: { deepObjectScalars: 1 } })).toEqual([
+      "/nonStandard/deepObjectScalars|CFG-1/invalid-value",
+    ]);
+  });
+
+  test("an unknown key beside it is refused", () => {
+    expect(refusals({ ...base, nonStandard: { deepObjectScalars: true, scalars: true } })).toEqual([
+      "/nonStandard/scalars|CFG-1/unknown-key",
+    ]);
+  });
+});

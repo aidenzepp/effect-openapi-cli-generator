@@ -451,6 +451,12 @@ export interface QueryOptions {
   readonly brackets?: boolean;
   readonly explode: boolean;
   readonly required: boolean;
+  /**
+   * `deepObject` only: send a scalar value as one `name=value` pair by the type-to-text rule
+   * (design 6.1 Scalar switch). Set only by the author config's `nonStandard.deepObjectScalars`;
+   * absent is strict, and a scalar is refused.
+   */
+  readonly scalars?: boolean;
 }
 
 /**
@@ -655,6 +661,19 @@ const bracketPairs = (
       : leaves.map(([, text], index) => `${names[index]}=${codec.value(text)}`);
   });
 
+/**
+ * Whether `deepObject` takes this value through the bracket convention: an object or array under
+ * `brackets`, but not a scalar the scalar switch sends as one pair.
+ */
+const bracketed = (style: QueryStyle, value: Nested, brackets?: boolean, scalars?: boolean) =>
+  style === "deepObject" && brackets === true && !(scalars === true && isScalar(value));
+
+/**
+ * `deepObject` sends an object, or a scalar when the scalar switch is set.
+ */
+const deepObjectTakes = (text: Text, scalars?: boolean) =>
+  text.kind === "object" || (scalars === true && text.kind === "primitive");
+
 const nothingSent = (
   name: string,
   value: Nested,
@@ -677,7 +696,7 @@ const queryStyled =
         return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
       }
 
-      if (style === "deepObject" && options.brackets === true) {
+      if (bracketed(style, value, options.brackets, options.scalars)) {
         const pairs = yield* bracketPairs(name, value, queryCodec(options.allowReserved));
 
         return pairs === undefined ? yield* nothingSent(name, value, options) : pairs.join("&");
@@ -693,7 +712,7 @@ const queryStyled =
         return yield* nothingSent(name, value, options);
       }
 
-      if (style === "deepObject" && text.kind !== "object") {
+      if (style === "deepObject" && !deepObjectTakes(text, options.scalars)) {
         return yield* refuse(`parameter ${name} is not an object, which deepObject requires`);
       }
 
@@ -731,7 +750,8 @@ export const pipeDelimited: QueryExpansion = queryStyled("pipeDelimited");
 /**
  * Query `deepObject`: an object with scalar members as `name[key]=value`, brackets encoded.
  * `explode` has no effect. A deeper value is refused unless `brackets` is set; then any object or
- * array is sent in the bracket convention.
+ * array is sent in the bracket convention. A scalar is refused unless `scalars` is set; then it is
+ * one `name=value` pair.
  */
 export const deepObject = queryStyled("deepObject");
 
@@ -1732,6 +1752,10 @@ export interface FormEncoding {
    */
   readonly brackets?: boolean;
   readonly explode?: boolean;
+  /**
+   * With `style: deepObject` only: a scalar as one pair, as `QueryOptions.scalars`.
+   */
+  readonly scalars?: boolean;
   readonly style?: QueryStyle;
 }
 
@@ -1836,7 +1860,7 @@ const styledPairs = (
       explode: encoding.explode ?? style === "form",
     };
 
-    if (style === "deepObject" && encoding.brackets === true) {
+    if (bracketed(style, value, encoding.brackets, encoding.scalars)) {
       const pairs = yield* bracketPairs(name, value, formCodec(options.allowReserved));
 
       return pairs === undefined ? noPairs : { members: true, pairs };
@@ -1852,7 +1876,7 @@ const styledPairs = (
       return noPairs;
     }
 
-    if (style === "deepObject" && text.kind !== "object") {
+    if (style === "deepObject" && !deepObjectTakes(text, encoding.scalars)) {
       return yield* refuse(`property ${name} is not an object, which deepObject requires`);
     }
 

@@ -142,10 +142,15 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
       operations: Schema.optionalKey(Schema.Record(Schema.NonEmptyString, OperationOverride)),
     }),
   ),
-  // Opt-in switches for behavior outside the OpenAPI specification (D-AD11, D-OQ1); absent and
-  // `false` both mean strict.
+  // Opt-in switches for behavior outside the OpenAPI specification (D-AD11, D-OQ1), each separate
+  // and never inferred from the other: `deepObjectBrackets` for nested members in the bracket
+  // convention, `deepObjectScalars` for a scalar `deepObject` value as `name=value` (design 6.1
+  // Scalar switch). Absent and `false` both mean strict.
   nonStandard: Schema.optionalKey(
-    Schema.Struct({ deepObjectBrackets: Schema.optionalKey(Schema.Boolean) }),
+    Schema.Struct({
+      deepObjectBrackets: Schema.optionalKey(Schema.Boolean),
+      deepObjectScalars: Schema.optionalKey(Schema.Boolean),
+    }),
   ),
   package: Schema.Struct({
     name: Schema.NonEmptyString,

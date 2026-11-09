@@ -16,8 +16,8 @@ import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
-import { deepObjectExplodeText, formStyleRefusal, partHeader } from "./parameters.ts";
-import type { PartHeaderOutcome } from "./parameters.ts";
+import { deepObjectExplodeText, formStyleRefusal, partHeader, scalarCover } from "./parameters.ts";
+import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
 import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
 
 /**
@@ -26,7 +26,10 @@ import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
  * opt-in switches of the same name; absent is strict (design 6.1, D-OQ1).
  */
 export interface BodySite {
-  readonly nonStandard?: { readonly deepObjectBrackets?: boolean };
+  readonly nonStandard?: {
+    readonly deepObjectBrackets?: boolean;
+    readonly deepObjectScalars?: boolean;
+  };
   readonly openapi: string;
   readonly operation?: typeof DiagnosticOperation.Type;
   readonly pointer: string;
@@ -660,6 +663,7 @@ interface PlainRule extends PlainNested {
   nested?: readonly PlainNested[];
   nestedItem?: PlainNested;
   nonStandard?: "deepObjectBrackets";
+  nonStandardScalars?: "deepObjectScalars";
   readonly origin: { readonly document: string; readonly pointer: string };
   readonly rows: readonly string[];
 }
@@ -2033,6 +2037,33 @@ const bracketChoice = (input: RuleInput): Finding =>
     input.actual,
   );
 
+const scalarChoiceCode = "PRM-27/scalar-author-choice";
+
+const scalarChoice = (input: RuleInput): Finding =>
+  notice(
+    scalarChoiceCode,
+    "style-values",
+    "Encoding style deepObject under form-urlencoded",
+    `The author config sends a scalar deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} as name=value, which the specification does not define.`,
+    input.actual,
+  );
+
+// The notices of the author config's switches, which go with an entry that is not sent.
+const authorChoiceCodes: ReadonlySet<string> = new Set([bracketChoiceCode, scalarChoiceCode]);
+
+// The scalar switch's decision for a form deepObject entry, by the query parameter rule (design
+// 6.1 Scalar switch); `Strict` for any other style.
+const scalarCoverOf = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+): Effect.Effect<ScalarCover> =>
+  serialization?.style !== "deepObject" || input.schema === undefined
+    ? Effect.succeed({ _tag: "Strict" })
+    : scalarCover(ctx.resolution, input.schema, ctx.site.nonStandard, {
+        maxNodes: ctx.walk.maxNodes,
+      });
+
 // The query style table's refusal for a form property's explicit style fields (design 6.3, through
 // the parameter rule `formStyleRefusal`), placed at the Encoding entry; it drops the alternative.
 const styleRefusalOf = (
@@ -2095,6 +2126,26 @@ const deepObjectOf = (
     return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
   });
 
+// What PRM-27 does to one form rule once the scalar switch has decided: its covered branches
+// (refused when a nested branch or member union is uncovered, marked when the bracket switch covers
+// a nested one), or the strict nested test.
+const coveredDeepObject = (
+  ctx: Context,
+  input: RuleInput,
+  serialization: PlainSerialization | undefined,
+  cover: ScalarCover,
+): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> => {
+  if (cover._tag === "Uncovered") {
+    return Effect.succeed("refuse");
+  }
+
+  if (cover._tag === "Covered") {
+    return Effect.succeed(cover.nested ? "mark" : "none");
+  }
+
+  return deepObjectOf(ctx, input, serialization);
+};
+
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
 // names the table's type, which changes nothing on the wire. Style fields the query style table
@@ -2108,12 +2159,18 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       return { findings: typing.findings, rule: undefined };
     }
 
-    const inapplicable = yield* styleRefusalOf(ctx, input, typing.serialization);
+    // Under the scalar switch the branch walk decides a deepObject entry the strict object test
+    // would refuse; the style table refuses nothing else for deepObject (design 6.1 Scalar switch).
+    const cover = yield* scalarCoverOf(ctx, input, typing.serialization);
+    const inapplicable =
+      cover._tag === "Strict"
+        ? yield* styleRefusalOf(ctx, input, typing.serialization)
+        : Option.none();
     if (Option.isSome(inapplicable)) {
       return { findings: [...typing.findings, inapplicable.value], rule: undefined };
     }
 
-    const deepObject = yield* deepObjectOf(ctx, input, typing.serialization);
+    const deepObject = yield* coveredDeepObject(ctx, input, typing.serialization, cover);
     if (deepObject === "refuse") {
       return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
     }
@@ -2153,10 +2210,15 @@ const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, Bod
       rule.nonStandard = "deepObjectBrackets";
     }
 
+    if (cover._tag === "Covered") {
+      rule.nonStandardScalars = "deepObjectScalars";
+    }
+
     return {
       findings: [
         ...typing.findings,
         ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+        ...(cover._tag === "Covered" ? [scalarChoice(input)] : []),
         ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
         ...formIgnored(node, input.actual),
       ],
@@ -2188,10 +2250,11 @@ const formPositional = (media: Media): readonly Finding[] => [
       ]),
 ];
 
-// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention:
-// its bracket notices go with it (design 8.4), whatever the order of its properties.
+// A refused form alternative sends nothing, so no entry of it is sent in the bracket convention or
+// as a scalar pair: its author-choice notices go with it (design 8.4, 8.5 rule 7), whatever the
+// order of its properties.
 const refusedFormParts = (findings: readonly Finding[]): Parts =>
-  refusedParts(findings.filter((finding) => finding.code !== bracketChoiceCode));
+  refusedParts(findings.filter((finding) => !authorChoiceCodes.has(finding.code)));
 
 // Form-urlencoded rules: one per declared property, by name (MED-11, MED-12 as for multipart).
 // With `fields` (a request body, design 8.5 rules 2, 3 and 11), a property whose rule refuses is

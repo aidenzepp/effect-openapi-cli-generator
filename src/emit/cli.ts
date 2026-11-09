@@ -517,10 +517,12 @@ const isArrayParameter = (parameter: Pick<Typed, "schema">, context: CommandCont
     return array.success;
   });
 
-// Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
+// Whether a styled parameter takes JSON (design 6.1): an object, or a union the scalar switch
+// covers (`nonStandardScalars`, design 6.1 Scalar switch). The operator gives it as JSON, which the
 // builder hands to the style serializer. A `content` parameter is one value whatever its schema.
 const isObjectParameter = ({ serialization }: Pick<Typed, "serialization">): boolean =>
-  serialization.kind === "style" && serialization.objectValued;
+  serialization.kind === "style" &&
+  (serialization.objectValued || serialization.nonStandardScalars !== undefined);
 
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A
@@ -852,13 +854,16 @@ const flagEntry = (flag: PlannedFlag, operation: Operation, context: CommandCont
       return yield* partOptionEntry(flag, source, operation, context);
     }
 
+    const { alternative, schema } = bodyField(operation, source, context);
+
     // A `format: password` property's secret-file flag (design 13.1 R4): the m3-pw2 helper carries
-    // its presence and its help note, which a schema description would replace.
+    // its presence and its help note, after the property's sanitized description when it has one.
     if (source.kind === "secret-file") {
-      return [flag.identifier, fn("Input.secretFileFlag", str(flag.name))] as const;
+      const description = describedBy(yield* fieldDescription(flag, alternative, schema));
+
+      return [flag.identifier, fn("Input.secretFileFlag", str(flag.name), ...description)] as const;
     }
 
-    const { alternative, schema } = bodyField(operation, source, context);
     if (source.kind === "integer" && schema.integer === "unsettled") {
       return yield* refuse("unsupported-flag", flag.name);
     }
