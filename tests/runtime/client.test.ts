@@ -197,7 +197,7 @@ const run = async (
 ) => {
   const { client, pulls, seen } = fixture();
   const program = client
-    .pipe(Client.redirectLoop(attach, sentinel, everyMethod))
+    .pipe(Client.redirectLoop(attach, sentinel, everyMethod, Client.noCertificate))
     .execute(request)
     .pipe(
       Effect.map((response): Outcome => `Response:${response.status}`),
@@ -215,7 +215,7 @@ const refusal = (request: HttpClientRequest.HttpClientRequest) => {
 
   return Effect.runPromise(
     client
-      .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod))
+      .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod, Client.noCertificate))
       .execute(request)
       .pipe(Effect.flip, Effect.scoped),
   );
@@ -510,7 +510,7 @@ describe("SP2: the discarded 3xx response is aborted, not drained", () => {
     const { client } = fixture();
     const text = await Effect.runPromise(
       client
-        .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod))
+        .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod, Client.noCertificate))
         .execute(HttpClientRequest.get(`${A}/endless/307`))
         .pipe(
           // Read only a 200: a 3xx here carries the endless body.
@@ -535,7 +535,7 @@ const owned = async <A>(
   const { client, pulls, seen } = fixture();
   const exit = await Effect.runPromiseExit(
     client
-      .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod))
+      .pipe(Client.redirectLoop(noAttach, sentinel, everyMethod, Client.noCertificate))
       .execute(HttpClientRequest.get(url))
       .pipe(
         Effect.orDie,
@@ -687,7 +687,10 @@ describe("RT-5: the method assertion and the User-Agent", () => {
     const { client, seen } = fixture();
     const exit = Effect.runPromiseExit(
       client
-        .pipe(Client.redirectLoop(noAttach, sentinel, allow), Client.withUserAgent("acme", "1.2.3"))
+        .pipe(
+          Client.redirectLoop(noAttach, sentinel, allow, Client.noCertificate),
+          Client.withUserAgent("acme", "1.2.3"),
+        )
         .execute(request)
         .pipe(Effect.scoped),
     );
@@ -727,8 +730,17 @@ describe("RT-5: the method assertion and the User-Agent", () => {
   test("building the loop without an allowlist is a type error", () => {
     const { client } = fixture();
 
-    // @ts-expect-error the allowlist is a required third input of redirectLoop
-    expect(() => client.pipe(Client.redirectLoop(noAttach, sentinel))).not.toThrow();
+    expect(() =>
+      // @ts-expect-error the allowlist is a required third input of redirectLoop
+      client.pipe(Client.redirectLoop(noAttach, sentinel, undefined, Client.noCertificate)),
+    ).not.toThrow();
+  });
+
+  test("building the loop without a certificate decision is a type error", () => {
+    const { client } = fixture();
+
+    // @ts-expect-error the certificate decision is a required fourth input of redirectLoop
+    expect(() => client.pipe(Client.redirectLoop(noAttach, sentinel, everyMethod))).not.toThrow();
   });
 
   test("a POST 303 with only POST allowed is refused before the GET is sent", async () => {
@@ -770,7 +782,9 @@ describe("RT-5: the method assertion and the User-Agent", () => {
 // The init each hop of the given requests, sent in order through one client, executed with.
 const initsOf = (...urls: readonly string[]) => {
   const { client, seen } = fixture();
-  const looped = client.pipe(Client.redirectLoop(noAttach, sentinel, everyMethod));
+  const looped = client.pipe(
+    Client.redirectLoop(noAttach, sentinel, everyMethod, Client.noCertificate),
+  );
 
   return Effect.runPromise(
     Effect.all(
