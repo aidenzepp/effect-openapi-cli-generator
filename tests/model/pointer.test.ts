@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import {
   escapeToken,
   evaluateFragment,
+  evaluateFragmentResult,
   evaluatePointer,
+  evaluatePointerResult,
+  evaluateTokens,
+  evaluateTokensResult,
   formatPointer,
   parseFragment,
+  parseFragmentResult,
   parsePointer,
+  parsePointerResult,
   unescapeToken,
+  unescapeTokenResult,
 } from "../../src/model/pointer.ts";
 import type { Json } from "../../src/model/pointer.ts";
 
@@ -141,5 +148,49 @@ describe("evaluation failures", () => {
   test("failures carry the prefix pointer that failed", () => {
     const e = run(Effect.flip(evaluatePointer(doc, "/foo/9")));
     expect("pointer" in e && e.pointer).toBe("/foo/9");
+  });
+});
+
+describe("Result functions agree with their Effect forms", () => {
+  const agree = <A, E extends { readonly _tag: string }>(
+    result: Result.Result<A, E>,
+    effect: Effect.Effect<A, E>,
+  ) => {
+    const exit = Effect.runSyncExit(effect);
+    if (Result.isSuccess(result)) {
+      expect(exit._tag).toBe("Success");
+      expect(exit._tag === "Success" && exit.value).toEqual(result.success);
+    } else {
+      expect(exit._tag).toBe("Failure");
+      expect(Effect.runSync(Effect.flip(effect))).toEqual(result.failure);
+    }
+  };
+
+  const pointers = ["", "/", "a", "/foo/0", "/a~1b", "/m~0n", "/~", "/~2", "/foo/9", "/foo/0/x"];
+  for (const pointer of pointers) {
+    test(`pointer ${JSON.stringify(pointer)}`, () => {
+      agree(parsePointerResult(pointer), parsePointer(pointer));
+      agree(evaluatePointerResult(doc, pointer), evaluatePointer(doc, pointer));
+    });
+  }
+
+  const fragments = ["#", "#/foo/0", "#/a%25b", "#/%zz", "foo", "#/foo~", "#a"];
+  for (const fragment of fragments) {
+    test(`fragment ${JSON.stringify(fragment)}`, () => {
+      agree(parseFragmentResult(fragment), parseFragment(fragment));
+      agree(evaluateFragmentResult(doc, fragment), evaluateFragment(doc, fragment));
+    });
+  }
+
+  for (const token of ["a", "a~1b", "~", "~2", "a~"]) {
+    test(`token ${JSON.stringify(token)}`, () => {
+      agree(unescapeTokenResult(token), unescapeToken(token));
+    });
+  }
+
+  test("tokens", () => {
+    for (const tokens of [[], ["foo", "1"], ["foo", "x"], ["constructor"], ["foo", "0", "x"]]) {
+      agree(evaluateTokensResult(doc, tokens), evaluateTokens(doc, tokens));
+    }
   });
 });

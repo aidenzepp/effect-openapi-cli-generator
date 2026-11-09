@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Exit, Schema } from "effect";
+import { Effect, Exit, Schema } from "effect";
 import hostile from "../fixtures/seeds/hostile.json" with { type: "json" };
 import paths from "../fixtures/seeds/paths.json" with { type: "json" };
 import {
@@ -17,6 +17,7 @@ import {
   WireName,
 } from "../../src/model/brands.ts";
 import { methodTokens } from "../../src/model/method-tokens.ts";
+import { parsePointer } from "../../src/model/pointer.ts";
 
 const decode = (codec: Schema.Decoder<unknown>, input: Schema.Json) =>
   Schema.decodeUnknownExit(codec)(input);
@@ -231,6 +232,16 @@ describe("method-token allowlist", () => {
     }
     for (const bad of ["patch", "Query", "PTH-23", "BAD TOKEN", "", "FOO"]) {
       expect(issueTag(MethodToken, bad)).toBe("rejected");
+    }
+  });
+});
+
+describe("JsonPointer brand", () => {
+  test("accepts exactly what parsePointer accepts", () => {
+    for (const text of ["", "/", "//", "a", "/a~1b/m~0n", "/~", "/~2", "/~01", "/\uD800"]) {
+      expect(Schema.is(JsonPointer)(text)).toBe(
+        Exit.isSuccess(Effect.runSyncExit(parsePointer(text))),
+      );
     }
   });
 });

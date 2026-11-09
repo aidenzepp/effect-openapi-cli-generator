@@ -1,5 +1,5 @@
-import { Array as Arr, Effect, Exit, Predicate, Schema } from "effect";
-import { parsePointer } from "./pointer.ts";
+import { Array as Arr, Predicate, Schema } from "effect";
+import { pointerPattern } from "./pointer.ts";
 import { methodTokens } from "./method-tokens.ts";
 
 const token = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
@@ -117,9 +117,7 @@ export const DocumentUri = pattern(uriPattern).pipe(Schema.brand("DocumentUri"))
  * An RFC 6901 JSON Pointer.
  */
 export const JsonPointer = Schema.String.pipe(
-  Schema.check(
-    Schema.makeFilter((value: string) => Exit.isSuccess(Effect.runSyncExit(parsePointer(value)))),
-  ),
+  Schema.check(Schema.isPattern(pointerPattern)),
   Schema.brand("JsonPointer"),
 );
 
