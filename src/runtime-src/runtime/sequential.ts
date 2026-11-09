@@ -2,6 +2,25 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { ResponseStreamError } from "../domain/errors.ts";
 
 /**
+ * A sequential body's framing: NDJSON or JSONL lines, RFC 7464 JSON-seq records, or Server-Sent
+ * Events.
+ */
+export type SequentialCodec = "jsonseq" | "ndjson" | "sse";
+
+/**
+ * The sequential codec each media type essence selects. The one owner of these facts: the
+ * generator assigns a response alternative its codec from this table (`src/normalize/responses.ts`)
+ * and the runtime frames a body by it (`framerFor` in `output.ts`), so the two cannot disagree.
+ */
+export const sequentialMediaTypes: ReadonlyMap<string, SequentialCodec> = new Map([
+  ["application/json-seq", "jsonseq"],
+  ["application/jsonl", "ndjson"],
+  ["application/ndjson", "ndjson"],
+  ["application/x-ndjson", "ndjson"],
+  ["text/event-stream", "sse"],
+]);
+
+/**
  * The RFC 7464 record separator that opens every JSON-seq record.
  */
 const recordSeparator = "\u001E";
@@ -268,7 +287,8 @@ const boundLines = (maxRecordBytes: number) =>
   );
 
 /**
- * Frame an NDJSON or JSONL response body (`application/x-ndjson`, `application/jsonl`) as one
+ * Frame an NDJSON or JSONL response body (`application/x-ndjson`, `application/ndjson`,
+ * `application/jsonl`) as one
  * compacted JSON text per record, without a line terminator, emitted as each line arrives.
  *
  * The body is decoded as UTF-8 and split by `Stream.splitLines`, so LF, CRLF and CR end a line and

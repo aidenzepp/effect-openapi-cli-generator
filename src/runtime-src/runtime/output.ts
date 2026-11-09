@@ -87,7 +87,8 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
-import { jsonSeqRecords, ndjsonRecords, sseRecords } from "./sequential.ts";
+import { jsonSeqRecords, ndjsonRecords, sequentialMediaTypes, sseRecords } from "./sequential.ts";
+import type { SequentialCodec } from "./sequential.ts";
 
 /**
  * `--output <path>` writes the response body to a file; `-` writes it to stdout.
@@ -339,23 +340,23 @@ type Framer = (
 
 const jsonSeqSuffix = /^[^/;]+\/[^/;]+\+json-seq$/u;
 
+const framers: Readonly<Record<SequentialCodec, Framer>> = {
+  jsonseq: jsonSeqRecords,
+  ndjson: ndjsonRecords,
+  sse: sseRecords,
+};
+
 /**
  * The framer the matched response media key selects (design 4.6, 5), or `undefined` for raw
- * bytes: NDJSON for `application/x-ndjson` and `application/jsonl`, JSON-seq for
- * `application/json-seq` and any `+json-seq` type, SSE for `text/event-stream`.
+ * bytes. The key's essence picks the codec from `sequentialMediaTypes`, the table the generator
+ * assigns codecs from; any `+json-seq` type is also framed as JSON-seq.
  */
 const framerFor = (mediaType: string | undefined): Framer | undefined => {
-  const key = mediaType?.trim().toLowerCase();
+  const [head = ""] = mediaType?.split(";", 1) ?? [];
+  const key = head.trim().toLowerCase();
+  const codec = sequentialMediaTypes.get(key) ?? (jsonSeqSuffix.test(key) ? "jsonseq" : undefined);
 
-  if (key === "application/x-ndjson" || key === "application/jsonl") {
-    return ndjsonRecords;
-  }
-
-  if (key === "application/json-seq" || (key !== undefined && jsonSeqSuffix.test(key))) {
-    return jsonSeqRecords;
-  }
-
-  return key === "text/event-stream" ? sseRecords : undefined;
+  return codec === undefined ? undefined : framers[codec];
 };
 
 /**
