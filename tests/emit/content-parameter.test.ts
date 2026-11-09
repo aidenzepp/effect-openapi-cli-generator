@@ -234,6 +234,15 @@ describe("generate: content parameters in query, header and cookie", () => {
     expect(cliNotes).toContain('xTrace: Flag.String("x-trace").pipe(Flag.optional');
     expect(cliNotes).toContain('c: Flag.String("c").pipe(Flag.optional');
   });
+
+  test("a JSON content flag is named json in help, as an object parameter's is (W1)", async () => {
+    const { cliNotes } = await generated();
+
+    expect(cliNotes).toContain(
+      'coordinates: Input.jsonFlag("coordinates").pipe(Flag.withMetavar("json"))',
+    );
+    expect(cliNotes).not.toContain('Flag.String("x-trace").pipe(Flag.withMetavar');
+  });
 });
 
 describe("generate: path content and form content outside querystring", () => {
