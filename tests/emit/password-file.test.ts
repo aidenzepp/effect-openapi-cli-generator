@@ -11,6 +11,7 @@ import { normalize } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 // m3-pw1b: the V1 cli emitter builds the `secret-file` field flag m3-pw1a plans for a flattened
 // `format: password` string property (design 13.1 R4): `--<prop>-file` through the m3-pw2 helper,
@@ -139,7 +140,7 @@ const helpOf = (flag: Flag.Flag<unknown>) =>
         Effect.provide(
           Layer.mergeAll(
             Stdio.layerTest({ stderr: () => Sink.drain, stdout: () => Sink.drain }),
-            Output.runCredentialsLayer,
+            runCredentialsLayer,
             Input.stdinClaimLayer,
           ),
         ),

@@ -24,7 +24,7 @@ import { evaluatePointer, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
-import { normalizeParameter } from "./parameters.ts";
+import { authorChoiceCodes, normalizeParameter } from "./parameters.ts";
 import type { ParameterNotReadable, ParameterOutcome, ParameterSite } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
 import { normalizeSecurityPolicy } from "./security.ts";
@@ -787,12 +787,6 @@ interface Assembly {
   readonly diagnostics: readonly Diagnostic[];
   readonly operation?: Operation;
 }
-
-// The notices of the author config's deepObject switches (design 6.1 Bracket and Scalar switch).
-const authorChoiceCodes: ReadonlySet<string> = new Set([
-  "PRM-27/bracket-author-choice",
-  "PRM-27/scalar-author-choice",
-]);
 
 // An operation refused whole sends nothing, so none of its elements is sent in the bracket
 // convention or as a scalar pair: their notices go with it (design 8.5 rule 7, option A), as a

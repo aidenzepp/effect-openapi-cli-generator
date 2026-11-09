@@ -5,6 +5,7 @@ import { Cause, Console, Effect, Exit, Layer, Option, Runtime, Sink, Stdio } fro
 import { CliOutput, Command, Flag } from "effect/cli";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 
 // Integer and number parameters (PRM-14, design 6.1): the flag or argument checks the operator's
 // text against the JSON number grammar and hands it on unchanged, so no digit is lost or reformatted.
@@ -64,10 +65,7 @@ const run = (args: readonly string[]): Promise<Run> =>
         Output.exitForHelp,
         Output.finalCatch([]),
         Effect.provide(
-          Layer.merge(
-            Stdio.layerTest({ stderr: capture, stdout: capture }),
-            Output.runCredentialsLayer,
-          ),
+          Layer.merge(Stdio.layerTest({ stderr: capture, stdout: capture }), runCredentialsLayer),
         ),
         Effect.provide(CliOutput.layer(Output.valueFreeFormatter)),
         Effect.provide(CliOutput.layerPresenter(Output.presenter)),

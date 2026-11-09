@@ -166,7 +166,7 @@ describe("emitEntryFiles with a mutualTLS scheme", () => {
     expect(bin).toContain('Output.finalCatch([], { envPrefix: "EXAMPLE_CLI" })');
     expect(bin).not.toContain("Output.finalCatch([])");
     expect(bin).toContain(
-      "Layer.provide(Layer.mergeAll(BunServices.layer, Output.runCredentialsLayer))",
+      "Layer.provide(Layer.mergeAll(BunServices.layer, Redact.runCredentialsLayer))",
     );
     expect(bin).toContain("  clientCertificate,\n");
     expect(

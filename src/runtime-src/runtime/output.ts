@@ -63,6 +63,7 @@ import {
   retryAfterCapSeconds,
   retryTransform,
   sendOrder,
+  setUserAgent,
   verboseSetting,
   verboseTransform,
   withUserAgent,
@@ -755,9 +756,7 @@ const reportOnce = <E extends object>(
     Effect.andThen(Effect.fail(Object.assign(error, { [Runtime.errorReported]: false }))),
   );
 
-// `RunCredentials` lives in `redact.ts`, beside the entries it holds, so `input.ts` records a
-// secret-file value without an import cycle (this module imports `auth.ts`, which imports
-// `input.ts`).
+// `redact.ts` owns these. Two tests still import them from this module, so the re-export stays.
 export { RunCredentials, runCredentialsLayer } from "./redact.ts";
 
 /**
@@ -2145,11 +2144,7 @@ export const send =
       const policy = yield* ClientPolicy;
       if (dryRun) {
         // The `User-Agent` `withUserAgent` sets, then the attach step, in the policy client's order.
-        const agent = HttpClientRequest.setHeader(
-          built,
-          "user-agent",
-          `${policy.binName}/${policy.version}`,
-        );
+        const agent = setUserAgent(policy.binName, policy.version)(built);
         const shown = yield* attachPlaceholders(security, chosen.placeholders, origins)(agent);
         yield* printDryRun(shown, chosen.placeholders, scrubbed).pipe(
           Effect.provide(redactedNames(security)),

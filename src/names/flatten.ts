@@ -5,7 +5,6 @@ import type { FoldNote } from "./fold.ts";
 import { foldKebab } from "./fold.ts";
 import { reservedCliNames } from "./reserved.ts";
 import { formatPointer } from "../model/pointer.ts";
-import { sendsFormPairs } from "../normalize/bodies.ts";
 import type { SpecLine } from "../model/spec-section.ts";
 
 /**
@@ -195,11 +194,6 @@ interface Ctx {
    */
   readonly base64Parts: ReadonlySet<string>;
   /**
-   * Multipart only: the parts whose Encoding style joins values into one part (ENC-40). Normalize
-   * refuses each at element scope, so it gets no flag and no notice here.
-   */
-  readonly styleRefused: ReadonlySet<string>;
-  /**
    * Multipart only: the parts whose Encoding rule nests by name (design 6.3, HT:B16, ENC-07). An
    * object part among them gets one dotted part flag per nested property instead of a JSON flag.
    */
@@ -216,8 +210,9 @@ interface Ctx {
    */
   readonly scalarFields: ReadonlySet<string>;
   /**
-   * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5). Each
-   * gets no flag and no notice, as a style-refused part gets none.
+   * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5),
+   * multipart parts whose style the writer cannot send (ENC-40) among them. Each gets no flag and
+   * no notice.
    */
   readonly refusedFields: ReadonlySet<string>;
   /**
@@ -276,18 +271,6 @@ const scalarFieldsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<str
     ),
   );
 
-// The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
-const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
-  new Set(
-    encoding.flatMap((rule) =>
-      rule.serialization !== undefined &&
-      !sendsFormPairs(rule.serialization) &&
-      rule.target.kind === "property"
-        ? [rule.target.name]
-        : [],
-    ),
-  );
-
 const newCtx = (
   defs: Defs,
   codec: "form" | "json" | "multipart",
@@ -306,7 +289,6 @@ const newCtx = (
   readOnlyOmitted: line === "3.0",
   refusedFields: new Set(refusedFields),
   scalarFields: codec === "form" ? scalarFieldsOf(encoding) : new Set(),
-  styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
 
@@ -836,8 +818,8 @@ const nestedFlags = (
  * The part flags of a multipart body: each top-level property one flag, a scalar or scalar array
  * (repeated parts), a `file` part when it is binary, a `format: password` string (an array of
  * them a repeated file part) or its rule sends it base64 encoded, or a `json` flag for an object
- * part, sent as one JSON part (ENC-22); any other shape is skipped with a reason. A part whose
- * style normalize refused (ENC-40) or that it refused at `field` scope gets nothing. An object part
+ * part, sent as one JSON part (ENC-22); any other shape is skipped with a reason. A part normalize
+ * refused at `field` scope (its style among the causes, ENC-40) gets nothing. An object part
  * whose rule nests by name gets one dotted flag per nested property (`nestedFlags`), or none when a
  * required nested property has none; a part whose rule nests by position gets one repeated file
  * flag.
@@ -854,7 +836,7 @@ const walkParts = (
       return Result.fail(new BodyBudgetExceeded({ budget: maxVisits }));
     }
 
-    if (ctx.styleRefused.has(key) || ctx.refusedFields.has(key) || omitted(ctx, child)) {
+    if (ctx.refusedFields.has(key) || omitted(ctx, child)) {
       continue;
     }
 

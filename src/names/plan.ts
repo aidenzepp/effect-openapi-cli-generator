@@ -1095,7 +1095,11 @@ const kindOf = (flag: PlannedBodyFlag): string =>
 const splitReason = (field: string, left: Merged, right: PlannedBodyFlag, media: string): string =>
   ` The body field ${field} is a ${kindOf(left.flag)} flag in ${left.media.join(", ")} and a ${kindOf(right)} flag in ${media}. A rename cannot separate them: fields[...].flag renames the field in every media type.`;
 
-const skipHint = (site: OverrideSite): string => `Skip the operation with ${site.configKey}.skip.`;
+/**
+ * The hint for a collision that only skipping the operation resolves.
+ */
+export const skipHint = (site: OverrideSite): string =>
+  `Skip the operation with ${site.configKey}.skip.`;
 
 // A field flag takes its configured name, verbatim: the config decoder admits only fold-shaped
 // names. The config is never inferred.

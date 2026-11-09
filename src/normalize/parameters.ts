@@ -377,15 +377,34 @@ const nonObjectSchema = refusal(
   "Give the parameter an object schema, or use style: form",
 );
 
+/**
+ * The code of the bracket switch's notice (design 6.1 Bracket switch), on parameters and bodies.
+ */
+export const bracketChoiceCode = "PRM-27/bracket-author-choice";
+
+/**
+ * The code of the scalar switch's notice (design 6.1 Scalar switch), on parameters and bodies.
+ */
+export const scalarChoiceCode = "PRM-27/scalar-author-choice";
+
+/**
+ * The notices of the author config's deepObject switches, which go with an element that is not
+ * sent (design 8.5 rule 7).
+ */
+export const authorChoiceCodes: ReadonlySet<string> = new Set([
+  bracketChoiceCode,
+  scalarChoiceCode,
+]);
+
 const bracketAuthorChoice = notice(
-  "PRM-27/bracket-author-choice",
+  bracketChoiceCode,
   "style-values",
   "Parameter style deepObject",
   "The author config's nonStandard.deepObjectBrackets sends this nested deepObject value in the bracket convention, which the specification does not define.",
 );
 
 const scalarAuthorChoice = notice(
-  "PRM-27/scalar-author-choice",
+  scalarChoiceCode,
   "style-values",
   "Parameter style deepObject",
   "The author config's nonStandard.deepObjectScalars sends a scalar value of this deepObject parameter as name=value, which the specification does not define.",
@@ -898,18 +917,6 @@ const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<
   return typesAt(resolution, childKey(source.target, "schema")).pipe(Effect.map(compound));
 };
 
-// Whether a parameter's schema, through `$ref`, declares types and none of them is an array or
-// object. An untyped schema is not primitive.
-const declaresPrimitive = (resolution: Resolution, source: Source): Effect.Effect<boolean> => {
-  if (source.node.schema === undefined) {
-    return Effect.succeed(false);
-  }
-
-  return typesAt(resolution, childKey(source.target, "schema")).pipe(
-    Effect.map((types) => types.length > 0 && !compound(types)),
-  );
-};
-
 // Whether a deepObject query parameter's schema, through `$ref`, is an array or declares a
 // property or `additionalProperties` schema of an object or array type (PRM-27). An untyped
 // member is not nested.
@@ -1036,21 +1043,31 @@ const objectOnly = (
     return only;
   });
 
-// Whether a deepObject query parameter's schema admits a value that is not an object (PRM-27).
-const admitsNonObject = (
+// The value traits of one schema site, through `$ref`, that the style table's applicability checks
+// read (`inapplicable`): `primitive` when it declares types and none of them is an array or object
+// (an untyped schema is not primitive), and, for a `deepObject` value only, `nonObject` when it
+// admits a value that is not an object (PRM-27). `limits` bounds that walk, which fails closed. No
+// schema has neither trait. Parameters and form Encoding entries share it.
+const valueTraits = (
   resolution: Resolution,
-  source: Source,
+  schema: CanonicalKey | undefined,
+  deepObject: boolean,
   limits: SchemaLimits,
-): Effect.Effect<boolean> => {
-  const { node, target } = source;
-  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
-    return Effect.succeed(false);
-  }
+): Effect.Effect<Pick<Traits, "nonObject" | "primitive">> =>
+  Effect.gen(function* traitsOf() {
+    if (schema === undefined) {
+      return { nonObject: false, primitive: false };
+    }
 
-  return objectOnly(resolution, childKey(target, "schema"), walkOf(limits, true)).pipe(
-    Effect.map((only) => !only),
-  );
-};
+    const types = yield* typesAt(resolution, schema);
+    const nonObject = deepObject && !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+
+    return { nonObject, primitive: types.length > 0 && !compound(types) };
+  });
+
+// A parameter's own schema site, or `undefined` for a `content` parameter.
+const schemaOf = (source: Source): CanonicalKey | undefined =>
+  source.node.schema === undefined ? undefined : childKey(source.target, "schema");
 
 // Whether a styled parameter's value is an object (design 6.1): its schema, through `$ref`, admits
 // only objects, by `type: object`, by `properties` with no type, or by anyOf and oneOf members that
@@ -1359,15 +1376,9 @@ export const formStyleRefusal = (
       return Option.none();
     }
 
-    const types = schema === undefined ? [] : yield* typesAt(resolution, schema);
-    const nonObject =
-      style === "deepObject" &&
-      schema !== undefined &&
-      !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+    const traits = yield* valueTraits(resolution, schema, style === "deepObject", limits);
 
-    return Option.fromUndefinedOr(
-      inapplicable(row, style, { nonObject, primitive: types.length > 0 && !compound(types) }),
-    );
+    return Option.fromUndefinedOr(inapplicable(row, style, traits));
   });
 
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
@@ -1494,12 +1505,14 @@ export const normalizeParameter = (
       return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
     }
 
+    const deepObject = source.node.in === "query" && source.node.style === "deepObject";
+    const values = yield* valueTraits(resolution, schemaOf(source), deepObject, limits);
     const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source), {
       brackets: site.nonStandard?.deepObjectBrackets === true,
       multiple: yield* carriesMultiple(resolution, source),
       nested: yield* nestsDeeply(resolution, source),
-      nonObject: yield* admitsNonObject(resolution, source, limits),
-      primitive: yield* declaresPrimitive(resolution, source),
+      nonObject: values.nonObject,
+      primitive: values.primitive,
       scalars: yield* scalarsOf(resolution, site, source, limits),
     });
     const diagnostics = (findings: readonly Finding[]) =>
@@ -1589,7 +1602,7 @@ export const partHeader = (
       multiple: false,
       nested: yield* nestsDeeply(resolution, source),
       nonObject: false,
-      primitive: yield* declaresPrimitive(resolution, source),
+      primitive: (yield* valueTraits(resolution, schemaOf(source), false, {})).primitive,
       scalars: strictCover,
     };
     const decision = Option.match(yield* mediaOf(resolution, source), {

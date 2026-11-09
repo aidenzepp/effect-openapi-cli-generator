@@ -26,7 +26,9 @@ const placeholderOf = (entry: ScrubEntry): string =>
  * The values the run recorded, so the final catch scrubs what the command handler chose: the
  * credentials `send` evaluated and the secret-file values the body read; `send` adds to it and
  * never replaces it. `finalCatch` adds them to its own list. Both require the service, so an entry
- * that omits `runCredentialsLayer` does not compile.
+ * that omits `runCredentialsLayer` does not compile. It lives here, beside the entries it holds,
+ * so `input.ts` records a secret-file value without an import cycle (`output.ts` imports
+ * `auth.ts`, which imports `input.ts`).
  */
 export class RunCredentials extends Context.Service<
   RunCredentials,

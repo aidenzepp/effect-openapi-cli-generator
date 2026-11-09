@@ -128,7 +128,7 @@ describe("emitEntryFiles", () => {
     for (const provided of [
       "BunServices.layer,",
       "Layer.succeed(FileBody.FileBody, {",
-      "Output.runCredentialsLayer,",
+      "Redact.runCredentialsLayer,",
       "Output.runRecordLayer,",
       "Output.runWarningsLayer,",
       "CliOutput.layerPresenter(Output.presenter),",
