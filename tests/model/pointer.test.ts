@@ -9,6 +9,7 @@ import {
   evaluateTokens,
   evaluateTokensResult,
   formatPointer,
+  isPointerWithin,
   parseFragment,
   parseFragmentResult,
   parsePointer,
@@ -192,5 +193,18 @@ describe("Result functions agree with their Effect forms", () => {
     for (const tokens of [[], ["foo", "1"], ["foo", "x"], ["constructor"], ["foo", "0", "x"]]) {
       agree(evaluateTokensResult(doc, tokens), evaluateTokens(doc, tokens));
     }
+  });
+});
+
+describe("isPointerWithin", () => {
+  test("a pointer is within itself and below it at a token boundary", () => {
+    expect(isPointerWithin("/a", "/a")).toBe(true);
+    expect(isPointerWithin("/a", "/a/b")).toBe(true);
+    expect(isPointerWithin("", "/a")).toBe(true);
+  });
+
+  test("a shared text prefix is not a descendant", () => {
+    expect(isPointerWithin("/a", "/ab")).toBe(false);
+    expect(isPointerWithin("/a/b", "/a")).toBe(false);
   });
 });

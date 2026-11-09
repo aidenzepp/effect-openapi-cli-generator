@@ -5,7 +5,7 @@ import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body, EncodingRule } from "../model/entities.ts";
 import type { DiscriminatorHint } from "../model/entities.ts";
 import { nodeAt as jsonAt } from "../model/json-tree.ts";
-import { childPointer, formatPointer } from "../model/pointer.ts";
+import { childPointer, formatPointer, isPointerWithin } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
@@ -2450,7 +2450,7 @@ const underMediaSite = (
   }
 
   const home = follow(resolution, mediaSite);
-  const below = at.pointer === home.pointer || at.pointer.startsWith(`${home.pointer}/`);
+  const below = isPointerWithin(home.pointer, at.pointer);
   if (keyOf(home) === keyOf(mediaSite) || at.document !== home.document || !below) {
     return undefined;
   }
@@ -2559,7 +2559,7 @@ const discriminatorRefused = (findings: readonly Diagnostic[], root: CanonicalKe
       finding.severity === "refusal" &&
       finding.scope === "element" &&
       finding.document === root.document &&
-      (finding.pointer === at || finding.pointer.startsWith(`${at}/`)),
+      isPointerWithin(at, finding.pointer),
   );
 };
 

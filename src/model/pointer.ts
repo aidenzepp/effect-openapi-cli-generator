@@ -123,6 +123,12 @@ export const childPointer = (pointer: string, token: string): string =>
   `${pointer}/${escapeToken(token)}`;
 
 /**
+ * Whether `pointer` is `ancestor` or lies below it, by string prefix at a `/` boundary.
+ */
+export const isPointerWithin = (ancestor: string, pointer: string): boolean =>
+  pointer === ancestor || pointer.startsWith(`${ancestor}/`);
+
+/**
  * Formats tokens as a pointer string.
  */
 export const formatPointer = (tokens: readonly string[]): string =>

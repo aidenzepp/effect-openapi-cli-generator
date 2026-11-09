@@ -38,6 +38,9 @@ export interface Normalization {
 
 export type NormalizeError = OperationsError | SchemaBudgetExceeded | SchemaImportDefect;
 
+// The root `servers` site, a constant, decoded once.
+const serversPointer = JsonPointer.make("/servers");
+
 const Described = Schema.Struct({
   description: Schema.optionalKey(Schema.String),
   summary: Schema.optionalKey(Schema.String),
@@ -149,7 +152,7 @@ export const normalize = (
     const rootServers = effectiveServers(
       {
         root: {
-          pointer: yield* Schema.decodeUnknownEffect(JsonPointer)("/servers").pipe(Effect.orDie),
+          pointer: serversPointer,
           value: fields?.servers,
         },
       },

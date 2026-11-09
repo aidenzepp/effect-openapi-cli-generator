@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Exit, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
 import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
@@ -20,7 +20,7 @@ import { isArray, isObject } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
-import { evaluatePointer, childPointer } from "../model/pointer.ts";
+import { evaluatePointerResult, childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
@@ -32,7 +32,7 @@ import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { follow, nodeIn } from "./document-set.ts";
+import { follow, nodeInResult } from "./document-set.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -185,11 +185,8 @@ const unsendableMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "TRACE"])
 
 type Plain<T> = { -readonly [K in keyof T]: T[K] };
 
-const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> => {
-  const exit = Effect.runSyncExit(evaluatePointer(resolution.value, pointer));
-
-  return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();
-};
+const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
+  Result.getSuccess(evaluatePointerResult(resolution.value, pointer));
 
 // The path item at a use site, followed through its Reference Object to the end of the chain. A
 // path item in another document of the set is not read here: the sites of its operations would sit
@@ -317,8 +314,7 @@ interface ParameterEntry {
 // A parameter's identity, read from the document of the set its reference chain ends in.
 const parameterKey = (resolution: Resolution, pointer: string): string => {
   const target = follow(resolution, { document: resolution.document, pointer });
-  const exit = Effect.runSyncExit(nodeIn(resolution, target));
-  const identity = (Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none<Json>()).pipe(
+  const identity = Result.getSuccess(nodeInResult(resolution, target)).pipe(
     Option.flatMap((node) => decodeOption(ParameterIdentity, node)),
   );
 
