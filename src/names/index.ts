@@ -18,6 +18,7 @@ import {
   reservedEnvNames,
   rootNamespace,
   siteOf,
+  skipHint,
   suffixed,
 } from "./plan.ts";
 import type {
@@ -929,9 +930,7 @@ const planCredentials = (
       return `security[${JSON.stringify(token[0])}].env`;
     }
 
-    const site = sites.get(operation) ?? overrideSite(config, operation);
-
-    return `Skip the operation with ${site.configKey}.skip.`;
+    return skipHint(sites.get(operation) ?? overrideSite(config, operation));
   };
 
   for (const operation of operations) {
