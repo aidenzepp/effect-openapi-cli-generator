@@ -1,0 +1,7 @@
+{
+  "package": { "name": "deep-object-scalars-cli", "version": "0.1.0" },
+  "binName": "charges",
+  "envPrefix": "CHARGES",
+  "servers": { "accepted": ["https://api.example.com"] },
+  "nonStandard": { "deepObjectBrackets": true, "deepObjectScalars": true }
+}
