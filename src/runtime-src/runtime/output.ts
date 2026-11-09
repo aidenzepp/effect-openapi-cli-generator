@@ -288,6 +288,20 @@ const toStdout = <E, R>(
 
 const writeError = (path: string) => () => new OutputError({ path, reason: "write" });
 
+/**
+ * Refuse an existing `--output` target with `OutputError` exists. `send` runs it before the
+ * request is sent, so a refusal never discards the answer of a request that took effect; `toFile`
+ * runs it again, and its `link` still refuses a path created after both checks.
+ */
+const refuseExisting = (target: string): Effect.Effect<void, OutputError, FileSystem.FileSystem> =>
+  Effect.gen(function* checkTarget() {
+    const fs = yield* FileSystem.FileSystem;
+
+    if (yield* fs.exists(target).pipe(Effect.mapError(writeError(target)))) {
+      yield* new OutputError({ path: target, reason: "exists" });
+    }
+  });
+
 const toFile = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
   target: string,
@@ -298,8 +312,8 @@ const toFile = <E, R>(
     const path = yield* Path.Path;
     const failWrite = writeError(target);
 
-    if (!force && (yield* fs.exists(target).pipe(Effect.mapError(failWrite)))) {
-      return yield* new OutputError({ path: target, reason: "exists" });
+    if (!force) {
+      yield* refuseExisting(target);
     }
 
     const temp = yield* fs
@@ -2064,8 +2078,9 @@ const printDryRun = (
  * values). Every body read, the excerpt's included, is bounded by the stream idle timeout
  * (`effectiveIdleTimeoutSeconds`, read before anything is sent). The request and every body read
  * run in one scope. Before the client runs, `send` adds the retry-hint input (the method and
- * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. Errors are
- * not rendered here: `finalCatch` does.
+ * whether an `Idempotency-Key` header was sent) to `RunRecord`, when one is provided. An existing
+ * `--output <path>` without `--force` is refused before the client runs, so the server never acts
+ * on a request whose answer would be discarded. Errors are not rendered here: `finalCatch` does.
  *
  * Under `--dry-run` (`dryRunSetting`) the requirement is evaluated by `preview`, which never fails
  * for a missing credential and never prompts, and the built request, with its `User-Agent` and the
@@ -2147,6 +2162,13 @@ export const send =
         );
 
         return;
+      }
+
+      // Before the request is sent: a refused target must not discard the answer of a request
+      // that took effect (a POST's one-time id or secret).
+      const target = Option.getOrUndefined(yield* OutputPath);
+      if (target !== undefined && target !== stdoutPath && !(yield* Force)) {
+        yield* refuseExisting(target);
       }
 
       const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
