@@ -8,7 +8,7 @@ The generator has one directory per pipeline stage (docs/project.md, "Pipeline" 
 
 - `src/load/`, `src/validate/`, `src/resolve/`, `src/check/`, `src/normalize/`, `src/names/`, `src/emit/`, `src/write/`, `src/report/`: the stages, in pipeline order.
 - `src/model/`: branded values, entities and codecs. This is the trust boundary: specification values enter only through `Schema` decoding, and stages after `src/normalize/` read the model, never the source document.
-- `src/runtime-src/`: the generated runtime's source, emitted verbatim. It imports only `effect`, `effect/http`, `effect/cli` and sibling runtime modules, and never names Bun.
+- `src/runtime-src/`: the generated runtime's source, emitted verbatim. It imports only subpaths exported by the pinned `effect` package (such as `effect`, `effect/http`, `effect/cli`, `effect/encoding`) and sibling runtime modules, and never names Bun or another package. Any change to the pinned `effect` version is reviewed for new runtime imports.
 - `src/index.ts` is the library entry; `src/main.ts` and `src/bin.ts` are the generator CLI.
 - Tests live under `tests/`, mirroring the stage they cover.
 
