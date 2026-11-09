@@ -374,8 +374,8 @@ describe("--error-format json through a generated CLI", () => {
   }, 30_000);
 
   // A parse-time error fails before --error-format exists, so OM_ERROR_FORMAT carries json (design
-  // 7.4); the command's help precedes the object on stderr (design 4.6, invalid invocation).
-  test("error-format json: a parse-time usage error (unknown flag) with OM_ERROR_FORMAT=json ends stderr with one object with kind and message only and exits 2", async () => {
+  // 7.4); the object is all stderr holds, with no help before it (ws5 finding 2).
+  test("error-format json: a parse-time usage error (unknown flag) with OM_ERROR_FORMAT=json writes exactly one JSON line with kind and message only and exits 2", async () => {
     const cli = await run(["--base-url", base, "widgets", "get", "w6", "--no-such-flag"], {
       ...credential,
       OM_ERROR_FORMAT: "json",
@@ -384,6 +384,8 @@ describe("--error-format json through a generated CLI", () => {
 
     expect(cli.exitCode).toBe(2);
     expect(cli.connections).toBe(0);
+    expect(cli.stderr.endsWith("\n")).toBe(true);
+    expect(lines(cli.stderr)).toHaveLength(1);
     expect(keysOf(error)).toEqual(["kind", "message"]);
   }, 30_000);
 
