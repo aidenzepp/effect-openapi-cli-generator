@@ -1,0 +1,116 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "Sequential response fixture", "version": "1.0.0" },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": { "port": { "default": "80" } }
+    }
+  ],
+  "paths": {
+    "/events": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-events",
+        "responses": {
+          "200": {
+            "description": "Server-sent events, one item per event.",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "string" },
+                    "event": { "type": "string" },
+                    "id": { "type": "string" },
+                    "retry": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lines": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-lines",
+        "responses": {
+          "200": {
+            "description": "Newline-delimited JSON, one item per line.",
+            "content": {
+              "application/x-ndjson": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": { "n": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jsonl": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-jsonl",
+        "responses": {
+          "200": {
+            "description": "JSON Lines, one item per line.",
+            "content": {
+              "application/jsonl": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": { "n": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/records": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-records",
+        "responses": {
+          "200": {
+            "description": "JSON text sequences, one item per record.",
+            "content": {
+              "application/json-seq": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": { "n": { "type": "integer" } }
+                  }
+                },
+                "itemSchema": {
+                  "type": "object",
+                  "properties": { "n": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/document": {
+      "get": {
+        "tags": ["feed"],
+        "operationId": "feed-document",
+        "responses": {
+          "200": {
+            "description": "One JSON document, written as received.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
