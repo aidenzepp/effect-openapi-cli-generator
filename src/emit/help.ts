@@ -1,4 +1,5 @@
 import { JsonPointer, Predicate, Schema } from "effect";
+import { isRefusal } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SafeText } from "../model/brands.ts";
 import type { DiscriminatorHint, Operation, Parameter, SecurityScheme } from "../model/entities.ts";
@@ -473,7 +474,7 @@ const refusedLine = (input: HelpInput): string | undefined => {
   const { key } = input.operation;
   const refused = input.diagnostics.filter(
     (diagnostic) =>
-      diagnostic.severity === "refusal" &&
+      isRefusal(diagnostic) &&
       (diagnostic.scope === "element" || diagnostic.scope === "field") &&
       diagnostic.operation?.method === key.method &&
       diagnostic.operation.path === key.path,

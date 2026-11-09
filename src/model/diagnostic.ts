@@ -104,6 +104,19 @@ const tokenOrder = Order.make<string>((left, right) =>
 );
 
 /**
+ * Whether a diagnostic is a refusal; the only other severity is `notice`.
+ */
+export const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
+
+/**
+ * Whether a diagnostic is a refusal of the whole document.
+ */
+export const isDocumentRefusal: (diagnostic: Diagnostic) => boolean = Predicate.and(
+  isRefusal,
+  (diagnostic) => diagnostic.scope === "document",
+);
+
+/**
  * Diagnostic pointer order (design 3.7): JSON Pointers compare token by token, array indices
  * numerically and every other token as a string.
  */
