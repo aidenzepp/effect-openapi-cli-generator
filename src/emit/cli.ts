@@ -718,9 +718,10 @@ const parameterFlagHead = (
   numeric: NumericKind | undefined,
 ): Expr => {
   const { location, serialization } = parameter;
+  // A JSON content flag takes JSON text, named in help as an object parameter's is.
   if (serialization.kind === "content") {
     return takesJsonContent(location, serialization.mediaType)
-      ? fn("Input.jsonFlag", str(flag.name))
+      ? pipe(fn("Input.jsonFlag", str(flag.name)), [fn("Flag.withMetavar", str("json"))])
       : fn("Flag.String", str(flag.name));
   }
 
