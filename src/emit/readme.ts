@@ -1,4 +1,4 @@
-import { Array as Arr, Order } from "effect";
+import { Array as Arr, JsonPointer, Order } from "effect";
 import { AuthorConfig, runtimeSettings } from "../model/author-config.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Api } from "../model/entities.ts";
@@ -32,8 +32,6 @@ const byKey = Order.combine(
   Order.mapInput(Order.String, (key: OperationKey) => key.path),
   Order.mapInput(Order.String, (key: OperationKey) => key.method),
 );
-
-const unescapeToken = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
 
 const longestRun = (text: string): number =>
   Math.max(0, ...Array.from(text.matchAll(/`+/gu), (match) => match[0].length));
@@ -333,7 +331,7 @@ const webhooks = (api: Api): string | undefined => {
     return element.row === "DOC-08" &&
       element.origin.pointer.startsWith(webhookPrefix) &&
       !rest.includes("/")
-      ? [unescapeToken(rest)]
+      ? [JsonPointer.unescapeToken(rest)]
       : [];
   });
 
