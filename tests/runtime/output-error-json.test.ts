@@ -1,9 +1,11 @@
 /* oxlint-disable unicorn/no-array-for-each -- Sink.forEach is the Effect sink, not Array#forEach */
 import { describe, expect, test } from "bun:test";
+import { BunServices } from "@effect/platform-bun";
 import {
   Array as Arr,
   Cause,
   ConfigProvider,
+  Console,
   Effect,
   Exit,
   FileSystem,
@@ -18,7 +20,7 @@ import {
   Sink,
   Stdio,
 } from "effect";
-import { CliError } from "effect/cli";
+import { CliError, CliOutput, Command, Flag } from "effect/cli";
 import type { GlobalFlag } from "effect/cli";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import {
@@ -520,5 +522,103 @@ describe("the retry hint follows wouldRetry for the method send recorded (SM-16)
     expect(isJson(rendered.stderr)).toBe(false);
     expect(rendered.stderr).not.toContain(Output.retryHint);
     expect(rendered.code).toBe(1);
+  });
+});
+
+describe("the retry hint joins the message as a second sentence (ws5 finding 3)", () => {
+  test("JSON: a period and a space separate the message from the hint", async () => {
+    const rendered = await sendOnce("GET", { flag: "json", record: {} });
+    const { message } = jsonOf(rendered.stderr);
+
+    expect(message).toBe(`users-act returned 404 (matched 404). ${Output.retryHint}`);
+  });
+
+  test("text keeps the hint on its own line after the Error line", async () => {
+    const rendered = await sendOnce("GET", { record: {} });
+
+    expect(rendered.stderr.split("\n").slice(0, 2)).toEqual([
+      "Error: users-act returned 404 (matched 404)",
+      Output.retryHint,
+    ]);
+  });
+});
+
+// The generated entry's shape for a parse-time error: `Command.runWith` with `renderErrors: false`
+// and the runtime presenter, `exitForHelp` inside `finalCatch`, `RunRecord` outside it. Console
+// carries the presenter's text and Stdio carries the final catch's; both land in one stderr.
+const parseRun = async (args: readonly string[], env: Record<string, string> = {}) => {
+  const out: string[] = [];
+  const err: string[] = [];
+  // oxlint-disable-next-line prefer-object-spread
+  const console: Console.Console = Object.assign({}, globalThis.console, {
+    error: (...parts: readonly unknown[]) => {
+      err.push(`${parts.join(" ")}\n`);
+    },
+    log: (...parts: readonly unknown[]) => {
+      out.push(`${parts.join(" ")}\n`);
+    },
+  });
+  const login = Command.make("login", { port: Flag.Int("port") }, () => Effect.void);
+  const root = Command.make("example").pipe(Command.withSubcommands([login]));
+  const exit = await Effect.runPromise(
+    Command.runWith(root, { renderErrors: false, version: "1.2.3" })(args).pipe(
+      Output.exitForHelp,
+      Output.finalCatch([], { envPrefix: PREFIX }),
+      Effect.provide(
+        Layer.mergeAll(
+          Stdio.layerTest({
+            stderr: () =>
+              Sink.forEach((chunk: string | Uint8Array) =>
+                Effect.sync(() => {
+                  err.push(Buffer.from(chunk).toString("utf-8"));
+                }),
+              ),
+            stdout: capture([]),
+          }),
+          Output.runCredentialsLayer,
+          Output.runRecordLayer,
+          ConfigProvider.layer(ConfigProvider.fromEnvRecord(env)),
+          CliOutput.layer(Output.valueFreeFormatter),
+          CliOutput.layerPresenter(Output.presenter),
+        ),
+      ),
+      Effect.provide(BunServices.layer),
+      Effect.provideService(Console.Console, console),
+      Effect.exit,
+    ),
+  );
+
+  return {
+    code: Exit.isSuccess(exit) ? 0 : Runtime.getErrorExitCode(Cause.squash(exit.cause)),
+    stderr: err.join(""),
+    stdout: out.join(""),
+  };
+};
+
+describe("a parse-time error under <PREFIX>_ERROR_FORMAT=json writes only the object (ws5 finding 2)", () => {
+  test("an unknown flag: stderr is exactly one JSON line, exit 2", async () => {
+    const run = await parseRun(["login", "--bogus"], { EXAMPLE_ERROR_FORMAT: "json" });
+
+    expect(run.stderr.endsWith("\n")).toBe(true);
+    expect(run.stderr.trimEnd().split("\n")).toHaveLength(1);
+    expect(jsonOf(run.stderr).kind).toBe("UnrecognizedOption");
+    expect(run.stdout).toBe("");
+    expect(run.code).toBe(2);
+  });
+
+  test("text keeps the help before the error", async () => {
+    const run = await parseRun(["login", "--bogus"]);
+
+    expect(run.stderr).toContain("USAGE");
+    expect(run.stderr.indexOf("USAGE")).toBeLessThan(run.stderr.indexOf("--bogus"));
+    expect(run.code).toBe(2);
+  });
+
+  test("a group run without a subcommand still prints its help on stderr under json, exit 0", async () => {
+    const run = await parseRun([], { EXAMPLE_ERROR_FORMAT: "json" });
+
+    expect(run.stderr).toContain("login");
+    expect(isJson(run.stderr)).toBe(false);
+    expect(run.code).toBe(0);
   });
 });

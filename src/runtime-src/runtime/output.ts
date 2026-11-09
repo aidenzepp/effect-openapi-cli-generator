@@ -62,6 +62,7 @@ import {
   redirectLoop,
   retryAfterCapSeconds,
   retryTransform,
+  sendOrder,
   verboseSetting,
   verboseTransform,
   withUserAgent,
@@ -761,10 +762,12 @@ export { RunCredentials, runCredentialsLayer } from "./redact.ts";
 
 /**
  * What the run recorded for its error rendering (design 7.4 revision 31b): the effective format,
- * once `recordRun` ran, and the retry-hint input, once `send` reached the client.
+ * once `recordRun` ran, the retry-hint input, once `send` reached the client, and the implicit
+ * help `presenter` held back until the run's outcome decides whether it prints.
  */
 export interface RunRecordState {
   readonly format?: ErrorFormat | undefined;
+  readonly help?: string | undefined;
   readonly sent?: { readonly idempotencyKey: boolean; readonly method: string } | undefined;
 }
 
@@ -916,8 +919,18 @@ const jsonLine = (fields: ErrorFields): string =>
     },
   });
 
-const withHint = (message: string, hint: boolean): string =>
-  hint ? `${message} ${retryHint}` : message;
+/**
+ * The JSON `message`, then `retryHint` as a second sentence when `hint` is set: a period unless
+ * the message already ends in terminal punctuation, a space, then the hint. The text form keeps
+ * the hint on its own line after the `Error:` line.
+ */
+const withHint = (message: string, hint: boolean): string => {
+  if (!hint) {
+    return message;
+  }
+
+  return `${/[.!?]$/u.test(message) ? message : `${message}.`} ${retryHint}`;
+};
 
 /**
  * The JSON object for a known error: `operation` only for the classes that carry one, and for an
@@ -972,6 +985,23 @@ const renderCliErrorJson = (
       });
 };
 
+/**
+ * Take the implicit help `presenter` held in `RunRecord`, if any, and print it on stderr unless
+ * `drop` is set. Taking it clears it, so it prints at most once.
+ */
+const flushHeldHelp = (drop: boolean): Effect.Effect<void> =>
+  Effect.flatMap(Effect.serviceOption(RunRecord), (record) =>
+    Option.isNone(record)
+      ? Effect.void
+      : Effect.flatMap(
+          Ref.modify(record.value, (state): [string | undefined, RunRecordState] => [
+            state.help,
+            { ...state, help: undefined },
+          ]),
+          (help) => (help === undefined || drop ? Effect.void : Console.error(help)),
+        ),
+  );
+
 const renderCause = <E>(
   cause: Cause.Cause<E>,
   credentials: readonly ScrubEntry[],
@@ -988,8 +1018,13 @@ const renderCause = <E>(
     const raw = renderCliError(failure.value);
     const text = raw === undefined ? undefined : scrubbedAndSanitized(raw, credentials);
     const rendered = json ? renderCliErrorJson(failure.value, credentials) : text;
+    // The json form is one object on stderr (design 7.4), so the held help goes only with text.
+    const help = flushHeldHelp(json && rendered !== undefined);
 
-    return rendered === undefined ? Effect.failCause(cause) : reportOnce(rendered, failure.value);
+    return Effect.andThen(
+      help,
+      rendered === undefined ? Effect.failCause(cause) : reportOnce(rendered, failure.value),
+    );
   }
 
   if (Option.isSome(failure) && isKnownError(failure.value)) {
@@ -1047,6 +1082,12 @@ export const finalCatch =
  * version are the answer, so they go to stdout; implicit help (a group run without a
  * subcommand) and an invalid invocation explain a run that did nothing, so they go to stderr.
  * The text comes from the `CliOutput.Formatter` in context and is sanitized before it is printed.
+ *
+ * With `renderErrors: false`, `Command.run` presents a parse error as implicit help too, before
+ * the final catch knows the error format. With `RunRecord` in context the implicit help is held
+ * there instead of printed: `exitForHelp` prints it when the help carries no errors, and
+ * `finalCatch` prints it before a text error and drops it before a json object (design 7.4: one
+ * object). Without `RunRecord` it prints at once.
  */
 export const presenter: CliOutput.Presenter = {
   present: (event) =>
@@ -1068,7 +1109,16 @@ export const presenter: CliOutput.Presenter = {
         return;
       }
 
-      yield* event.reason === "Requested" ? Console.log(help) : Console.error(help);
+      if (event.reason === "Requested") {
+        yield* Console.log(help);
+
+        return;
+      }
+
+      const record = yield* Effect.serviceOption(RunRecord);
+      yield* Option.isNone(record)
+        ? Console.error(help)
+        : Ref.update(record.value, (state) => ({ ...state, help }));
     }),
 };
 
@@ -1082,8 +1132,9 @@ const isShowHelp = (error: unknown): error is CliError.ShowHelp =>
 
 /**
  * Maps `CliError.ShowHelp` to the entry's exit status. Help with parse errors fails again as
- * itself with exit 2, so `finalCatch` renders its errors once; help without errors (already
- * presented) succeeds, exit 0. Other failures pass through. Apply it inside `finalCatch`.
+ * itself with exit 2, so `finalCatch` renders its errors once (and the help `presenter` held);
+ * help without errors succeeds, exit 0, after printing the help `presenter` held, if any. Other
+ * failures pass through. Apply it inside `finalCatch`.
  */
 export const exitForHelp = <E, R>(effect: Effect.Effect<void, E, R>): Effect.Effect<void, E, R> =>
   Effect.catchIf(
@@ -1091,7 +1142,7 @@ export const exitForHelp = <E, R>(effect: Effect.Effect<void, E, R>): Effect.Eff
     (error): error is E & CliError.ShowHelp => isShowHelp(error),
     (help) =>
       help.errors.length === 0
-        ? Effect.void
+        ? flushHeldHelp(false)
         : Effect.fail(Object.assign(help, { [Runtime.errorExitCode]: invalidInvocationExitCode })),
   );
 
@@ -1935,7 +1986,7 @@ const dryRunUrl = (
 
 /**
  * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
- * `METHOD <absolute URL> HTTP/1.1`, the headers in send order, a blank line and `dryRunBody`. The
+ * `METHOD <absolute URL> HTTP/1.1`, the headers in `sendOrder`, a blank line and `dryRunBody`. The
  * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
  * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
  * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
@@ -1980,9 +2031,7 @@ const printDryRun = (
     };
     const lines = [
       `${request.method} ${dryRunUrl(request, written, queryNames)} HTTP/1.1`,
-      ...Object.entries(request.headers).map(
-        ([name, value]) => `${name}: ${shownValue(name, value)}`,
-      ),
+      ...sendOrder(request.headers).map(([name, value]) => `${name}: ${shownValue(name, value)}`),
     ].map((text) => scrubbedAndSanitized(text, recorded));
 
     yield* toStdout(

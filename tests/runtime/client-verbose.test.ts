@@ -111,10 +111,12 @@ const redirectThenOk: readonly Answer[] = [
   { headers: [["x-echo", TOKEN]], status: 200 },
 ];
 
+// The request headers in the order fetch sends them, the WHATWG `Headers` order (sorted by
+// name), not the order the builder set them (x-first, authorization, x-last).
 const requestBlock = (path: string) => [
   `> GET ${origin}${path} HTTP/1.1`,
-  "> x-first: 1",
   "> authorization: <redacted>",
+  "> x-first: 1",
   "> x-last: z",
 ];
 
