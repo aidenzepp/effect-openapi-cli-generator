@@ -7,6 +7,7 @@ import {
   Option,
   Order,
   Predicate,
+  Result,
   Schema,
   SchemaRepresentation,
 } from "effect";
@@ -16,7 +17,7 @@ import { defsKey, keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { defaultLimits } from "../resolve/index.ts";
 import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
-import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
+import { evaluatePointerResult, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
@@ -146,11 +147,7 @@ const sortedKeys = (map: ReadonlyMap<string, unknown>): readonly string[] =>
   Arr.sort([...map.keys()], byString);
 
 const tokensOf = (pointer: string): readonly string[] | undefined =>
-  Effect.runSync(
-    parsePointer(pointer).pipe(
-      Effect.orElseSucceed((): readonly string[] | undefined => undefined),
-    ),
-  );
+  Result.getSuccess(parsePointerResult(pointer)).pipe(Option.getOrUndefined);
 
 const childAt = (node: Json | undefined, token: string): Json | undefined => {
   if (isObject(node)) {
@@ -1632,9 +1629,7 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
     return "";
   }
 
-  let current = Effect.runSync(Effect.option(evaluatePointer(value, base))).pipe(
-    Option.getOrUndefined,
-  );
+  let current = Result.getSuccess(evaluatePointerResult(value, base)).pipe(Option.getOrUndefined);
   let consumed = 0;
   for (const token of path) {
     current = childAt(current, token);
