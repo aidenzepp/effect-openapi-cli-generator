@@ -759,6 +759,27 @@ const multipart = (schema: Schema.Json, encoding?: Schema.Json) => ({
   "multipart/form-data": encoding === undefined ? { schema } : { encoding, schema },
 });
 
+// A 3.2 multipart/form-data body whose `parts` part has the given schema and nested Encoding.
+const nestedEmit = async (parts: Schema.Json, encoding: Schema.Json) =>
+  await Effect.runPromise(
+    emitCli(
+      await input(
+        {
+          ...spec,
+          openapi: "3.2.0",
+          paths: {
+            ...paths,
+            "/imports": importsOperation(
+              multipart({ properties: { parts }, type: "object" }, { parts: encoding }),
+            ),
+          },
+        },
+        configJson,
+        "3.2",
+      ),
+    ),
+  );
+
 const multipartRefusals = async (content: Readonly<Record<string, Schema.Json>>) => {
   const output = await emit(withPaths({ ...paths, "/imports": importsOperation(content) }));
 
@@ -896,38 +917,44 @@ describe("emitCli: multipart request bodies", () => {
     expect(text).toContain("Effect.flatMap((parts) => Imports.create({ body: parts })),");
   });
 
-  // ENC-08 is deferred (M3-MP3): a nested prefixEncoding fails closed whether the part schema
-  // lists `items` (a part flag) or `prefixItems` (no part flag, an RQB-03 notice).
+  // ENC-08 (M3-MP3): a part nested by position under multipart/mixed is one repeated file flag,
+  // its files in order, whether its schema lists `items` or `prefixItems`.
   test.each([
     ["items", { items: { type: "string" }, type: "array" }],
     ["prefixItems", { prefixItems: [{ type: "string" }], type: "array" }],
-  ])("a nested prefixEncoding over %s refuses its operation", async (_, parts) => {
-    const output = await Effect.runPromise(
-      emitCli(
-        await input(
-          {
-            ...spec,
-            openapi: "3.2.0",
-            paths: {
-              ...paths,
-              "/imports": importsOperation(
-                multipart(
-                  { properties: { parts }, type: "object" },
-                  {
-                    parts: {
-                      contentType: "multipart/mixed",
-                      prefixEncoding: [{ contentType: "text/plain" }],
-                    },
-                  },
-                ),
-              ),
-            },
-          },
-          configJson,
-          "3.2",
-        ),
-      ),
+  ])("a nested prefixEncoding over %s is one repeated file flag", async (_, parts) => {
+    const output = await nestedEmit(parts, {
+      contentType: "multipart/mixed",
+      prefixEncoding: [{ contentType: "text/plain" }],
+    });
+
+    expect(output.refusals).toEqual([]);
+    expect(contentOf(output, "src/cli/imports.ts")).toContain(
+      '{ parts: Flag.String("parts").pipe(Flag.atLeast(0)) },',
     );
+  });
+
+  // Still refused after M3-MP3: nested parts by position need names under multipart/form-data,
+  // and a part cannot nest both by name and by position.
+  test.each([
+    [
+      "by position under multipart/form-data",
+      { items: { type: "string" }, type: "array" },
+      { contentType: "multipart/form-data", prefixEncoding: [{ contentType: "text/plain" }] },
+      "nested parts by position in multipart part /parts",
+    ],
+    [
+      "both by name and by position",
+      { properties: { note: { type: "string" } }, type: "object" },
+      {
+        contentType: "multipart/mixed",
+        encoding: { note: { contentType: "text/plain" } },
+        prefixEncoding: [{ contentType: "text/plain" }],
+      },
+      "nested parts by name and by position in multipart part /parts",
+    ],
+  ])("a part nested %s refuses its operation", async (_, parts, encoding, subject) => {
+    const output = await nestedEmit(parts, encoding);
 
     expect(contentOf(output, "src/cli/imports.ts")).toBeUndefined();
     expect(
@@ -936,13 +963,7 @@ describe("emitCli: multipart request bodies", () => {
         scope: refusal.scope,
         subject: refusal.subject,
       })),
-    ).toEqual([
-      {
-        reason: "unsupported-body",
-        scope: "operation",
-        subject: "nested parts in multipart part /parts",
-      },
-    ]);
+    ).toEqual([{ reason: "unsupported-body", scope: "operation", subject }]);
   });
 
   test("a multipart/mixed body is refused", async () => {
