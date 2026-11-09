@@ -12,6 +12,7 @@ import {
   Stream,
 } from "effect";
 import { Argument, CliError, Flag } from "effect/cli";
+import { Base64, Base64Url } from "effect/encoding";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
@@ -823,17 +824,8 @@ const toNode = (value: FieldValue): JsonNode => {
   return copy;
 };
 
-const base64Chunk = 0x80_00;
-
-// btoa over binary-string chunks, so a large file never spreads into one call's arguments.
-const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string => {
-  let text = "";
-  for (let offset = 0; offset < bytes.length; offset += base64Chunk) {
-    text += btoa(String.fromCodePoint(...bytes.subarray(offset, offset + base64Chunk)));
-  }
-
-  return encoding === "base64url" ? text.replaceAll("+", "-").replaceAll("/", "_") : text;
-};
+const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string =>
+  encoding === "base64url" ? Base64Url.encodePadded(bytes) : Base64.encode(bytes);
 
 const readEncoded = (
   field: FileField,
