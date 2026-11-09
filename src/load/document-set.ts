@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
 import { pathToFileURL } from "node:url";
 import { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
 import { retrievalBase } from "../resolve/base-uri.ts";
 import {
   defaultLimits,
@@ -80,8 +80,8 @@ export const parseDocumentPair = (value: string): DocumentPair => {
     : { path: value.slice(split + 1), uri: value.slice(0, split) };
 };
 
-const refuse = (code: keyof typeof messages, pair: DocumentPair) =>
-  Schema.decodeUnknownEffect(Diagnostic)({
+const refusePair = (code: keyof typeof messages, pair: DocumentPair) =>
+  makeDiagnostic({
     code,
     document: decodeUri(pair.uri)._tag === "Some" ? pair.uri : pathToFileURL(pair.path).href,
     element: "document",
@@ -89,30 +89,26 @@ const refuse = (code: keyof typeof messages, pair: DocumentPair) =>
     message: messages[code],
     openapi: "unknown",
     pointer: "",
-    row: "REF-16",
     scope: "document",
     severity: "refusal",
     specSection: "https://spec.openapis.org/oas/v3.2.1.html#establishing-the-base-uri",
-  }).pipe(
-    Effect.orDie,
-    Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))),
-  );
+  }).pipe(Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))));
 
 /**
  * The `REF-16/duplicate-uri` refusal for `pair`, whose `uri` is the retrieval URI already in use.
  */
-export const duplicateUri = (pair: DocumentPair) => refuse("REF-16/duplicate-uri", pair);
+export const duplicateUri = (pair: DocumentPair) => refusePair("REF-16/duplicate-uri", pair);
 
-const withPath = (refusal: LoadRefusal, path: string): LoadRefusal => {
-  const diagnostic = Schema.decodeUnknownSync(Diagnostic)({
-    ...Schema.encodeSync(Diagnostic)(refusal.diagnostic),
-    hint: path,
-  });
-
-  return new LoadRefusal(
-    refusal.offset === undefined ? { diagnostic } : { diagnostic, offset: refusal.offset },
+const withPath = (refusal: LoadRefusal, path: string): Effect.Effect<never, LoadRefusal> =>
+  makeDiagnostic({ ...Schema.encodeSync(Diagnostic)(refusal.diagnostic), hint: path }).pipe(
+    Effect.flatMap((diagnostic) =>
+      Effect.fail(
+        new LoadRefusal(
+          refusal.offset === undefined ? { diagnostic } : { diagnostic, offset: refusal.offset },
+        ),
+      ),
+    ),
   );
-};
 
 /**
  * The members loaded so far and the entry's retrieval URI, when the caller names it.
@@ -156,7 +152,7 @@ const loadPair = (
   const uri = decodeUri(pair.uri);
 
   if (uri._tag === "None") {
-    return refuse("REF-16/relative-uri", pair);
+    return refusePair("REF-16/relative-uri", pair);
   }
 
   if (isDuplicate(loading, uri.value)) {
@@ -164,7 +160,7 @@ const loadPair = (
   }
 
   if (overflows(loading, uri.value)) {
-    return refuse("REF-16/document-limit", pair);
+    return refusePair("REF-16/document-limit", pair);
   }
 
   const read =
@@ -186,7 +182,7 @@ const loadPair = (
         ),
       ),
     ),
-    Effect.mapError((refusal) => withPath(refusal, pair.path)),
+    Effect.catch((refusal) => withPath(refusal, pair.path)),
   );
 };
 
@@ -205,11 +201,11 @@ export interface DocumentSetOptions {
 
 const refRootExtensions: ReadonlySet<string> = new Set([".json", ".yaml", ".yml"]);
 
-const unreadable = (path: string) => refuse("REF-16/unreadable-root", { path, uri: "" });
+const unreadable = (path: string) => refusePair("REF-16/unreadable-root", { path, uri: "" });
 
-const outsideRoot = (path: string) => refuse("REF-16/outside-root", { path, uri: "" });
+const outsideRoot = (path: string) => refusePair("REF-16/outside-root", { path, uri: "" });
 
-const walkLimit = (path: string) => refuse("REF-16/walk-limit", { path, uri: "" });
+const walkLimit = (path: string) => refusePair("REF-16/walk-limit", { path, uri: "" });
 
 /**
  * Resolves `relative` beneath `root` and returns the real path of the result. The lexical
