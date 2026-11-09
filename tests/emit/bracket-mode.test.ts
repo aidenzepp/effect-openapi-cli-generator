@@ -24,7 +24,9 @@ import { resolve } from "../../src/resolve/index.ts";
 // "deepObjectBrackets"`, on a query parameter's `StyleSerialization` or a form property's
 // `EncodingRule`. Only the author config switch sets it: with `nonStandard.deepObjectBrackets` on,
 // normalize marks the nested deepObject entries, and a marked entry emits `brackets: true`. The
-// comparison model is the same model with its markers removed, so it emits the M1 text.
+// comparison model is the same model with its markers removed, so it emits the M1 text. The scalar
+// switch's marker, `nonStandardScalars: "deepObjectScalars"` (design 6.1 Scalar switch), is added
+// to the marked model by hand until normalize sets it (m3-sc5), and emits `scalars: true`.
 
 const root = nodePath.resolve(import.meta.dir, "../..");
 
@@ -64,12 +66,19 @@ const filter = {
   type: "object",
 };
 
+// A deepObject object with scalar members: standard, so neither switch marks it in normalize.
+const created = { properties: { gt: { type: "integer" } }, type: "object" };
+
 // A deepObject array of scalars, Stripe's `expand` shape (watch item N2).
 const expand = { items: { maxLength: 5000, type: "string" }, type: "array" };
 
-const formSchema = { properties: { expand, filter, title: { type: "string" } }, type: "object" };
+const formSchema = {
+  properties: { created, expand, filter, title: { type: "string" } },
+  type: "object",
+};
 
 const formEncoding = {
+  created: { explode: true, style: "deepObject" },
   expand: { explode: true, style: "deepObject" },
   filter: { explode: true, style: "deepObject" },
 };
@@ -110,6 +119,7 @@ const spec: Schema.Json = {
       get: {
         operationId: "items-list",
         parameters: [
+          { explode: true, in: "query", name: "created", schema: created, style: "deepObject" },
           { explode: true, in: "query", name: "filter", schema: filter, style: "deepObject" },
           { explode: true, in: "query", name: "expand", schema: expand, style: "deepObject" },
           { in: "query", name: "page", schema: { type: "string" } },
@@ -131,6 +141,65 @@ const unmark = (api: Api): Api =>
       ),
     ),
   );
+
+// The deepObject entries the hand-built scalar model marks: `created`, which is made
+// non-object-valued as a covered union of an object and a scalar is (design 6.1 Scalar switch), so
+// its JSON flag comes from the marker alone, and `filter`, which the bracket switch marks too.
+const scalarMarked: ReadonlySet<string> = new Set(["created", "filter"]);
+
+type EncodedOperation = (typeof Api.Encoded)["operations"][number];
+
+type EncodedParameter = EncodedOperation["parameters"][number];
+
+type EncodedRule = NonNullable<
+  EncodedOperation["body"]
+>["alternatives"][number]["encoding"][number];
+
+const markParameter = (parameter: EncodedParameter): EncodedParameter => {
+  const { serialization, wireName } = parameter;
+  if (serialization.kind !== "style" || !scalarMarked.has(wireName)) {
+    return parameter;
+  }
+
+  const objectValued = wireName === "filter" && serialization.objectValued;
+
+  return {
+    ...parameter,
+    serialization: { ...serialization, nonStandardScalars: "deepObjectScalars", objectValued },
+  };
+};
+
+const markRule = (rule: EncodedRule): EncodedRule =>
+  rule.target.kind === "property" &&
+  scalarMarked.has(rule.target.name) &&
+  rule.serialization?.style === "deepObject"
+    ? { ...rule, nonStandardScalars: "deepObjectScalars" }
+    : rule;
+
+const markOperation = (operation: EncodedOperation): EncodedOperation => {
+  const marked = { ...operation, parameters: operation.parameters.map(markParameter) };
+  if (operation.body === undefined) {
+    return marked;
+  }
+
+  const alternatives = operation.body.alternatives.map((alternative) => ({
+    ...alternative,
+    encoding: alternative.encoding.map(markRule),
+  }));
+
+  return { ...marked, body: { ...operation.body, alternatives } };
+};
+
+// The marked model with the scalar marker added to `created` and `filter`, on the query parameters
+// and the form properties, round-tripped through the model's encoded form as `unmark` is.
+const markScalars = (api: Api): Api => {
+  const encoded = Schema.encodeSync(Api)(api);
+
+  return Schema.decodeUnknownSync(Api)({
+    ...encoded,
+    operations: encoded.operations.map(markOperation),
+  });
+};
 
 const generated = await Effect.runPromise(
   Effect.gen(function* generated() {
@@ -165,6 +234,18 @@ const generated = await Effect.runPromise(
         return yield* emitApi({ api: model, boundOrigins: bound, plan: yield* planOf(model) });
       });
     const plainApi = unmark(markedApi);
+    const scalarApi = markScalars(markedApi);
+    const cliOf = (model: Api) =>
+      Effect.gen(function* cliModel() {
+        const emitted = yield* emitCli({
+          api: model,
+          config,
+          plan: yield* planOf(model),
+          validationEdits: [],
+        });
+
+        return emitted.files;
+      });
 
     const cli = yield* emitCli({
       api: markedApi,
@@ -179,6 +260,7 @@ const generated = await Effect.runPromise(
       marked: yield* emitOf(markedApi),
       off: { diagnostics: off.diagnostics, files: yield* emitOf(off.api) },
       plain: yield* emitOf(plainApi),
+      scalars: { api: yield* emitOf(scalarApi), cli: yield* cliOf(scalarApi) },
     };
   }),
 );
@@ -267,8 +349,73 @@ describe("emitApi: the non-standard bracket marker", () => {
   });
 });
 
-// The marked modules and the runtime, written under the worktree's git-ignored `work/` and
-// type-checked together: the emitted options satisfy `QueryOptions` and `FormEncoding`.
+const cliItems = (files: readonly EmittedFile[]): string =>
+  files.find((file) => file.path === "src/cli/items.ts")?.content ?? "";
+
+// The text with every `scalars: true` option removed, as `withoutBrackets` removes brackets.
+const withoutScalars = (text: string): string =>
+  withoutBrackets(text.replaceAll(/scalars: true,\s*/gu, ""));
+
+describe("emitApi and emitCli: the non-standard scalar marker (design 6.1 Scalar switch)", () => {
+  test("a scalar-marked deepObject query parameter emits scalars: true and the JSON flag", () => {
+    const call = callOf(items(generated.scalars.api), 'Serialize.deepObject("created"');
+
+    expect(call).toContain("scalars: true");
+    expect(call).not.toContain("brackets");
+    expect(cliItems(generated.scalars.cli)).toContain(
+      'created: Input.jsonFlag("created").pipe(Flag.withMetavar("json")',
+    );
+  });
+
+  test("a deepObject entry marked by both switches emits brackets: true and scalars: true", () => {
+    const text = items(generated.scalars.api);
+    const call = callOf(text, 'Serialize.deepObject("filter"');
+
+    expect(call).toContain("brackets: true");
+    expect(call).toContain("scalars: true");
+    expect(lines(text, '["filter", {').length).toBe(2);
+    for (const entry of lines(text, '["filter", {')) {
+      expect(entry).toContain("brackets: true");
+      expect(entry).toContain("scalars: true");
+    }
+  });
+
+  test("a scalar-marked form property emits scalars: true and one JSON-valued body field flag", () => {
+    const entries = lines(items(generated.scalars.api), '["created", {');
+
+    expect(entries.length).toBe(2);
+    for (const entry of entries) {
+      expect(entry).toContain("scalars: true");
+      expect(entry).not.toContain("brackets");
+    }
+
+    // Unmarked, the form alternatives of `forms-create` and `choices-create` and the JSON one of
+    // `choices-create` send `--created.gt`; marked, only the JSON alternative does, and the query
+    // parameter and both form alternatives take `--created` as JSON.
+    const dotted = /"\/created\/gt": flags\.createdGt/gu;
+    expect(cliItems(generated.cli).match(dotted)?.length).toBe(3);
+    expect(cliItems(generated.scalars.cli).match(dotted)?.length).toBe(1);
+    expect(cliItems(generated.scalars.cli).match(/"\/created": flags\.created,/gu)?.length).toBe(2);
+    expect(cliItems(generated.scalars.cli).match(/Input\.jsonFlag\("created"\)/gu)?.length).toBe(3);
+  });
+
+  test("the marker adds scalars: true and nothing else", () => {
+    const text = items(generated.scalars.api);
+
+    expect(text.match(/scalars: true/gu)?.length).toBe(6);
+    expect(withoutScalars(text)).toBe(withoutBrackets(items(generated.marked)));
+  });
+
+  test("entries without the scalar marker emit no scalars option", () => {
+    for (const file of [...generated.marked, ...generated.plain]) {
+      expect(file.content).not.toContain("scalars");
+    }
+  });
+});
+
+// The scalar-marked modules, which carry every bracket marker too, and the runtime, written under
+// the worktree's git-ignored `work/` and type-checked together: the emitted options satisfy
+// `QueryOptions` and `FormEncoding`.
 const scratch = nodePath.join(root, "work");
 
 nodeFs.mkdirSync(scratch, { recursive: true });
@@ -289,7 +436,7 @@ describe("emitApi: the marked options against the runtime types", () => {
     );
     const files: readonly EmittedFile[] = [
       generated.domain,
-      ...generated.marked,
+      ...generated.scalars.api,
       ...Object.entries(runtimeFiles).map(([key, content]) => ({ content, path: `src/${key}` })),
       {
         content: scaffold.find((file) => file.path === "tsconfig.json")?.content ?? "",

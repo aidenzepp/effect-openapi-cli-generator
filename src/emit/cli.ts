@@ -517,10 +517,12 @@ const isArrayParameter = (parameter: Pick<Typed, "schema">, context: CommandCont
     return array.success;
   });
 
-// Whether a styled parameter is an object (design 6.1): the operator gives it as JSON, which the
+// Whether a styled parameter takes JSON (design 6.1): an object, or a union the scalar switch
+// covers (`nonStandardScalars`, design 6.1 Scalar switch). The operator gives it as JSON, which the
 // builder hands to the style serializer. A `content` parameter is one value whatever its schema.
 const isObjectParameter = ({ serialization }: Pick<Typed, "serialization">): boolean =>
-  serialization.kind === "style" && serialization.objectValued;
+  serialization.kind === "style" &&
+  (serialization.objectValued || serialization.nonStandardScalars !== undefined);
 
 // The numeric kind of an `integer` or `number` parameter, or of its items for an array (design
 // 6.1): the runtime checks the operator's text against that grammar and sends it unchanged. A

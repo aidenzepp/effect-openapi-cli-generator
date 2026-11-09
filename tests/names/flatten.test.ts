@@ -710,3 +710,84 @@ describe("flattenBody: refused fields (design 4.5, 8.5 rule 5)", () => {
     expect(run(defs, "form").flags.map((flag) => flag.name)).toEqual(all);
   });
 });
+
+// A form property's Encoding rule with `style: deepObject`, as normalize builds it, carrying the
+// markers the author config's switches set (design 6.1 Scalar switch).
+const deepObjectRule = (
+  name: string,
+  markers: { readonly nonStandard?: string; readonly nonStandardScalars?: string },
+) =>
+  Schema.decodeUnknownSync(EncodingRule)({
+    contentType: ["text/plain"],
+    headers: [],
+    ...markers,
+    origin: { document: "file:///spec.json", pointer: `/encoding/${name}` },
+    rows: [],
+    serialization: { explode: true, style: "deepObject" },
+    target: { kind: "property", name },
+  });
+
+describe("flattenBody: the scalar switch (design 6.1 Scalar switch, 4.5 Not flattened)", () => {
+  const defs = {
+    Root: object({
+      created: object({ gt: { type: "integer" }, lt: { type: "integer" } }),
+      flag: { type: "boolean" },
+      title: { type: "string" },
+    }),
+  } satisfies Defs;
+
+  const flatten = (encoding: readonly EncodingRule[]) => {
+    const result = flattenBody(defs, { codec: "form", encoding, schema: { key: "Root" } }, "3.1");
+    if (Result.isFailure(result)) {
+      throw new Error(`flattenBody failed with ${result.failure._tag}`);
+    }
+
+    return result.success.flags.map(({ kind, name, pointer, repeated }) => [
+      name,
+      kind,
+      pointer,
+      repeated,
+    ]);
+  };
+
+  test("a scalar-marked form property is one JSON-valued field flag, not dotted fields or a scalar flag", () => {
+    expect(
+      flatten([
+        deepObjectRule("created", { nonStandardScalars: "deepObjectScalars" }),
+        deepObjectRule("flag", { nonStandardScalars: "deepObjectScalars" }),
+      ]),
+    ).toEqual([
+      ["body", "body", "", false],
+      ["body-file", "body-file", "", false],
+      ["created", "json", "/created", false],
+      ["flag", "json", "/flag", false],
+      ["title", "string", "/title", false],
+    ]);
+  });
+
+  test("a property marked by both switches is one JSON-valued field flag", () => {
+    expect(
+      flatten([
+        deepObjectRule("created", {
+          nonStandard: "deepObjectBrackets",
+          nonStandardScalars: "deepObjectScalars",
+        }),
+      ]),
+    ).toContainEqual(["created", "json", "/created", false]);
+  });
+
+  test("an unmarked or bracket-marked form property keeps its flags", () => {
+    const kept = [
+      ["body", "body", "", false],
+      ["body-file", "body-file", "", false],
+      ["created.gt", "integer", "/created/gt", false],
+      ["created.lt", "integer", "/created/lt", false],
+      ["flag", "boolean", "/flag", false],
+      ["title", "string", "/title", false],
+    ];
+    expect(flatten([deepObjectRule("created", {}), deepObjectRule("flag", {})])).toEqual(kept);
+    expect(flatten([deepObjectRule("created", { nonStandard: "deepObjectBrackets" })])).toEqual(
+      kept,
+    );
+  });
+});

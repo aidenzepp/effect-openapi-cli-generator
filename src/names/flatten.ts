@@ -210,6 +210,12 @@ interface Ctx {
    */
   readonly positionalParts: ReadonlySet<string>;
   /**
+   * Form only: the properties whose Encoding rule the scalar switch marks (`nonStandardScalars`,
+   * design 6.1 Scalar switch). Each is one JSON-valued field flag (4.5 Not flattened), whatever its
+   * schema, never dotted object fields or a scalar flag.
+   */
+  readonly scalarFields: ReadonlySet<string>;
+  /**
    * The top-level properties normalize refused at `field` scope (`refusedFields`, design 8.5). Each
    * gets no flag and no notice, as a style-refused part gets none.
    */
@@ -260,6 +266,16 @@ const positionalPartsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<
     ),
   );
 
+// The form properties whose Encoding rule the scalar switch marks (design 6.1 Scalar switch).
+const scalarFieldsOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
+  new Set(
+    encoding.flatMap((rule) =>
+      rule.nonStandardScalars !== undefined && rule.target.kind === "property"
+        ? [rule.target.name]
+        : [],
+    ),
+  );
+
 // The property parts of a multipart alternative whose style the writer cannot send (ENC-40).
 const styleRefusedOf = (encoding: MediaAlternative["encoding"]): ReadonlySet<string> =>
   new Set(
@@ -289,6 +305,7 @@ const newCtx = (
   positionalParts: codec === "multipart" ? positionalPartsOf(encoding) : new Set(),
   readOnlyOmitted: line === "3.0",
   refusedFields: new Set(refusedFields),
+  scalarFields: codec === "form" ? scalarFieldsOf(encoding) : new Set(),
   styleRefused: codec === "multipart" ? styleRefusedOf(encoding) : new Set(),
   visits: 0,
 });
@@ -672,6 +689,18 @@ const walkProperties = (
     }
 
     const names = [...at.names, folded.success.name];
+    if (at.depth === 1 && ctx.scalarFields.has(key)) {
+      flags.push({
+        kind: "json",
+        name: names.join("."),
+        notes: folded.success.notes,
+        pointer,
+        repeated: false,
+        schemaPointer: sourcePointer(site),
+      });
+      continue;
+    }
+
     const classified = classify(ctx, child, site, 0);
     if (Result.isFailure(classified)) {
       return Result.fail(classified.failure);
@@ -951,6 +980,9 @@ const clashesOf = (flag: BodyFlag): readonly ReservedClash[] => [
  * keeps its flag (SCH-51). `format: byte` makes a JSON or form property a base64 `file` flag on 3.0
  * only; on 3.1 and 3.2 it is a `string` flag sent as given (FMT-10). A top-level property named in
  * `alternative.refusedFields` gets no flag, no nested flag and no skip notice (design 4.5, 8.5).
+ *
+ * A form property whose Encoding rule carries `nonStandardScalars` is one JSON-valued flag (design
+ * 6.1 Scalar switch).
  */
 export const flattenBody = (
   defs: Defs,
