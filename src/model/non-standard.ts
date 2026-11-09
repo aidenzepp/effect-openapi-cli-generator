@@ -47,21 +47,3 @@ export const nonStandardUses = (
   serialization.kind === "content"
     ? serialization.encoding.flatMap(markedUses)
     : markedUses(serialization);
-
-/**
- * The origins of a parameter serialization's bracket-marked use sites, which the report lists as
- * `deepObjectBrackets` entries.
- */
-export const nonStandardOrigins = (
-  serialization: typeof Serialization.Type,
-): readonly (typeof Origin.Type)[] =>
-  nonStandardUses(serialization).flatMap((use) =>
-    use.choice === "deepObjectBrackets" ? [use.origin] : [],
-  );
-
-/**
- * Whether the author config marked any part of a parameter serialization non-standard, by either
- * switch.
- */
-export const isNonStandard = (serialization: typeof Serialization.Type): boolean =>
-  nonStandardUses(serialization).length > 0;
