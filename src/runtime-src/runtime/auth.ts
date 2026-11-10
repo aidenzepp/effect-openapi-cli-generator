@@ -9,13 +9,14 @@ import {
   Path,
   Record as Rec,
   Redacted,
+  Result,
   Stdio,
   Stream,
   Terminal,
 } from "effect";
 import { Flag, GlobalFlag, Prompt, TerminalCapabilities } from "effect/cli";
 import type { FetchHttpClient } from "effect/http";
-import { Headers, HttpClientRequest, UrlParams } from "effect/http";
+import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
 import { StdinClaim, stripLineEnd } from "./input.ts";
@@ -658,13 +659,10 @@ export interface CredentialGate {
 }
 
 const originOf = (raw: string): Option.Option<string> => {
-  if (!URL.canParse(raw)) {
-    return Option.none();
-  }
-
-  const { origin } = new URL(raw);
-
-  return origin === "null" ? Option.none() : Option.some(origin);
+  return Result.match(Url.fromString(raw), {
+    onFailure: () => Option.none(),
+    onSuccess: ({ origin }) => (origin === "null" ? Option.none() : Option.some(origin)),
+  });
 };
 
 /**
@@ -1058,15 +1056,17 @@ export const isLoopbackHost = (hostname: string): boolean => {
  * Printing it once per run is the caller's.
  */
 export const plaintextWarning = (baseUrl: string, allowed: boolean): Option.Option<string> => {
-  if (!allowed || !URL.canParse(baseUrl)) {
+  if (!allowed) {
     return Option.none();
   }
 
-  const { host, hostname, protocol } = new URL(baseUrl);
-
-  return protocol === "http:" && !isLoopbackHost(hostname)
-    ? Option.some(
-        `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
-      )
-    : Option.none();
+  return Result.match(Url.fromString(baseUrl), {
+    onFailure: () => Option.none(),
+    onSuccess: ({ host, hostname, protocol }) =>
+      protocol === "http:" && !isLoopbackHost(hostname)
+        ? Option.some(
+            `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
+          )
+        : Option.none(),
+  });
 };

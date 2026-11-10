@@ -1,5 +1,6 @@
-import { Config, Context, Effect, Layer, Option } from "effect";
+import { Config, Context, Effect, Layer, Option, Result } from "effect";
 import { CliError, Flag, GlobalFlag } from "effect/cli";
+import { Url } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 
 /**
@@ -82,31 +83,30 @@ const authorityOf = (raw: string): string => {
  * Check an operator-chosen base URL. `label` names the flag or env variable in the error. The
  * error names the cause and never the value.
  */
-export const validateBaseUrl = (label: string, raw: string): Effect.Effect<string, UsageError> => {
-  if (!URL.canParse(raw)) {
-    return Effect.fail(usage(label, "not an absolute URL"));
-  }
+export const validateBaseUrl = (label: string, raw: string): Effect.Effect<string, UsageError> =>
+  Result.match(Url.fromString(raw), {
+    onFailure: () => Effect.fail(usage(label, "not an absolute URL")),
+    onSuccess: (parsed) => {
+      const { protocol } = parsed;
+      if (protocol !== "http:" && protocol !== "https:") {
+        return Effect.fail(usage(label, "the scheme must be http or https"));
+      }
 
-  const parsed = new URL(raw);
-  const { protocol } = parsed;
-  if (protocol !== "http:" && protocol !== "https:") {
-    return Effect.fail(usage(label, "the scheme must be http or https"));
-  }
+      if (authorityOf(raw).includes("@") || parsed.username !== "" || parsed.password !== "") {
+        return Effect.fail(usage(label, "the URL must not contain userinfo"));
+      }
 
-  if (authorityOf(raw).includes("@") || parsed.username !== "" || parsed.password !== "") {
-    return Effect.fail(usage(label, "the URL must not contain userinfo"));
-  }
+      if (raw.includes("?")) {
+        return Effect.fail(usage(label, "the URL must not contain a query"));
+      }
 
-  if (raw.includes("?")) {
-    return Effect.fail(usage(label, "the URL must not contain a query"));
-  }
+      if (raw.includes("#")) {
+        return Effect.fail(usage(label, "the URL must not contain a fragment"));
+      }
 
-  if (raw.includes("#")) {
-    return Effect.fail(usage(label, "the URL must not contain a fragment"));
-  }
-
-  return Effect.succeed(raw);
-};
+      return Effect.succeed(raw);
+    },
+  });
 
 /**
  * Split `name=value` at the first `=`. A missing `=` or an empty name is malformed.
@@ -283,7 +283,10 @@ const expandTemplate = (
 };
 
 const normalizeOrigin = (origin: string): string =>
-  URL.canParse(origin) ? new URL(origin).origin : origin;
+  Result.match(Url.fromString(origin), {
+    onFailure: () => origin,
+    onSuccess: (parsed) => parsed.origin,
+  });
 
 /**
  * The base URL a request is built on. An operator base is returned as validated. A server selection
@@ -309,7 +312,10 @@ export const resolve = (
     }
 
     const base = yield* validateBaseUrl(flag, expanded);
-    const { origin } = new URL(base);
+    const origin = yield* Result.match(Url.fromString(base), {
+      onFailure: () => Effect.fail(usage(flag, "not an absolute URL")),
+      onSuccess: (parsed) => Effect.succeed(parsed.origin),
+    });
     if (!table.boundOrigins.some((bound) => normalizeOrigin(bound) === origin)) {
       return yield* usage(flag, "the server URL is outside the origins bound at generation");
     }
