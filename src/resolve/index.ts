@@ -8,7 +8,7 @@ import {
   resolveUri,
   retrievalBase,
   schemaBase,
-  stringMember,
+  splitFragment,
   stripFragment,
 } from "./base-uri.ts";
 import { defsKey, keyOf } from "./canonical.ts";
@@ -22,7 +22,7 @@ import {
 import { fixedMethods, queryMethod } from "../model/path-item.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { isObject, isArray, nodeAt } from "../model/json-tree.ts";
+import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
@@ -639,7 +639,7 @@ const enclosingBase = (found: Place): string => {
     }
 
     if ("kind" in state && state.kind === "schema") {
-      base = schemaBase(line, base, node) ?? base;
+      base = Option.getOrUndefined(schemaBase(line, base, node)) ?? base;
     }
 
     if ("container" in state) {
@@ -781,7 +781,7 @@ class Resolver {
 
     let { base } = item;
     if (item.kind === "schema") {
-      const own = schemaBase(member.line, base, node);
+      const own = Option.getOrUndefined(schemaBase(member.line, base, node));
       if (own === undefined) {
         return failure(
           member.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
@@ -895,7 +895,7 @@ class Resolver {
     const place: Place = { member, pointer: item.pointer };
     let { base } = item;
     if (kind === "schema") {
-      const own = schemaBase(member.line, base, node);
+      const own = Option.getOrUndefined(schemaBase(member.line, base, node));
       if (own === undefined) {
         return failure(
           member.line === "3.2" ? "REF-12/invalid-base" : "REF-11/invalid-base",
@@ -1000,11 +1000,10 @@ class Resolver {
   // Finds the node a reference names inside the document set, without fetching anything. `line` is
   // the line of the document that holds the reference.
   lookup(ref: string, base: string, isSchema: boolean, line: Line): Lookup {
-    const hash = ref.indexOf("#");
-    const uriPart = hash === -1 ? ref : ref.slice(0, hash);
-    const fragment = hash === -1 ? "" : ref.slice(hash + 1);
-    const resolved = uriPart === "" ? base : resolveUri(uriPart, base);
-    const resource = resolved === undefined ? undefined : stripFragment(resolved);
+    const [uriPart, fragmentPart] = splitFragment(ref);
+    const fragment = Option.getOrElse(fragmentPart, () => "");
+    const resolved = uriPart === "" ? Option.some(base) : resolveUri(uriPart, base);
+    const resource = resolved.pipe(Option.map(stripFragment), Option.getOrUndefined);
     const root = resource === undefined ? undefined : this.resourceRoot(resource, isSchema);
     if (resource === undefined) {
       return { missing: "outside" };
@@ -1403,7 +1402,7 @@ interface Prepared {
 // A document of the set with its base URI (design 3.3); a fragment has no `$self` to honour.
 const prepare = (input: ResolveMember, line: Line, openapi: boolean): Prepared => {
   const base = openapi
-    ? documentBase(line, input.document, input.value)
+    ? Option.getOrUndefined(documentBase(line, input.document, input.value))
     : retrievalBase(input.document);
   const member: Member = {
     base: base ?? input.document,
@@ -1476,15 +1475,22 @@ export const referenceAt = (
 // A name read as a URI, resolved inside the set only: a 3.2 Security Scheme URI (SEC-10) or a
 // discriminator mapping value that is not a component name (DSC-03, DSC-08).
 const componentByUri = (resolution: Resolution, name: string): Option.Option<CanonicalKey> => {
-  const resolved = resolveUri(name, resolution.base);
-  const hash = resolved?.indexOf("#") ?? -1;
-  const resource = resolved === undefined ? undefined : stripFragment(resolved);
-  const retrieval = stripFragment(resolveUri(resolution.document, resolution.document) ?? "");
+  const resolved = resolveUri(name, resolution.base).pipe(Option.map(splitFragment));
+  const resource = resolved.pipe(
+    Option.map(([uri]) => uri),
+    Option.getOrUndefined,
+  );
+  const retrieval = stripFragment(
+    Option.getOrElse(resolveUri(resolution.document, resolution.document), () => ""),
+  );
   const inSet = resource === resolution.base || resource === retrieval;
-  const pointer =
-    resolved === undefined || hash === -1 || !inSet
-      ? undefined
-      : fragmentPointer(resolved.slice(hash + 1));
+  const pointer = inSet
+    ? resolved.pipe(
+        Option.flatMap(([, fragment]) => fragment),
+        Option.map(fragmentPointer),
+        Option.getOrUndefined,
+      )
+    : undefined;
 
   return pointer !== undefined && nodeAt(resolution.value, pointer) !== undefined
     ? Option.some({ document: resolution.document, pointer })
