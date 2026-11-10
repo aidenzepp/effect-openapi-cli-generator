@@ -493,62 +493,62 @@ const unresolvedCodes: ReadonlySet<string> = new Set([
  * `checkFindings` are the spec-text check findings of the run; a requirement name they refuse as
  * unresolved gets no second diagnostic from `normalizeSecurityPolicy`.
  */
-export const normalizeSecuritySchemes = (
+export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSecuritySchemes(
   resolution: Resolution,
   author: AuthorSecurity | undefined,
   checkFindings: readonly Diagnostic[],
-): Effect.Effect<SchemeNormalization> =>
-  Effect.gen(function* normalize() {
-    const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
-    const names = nodeAt(resolution, schemes).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
-      Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
-    );
-    const refused = new Set<string>(
-      resolution.diagnostics
-        .filter((diagnostic) => diagnostic.code === "SEC-10/uri-like-name")
-        .map((diagnostic) => diagnostic.pointer),
-    );
-    const built = names.map((name): Built => {
-      const pointer = formatPointer(["components", "securitySchemes", name]);
+): Effect.fn.Return<SchemeNormalization> {
+  const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
+  const names = nodeAt(resolution, schemes).pipe(
+    Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
+    Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
+  );
+  const refused = new Set<string>(
+    resolution.diagnostics
+      .filter((diagnostic) => diagnostic.code === "SEC-10/uri-like-name")
+      .map((diagnostic) => diagnostic.pointer),
+  );
+  const built = names.map((name): Built => {
+    const pointer = formatPointer(["components", "securitySchemes", name]);
 
-      // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
-      return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
-    });
-    const extra = addedSchemes(new Set(names), author, resolution.line);
-    const all = [...built, ...extra.built];
-    const diagnostics = yield* Effect.all(
-      all.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
-    );
-
-    const requirement = author?.config.security?.add?.requirement;
-    const supplied =
-      author === undefined || requirement === undefined
-        ? undefined
-        : { document: author.configDocument, requirement };
-
-    return {
-      added: new Set(extra.names.filter((name) => !names.includes(name))),
-      checkRefused: new Set(
-        checkFindings
-          .filter(
-            (finding) =>
-              finding.document === resolution.document && unresolvedCodes.has(finding.code),
-          )
-          .map((finding) => finding.pointer),
-      ),
-      diagnostics,
-      schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
-      supplied,
-      unusable: [
-        ...names.filter((_, index) => built[index]?.scheme === undefined),
-        // An added name that collides keeps meaning the declared scheme, so it is never unusable.
-        ...extra.names.filter(
-          (name, index) => !names.includes(name) && extra.built[index]?.scheme === undefined,
-        ),
-      ],
-    };
+    // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
+    return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
   });
+  const extra = addedSchemes(new Set(names), author, resolution.line);
+  const all = [...built, ...extra.built];
+  const diagnostics = yield* Effect.forEach(
+    all.flatMap((one) => one.findings),
+    (finding) => toDiagnostic(resolution, finding),
+  );
+
+  const requirement = author?.config.security?.add?.requirement;
+  const supplied =
+    author === undefined || requirement === undefined
+      ? undefined
+      : { document: author.configDocument, requirement };
+
+  return {
+    added: new Set(extra.names.filter((name) => !names.includes(name))),
+    checkRefused: new Set(
+      checkFindings
+        .filter(
+          (finding) =>
+            finding.document === resolution.document && unresolvedCodes.has(finding.code),
+        )
+        .map((finding) => finding.pointer),
+    ),
+    diagnostics,
+    schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
+    supplied,
+    unusable: [
+      ...names.filter((_, index) => built[index]?.scheme === undefined),
+      // An added name that collides keeps meaning the declared scheme, so it is never unusable.
+      ...extra.names.filter(
+        (name, index) => !names.includes(name) && extra.built[index]?.scheme === undefined,
+      ),
+    ],
+  };
+});
 
 interface Scope {
   readonly declared: ReadonlyMap<string, SecurityScheme>;
@@ -775,61 +775,58 @@ const judge = (
  * check already refused as unresolved keeps that one diagnostic and gets no second here. Raising an
  * operation with no alternative left is the caller's job (`listed`).
  */
-export const normalizeSecurityPolicy = (
+export const normalizeSecurityPolicy = Effect.fnUntraced(function* normalizeSecurityPolicy(
   resolution: Resolution,
   schemes: SchemeNormalization,
   operation?: string,
-): Effect.Effect<PolicyNormalization> =>
-  Effect.gen(function* normalize() {
-    const spec = effectiveList(resolution, operation);
-    // `security.add` applies as if declared, only where the spec declares no security (D-OQ10).
-    const supplied =
-      spec === undefined && schemes.supplied !== undefined
-        ? {
-            document: schemes.supplied.document,
-            list: schemes.supplied.requirement,
-            source: { pointer: addRequirementPointer, rows: ["CFG-1", "SEC-01", "SEC-08"] },
-          }
-        : undefined;
-    const effective =
-      supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
-    const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
-    const judged = (effective?.list ?? []).map((json, index) => {
-      const pointer = childPointer(source.pointer, String(index));
-      const entries = Schema.decodeUnknownOption(Requirement)(json).pipe(
-        Option.map((requirement) => Object.entries(requirement)),
-      );
-
-      return Option.isNone(entries)
-        ? {
-            findings: [
-              {
-                anchor: "security-requirement-object",
-                code: "SEC-01/invalid-requirement",
-                element: "Security Requirement Object",
-                message: "The security requirement is malformed.",
-                pointer,
-              },
-            ],
-          }
-        : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
-    });
-    const diagnostics = yield* Effect.all(
-      judged
-        .flatMap((one) => one.findings)
-        .map((finding) =>
-          toDiagnostic(
-            resolution,
-            supplied === undefined ? finding : { ...finding, document: supplied.document },
-          ),
-        ),
+): Effect.fn.Return<PolicyNormalization> {
+  const spec = effectiveList(resolution, operation);
+  // `security.add` applies as if declared, only where the spec declares no security (D-OQ10).
+  const supplied =
+    spec === undefined && schemes.supplied !== undefined
+      ? {
+          document: schemes.supplied.document,
+          list: schemes.supplied.requirement,
+          source: { pointer: addRequirementPointer, rows: ["CFG-1", "SEC-01", "SEC-08"] },
+        }
+      : undefined;
+  const effective =
+    supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
+  const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
+  const judged = (effective?.list ?? []).map((json, index) => {
+    const pointer = childPointer(source.pointer, String(index));
+    const entries = Schema.decodeUnknownOption(Requirement)(json).pipe(
+      Option.map((requirement) => Object.entries(requirement)),
     );
-    const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
-      alternatives: judged.flatMap((one) => (one.use === undefined ? [] : [{ uses: one.use }])),
-      declared: effective !== undefined,
-      origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
-      rows: source.rows,
-    }).pipe(Effect.orDie);
 
-    return { diagnostics, listed: judged.length, policy };
+    return Option.isNone(entries)
+      ? {
+          findings: [
+            {
+              anchor: "security-requirement-object",
+              code: "SEC-01/invalid-requirement",
+              element: "Security Requirement Object",
+              message: "The security requirement is malformed.",
+              pointer,
+            },
+          ],
+        }
+      : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
   });
+  const diagnostics = yield* Effect.forEach(
+    judged.flatMap((one) => one.findings),
+    (finding) =>
+      toDiagnostic(
+        resolution,
+        supplied === undefined ? finding : { ...finding, document: supplied.document },
+      ),
+  );
+  const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
+    alternatives: judged.flatMap((one) => (one.use === undefined ? [] : [{ uses: one.use }])),
+    declared: effective !== undefined,
+    origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
+    rows: source.rows,
+  }).pipe(Effect.orDie);
+
+  return { diagnostics, listed: judged.length, policy };
+});

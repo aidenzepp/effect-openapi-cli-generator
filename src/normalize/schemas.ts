@@ -1,6 +1,5 @@
 import {
   Array as Arr,
-  Data,
   Effect,
   JsonPointer,
   JsonSchema,
@@ -86,17 +85,20 @@ export interface SchemaNormalization extends StoredSchemas {
 /**
  * A conversion or import failure that no D-AD12 class names: a defect in that list (design 3.5).
  */
-export class SchemaImportDefect extends Data.TaggedError("SchemaImportDefect")<{
-  readonly key: string;
-  readonly message: string;
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class SchemaImportDefect extends Schema.TaggedError<SchemaImportDefect>()(
+  "SchemaImportDefect",
+  { key: Schema.String, message: Schema.String },
+) {}
 
 /**
  * A schema walk visited more nodes than the node budget allows (design 3.3, 9 I5).
  */
-export class SchemaBudgetExceeded extends Data.TaggedError("SchemaBudgetExceeded")<{
-  readonly limit: number;
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class SchemaBudgetExceeded extends Schema.TaggedError<SchemaBudgetExceeded>()(
+  "SchemaBudgetExceeded",
+  { limit: Schema.Number },
+) {}
 
 /**
  * The node budget of one call: `maxNodes` from the resolution limits.
@@ -1398,32 +1400,31 @@ const importEdit = (
 // at its deepest existing schema ancestor, until the import succeeds. The importer stops at its
 // first failure, so repairs cannot be batched: each pass is charged the number of definitions it
 // imports, and the budget caps the passes.
-const importCopy = (
+const importCopy = Effect.fnUntraced(function* importCopy(
   budget: Budget,
   line: Line,
   initial: ReadonlyMap<string, Json>,
   edits: SchemaEdit[],
-): Effect.Effect<ReadonlyMap<string, Json>, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* importLoop() {
-    const definitions = new Map(initial);
-    budget.spent += definitions.size;
-    yield* within(budget, definitions);
-    let failure = yield* importOnce(definitions);
-    while (Option.isSome(failure)) {
-      const edit = importEdit(line, definitions, failure.value);
-      if (edit === undefined) {
-        return yield* new SchemaImportDefect({ key: "", message: failure.value });
-      }
-
-      edits.push(edit);
-      definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
-      budget.spent += definitions.size;
-      yield* within(budget, definitions);
-      failure = yield* importOnce(definitions);
+): Effect.fn.Return<ReadonlyMap<string, Json>, SchemaBudgetExceeded | SchemaImportDefect> {
+  const definitions = new Map(initial);
+  budget.spent += definitions.size;
+  yield* within(budget, definitions);
+  let failure = yield* importOnce(definitions);
+  while (Option.isSome(failure)) {
+    const edit = importEdit(line, definitions, failure.value);
+    if (edit === undefined) {
+      return yield* new SchemaImportDefect({ key: "", message: failure.value });
     }
 
-    return definitions;
-  });
+    edits.push(edit);
+    definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
+    budget.spent += definitions.size;
+    yield* within(budget, definitions);
+    failure = yield* importOnce(definitions);
+  }
+
+  return definitions;
+});
 
 /**
  * Derives the validation copy from stored definitions (design 3.5 "Import copies", D-AD12): the
@@ -1438,26 +1439,25 @@ const importCopy = (
  * Effect's importer runs, and each node it still rejects becomes `{}` under the code of its D-AD12
  * class. The copy is the stored document minus `edits` (X10); it is recomputed, never edited.
  */
-export const validationCopy = (
+export const validationCopy = Effect.fnUntraced(function* validationCopy(
   line: Line,
   definitions: ReadonlyMap<string, Json>,
   limits: SchemaLimits = {},
-): Effect.Effect<ValidationCopy, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* derive() {
-    const budget = budgetOf(limits);
-    const edits: SchemaEdit[] = [];
-    const filtered = new Map(
-      sortedKeys(definitions).map((key): [string, Json] => {
-        const visit = filterNode({ definitions, edits, key, line });
+): Effect.fn.Return<ValidationCopy, SchemaBudgetExceeded | SchemaImportDefect> {
+  const budget = budgetOf(limits);
+  const edits: SchemaEdit[] = [];
+  const filtered = new Map(
+    sortedKeys(definitions).map((key): [string, Json] => {
+      const visit = filterNode({ definitions, edits, key, line });
 
-        return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
-      }),
-    );
-    const acyclic = yield* within(budget, breakAliasCycles(budget, filtered, edits));
-    const imported = yield* importCopy(budget, line, acyclic, edits);
+      return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
+    }),
+  );
+  const acyclic = yield* within(budget, breakAliasCycles(budget, filtered, edits));
+  const imported = yield* importCopy(budget, line, acyclic, edits);
 
-    return { definitions: imported, edits };
-  });
+  return { definitions: imported, edits };
+});
 
 // ---------------------------------------------------------------------------------------------
 // Diagnostics.
@@ -1735,22 +1735,21 @@ const diagnosticsOf = (
  * each refused keyword in a stored schema's source, nested `$defs` members included. A refusal the
  * resolver already reported is not repeated.
  */
-export const normalizeSchemas = (
+export const normalizeSchemas = Effect.fnUntraced(function* normalizeSchemas(
   resolution: Resolution,
   limits: SchemaLimits = {},
-): Effect.Effect<SchemaNormalization, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* normalize() {
-    const budget = budgetOf(limits);
-    const sites = yield* within(budget, sitesOf(budget, resolution));
-    const stored = yield* storeFrom(budget, resolution, sites);
-    const refused = yield* within(budget, refusedInSource(budget, resolution, sites));
-    const validation = yield* validationCopy(resolution.line, stored.definitions, {
-      maxNodes: budget.limit - budget.spent,
-    });
-    const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits, refused);
-
-    return { ...stored, diagnostics, line: resolution.line, validation };
+): Effect.fn.Return<SchemaNormalization, SchemaBudgetExceeded | SchemaImportDefect> {
+  const budget = budgetOf(limits);
+  const sites = yield* within(budget, sitesOf(budget, resolution));
+  const stored = yield* storeFrom(budget, resolution, sites);
+  const refused = yield* within(budget, refusedInSource(budget, resolution, sites));
+  const validation = yield* validationCopy(resolution.line, stored.definitions, {
+    maxNodes: budget.limit - budget.spent,
   });
+  const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits, refused);
+
+  return { ...stored, diagnostics, line: resolution.line, validation };
+});
 
 // ---------------------------------------------------------------------------------------------
 // The code-generation copy.

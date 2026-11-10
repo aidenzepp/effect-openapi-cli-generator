@@ -1,4 +1,4 @@
-import { Array as Arr, Data, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
 import { diagnosticOf } from "../model/diagnostic.ts";
@@ -47,15 +47,20 @@ export type ParameterOutcome =
  * The site is not a Parameter Object the earlier stages could have passed: validation, resolution
  * or the structure checks should have stopped it.
  */
-export class ParameterNotReadable extends Data.TaggedError("ParameterNotReadable")<{
-  readonly pointer: string;
-  readonly reason:
-    | "content-entry-count"
-    | "line-mismatch"
-    | "not-a-parameter"
-    | "path-not-required"
-    | "schema-xor-content";
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class ParameterNotReadable extends Schema.TaggedError<ParameterNotReadable>()(
+  "ParameterNotReadable",
+  {
+    pointer: Schema.String,
+    reason: Schema.Literals([
+      "content-entry-count",
+      "line-mismatch",
+      "not-a-parameter",
+      "path-not-required",
+      "schema-xor-content",
+    ]),
+  },
+) {}
 
 const styleNames = [
   "cookie",
@@ -807,24 +812,23 @@ const toDiagnostics = (
 ): Effect.Effect<readonly Diagnostic[]> => {
   const wire = sanitize(wireName);
 
-  return Effect.all(
-    findings.map((finding) =>
-      diagnosticOf({
-        code: finding.code,
-        document: resolution.document,
-        element: finding.element,
-        hint: finding.hint,
-        message: finding.message,
-        openapi: site.openapi,
-        operation: site.operation,
-        pointer: site.pointer,
-        related: related.length > 0 ? related : undefined,
-        scope: "element",
-        severity: finding.severity,
-        specSection: specSectionUrl(resolution.line, finding.anchor),
-        wire: wire === "" ? undefined : wire,
-      }),
-    ),
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  return Effect.forEach(findings, (finding) =>
+    diagnosticOf({
+      code: finding.code,
+      document: resolution.document,
+      element: finding.element,
+      hint: finding.hint,
+      message: finding.message,
+      openapi: site.openapi,
+      operation: site.operation,
+      pointer: site.pointer,
+      related: related.length > 0 ? related : undefined,
+      scope: "element",
+      severity: finding.severity,
+      specSection: specSectionUrl(resolution.line, finding.anchor),
+      wire: wire === "" ? undefined : wire,
+    }),
   ).pipe(Effect.orDie);
 };
 
@@ -891,37 +895,39 @@ const carriesMultiple = (resolution: Resolution, source: Source): Effect.Effect<
 // Whether a deepObject query parameter's schema, through `$ref`, is an array or declares a
 // property or `additionalProperties` schema of an object or array type (PRM-27). An untyped
 // member is not nested.
-const nestsDeeply = (resolution: Resolution, source: Source): Effect.Effect<boolean> =>
-  Effect.gen(function* nests() {
-    const { node, target } = source;
-    if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
-      return false;
-    }
+const nestsDeeply = Effect.fnUntraced(function* nestsDeeply(
+  resolution: Resolution,
+  source: Source,
+): Effect.fn.Return<boolean> {
+  const { node, target } = source;
+  if (node.in !== "query" || node.style !== "deepObject" || node.schema === undefined) {
+    return false;
+  }
 
-    const home = follow(resolution, childKey(target, "schema"));
-    if ((yield* typesAt(resolution, home)).includes("array")) {
+  const home = follow(resolution, childKey(target, "schema"));
+  if ((yield* typesAt(resolution, home)).includes("array")) {
+    return true;
+  }
+
+  const declared = yield* nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(MemberSchemas)),
+    Effect.orElseSucceed((): typeof MemberSchemas.Type => ({})),
+  );
+  const members = Object.keys(declared.properties ?? {}).map((name) =>
+    childKey(home, "properties", name),
+  );
+  if (declared.additionalProperties !== undefined) {
+    members.push(childKey(home, "additionalProperties"));
+  }
+
+  for (const member of members) {
+    if (compound(yield* typesAt(resolution, member))) {
       return true;
     }
+  }
 
-    const declared = yield* nodeIn(resolution, home).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(MemberSchemas)),
-      Effect.orElseSucceed((): typeof MemberSchemas.Type => ({})),
-    );
-    const members = Object.keys(declared.properties ?? {}).map((name) =>
-      childKey(home, "properties", name),
-    );
-    if (declared.additionalProperties !== undefined) {
-      members.push(childKey(home, "additionalProperties"));
-    }
-
-    for (const member of members) {
-      if (compound(yield* typesAt(resolution, member))) {
-        return true;
-      }
-    }
-
-    return false;
-  });
+  return false;
+});
 
 const CompositionSchema = Schema.Struct({
   anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
@@ -954,87 +960,84 @@ interface OwnVerdict {
   readonly only: boolean;
 }
 
-const ownVerdict = (
+const ownVerdict = Effect.fnUntraced(function* ownVerdict(
   resolution: Resolution,
   home: CanonicalKey,
   walk: ObjectWalk,
-): Effect.Effect<OwnVerdict> =>
-  Effect.gen(function* own() {
-    const types = yield* typesAt(resolution, home);
-    if (types.length > 0) {
-      const counted = (name: string) => name === "object" || (walk.arrays && name === "array");
+): Effect.fn.Return<OwnVerdict> {
+  const types = yield* typesAt(resolution, home);
+  if (types.length > 0) {
+    const counted = (name: string) => name === "object" || (walk.arrays && name === "array");
 
-      return { members: [], only: types.every(counted) };
-    }
+    return { members: [], only: types.every(counted) };
+  }
 
-    const declared = yield* nodeIn(resolution, home).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
-      Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
-    );
-    const members = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
-      (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
-    );
+  const declared = yield* nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
+    Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
+  );
+  const members = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
+    (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
+  );
 
-    return { members, only: members.length > 0 || declared.properties !== undefined };
-  });
+  return { members, only: members.length > 0 || declared.properties !== undefined };
+});
 
 // Whether the schema at `key`, through `$ref`, admits only objects: its own verdict, or every
 // anyOf and oneOf member's. A cycle or a spent budget fails closed (not object-only); a result
 // reached through either is false, so memoizing it is sound.
-const objectOnly = (
+const objectOnly = Effect.fnUntraced(function* admitsOnlyObjects(
   resolution: Resolution,
   key: CanonicalKey,
   walk: ObjectWalk,
-): Effect.Effect<boolean> =>
-  Effect.gen(function* admitsOnlyObjects() {
-    const home = follow(resolution, key);
-    const id = keyOf(home);
-    const known = walk.memo.get(id);
-    if (known !== undefined) {
-      return known;
+): Effect.fn.Return<boolean> {
+  const home = follow(resolution, key);
+  const id = keyOf(home);
+  const known = walk.memo.get(id);
+  if (known !== undefined) {
+    return known;
+  }
+
+  if (walk.path.has(id) || !charge(walk.budget)) {
+    return false;
+  }
+
+  walk.path.add(id);
+
+  const verdict = yield* ownVerdict(resolution, home, walk);
+  let { only } = verdict;
+  for (const member of verdict.members) {
+    if (only) {
+      only = yield* objectOnly(resolution, member, walk);
     }
+  }
 
-    if (walk.path.has(id) || !charge(walk.budget)) {
-      return false;
-    }
+  walk.path.delete(id);
+  walk.memo.set(id, only);
 
-    walk.path.add(id);
-
-    const verdict = yield* ownVerdict(resolution, home, walk);
-    let { only } = verdict;
-    for (const member of verdict.members) {
-      if (only) {
-        only = yield* objectOnly(resolution, member, walk);
-      }
-    }
-
-    walk.path.delete(id);
-    walk.memo.set(id, only);
-
-    return only;
-  });
+  return only;
+});
 
 // The value traits of one schema site, through `$ref`, that the style table's applicability checks
 // read (`inapplicable`): `primitive` when it declares types and none of them is an array or object
 // (an untyped schema is not primitive), and, for a `deepObject` value only, `nonObject` when it
 // admits a value that is not an object (PRM-27). `limits` bounds that walk, which fails closed. No
 // schema has neither trait. Parameters and form Encoding entries share it.
-const valueTraits = (
+const valueTraits = Effect.fnUntraced(function* valueTraits(
   resolution: Resolution,
   schema: CanonicalKey | undefined,
   deepObject: boolean,
   limits: SchemaLimits,
-): Effect.Effect<Pick<Traits, "nonObject" | "primitive">> =>
-  Effect.gen(function* traitsOf() {
-    if (schema === undefined) {
-      return { nonObject: false, primitive: false };
-    }
+): Effect.fn.Return<Pick<Traits, "nonObject" | "primitive">> {
+  if (schema === undefined) {
+    return { nonObject: false, primitive: false };
+  }
 
-    const types = yield* typesAt(resolution, schema);
-    const nonObject = deepObject && !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
+  const types = yield* typesAt(resolution, schema);
+  const nonObject = deepObject && !(yield* objectOnly(resolution, schema, walkOf(limits, true)));
 
-    return { nonObject, primitive: types.length > 0 && !compound(types) };
-  });
+  return { nonObject, primitive: types.length > 0 && !compound(types) };
+});
 
 // A parameter's own schema site, or `undefined` for a `content` parameter.
 const schemaOf = (source: Source): CanonicalKey | undefined =>
@@ -1113,96 +1116,96 @@ const memberSites = (resolution: Resolution, home: CanonicalKey) =>
   );
 
 // The branches of a `type` list, the object branch's members read once for `object`.
-const typedBranches = (
+const typedBranches = Effect.fnUntraced(function* typedBranches(
   resolution: Resolution,
   home: CanonicalKey,
   declared: typeof BranchSchema.Type,
-): Effect.Effect<OwnBranches> =>
-  Effect.gen(function* typed() {
-    const types = [declared.type ?? []].flat();
-    const kinds: Branch[] = [];
-    if (types.length === 0 && declared.properties === undefined) {
-      return settled(["other"]);
+): Effect.fn.Return<OwnBranches> {
+  const types = [declared.type ?? []].flat();
+  const kinds: Branch[] = [];
+  if (types.length === 0 && declared.properties === undefined) {
+    return settled(["other"]);
+  }
+
+  for (const name of types) {
+    if (name === "array") {
+      kinds.push("nested");
+    } else if (name !== "object") {
+      kinds.push(scalarTypes.has(name) ? "scalar" : "other");
     }
+  }
 
-    for (const name of types) {
-      if (name === "array") {
-        kinds.push("nested");
-      } else if (name !== "object") {
-        kinds.push(scalarTypes.has(name) ? "scalar" : "other");
-      }
-    }
+  const objects = types.length === 0 || types.includes("object");
 
-    const objects = types.length === 0 || types.includes("object");
-
-    return objects
-      ? { kinds, object: yield* memberSites(resolution, home), union: [] }
-      : settled(kinds);
-  });
+  return objects
+    ? { kinds, object: yield* memberSites(resolution, home), union: [] }
+    : settled(kinds);
+});
 
 // One resolved schema's own branches: an anyOf or oneOf beside no constraint of its own is the union
 // of its members' branches (beside `type`, `enum`, `const` or `properties` it fails closed); an
 // `enum` or `const` of strings, numbers and booleans is a scalar branch; then the `type` list, or
 // an untyped schema with `properties` (an object).
-const ownBranches = (resolution: Resolution, home: CanonicalKey): Effect.Effect<OwnBranches> =>
-  Effect.gen(function* own() {
-    const decoded = yield* nodeIn(resolution, home).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(BranchSchema)),
-      Effect.option,
-    );
-    if (Option.isNone(decoded)) {
-      return settled(["other"]);
-    }
+const ownBranches = Effect.fnUntraced(function* ownBranches(
+  resolution: Resolution,
+  home: CanonicalKey,
+): Effect.fn.Return<OwnBranches> {
+  const decoded = yield* nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(BranchSchema)),
+    Effect.option,
+  );
+  if (Option.isNone(decoded)) {
+    return settled(["other"]);
+  }
 
-    const declared = decoded.value;
-    // A 3.0 `nullable: true` admits `null`, which neither switch sends.
-    if (resolution.line === "3.0" && declared.nullable === true) {
-      return settled(["other"]);
-    }
+  const declared = decoded.value;
+  // A 3.0 `nullable: true` admits `null`, which neither switch sends.
+  if (resolution.line === "3.0" && declared.nullable === true) {
+    return settled(["other"]);
+  }
 
-    const constant = Object.hasOwn(declared, "const");
-    const union = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
-      (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
-    );
-    if (union.length > 0) {
-      const constrained =
-        declared.type !== undefined ||
-        declared.enum !== undefined ||
-        constant ||
-        declared.properties !== undefined;
+  const constant = Object.hasOwn(declared, "const");
+  const union = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
+    (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
+  );
+  if (union.length > 0) {
+    const constrained =
+      declared.type !== undefined ||
+      declared.enum !== undefined ||
+      constant ||
+      declared.properties !== undefined;
 
-      return constrained ? settled(["other"]) : { kinds: [], union };
-    }
+    return constrained ? settled(["other"]) : { kinds: [], union };
+  }
 
-    if (constant || declared.enum !== undefined) {
-      const values = constant ? [declared.const] : declared.enum;
-      const scalar = Option.isSome(Schema.decodeUnknownOption(ScalarValues)(values));
+  if (constant || declared.enum !== undefined) {
+    const values = constant ? [declared.const] : declared.enum;
+    const scalar = Option.isSome(Schema.decodeUnknownOption(ScalarValues)(values));
 
-      return settled([scalar ? "scalar" : "other"]);
-    }
+    return settled([scalar ? "scalar" : "other"]);
+  }
 
-    return yield* typedBranches(resolution, home, declared);
-  });
+  return yield* typedBranches(resolution, home, declared);
+});
 
 // How a member of an object branch nests: its declared type is an object or array (`nested`, as
 // the strict nested test reads it), it is an anyOf or oneOf union (`union`, walked), or neither
 // (`flat`: an untyped member is scalar, as it is today).
-const memberNesting = (
+const memberNesting = Effect.fnUntraced(function* memberNesting(
   resolution: Resolution,
   member: CanonicalKey,
-): Effect.Effect<"flat" | "nested" | "union"> =>
-  Effect.gen(function* nesting() {
-    if (compound(yield* typesAt(resolution, member))) {
-      return "nested";
-    }
+): Effect.fn.Return<"flat" | "nested" | "union"> {
+  if (compound(yield* typesAt(resolution, member))) {
+    return "nested";
+  }
 
-    const composed = yield* nodeIn(resolution, follow(resolution, member)).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
-      Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
-    );
+  const composed = yield* nodeIn(resolution, follow(resolution, member)).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(CompositionSchema)),
+    Effect.orElseSucceed((): typeof CompositionSchema.Type => ({})),
+  );
 
-    return composed.anyOf === undefined && composed.oneOf === undefined ? "flat" : "union";
-  });
+  return composed.anyOf === undefined && composed.oneOf === undefined ? "flat" : "union";
+});
 
 // A member union holding objects nests (`nested`); objects beside other values is `mixed`; a
 // union with no object is a scalar member (`flat`).
@@ -1226,50 +1229,49 @@ const objectBranch = (members: readonly Branch[]): Branch => {
 
 // The branches the schema at `key` admits, through `$ref`. A cycle or a spent budget is `other`,
 // which refuses the entry, so memoizing a result reached through either is sound.
-const branchesOf = (
+const branchesOf = Effect.fnUntraced(function* branches(
   resolution: Resolution,
   key: CanonicalKey,
   walk: BranchWalk,
-): Effect.Effect<ReadonlySet<Branch>> =>
-  Effect.gen(function* branches() {
-    const home = follow(resolution, key);
-    const id = keyOf(home);
-    const known = walk.memo.get(id);
-    if (known !== undefined) {
-      return known;
+): Effect.fn.Return<ReadonlySet<Branch>> {
+  const home = follow(resolution, key);
+  const id = keyOf(home);
+  const known = walk.memo.get(id);
+  if (known !== undefined) {
+    return known;
+  }
+
+  if (walk.path.has(id) || !charge(walk.budget)) {
+    return new Set<Branch>(["other"]);
+  }
+
+  walk.path.add(id);
+
+  const own = yield* ownBranches(resolution, home);
+  const kinds = new Set<Branch>(own.kinds);
+  for (const member of own.union) {
+    for (const kind of yield* branchesOf(resolution, member, walk)) {
+      kinds.add(kind);
+    }
+  }
+
+  if (own.object !== undefined) {
+    const members: Branch[] = [];
+    for (const member of own.object) {
+      const nesting = yield* memberNesting(resolution, member);
+      members.push(
+        nesting === "union" ? unionMember(yield* branchesOf(resolution, member, walk)) : nesting,
+      );
     }
 
-    if (walk.path.has(id) || !charge(walk.budget)) {
-      return new Set<Branch>(["other"]);
-    }
+    kinds.add(objectBranch(members));
+  }
 
-    walk.path.add(id);
+  walk.path.delete(id);
+  walk.memo.set(id, kinds);
 
-    const own = yield* ownBranches(resolution, home);
-    const kinds = new Set<Branch>(own.kinds);
-    for (const member of own.union) {
-      for (const kind of yield* branchesOf(resolution, member, walk)) {
-        kinds.add(kind);
-      }
-    }
-
-    if (own.object !== undefined) {
-      const members: Branch[] = [];
-      for (const member of own.object) {
-        const nesting = yield* memberNesting(resolution, member);
-        members.push(
-          nesting === "union" ? unionMember(yield* branchesOf(resolution, member, walk)) : nesting,
-        );
-      }
-
-      kinds.add(objectBranch(members));
-    }
-
-    walk.path.delete(id);
-    walk.memo.set(id, kinds);
-
-    return kinds;
-  });
+  return kinds;
+});
 
 /**
  * Classifies the `deepObject` schema at `schema` branch by branch, through `$ref`, `anyOf`,
@@ -1277,30 +1279,29 @@ const branchesOf = (
  * and decides it under the author config's `switches`. Query parameters and form Encoding entries
  * share it (design 6.1, 6.3).
  */
-export const scalarCover = (
+export const scalarCover = Effect.fnUntraced(function* scalarCover(
   resolution: Resolution,
   schema: CanonicalKey,
   switches: AuthorConfig["nonStandard"],
   limits: SchemaLimits = {},
-): Effect.Effect<ScalarCover> =>
-  Effect.gen(function* decideCover() {
-    if (switches?.deepObjectScalars !== true) {
-      return strictCover;
-    }
+): Effect.fn.Return<ScalarCover> {
+  if (switches?.deepObjectScalars !== true) {
+    return strictCover;
+  }
 
-    const walk: BranchWalk = { budget: budgetOf(limits), memo: new Map(), path: new Set() };
-    const kinds = yield* branchesOf(resolution, schema, walk);
-    if (!kinds.has("scalar") || kinds.has("other")) {
-      return strictCover;
-    }
+  const walk: BranchWalk = { budget: budgetOf(limits), memo: new Map(), path: new Set() };
+  const kinds = yield* branchesOf(resolution, schema, walk);
+  if (!kinds.has("scalar") || kinds.has("other")) {
+    return strictCover;
+  }
 
-    const nested = kinds.has("nested");
-    if (kinds.has("mixed") || (nested && switches.deepObjectBrackets !== true)) {
-      return { _tag: "Uncovered" };
-    }
+  const nested = kinds.has("nested");
+  if (kinds.has("mixed") || (nested && switches.deepObjectBrackets !== true)) {
+    return { _tag: "Uncovered" };
+  }
 
-    return { _tag: "Covered", nested };
-  });
+  return { _tag: "Covered", nested };
+});
 
 // The scalar switch's decision for a deepObject query parameter; `Strict` for any other.
 const scalarsOf = (
@@ -1326,7 +1327,7 @@ const scalarsOf = (
  * `limits` bounds the PRM-27 walk, which fails closed. `None` means the table does not refuse
  * the entry, or its style is outside the query table and is not decided here.
  */
-export const formStyleRefusal = (
+export const formStyleRefusal = Effect.fnUntraced(function* formStyleRefusal(
   resolution: Resolution,
   schema: CanonicalKey | undefined,
   given: {
@@ -1335,22 +1336,21 @@ export const formStyleRefusal = (
     readonly style?: StyleName;
   },
   limits: SchemaLimits = {},
-): Effect.Effect<Option.Option<Finding>> =>
-  Effect.gen(function* refusalOf() {
-    const style = given.style ?? "form";
-    const allowReserved = given.allowReserved === true;
-    const row =
-      style === "deepObject"
-        ? deepObjectRow(resolution.line, given.explode === true, allowReserved)
-        : rowOf.get(rowKey("query", style, given.explode ?? style === "form", allowReserved));
-    if (row === undefined) {
-      return Option.none();
-    }
+): Effect.fn.Return<Option.Option<Finding>> {
+  const style = given.style ?? "form";
+  const allowReserved = given.allowReserved === true;
+  const row =
+    style === "deepObject"
+      ? deepObjectRow(resolution.line, given.explode === true, allowReserved)
+      : rowOf.get(rowKey("query", style, given.explode ?? style === "form", allowReserved));
+  if (row === undefined) {
+    return Option.none();
+  }
 
-    const traits = yield* valueTraits(resolution, schema, style === "deepObject", limits);
+  const traits = yield* valueTraits(resolution, schema, style === "deepObject", limits);
 
-    return Option.fromUndefinedOr(inapplicable(row, style, traits));
-  });
+  return Option.fromUndefinedOr(inapplicable(row, style, traits));
+});
 
 const mediaOf = (resolution: Resolution, source: Source): Effect.Effect<Media> => {
   const [mediaType] = Object.keys(source.node.content ?? {});
@@ -1414,36 +1414,33 @@ const parameterRows = (node: ParameterNode, plan: ContentPlan | StylePlan): read
   return node.in === "query" && node.allowEmptyValue === true ? ["PRM-01", "PRM-08"] : ["PRM-01"];
 };
 
-const build = (
+const build = Effect.fnUntraced(function* build(
   resolution: Resolution,
   site: ParameterSite,
   source: Source,
   plan: ContentPlan | StylePlan,
   limits: SchemaLimits,
   mark: SensitiveMark,
-) =>
-  Effect.gen(function* built() {
-    const { node, reference, target } = source;
-    const origin = { document: resolution.document, pointer: site.pointer };
-    const schemaKey =
-      plan.kind === "content"
-        ? plan.schemaKey
-        : schemaKeyAt(resolution, childKey(target, "schema"));
-    const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
+) {
+  const { node, reference, target } = source;
+  const origin = { document: resolution.document, pointer: site.pointer };
+  const schemaKey =
+    plan.kind === "content" ? plan.schemaKey : schemaKeyAt(resolution, childKey(target, "schema"));
+  const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
 
-    return yield* Schema.decodeUnknownEffect(Parameter)({
-      deprecated: node.deprecated ?? false,
-      docs: docsOf(reference?.description ?? node.description, reference?.summary),
-      location: node.in,
-      origin,
-      required: node.required ?? false,
-      rows: sorted(parameterRows(node, plan)),
-      schema: { key: schemaKey },
-      ...mark,
-      serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
-      wireName: node.name,
-    }).pipe(Effect.orDie);
-  });
+  return yield* Schema.decodeUnknownEffect(Parameter)({
+    deprecated: node.deprecated ?? false,
+    docs: docsOf(reference?.description ?? node.description, reference?.summary),
+    location: node.in,
+    origin,
+    required: node.required ?? false,
+    rows: sorted(parameterRows(node, plan)),
+    schema: { key: schemaKey },
+    ...mark,
+    serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
+    wireName: node.name,
+  }).pipe(Effect.orDie);
+});
 
 // The schema sites a parameter carries: its `schema`, or its one content entry's `schema`.
 const schemaSitesOf = (resolution: Resolution, source: Source): readonly CanonicalKey[] => {
@@ -1475,23 +1472,25 @@ interface SensitiveMark {
 
 // The `sensitive` mark of a Parameter or Header Object: present when `x-sensitive: true` sits on
 // the object itself or on its schema, at the schema's own node or where its `$ref` leads.
-const sensitiveOf = (resolution: Resolution, source: Source): Effect.Effect<SensitiveMark> =>
-  Effect.gen(function* sensitive() {
-    if (source.node["x-sensitive"] === true) {
+const sensitiveOf = Effect.fnUntraced(function* sensitiveOf(
+  resolution: Resolution,
+  source: Source,
+): Effect.fn.Return<SensitiveMark> {
+  if (source.node["x-sensitive"] === true) {
+    return { sensitive: true };
+  }
+
+  for (const at of schemaSitesOf(resolution, source)) {
+    if (
+      (yield* markedAt(resolution, at)) ||
+      (yield* markedAt(resolution, follow(resolution, at)))
+    ) {
       return { sensitive: true };
     }
+  }
 
-    for (const at of schemaSitesOf(resolution, source)) {
-      if (
-        (yield* markedAt(resolution, at)) ||
-        (yield* markedAt(resolution, follow(resolution, at)))
-      ) {
-        return { sensitive: true };
-      }
-    }
-
-    return {};
-  });
+  return {};
+});
 
 /**
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
@@ -1500,62 +1499,61 @@ const sensitiveOf = (resolution: Resolution, source: Source): Effect.Effect<Sens
  * `limits.maxNodes` bounds each schema walk behind the PRM-27 object test and the `objectValued`
  * fact, which fail closed when it is spent.
  */
-export const normalizeParameter = (
+export const normalizeParameter = Effect.fnUntraced(function* normalizeParameter(
   resolution: Resolution,
   site: ParameterSite,
   limits: SchemaLimits = {},
-): Effect.Effect<ParameterOutcome, ParameterNotReadable> =>
-  Effect.gen(function* normalize() {
-    const source = yield* read(resolution, site);
-    const reason = contractReason(source.node, resolution.line);
-    if (reason !== undefined) {
-      return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
-    }
+): Effect.fn.Return<ParameterOutcome, ParameterNotReadable> {
+  const source = yield* read(resolution, site);
+  const reason = contractReason(source.node, resolution.line);
+  if (reason !== undefined) {
+    return yield* new ParameterNotReadable({ pointer: site.pointer, reason });
+  }
 
-    const deepObject = source.node.in === "query" && source.node.style === "deepObject";
-    const values = yield* valueTraits(resolution, schemaOf(source), deepObject, limits);
-    const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source), {
-      brackets: site.nonStandard?.deepObjectBrackets === true,
-      multiple: yield* carriesMultiple(resolution, source),
-      nested: yield* nestsDeeply(resolution, source),
-      nonObject: values.nonObject,
-      primitive: values.primitive,
-      scalars: yield* scalarsOf(resolution, site, source, limits),
-    });
-    const diagnostics = (findings: readonly Finding[]) =>
-      toDiagnostics(resolution, site, source.related, source.node.name, findings);
-    if (decision._tag === "Ignore") {
-      return { _tag: "Ignored", diagnostics: yield* diagnostics(decision.findings) };
-    }
-
-    if (decision._tag === "Refuse") {
-      return {
-        _tag: "Refused",
-        diagnostics: yield* diagnostics([decision.finding]),
-        required: source.node.required ?? false,
-      };
-    }
-
-    if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
-      // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
-      // the value cannot be checked without it, so the parameter is refused with no second
-      // diagnostic, as a body is, and a required one raises its operation.
-      return { _tag: "Refused", diagnostics: [], required: source.node.required ?? false };
-    }
-
-    return {
-      _tag: "Implemented",
-      diagnostics: yield* diagnostics(decision.findings),
-      parameter: yield* build(
-        resolution,
-        site,
-        source,
-        decision.plan,
-        limits,
-        yield* sensitiveOf(resolution, source),
-      ),
-    };
+  const deepObject = source.node.in === "query" && source.node.style === "deepObject";
+  const values = yield* valueTraits(resolution, schemaOf(source), deepObject, limits);
+  const decision = decide(source.node, resolution.line, yield* mediaOf(resolution, source), {
+    brackets: site.nonStandard?.deepObjectBrackets === true,
+    multiple: yield* carriesMultiple(resolution, source),
+    nested: yield* nestsDeeply(resolution, source),
+    nonObject: values.nonObject,
+    primitive: values.primitive,
+    scalars: yield* scalarsOf(resolution, site, source, limits),
   });
+  const diagnostics = (findings: readonly Finding[]) =>
+    toDiagnostics(resolution, site, source.related, source.node.name, findings);
+  if (decision._tag === "Ignore") {
+    return { _tag: "Ignored", diagnostics: yield* diagnostics(decision.findings) };
+  }
+
+  if (decision._tag === "Refuse") {
+    return {
+      _tag: "Refused",
+      diagnostics: yield* diagnostics([decision.finding]),
+      required: source.node.required ?? false,
+    };
+  }
+
+  if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
+    // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
+    // the value cannot be checked without it, so the parameter is refused with no second
+    // diagnostic, as a body is, and a required one raises its operation.
+    return { _tag: "Refused", diagnostics: [], required: source.node.required ?? false };
+  }
+
+  return {
+    _tag: "Implemented",
+    diagnostics: yield* diagnostics(decision.findings),
+    parameter: yield* build(
+      resolution,
+      site,
+      source,
+      decision.plan,
+      limits,
+      yield* sensitiveOf(resolution, source),
+    ),
+  };
+});
 
 const { in: _in, name: _name, ...headerFields } = ParameterObject.fields;
 
@@ -1585,69 +1583,68 @@ const unsupported = (reason: string): PartHeaderOutcome => ({ _tag: "Unsupported
  * schema, or a Header Object with neither or both of `schema` and `content` is `Unsupported`. The
  * notices a header parameter would carry are not repeated here. `origin` is the header's pointer.
  */
-export const partHeader = (
+export const partHeader = Effect.fnUntraced(function* partHeader(
   resolution: Resolution,
   site: CanonicalKey,
   name: string,
   origin: Related,
   limits: SchemaLimits = {},
-): Effect.Effect<PartHeaderOutcome> =>
-  Effect.gen(function* decidePartHeader() {
-    const target = follow(resolution, site);
-    const decoded = yield* nodeIn(resolution, target).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
-      Effect.option,
-    );
-    if (Option.isNone(decoded)) {
-      return unsupported("The header is not a Header Object.");
-    }
+): Effect.fn.Return<PartHeaderOutcome> {
+  const target = follow(resolution, site);
+  const decoded = yield* nodeIn(resolution, target).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
+    Effect.option,
+  );
+  if (Option.isNone(decoded)) {
+    return unsupported("The header is not a Header Object.");
+  }
 
-    const node: ParameterNode = { ...decoded.value, in: "header", name };
-    if ((node.schema === undefined) === (node.content === undefined)) {
-      return unsupported("The header needs exactly one of schema and content.");
-    }
+  const node: ParameterNode = { ...decoded.value, in: "header", name };
+  if ((node.schema === undefined) === (node.content === undefined)) {
+    return unsupported("The header needs exactly one of schema and content.");
+  }
 
-    if (node.content !== undefined && Object.keys(node.content).length !== 1) {
-      return unsupported("The header's content needs exactly one media type.");
-    }
+  if (node.content !== undefined && Object.keys(node.content).length !== 1) {
+    return unsupported("The header's content needs exactly one media type.");
+  }
 
-    const source: Source = { node, reference: referenceIn(resolution, site), related: [], target };
-    const traits: Traits = {
-      brackets: false,
-      multiple: false,
-      nested: yield* nestsDeeply(resolution, source),
-      nonObject: false,
-      primitive: (yield* valueTraits(resolution, schemaOf(source), false, {})).primitive,
-      scalars: strictCover,
-    };
-    const decision = Option.match(yield* mediaOf(resolution, source), {
-      onNone: () => decideStyle(node, resolution.line, traits),
-      onSome: (content) => decideContent(node, content),
-    });
-    if (decision._tag === "Refuse") {
-      return unsupported(decision.finding.message);
-    }
-
-    if (decision._tag === "Ignore") {
-      return unsupported("The header parameter rules ignore this header.");
-    }
-
-    if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
-      return unsupported("The header's schema applies a dynamic keyword.");
-    }
-
-    const { plan } = decision;
-    const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
-
-    return {
-      _tag: "Typed",
-      schema: {
-        key:
-          plan.kind === "content"
-            ? plan.schemaKey
-            : schemaKeyAt(resolution, childKey(target, "schema")),
-      },
-      ...(yield* sensitiveOf(resolution, source)),
-      serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
-    };
+  const source: Source = { node, reference: referenceIn(resolution, site), related: [], target };
+  const traits: Traits = {
+    brackets: false,
+    multiple: false,
+    nested: yield* nestsDeeply(resolution, source),
+    nonObject: false,
+    primitive: (yield* valueTraits(resolution, schemaOf(source), false, {})).primitive,
+    scalars: strictCover,
+  };
+  const decision = Option.match(yield* mediaOf(resolution, source), {
+    onNone: () => decideStyle(node, resolution.line, traits),
+    onSome: (content) => decideContent(node, content),
   });
+  if (decision._tag === "Refuse") {
+    return unsupported(decision.finding.message);
+  }
+
+  if (decision._tag === "Ignore") {
+    return unsupported("The header parameter rules ignore this header.");
+  }
+
+  if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
+    return unsupported("The header's schema applies a dynamic keyword.");
+  }
+
+  const { plan } = decision;
+  const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
+
+  return {
+    _tag: "Typed",
+    schema: {
+      key:
+        plan.kind === "content"
+          ? plan.schemaKey
+          : schemaKeyAt(resolution, childKey(target, "schema")),
+    },
+    ...(yield* sensitiveOf(resolution, source)),
+    serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
+  };
+});
