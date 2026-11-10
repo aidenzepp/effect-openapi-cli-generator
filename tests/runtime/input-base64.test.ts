@@ -11,6 +11,10 @@ const five = Uint8Array.from([0xfb, 0xff, 0xbf, 0x01, 0x02]);
 
 const decoder = new TextDecoder();
 
+const decodeAvatar = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ avatar: Schema.String })),
+);
+
 const stdinOf = (...chunks: readonly Uint8Array[]): Layer.Layer<Stdio.Stdio> =>
   Layer.succeed(
     Stdio.Stdio,
@@ -91,6 +95,34 @@ describe("a base64 field flag", () => {
     );
 
     expect(JSON.parse(text)).toEqual({ avatar: "-_-_AQI=" });
+  });
+
+  // Past one 32 KiB chunk, so an encoder that pads each chunk separately puts '=' mid-text.
+  test.each([
+    ["base64", 32_769],
+    ["base64", 98_306],
+    ["base64url", 32_769],
+    ["base64url", 98_306],
+  ] as const)("a %s file of %d bytes is encoded as one whole buffer", async (encoding, size) => {
+    // A 256-cycle that shifts every 251 bytes, so no window of the file repeats a short period.
+    const bytes = Uint8Array.from(
+      { length: size },
+      (_, index) => (index * 131 + Math.floor(index / 251) * 17) % 256,
+    );
+    const whole = Buffer.from(bytes).toString("base64");
+    const expected =
+      encoding === "base64url" ? whole.replaceAll("+", "-").replaceAll("/", "_") : whole;
+
+    const text = await run(
+      withTempFile(bytes, (path) =>
+        merge({ fields: { "/avatar": file(encoding, path) } }).pipe(Effect.map(textOf)),
+      ),
+    );
+    const { avatar } = decodeAvatar(text);
+
+    expect(avatar).toBe(expected);
+    expect(new Uint8Array(Buffer.from(avatar, encoding))).toEqual(bytes);
+    expect(avatar.replace(/=+$/u, "")).not.toContain("=");
   });
 
   test("a nested pointer is written and the rest of --body is kept", async () => {
