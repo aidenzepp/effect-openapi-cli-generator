@@ -35,7 +35,7 @@ import {
 import { RedirectRefused, UsageError } from "../domain/errors.ts";
 import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
-import { credentialHeaders, isLoopbackHost } from "./auth.ts";
+import { credentialHeaders, credentialLikeResponseName, isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
 import { asCliError, printStderr } from "./input.ts";
 import { queryWireForm, redactedPlaceholder } from "./redact.ts";
@@ -971,7 +971,8 @@ const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =
  * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
  * arrive; no bodies. A send that fails writes only its request block. Header and query values
  * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, a request
- * header also through `sensitive` (`Auth.sensitiveHeaderNames`), then the RT-6
+ * header also through `sensitive` (`Auth.sensitiveHeaderNames`) and a response header through
+ * `Auth.credentialLikeResponseName`, then the RT-6
  * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
  * `<redacted:<scheme>>`. A URL a header carries (`Location`, `Content-Location`, `Link`,
  * `Refresh`) is redacted as the request URL is. The scrubber runs over each whole line.
@@ -1006,7 +1007,12 @@ export const verboseTransform =
         const response = yield* send;
         yield* printBlock(scrub, [
           `< ${response.status}`,
-          ...headerLines("<", Object.entries(response.headers), headerNames, queryNames),
+          ...headerLines(
+            "<",
+            Object.entries(response.headers),
+            [...headerNames, credentialLikeResponseName],
+            queryNames,
+          ),
         ]);
 
         return response;

@@ -103,6 +103,18 @@ const redactedParameters = [
   },
   { flag: "--x-pin", name: "x-pin", rule: "a format password schema", value: "pin-58d0e4b6" },
   { flag: "--x-hidden", name: "x-hidden", rule: "x-sensitive: true", value: "hid-c41b9a07" },
+  {
+    flag: "--x-pins",
+    name: "x-pins",
+    rule: "an array of format password strings",
+    value: "pins-d8a24f13",
+  },
+  {
+    flag: "--x-shield",
+    name: "x-shield",
+    rule: "x-sensitive: true on the schema",
+    value: "shd-6b0e93c7",
+  },
 ] as const;
 
 const ordinary = { flag: "--x-request-id", name: "x-request-id", value: "req-2e6d8f15" };
@@ -171,6 +183,12 @@ const redactedPartHeaders = [
     name: "X-Part-Hidden",
     rule: "x-sensitive: true",
     value: "phid-7d15c3a9",
+  },
+  {
+    flag: "--note-x-part-shield",
+    name: "X-Part-Shield",
+    rule: "x-sensitive: true on the schema",
+    value: "pshd-2f71e0b8",
   },
 ] as const;
 
@@ -307,6 +325,52 @@ describe("every policy word redacts a header parameter that contains it", () => 
       expect(lines(dry.stdout)).toContain(`${header}: ${value}`);
       expect(lines(verbose.stderr)).toContain(`> ${header}: ${value}`);
       expect(sent(verbose.requests[0], name)).toEqual([value]);
+    }, 30_000);
+  }
+});
+
+// Response headers under --verbose (operator rulings 57f4ca85): a credential-like name is redacted,
+// the WWW-Authenticate and Proxy-Authenticate challenges still print, Set-Cookie stays redacted.
+const sessionToken = "rsp-4c19e7a2";
+
+const challenges = [
+  { name: "www-authenticate", value: 'Bearer realm="wwwx-81d3"' },
+  { name: "proxy-authenticate", value: 'Basic realm="prxx-5e60"' },
+] as const;
+
+const cookie = "ck-0a9f37d5";
+
+const challenged = {
+  ...ok,
+  headers: [
+    ["Content-Type", "application/json"],
+    ["X-Session-Token", sessionToken],
+    ["WWW-Authenticate", challenges[0].value],
+    ["Proxy-Authenticate", challenges[1].value],
+    ["Set-Cookie", `sid=${cookie}`],
+  ] as const,
+};
+
+describe("response headers under --verbose", () => {
+  test("a credential-like response header prints < x-session-token: <redacted> and its value appears in neither stream", async () => {
+    capture.script("/params", challenged);
+
+    const cli = await run([...parameterArgs, "--verbose"]);
+
+    expect(cli.exitCode).toBe(0);
+    expect(lines(cli.stderr)).toContain("< x-session-token: <redacted>");
+    expect(`${cli.stdout}${cli.stderr}`).not.toContain(sessionToken);
+    expect(`${cli.stdout}${cli.stderr}`).not.toContain(cookie);
+  }, 30_000);
+
+  for (const { name, value } of challenges) {
+    test(`the ${name} challenge still prints its value`, async () => {
+      capture.script("/params", challenged);
+
+      const cli = await run([...parameterArgs, "--verbose"]);
+
+      expect(cli.exitCode).toBe(0);
+      expect(lines(cli.stderr)).toContain(`< ${name}: ${value}`);
     }, 30_000);
   }
 });

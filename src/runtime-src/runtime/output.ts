@@ -1323,7 +1323,7 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
  * const`, so it arrives widened to `boolean`, and only `true` writes the notice. `requiredHeaders`
  * lists, by response key, the required headers a case declares; it is present only when some case
  * declares one. `sensitiveHeaders` lists the header parameters and multipart part headers the
- * document marks sensitive (`format: password` or `x-sensitive: true`), which `--dry-run` and
+ * document marks sensitive (a password schema or `x-sensitive: true`), which `--dry-run` and
  * `--verbose` redact (`sensitiveHeaderNames`); it is present only when there is one.
  */
 export interface OperationMeta {

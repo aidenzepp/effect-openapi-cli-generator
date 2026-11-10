@@ -992,10 +992,21 @@ export const credentialLikeName =
   /token|secret|password|passwd|api-key|apikey|api_key|auth|session|credential|signature/iu;
 
 /**
+ * A response header name `--verbose` redacts by operator policy: a credential-like name
+ * (`credentialLikeName`), except the `WWW-Authenticate` and `Proxy-Authenticate` challenges,
+ * which carry no secret and are the main clue when authentication fails.
+ */
+export const credentialLikeResponseName = new RegExp(
+  `^(?!(?:www|proxy)-authenticate$).*(?:${credentialLikeName.source})`,
+  "iu",
+);
+
+/**
  * The request header names `--dry-run` and `--verbose` redact on top of `redactedNames`: every
  * credential-like name (`credentialLikeName`) and each header the operation declares sensitive
- * (`format: password` or `x-sensitive: true`, which the generator writes as `sensitive`). They
- * apply to the request's headers and its multipart part headers, never to a response's.
+ * (`format: password`, an array of password strings, or `x-sensitive: true`, which the generator
+ * writes as `sensitiveHeaders`). They apply to the request's headers and its multipart part
+ * headers; a response's headers get `credentialLikeResponseName`.
  */
 export const sensitiveHeaderNames = (
   sensitive: readonly string[] | undefined,
