@@ -1,12 +1,16 @@
 import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect, Layer, PlatformError, Predicate, Schema } from "effect";
+import { Effect, Layer, Option, PlatformError, Predicate, Schema } from "effect";
 import type { FileSystem, Path } from "effect";
 import type { Digest } from "effect/crypto";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
-import { UnsupportedOpenApiVersion, versionRefusal } from "../../src/validate/dispatch.ts";
+import {
+  declaredOpenapi,
+  UnsupportedOpenApiVersion,
+  versionRefusal,
+} from "../../src/validate/dispatch.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { ReadSchema } from "../../src/validate/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -142,6 +146,17 @@ describe("validateDocument", () => {
     expect(await failureTag(validateDocument({ swagger: "2.0" }))).toBe(
       "UnsupportedOpenApiVersion",
     );
+  });
+});
+
+describe("declaredOpenapi", () => {
+  test("a string openapi value is Some; a missing or non-string one is None", () => {
+    expect(declaredOpenapi({ openapi: "3.1.0" })).toEqual(Option.some("3.1.0"));
+    expect(declaredOpenapi({ openapi: "2.0" })).toEqual(Option.some("2.0"));
+    expect(declaredOpenapi({ swagger: "2.0" })).toEqual(Option.none());
+    expect(declaredOpenapi({ openapi: 3.1 })).toEqual(Option.none());
+    expect(declaredOpenapi({ openapi: null })).toEqual(Option.none());
+    expect(declaredOpenapi("3.1.0")).toEqual(Option.none());
   });
 });
 

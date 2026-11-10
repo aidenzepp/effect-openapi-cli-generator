@@ -1,4 +1,5 @@
-import { Data, Effect, Option, Schema } from "effect";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
+import { Effect, Option, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { Json } from "../model/pointer.ts";
@@ -13,9 +14,10 @@ export type Line = SpecLine;
  * The document has no `openapi` string, or names a line other than 3.0, 3.1 or 3.2. A run reports
  * it as the `DOC-02` refusal `versionRefusal` builds.
  */
-export class UnsupportedOpenApiVersion extends Data.TaggedError("UnsupportedOpenApiVersion")<{
-  readonly openapi: string | undefined;
-}> {}
+export class UnsupportedOpenApiVersion extends Schema.TaggedError<UnsupportedOpenApiVersion>()(
+  "UnsupportedOpenApiVersion",
+  { openapi: Schema.UndefinedOr(Schema.String) },
+) {}
 
 /**
  * The dated official schema each line validates against (design 3.2): `schema-base` for 3.1 and
@@ -29,7 +31,14 @@ export const schemaUri: Record<Line, string> = {
 
 const linePattern = /^(?<line>3\.[012])\.[0-9]+$/u;
 
-const Declared = Schema.Struct({ openapi: Schema.String });
+const decodeDeclared = Schema.decodeUnknownOption(Schema.Struct({ openapi: Schema.String }));
+
+/**
+ * The `openapi` string a document declares, or `None` when the document has no `openapi` member or
+ * its value is not a string. Each caller chooses its own fallback.
+ */
+export const declaredOpenapi = (document: Json): Option.Option<string> =>
+  decodeDeclared(document).pipe(Option.map((found) => found.openapi));
 
 const lineOfVersion = (openapi: string): Line | undefined => {
   const line = linePattern.exec(openapi)?.groups?.line;
@@ -41,11 +50,7 @@ const lineOfVersion = (openapi: string): Line | undefined => {
  * Selects the line from the document's `openapi` major.minor.
  */
 export const lineOf = (document: Json): Effect.Effect<Line, UnsupportedOpenApiVersion> => {
-  const declared = Schema.decodeUnknownOption(Declared)(document);
-  const openapi = declared.pipe(
-    Option.map((found) => found.openapi),
-    Option.getOrUndefined,
-  );
+  const openapi = Option.getOrUndefined(declaredOpenapi(document));
   const line = openapi === undefined ? undefined : lineOfVersion(openapi);
 
   return line === undefined
