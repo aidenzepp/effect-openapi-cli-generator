@@ -984,6 +984,24 @@ export const attachPlaceholders =
 export const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
 
 /**
+ * A request header name that reads as a credential, by operator policy: it contains, in any case,
+ * one of these words. Output redacts such a header beside `credentialHeaders`; the wire never
+ * changes.
+ */
+export const credentialLikeName =
+  /token|secret|password|passwd|api-key|apikey|api_key|auth|session|credential|signature/iu;
+
+/**
+ * The request header names `--dry-run` and `--verbose` redact on top of `redactedNames`: every
+ * credential-like name (`credentialLikeName`) and each header the operation declares sensitive
+ * (`format: password` or `x-sensitive: true`, which the generator writes as `sensitive`). They
+ * apply to the request's headers and its multipart part headers, never to a response's.
+ */
+export const sensitiveHeaderNames = (
+  sensitive: readonly string[] | undefined,
+): readonly (string | RegExp)[] => [credentialLikeName, ...(sensitive ?? [])];
+
+/**
  * Extend `Headers.CurrentRedactedNames` with every credential header name and every `apiKey`
  * header name, and `UrlParams.CurrentRedactedNames` with every `apiKey` query name, keeping
  * Effect's defaults (design 7.5). A cookie name needs no entry: the whole `Cookie` header is

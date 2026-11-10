@@ -65,7 +65,7 @@ const run = async (answers: readonly Answer[], options: Run = {}) => {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   const looped = scripted(answers).pipe(
-    Client.verboseTransform(scrub),
+    Client.verboseTransform(scrub, []),
     Client.redirectLoop(Effect.succeed, sentinel, allowed, Client.noCertificate),
   );
   const client = options.retries === true ? looped.pipe(Client.retryTransform(scrub)) : looped;

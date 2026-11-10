@@ -970,7 +970,8 @@ const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =
  * sends writes a `> ` block (`> METHOD <URL> HTTP/1.1`, then the headers in `sendOrder`) before
  * the send, and each response a `< ` block (`< <status>`, then the headers) when its headers
  * arrive; no bodies. A send that fails writes only its request block. Header and query values
- * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, then the RT-6
+ * pass through `Headers.CurrentRedactedNames` and `UrlParams.CurrentRedactedNames`, a request
+ * header also through `sensitive` (`Auth.sensitiveHeaderNames`), then the RT-6
  * value scrubber `send` passes as `scrub`, so a credential prints as `<redacted>` or
  * `<redacted:<scheme>>`. A URL a header carries (`Location`, `Content-Location`, `Link`,
  * `Refresh`) is redacted as the request URL is. The scrubber runs over each whole line.
@@ -979,7 +980,7 @@ const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =
  * because only there does it see each hop as sent, after the attach step, of every attempt.
  */
 export const verboseTransform =
-  (scrub: (text: string) => string) =>
+  (scrub: (text: string) => string, sensitive: readonly (string | RegExp)[]) =>
   <E, R>(
     client: HttpClient.HttpClient.With<E, R>,
   ): HttpClient.HttpClient.With<E, R | Stdio.Stdio> =>
@@ -994,7 +995,12 @@ export const verboseTransform =
         const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
         yield* printBlock(scrub, [
           `> ${request.method} ${verboseUrl(request, queryNames)} HTTP/1.1`,
-          ...headerLines(">", sendOrder(request.headers), headerNames, queryNames),
+          ...headerLines(
+            ">",
+            sendOrder(request.headers),
+            [...headerNames, ...sensitive],
+            queryNames,
+          ),
         ]);
 
         const response = yield* send;
