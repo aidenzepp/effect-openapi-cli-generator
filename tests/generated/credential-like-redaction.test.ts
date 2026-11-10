@@ -217,3 +217,96 @@ describe("multipart part headers the policy marks sensitive through a generated 
     expect(lines(cli.stdout)).toContain(`${ordinaryPart.name}: ${ordinaryPart.value}`);
   }, 30_000);
 });
+
+// Every word of the policy's name list, each in mixed case inside a longer header name, with the
+// flag the generator folds it to and a value no other row uses. Deleting any one word from
+// `Auth.credentialLikeName` turns its row red.
+const policyWords = [
+  { flag: "--x-hdr-to-ke-n-value", name: "X-Hdr-ToKeN-Value", value: "w01-5c9e", word: "token" },
+  { flag: "--x-hdr-se-cr-et-value", name: "X-Hdr-SeCrEt-Value", value: "w02-a7d1", word: "secret" },
+  {
+    flag: "--x-hdr-pa-ss-wo-rd-value",
+    name: "X-Hdr-PaSsWoRd-Value",
+    value: "w03-3f8b",
+    word: "password",
+  },
+  { flag: "--x-hdr-pa-ss-wd-value", name: "X-Hdr-PaSsWd-Value", value: "w04-e214", word: "passwd" },
+  {
+    flag: "--x-hdr-ap-i-ke-y-value",
+    name: "X-Hdr-ApI-KeY-Value",
+    value: "w05-60ca",
+    word: "api-key",
+  },
+  { flag: "--x-hdr-ap-ik-ey-value", name: "X-Hdr-ApIkEy-Value", value: "w06-b93f", word: "apikey" },
+  {
+    flag: "--x-hdr-ap-i-k-ey-value",
+    name: "X-Hdr-ApI_kEy-Value",
+    value: "w07-1d47",
+    word: "api_key",
+  },
+  { flag: "--x-hdr-au-th-value", name: "X-Hdr-AuTh-Value", value: "w08-8e05", word: "auth" },
+  {
+    flag: "--x-hdr-se-ss-io-n-value",
+    name: "X-Hdr-SeSsIoN-Value",
+    value: "w09-c2a6",
+    word: "session",
+  },
+  {
+    flag: "--x-hdr-cr-ed-en-ti-al-value",
+    name: "X-Hdr-CrEdEnTiAl-Value",
+    value: "w10-47fd",
+    word: "credential",
+  },
+  {
+    flag: "--x-hdr-si-gn-at-ur-e-value",
+    name: "X-Hdr-SiGnAtUrE-Value",
+    value: "w11-9b30",
+    word: "signature",
+  },
+] as const;
+
+// Names that come close to the list without containing a word: their values still print.
+const nearMisses = [
+  { flag: "--x-request-id", name: "X-Request-Id", value: "nm1-2a6e" },
+  { flag: "--r2-access-key-id", name: "R2-Access-Key-Id", value: "nm2-f0c4" },
+] as const;
+
+const wordArgs = [
+  "words-get",
+  "--base-url",
+  base,
+  ...[...policyWords, ...nearMisses].flatMap(({ flag, value }) => [flag, value]),
+];
+
+describe("every policy word redacts a header parameter that contains it", () => {
+  for (const { name, value, word } of policyWords) {
+    test(`${word} in ${name}: dry-run and verbose print <redacted>, the wire carries the value`, async () => {
+      const dry = await run([...wordArgs, "--dry-run"]);
+      capture.script("/words", ok);
+
+      const verbose = await run([...wordArgs, "--verbose"]);
+      const header = name.toLowerCase();
+
+      expect(dry.exitCode).toBe(0);
+      expect(lines(dry.stdout)).toContain(`${header}: <redacted>`);
+      expect(verbose.exitCode).toBe(0);
+      expect(lines(verbose.stderr)).toContain(`> ${header}: <redacted>`);
+      expect(`${dry.stdout}${dry.stderr}${verbose.stdout}${verbose.stderr}`).not.toContain(value);
+      expect(sent(verbose.requests[0], name)).toEqual([value]);
+    }, 30_000);
+  }
+
+  for (const { name, value } of nearMisses) {
+    test(`near miss ${name}: dry-run and verbose still print its value`, async () => {
+      const dry = await run([...wordArgs, "--dry-run"]);
+      capture.script("/words", ok);
+
+      const verbose = await run([...wordArgs, "--verbose"]);
+      const header = name.toLowerCase();
+
+      expect(lines(dry.stdout)).toContain(`${header}: ${value}`);
+      expect(lines(verbose.stderr)).toContain(`> ${header}: ${value}`);
+      expect(sent(verbose.requests[0], name)).toEqual([value]);
+    }, 30_000);
+  }
+});
