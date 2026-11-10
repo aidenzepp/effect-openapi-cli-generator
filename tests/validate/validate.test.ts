@@ -1,7 +1,7 @@
 import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect, Layer, Predicate, Schema } from "effect";
+import { Effect, Layer, PlatformError, Predicate, Schema } from "effect";
 import type { FileSystem, Path } from "effect";
 import type { Digest } from "effect/crypto";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
@@ -38,7 +38,7 @@ const deepFreeze = (value: Json): Json => {
 const vendored: ReadSchema = (file) =>
   manifest.some((entry) => entry.file === file)
     ? Effect.succeed(readFileSync(new URL(`../../src/validate/schemas/${file}`, import.meta.url)))
-    : Effect.fail("not vendored");
+    : Effect.fail(new PlatformError.BadArgument({ method: "read", module: "test" }));
 
 const tampered: ReadSchema = (file) =>
   file === "schema-base-3.1-2026-08-03.json"
@@ -48,7 +48,9 @@ const tampered: ReadSchema = (file) =>
     : vendored(file);
 
 const missing: ReadSchema = (file) =>
-  file === "meta-3.2-2026-02-26.json" ? Effect.fail("gone") : vendored(file);
+  file === "meta-3.2-2026-02-26.json"
+    ? Effect.fail(new PlatformError.BadArgument({ method: "read", module: "test" }))
+    : vendored(file);
 
 const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
@@ -215,5 +217,15 @@ describe("checkManifest", () => {
 
   test("a missing vendored schema fails the check", async () => {
     expect(await failureTag(checkManifest(missing))).toBe("SchemaManifestError");
+  });
+
+  test("an unreadable vendored file keeps its cause", async () => {
+    const error = await Effect.runPromise(
+      checkManifest(missing).pipe(Effect.provide(layer), Effect.flip),
+    );
+
+    expect(error.file).toBe("meta-3.2-2026-02-26.json");
+    expect(error.reason).toBe("unreadable");
+    expect(error.cause).toBeInstanceOf(PlatformError.BadArgument);
   });
 });

@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 import {
   validate as compile,
   registerSchema,
@@ -12,8 +11,8 @@ import "@hyperjump/json-schema/draft-04";
 // against.
 import "@hyperjump/json-schema/openapi-3-1";
 import "@hyperjump/json-schema/openapi-3-2";
-import { Data, Effect, Option, Schema } from "effect";
-import type { FileSystem, Path } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
+import type { PlatformError } from "effect";
 import type { Digest } from "effect/crypto";
 import { rewriteDialect } from "./dialect.ts";
 import { matchDisagreement, noticeFor, refusalFor, knownDisagreements } from "./disagreements.ts";
@@ -26,9 +25,12 @@ import type { Line, UnsupportedOpenApiVersion } from "./dispatch.ts";
 import type { Json } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
+import { sha256Hex } from "../write/manifest.ts";
 import { manifest } from "./schemas/manifest.ts";
 
 type ValidatorInput = Parameters<Validator>[0];
+
+type SchemaInput = Parameters<typeof registerSchema>[0];
 
 export { UnsupportedOpenApiVersion } from "./dispatch.ts";
 
@@ -37,17 +39,21 @@ export type { Line } from "./dispatch.ts";
 /**
  * A vendored schema file cannot be read or differs from the manifest.
  */
-export class SchemaManifestError extends Data.TaggedError("SchemaManifestError")<{
-  readonly file: string;
-  readonly reason: "unreadable" | "sha256-mismatch";
-}> {}
+export class SchemaManifestError extends Schema.TaggedError<SchemaManifestError>()(
+  "SchemaManifestError",
+  {
+    cause: Schema.optionalKey(Schema.Defect()),
+    file: Schema.String,
+    reason: Schema.Literals(["unreadable", "sha256-mismatch"]),
+  },
+) {}
 
 /**
  * The validator library failed to register, compile or run a schema.
  */
-export class ValidatorError extends Data.TaggedError("ValidatorError")<{
-  readonly cause: unknown;
-}> {}
+export class ValidatorError extends Schema.TaggedError<ValidatorError>()("ValidatorError", {
+  cause: Schema.Defect(),
+}) {}
 
 /**
  * One BASIC output error unit. `instanceLocation` is a URI fragment, not yet decoded (m1-va2).
@@ -71,12 +77,21 @@ export interface ValidationResult {
 /**
  * Reads the bytes of one vendored file.
  */
-export type ReadSchema = (file: string) => Effect.Effect<Uint8Array, unknown>;
+export type ReadSchema = (
+  file: string,
+) => Effect.Effect<
+  Uint8Array,
+  PlatformError.PlatformError | PlatformError.BadArgument,
+  FileSystem.FileSystem | Path.Path
+>;
 
-const readVendored: ReadSchema = (file) =>
-  Effect.try(() => readFileSync(new URL(`schemas/${file}`, import.meta.url)));
+const readVendored: ReadSchema = Effect.fnUntraced(function* readVendored(file: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const target = yield* path.fromFileUrl(new URL(`schemas/${file}`, import.meta.url));
 
-const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+  return yield* fs.readFile(target);
+});
 
 /**
  * Reads every vendored file and checks its sha256 against the manifest, in registration order.
@@ -92,26 +107,48 @@ export const checkManifest = (
   Effect.all(
     manifest.map((entry) =>
       read(entry.file).pipe(
-        Effect.mapError(() => new SchemaManifestError({ file: entry.file, reason: "unreadable" })),
+        Effect.mapError(
+          (cause) => new SchemaManifestError({ cause, file: entry.file, reason: "unreadable" }),
+        ),
         Effect.flatMap((bytes) =>
-          sha256(bytes) === entry.sha256
-            ? Effect.succeed(bytes)
-            : Effect.fail(new SchemaManifestError({ file: entry.file, reason: "sha256-mismatch" })),
+          sha256Hex(bytes).pipe(
+            Effect.flatMap((hex) =>
+              hex === entry.sha256
+                ? Effect.succeed(bytes)
+                : Effect.fail(
+                    new SchemaManifestError({ file: entry.file, reason: "sha256-mismatch" }),
+                  ),
+            ),
+          ),
         ),
       ),
     ),
   );
 
+const decodeSchemaText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+
+const textDecoder = new TextDecoder();
+
 const register = checkManifest(readVendored).pipe(
   Effect.flatMap((files) =>
+    // Effect.forEach takes (items, f); it is not an array method with a thisArg.
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument
+    Effect.forEach(files, (bytes) =>
+      decodeSchemaText(textDecoder.decode(bytes)).pipe(
+        Effect.mapError((cause) => new ValidatorError({ cause })),
+      ),
+    ),
+  ),
+  Effect.flatMap((schemas) =>
     Effect.try({
       catch: (cause) => new ValidatorError({ cause }),
       try: () => {
         setShouldValidateFormat(false);
 
-        for (const bytes of files) {
-          // oxlint-disable-next-line typescript/no-unsafe-argument -- JSON.parse yields any; the sha256-checked vendored file is the library's own schema document
-          registerSchema(JSON.parse(new TextDecoder().decode(bytes)));
+        for (const schema of schemas) {
+          // SAFETY: the sha256-checked vendored file is the library's own schema document, an object.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- decoded Json to the library's schema input type
+          registerSchema(schema as SchemaInput);
         }
       },
     }),
