@@ -49,6 +49,7 @@ import {
   preview,
   redactedNames,
   Schemes,
+  sensitiveHeaderNames,
   withheldCertificateClause,
 } from "./auth.ts";
 import {
@@ -1314,14 +1315,16 @@ export const formatter = (root: Command.Command.Any): CliOutput.Formatter => ({
 });
 
 /**
- * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path
- * template (the display name when it has no `operationId`), its declared media, its security
- * requirement, when the operation declares one, the request-id header chosen at generation, and,
- * when the operation or its path item overrides the root servers, its effective servers table.
- * `deprecated` is printed only for an operation the document marks deprecated; the meta object is
- * not `as const`, so it arrives widened to `boolean`, and only `true` writes the notice.
- * `requiredHeaders` lists, by response key, the required headers a case declares; it is present
- * only when some case declares one.
+ * What `send` reads of an operation's emitted meta (`api/<group>.ts`): its method and path template
+ * (the display name when it has no `operationId`), its declared media, its security requirement,
+ * when the operation declares one, the request-id header chosen at generation, and, when the
+ * operation or its path item overrides the root servers, its effective servers table. `deprecated`
+ * is printed only for an operation the document marks deprecated; the meta object is not `as
+ * const`, so it arrives widened to `boolean`, and only `true` writes the notice. `requiredHeaders`
+ * lists, by response key, the required headers a case declares; it is present only when some case
+ * declares one. `sensitiveHeaders` lists the header parameters and multipart part headers the
+ * document marks sensitive (a password schema or `x-sensitive: true`), which `--dry-run` and
+ * `--verbose` redact (`sensitiveHeaderNames`); it is present only when there is one.
  */
 export interface OperationMeta {
   readonly deprecated?: boolean | undefined;
@@ -1332,6 +1335,7 @@ export interface OperationMeta {
   readonly requestIdHeader?: string | undefined;
   readonly requiredHeaders?: Readonly<Record<string, readonly string[]>> | undefined;
   readonly security: SecurityRequirement;
+  readonly sensitiveHeaders?: readonly string[] | undefined;
   readonly servers?: ServersTable | undefined;
 }
 
@@ -1577,6 +1581,19 @@ const partContentType = /^content-type:\s*(?<type>[^\r\n]*)$/imu;
 
 const unchanged = (text: string): string => text;
 
+// A part head with the value of each field whose name `names` lists replaced by `<redacted>`.
+const redactPartHead = (head: string, names: readonly (string | RegExp)[]): string =>
+  head
+    .split("\r\n")
+    .map((field) => {
+      const colon = field.indexOf(":");
+
+      return colon !== -1 && Headers.isRedactedName(field.slice(0, colon).trim(), names)
+        ? `${field.slice(0, colon)}: ${redactedPlaceholder()}`
+        : field;
+    })
+    .join("\r\n");
+
 /**
  * The recorded-value scrub over text that arrives in chunks, for the `--dry-run` body: each piece
  * is emitted scrubbed (`scrub`) once it ends with no proper prefix of any recorded form, found by
@@ -1633,7 +1650,8 @@ const scrubStream =
 /**
  * The `--dry-run` view of a multipart body (design 4.6), as a streaming state machine over the
  * bytes the writer produced: delimiters, part heads and text parts as given, the heads and text
- * through the recorded-value scrub (`StreamScrubber`); a file part's content
+ * through the recorded-value scrub (`StreamScrubber`), and in a head the value of each field whose
+ * name `names` lists as `<redacted>`; a file part's content
  * (one with a `filename`) as `<file <basename>, N bytes>`, and any other part with a binary content
  * type as `<binary part, N bytes>`, counted, never held. One nested multipart level is walked with
  * its own boundary. Every delimiter is read as CRLF `--<boundary>`, so a CRLF is put before the
@@ -1644,13 +1662,19 @@ class MultipartSummary {
   private counted = 0;
   private first = true;
   private mode: "content" | "epilogue" | "head" | "opaque" = "content";
+  private readonly names: readonly (string | RegExp)[];
   private pending: Uint8Array = crlf;
   private readonly recorded: readonly ScrubEntry[];
   private summary: string | undefined = undefined;
   private text: StreamScrubber | undefined = undefined;
 
-  constructor(boundary: string, recorded: readonly ScrubEntry[]) {
+  constructor(
+    boundary: string,
+    recorded: readonly ScrubEntry[],
+    names: readonly (string | RegExp)[],
+  ) {
     this.boundaries = [boundary];
+    this.names = names;
     this.recorded = recorded;
   }
 
@@ -1744,10 +1768,11 @@ class MultipartSummary {
     }
 
     const head = new TextDecoder().decode(this.pending.subarray(0, at));
+    const shown = redactPartHead(head, this.names);
     const contentType = partContentType.exec(head)?.groups?.type;
     const nested = boundaryOf(contentType);
     if (nested === undefined) {
-      out.push(this.scrubbed(`${head}\r\n\r\n`));
+      out.push(this.scrubbed(`${shown}\r\n\r\n`));
       this.pending = this.pending.subarray(at + headEnd.length);
       const filename = partFilename.exec(head)?.groups?.filename;
       if (filename !== undefined) {
@@ -1757,7 +1782,7 @@ class MultipartSummary {
       }
     } else {
       // The head's last CRLF starts the nested body's first delimiter.
-      out.push(this.scrubbed(`${head}\r\n`));
+      out.push(this.scrubbed(`${shown}\r\n`));
       this.pending = this.pending.subarray(at + 2);
       this.boundaries.push(nested);
     }
@@ -1822,10 +1847,11 @@ const summarizeMultipart = <E, R>(
   body: Stream.Stream<Uint8Array, E, R>,
   boundary: string,
   recorded: readonly ScrubEntry[],
+  names: readonly (string | RegExp)[],
 ): Stream.Stream<Uint8Array, E, R> =>
   body.pipe(
     Stream.mapAccum(
-      () => new MultipartSummary(boundary, recorded),
+      () => new MultipartSummary(boundary, recorded, names),
       (summary, chunk: Uint8Array) => [summary, summary.push(chunk)] as const,
       { onHalt: (summary) => summary.end() },
     ),
@@ -1851,14 +1877,15 @@ const line = (text: string): Stream.Stream<Uint8Array> => Stream.succeed(encoder
 /**
  * The `--dry-run` body (design 4.6, DM3-8): a text body (`printsAsText`: text-family or sequential)
  * as given, with every recorded value replaced (`scrub`, or `StreamScrubber` for a streamed one); a
- * multipart body summarized by `MultipartSummary`; a binary body as `<binary body, N bytes>` from
- * its declared length, or, with no length, which is stdin, as `<binary body from stdin>` (`<body
- * from stdin>` for a text one) without reading it. A file the runtime streams arrives with its size
- * only, so its path cannot be named here.
+ * multipart body summarized by `MultipartSummary`, a part header `names` lists redacted; a binary
+ * body as `<binary body, N bytes>` from its declared length, or, with no length, which is stdin, as
+ * `<binary body from stdin>` (`<body from stdin>` for a text one) without reading it. A file the
+ * runtime streams arrives with its size only, so its path cannot be named here.
  */
 const dryRunBody = (
   request: HttpClientRequest.HttpClientRequest,
   recorded: readonly ScrubEntry[],
+  names: readonly (string | RegExp)[],
 ): Stream.Stream<Uint8Array, UsageError> => {
   const { body } = request;
   if (body._tag === "Empty") {
@@ -1888,6 +1915,7 @@ const dryRunBody = (
       ),
       boundary,
       recorded,
+      names,
     );
   }
 
@@ -1953,18 +1981,19 @@ const dryRunUrl = (
  * Print the request `send` built instead of sending it (design 4.6 DM3-8, D-OUT3, 7.5): on stdout
  * `METHOD <absolute URL> HTTP/1.1`, the headers in `sendOrder`, a blank line and `dryRunBody`. The
  * request carries `<redacted:<scheme>>` where a credential would go (`attachPlaceholders`); a
- * header value whose name `Headers.CurrentRedactedNames` lists is `<redacted>` unless it is exactly
- * a placeholder form, and a `Cookie` is redacted pair by pair; every line is scrubbed of the values
- * the run recorded, secret-file values among them, and sanitized.
+ * header value whose name `Headers.CurrentRedactedNames` or `sensitive` lists is `<redacted>`
+ * unless it is exactly a placeholder form, and a `Cookie` is redacted pair by pair; every line is
+ * scrubbed of the values the run recorded, secret-file values among them, and sanitized.
  */
 const printDryRun = (
   request: HttpClientRequest.HttpClientRequest,
   placeholders: readonly Placeholder[],
   recorded: readonly ScrubEntry[],
+  sensitive: readonly (string | RegExp)[],
 ): Effect.Effect<void, OutputError | UsageError, Stdio.Stdio> =>
   Effect.gen(function* dryRun() {
     const written = new Set(placeholders.map(({ scheme }) => placeholder(scheme)));
-    const headerNames = yield* Effect.service(Headers.CurrentRedactedNames);
+    const headerNames = [...(yield* Effect.service(Headers.CurrentRedactedNames)), ...sensitive];
     const queryNames = yield* Effect.service(UrlParams.CurrentRedactedNames);
     const exact = new Set(
       [...written].flatMap((text) => [text, `Bearer ${text}`, `Basic ${text}`]),
@@ -1999,7 +2028,10 @@ const printDryRun = (
     ].map((text) => scrubbedAndSanitized(text, recorded));
 
     yield* toStdout(
-      Stream.concat(line(`${lines.join("\n")}\n\n`), endWithNewline(dryRunBody(request, recorded))),
+      Stream.concat(
+        line(`${lines.join("\n")}\n\n`),
+        endWithNewline(dryRunBody(request, recorded, headerNames)),
+      ),
     );
   });
 
@@ -2113,11 +2145,12 @@ export const send =
       yield* warnOncePerRun(plaintextWarning(baseUrl, allowedByFlag));
 
       const policy = yield* ClientPolicy;
+      const sensitive = sensitiveHeaderNames(meta.sensitiveHeaders);
       if (dryRun) {
         // The `User-Agent` `withUserAgent` sets, then the attach step, in the policy client's order.
         const agent = setUserAgent(policy.binName, policy.version)(built);
         const shown = yield* attachPlaceholders(security, chosen.placeholders, origins)(agent);
-        yield* printDryRun(shown, chosen.placeholders, scrubbed).pipe(
+        yield* printDryRun(shown, chosen.placeholders, scrubbed, sensitive).pipe(
           Effect.provide(redactedNames(security)),
         );
 
@@ -2134,7 +2167,7 @@ export const send =
       const idleSeconds = yield* effectiveIdleTimeoutSeconds(envPrefix);
       const scrub = (text: string): string => scrubbedAndSanitized(text, scrubbed);
       const client = (yield* HttpClient.HttpClient).pipe(
-        verboseTransform(scrub),
+        verboseTransform(scrub, sensitive),
         redirectLoop(
           attach(security, { credentials, origins }),
           policy.direct,
