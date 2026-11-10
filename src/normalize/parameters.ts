@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, HashMap, Option, Order, Record, Schema } from "effect";
+import { Array as Arr, Data, Effect, HashMap, Option, Order, Record, Schema, Struct } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
 import { diagnosticOf } from "../model/diagnostic.ts";
@@ -30,18 +30,17 @@ export interface ParameterSite {
  * What normalizing one Parameter Object produced. `Refused` keeps `required` so the operation
  * assembly can raise a refused required parameter to operation scope.
  */
-export type ParameterOutcome =
-  | {
-      readonly _tag: "Implemented";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly parameter: Parameter;
-    }
-  | { readonly _tag: "Ignored"; readonly diagnostics: readonly Diagnostic[] }
-  | {
-      readonly _tag: "Refused";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly required: boolean;
-    };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type ParameterOutcome = Data.TaggedEnum<{
+  Implemented: { readonly diagnostics: readonly Diagnostic[]; readonly parameter: Parameter };
+  Ignored: { readonly diagnostics: readonly Diagnostic[] };
+  Refused: { readonly diagnostics: readonly Diagnostic[]; readonly required: boolean };
+}>;
+
+/**
+ * Constructors and dispatch for {@link ParameterOutcome}.
+ */
+export const ParameterOutcome = Data.taggedEnum<ParameterOutcome>();
 
 /**
  * The site is not a Parameter Object the earlier stages could have passed: validation, resolution
@@ -62,7 +61,10 @@ export class ParameterNotReadable extends Schema.TaggedError<ParameterNotReadabl
   },
 ) {}
 
-const styleNames = [
+/**
+ * The eight `style` values a Parameter, Header or Encoding Object may declare.
+ */
+export const styleNames = [
   "cookie",
   "deepObject",
   "form",
@@ -73,7 +75,10 @@ const styleNames = [
   "spaceDelimited",
 ] as const;
 
-type StyleName = (typeof styleNames)[number];
+/**
+ * One of the {@link styleNames}.
+ */
+export type StyleName = (typeof styleNames)[number];
 
 type Location = "cookie" | "header" | "path" | "query" | "querystring";
 
@@ -258,16 +263,16 @@ interface ContentPlan {
   readonly schemaKey: string;
 }
 
-type Decision =
-  | {
-      readonly _tag: "Build";
-      readonly findings: readonly Finding[];
-      readonly plan: ContentPlan | StylePlan;
-    }
-  | { readonly _tag: "Ignore"; readonly findings: readonly Finding[] }
-  | { readonly _tag: "Refuse"; readonly finding: Finding };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+type Decision = Data.TaggedEnum<{
+  Build: { readonly findings: readonly Finding[]; readonly plan: ContentPlan | StylePlan };
+  Ignore: { readonly findings: readonly Finding[] };
+  Refuse: { readonly finding: Finding };
+}>;
 
-const refuse = (finding: Finding): Decision => ({ _tag: "Refuse", finding });
+const Decision = Data.taggedEnum<Decision>();
+
+const refuse = (finding: Finding): Decision => Decision.Refuse({ finding });
 
 const cookieExplodeFalse = (style: StyleName, allowReserved: boolean): Finding => {
   const row = permanentCookieRow(style, allowReserved);
@@ -307,11 +312,10 @@ const decideCookie = (
     return refuse(cookieFormMultiple);
   }
 
-  return {
-    _tag: "Build",
+  return Decision.Build({
     findings,
     plan: { ...plan, kind: "style", row: stagedCookieRow(style, explode, allowReserved) },
-  };
+  });
 };
 
 // In the entry document, official-schema validation (VAL-02 to VAL-04) refuses a style its
@@ -494,8 +498,7 @@ const decideContent = (node: ParameterNode, content: Content): Decision => {
     );
   }
 
-  return {
-    _tag: "Build",
+  return Decision.Build({
     findings: node.allowEmptyValue === true ? [allowEmptyValueIgnored] : [],
     plan: {
       kind: "content",
@@ -503,7 +506,7 @@ const decideContent = (node: ParameterNode, content: Content): Decision => {
       rows: contentRows(node.in),
       schemaKey: schemaKey.value,
     },
-  };
+  });
 };
 
 // Whether the line's text gives allowReserved a meaning for this location and style.
@@ -549,12 +552,19 @@ const styleNotices = (
  * or a member union neither switch defines (`PRM-27/compound-nested`). `Covered`: every branch is
  * covered and a scalar one by the scalar switch; `nested` when the bracket switch covers one.
  */
-export type ScalarCover =
-  | { readonly _tag: "Covered"; readonly nested: boolean }
-  | { readonly _tag: "Strict" }
-  | { readonly _tag: "Uncovered" };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type ScalarCover = Data.TaggedEnum<{
+  Covered: { readonly nested: boolean };
+  Strict: Record<never, never>;
+  Uncovered: Record<never, never>;
+}>;
 
-const strictCover: ScalarCover = { _tag: "Strict" };
+/**
+ * Constructors and dispatch for {@link ScalarCover}.
+ */
+export const ScalarCover = Data.taggedEnum<ScalarCover>();
+
+const strictCover: ScalarCover = ScalarCover.Strict();
 
 /**
  * What the schema shape and the author config add to a parameter's decision: `multiple` for a
@@ -604,15 +614,14 @@ const deepObjectMarks = (
   cover: ScalarCover,
   strictNested: boolean,
   brackets: boolean,
-): Marks | undefined => {
-  if (cover._tag === "Uncovered") {
-    return undefined;
-  }
-
-  const nested = cover._tag === "Covered" ? cover.nested : strictNested;
-
-  return nested && !brackets ? undefined : { nested, scalars: cover._tag === "Covered" };
-};
+): Marks | undefined =>
+  ScalarCover.$match(cover, {
+    Covered: ({ nested }): Marks | undefined =>
+      nested && !brackets ? undefined : { nested, scalars: true },
+    Strict: (): Marks | undefined =>
+      strictNested && !brackets ? undefined : { nested: strictNested, scalars: false },
+    Uncovered: (): Marks | undefined => undefined,
+  });
 
 const markedPlan = (plan: StylePlan, marks: Marks): StylePlan => {
   const bracketed: StylePlan = marks.nested ? { ...plan, nonStandard: "deepObjectBrackets" } : plan;
@@ -650,7 +659,7 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
   const blocked = inapplicable(
     row,
     style,
-    cover._tag === "Strict" ? traits : { ...traits, nonObject: false },
+    ScalarCover.$is("Strict")(cover) ? traits : { ...traits, nonObject: false },
   );
   if (blocked !== undefined) {
     return refuse(blocked);
@@ -669,22 +678,20 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
     style,
   };
 
-  return {
-    _tag: "Build",
+  return Decision.Build({
     findings: [
       ...styleNotices(node, line, honored, deepRow),
       ...(marks.nested ? [bracketAuthorChoice] : []),
       ...(marks.scalars ? [scalarAuthorChoice] : []),
     ],
     plan: markedPlan(plan, marks),
-  };
+  });
 };
 
 const decideName = (node: ParameterNode): Decision | undefined => {
   const name = node.name.toLowerCase();
   if (node.in === "header" && ignoredHeaders.has(name)) {
-    return {
-      _tag: "Ignore",
+    return Decision.Ignore({
       findings: [
         notice(
           "PRM-19/ignored-header",
@@ -693,7 +700,7 @@ const decideName = (node: ParameterNode): Decision | undefined => {
           "The specification says this header parameter SHALL be ignored; the generated CLI sets the header itself.",
         ),
       ],
-    };
+    });
   }
 
   if (node.in === "header" && name === "cookie") {
@@ -875,15 +882,24 @@ const MemberSchemas = Schema.Struct({
   properties: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
 });
 
+/**
+ * The type names a schema's `type` keyword declares; none when it declares no type.
+ */
+export const typeNames = (type: string | readonly string[] | undefined): readonly string[] =>
+  type === undefined ? [] : Arr.ensure(type);
+
 // The type names the schema at `key` declares, through `$ref`; none when it declares no type.
 const typesAt = (resolution: Resolution, key: CanonicalKey): Effect.Effect<readonly string[]> =>
   nodeIn(resolution, follow(resolution, key)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(TypedSchema)),
-    Effect.map(({ type }) => [type ?? []].flat()),
+    Effect.map(({ type }) => typeNames(type)),
     Effect.orElseSucceed(() => []),
   );
 
-const compound = (types: readonly string[]): boolean =>
+/**
+ * Whether a list of type names includes `array` or `object`.
+ */
+export const compound = (types: readonly string[]): boolean =>
   types.some((name) => name === "array" || name === "object");
 
 // Whether a cookie's schema, through `$ref`, declares an array or object type (PRM-34).
@@ -1124,7 +1140,7 @@ const typedBranches = Effect.fnUntraced(function* typedBranches(
   home: CanonicalKey,
   declared: typeof BranchSchema.Type,
 ): Effect.fn.Return<OwnBranches> {
-  const types = [declared.type ?? []].flat();
+  const types = typeNames(declared.type);
   const kinds: Branch[] = [];
   if (types.length === 0 && declared.properties === undefined) {
     return settled(["other"]);
@@ -1301,10 +1317,10 @@ export const scalarCover = Effect.fnUntraced(function* scalarCover(
 
   const nested = kinds.has("nested");
   if (kinds.has("mixed") || (nested && switches.deepObjectBrackets !== true)) {
-    return { _tag: "Uncovered" };
+    return ScalarCover.Uncovered();
   }
 
-  return { _tag: "Covered", nested };
+  return ScalarCover.Covered({ nested });
 });
 
 // The scalar switch's decision for a deepObject query parameter; `Strict` for any other.
@@ -1576,27 +1592,25 @@ export const normalizeParameter = Effect.fnUntraced(function* normalizeParameter
   });
   const diagnostics = (findings: readonly Finding[]) =>
     toDiagnostics(resolution, site, source.related, source.node.name, findings);
-  if (decision._tag === "Ignore") {
-    return { _tag: "Ignored", diagnostics: yield* diagnostics(decision.findings) };
+  if (Decision.$is("Ignore")(decision)) {
+    return ParameterOutcome.Ignored({ diagnostics: yield* diagnostics(decision.findings) });
   }
 
-  if (decision._tag === "Refuse") {
-    return {
-      _tag: "Refused",
+  if (Decision.$is("Refuse")(decision)) {
+    return ParameterOutcome.Refused({
       diagnostics: yield* diagnostics([decision.finding]),
       required: source.node.required ?? false,
-    };
+    });
   }
 
   if (schemaSitesOf(resolution, source).some((at) => appliesDynamicKeyword(resolution, at))) {
     // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
     // the value cannot be checked without it, so the parameter is refused with no second
     // diagnostic, as a body is, and a required one raises its operation.
-    return { _tag: "Refused", diagnostics: [], required: source.node.required ?? false };
+    return ParameterOutcome.Refused({ diagnostics: [], required: source.node.required ?? false });
   }
 
-  return {
-    _tag: "Implemented",
+  return ParameterOutcome.Implemented({
     diagnostics: yield* diagnostics(decision.findings),
     parameter: yield* build(
       resolution,
@@ -1606,28 +1620,33 @@ export const normalizeParameter = Effect.fnUntraced(function* normalizeParameter
       limits,
       yield* sensitiveOf(resolution, source, limits),
     ),
-  };
+  });
 });
 
-const { in: _in, name: _name, ...headerFields } = ParameterObject.fields;
-
 // A Header Object is a Parameter Object without `name` and `in` (HDR-01).
-const HeaderObject = Schema.Struct(headerFields);
+const HeaderObject = Schema.Struct(Struct.omit(ParameterObject.fields, ["in", "name"]));
 
 /**
  * How one encoding part header is typed and sent: as a header parameter of its name would be, or
  * `Unsupported` with the reason the header parameter path cannot carry it.
  */
-export type PartHeaderOutcome =
-  | {
-      readonly _tag: "Typed";
-      readonly schema: { readonly key: string };
-      readonly sensitive?: true;
-      readonly serialization: ReturnType<typeof serializationOf>;
-    }
-  | { readonly _tag: "Unsupported"; readonly reason: string };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type PartHeaderOutcome = Data.TaggedEnum<{
+  Typed: {
+    readonly schema: { readonly key: string };
+    readonly sensitive?: true;
+    readonly serialization: ReturnType<typeof serializationOf>;
+  };
+  Unsupported: { readonly reason: string };
+}>;
 
-const unsupported = (reason: string): PartHeaderOutcome => ({ _tag: "Unsupported", reason });
+/**
+ * Constructors and dispatch for {@link PartHeaderOutcome}.
+ */
+export const PartHeaderOutcome = Data.taggedEnum<PartHeaderOutcome>();
+
+const unsupported = (reason: string): PartHeaderOutcome =>
+  PartHeaderOutcome.Unsupported({ reason });
 
 /**
  * Decides an encoding part header (ENC-03, HDR-01) by the header parameter rules: the Header
@@ -1675,11 +1694,11 @@ export const partHeader = Effect.fnUntraced(function* partHeader(
     onNone: () => decideStyle(node, resolution.line, traits),
     onSome: (content) => decideContent(node, content),
   });
-  if (decision._tag === "Refuse") {
+  if (Decision.$is("Refuse")(decision)) {
     return unsupported(decision.finding.message);
   }
 
-  if (decision._tag === "Ignore") {
+  if (Decision.$is("Ignore")(decision)) {
     return unsupported("The header parameter rules ignore this header.");
   }
 
@@ -1690,8 +1709,7 @@ export const partHeader = Effect.fnUntraced(function* partHeader(
   const { plan } = decision;
   const objectValue = plan.kind === "style" && (yield* objectValued(resolution, source, limits));
 
-  return {
-    _tag: "Typed",
+  return PartHeaderOutcome.Typed({
     schema: {
       key:
         plan.kind === "content"
@@ -1700,5 +1718,5 @@ export const partHeader = Effect.fnUntraced(function* partHeader(
     },
     ...(yield* sensitiveOf(resolution, source, limits)),
     serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
-  };
+  });
 });

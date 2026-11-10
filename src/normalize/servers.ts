@@ -230,46 +230,44 @@ const authoritySpan = /^(?:[^/?#]*:)?\/\/[^/?#]*/u;
  */
 const originSpan = (template: string): string => authoritySpan.exec(template)?.[0] ?? "";
 
-type Verdict =
-  | { readonly _tag: "Refused"; readonly code: RuleCode }
-  | { readonly _tag: "Origin"; readonly origin: DocumentUri };
-
-const refused = (code: RuleCode): Verdict => ({ _tag: "Refused", code });
-
 const isDocumentUri = Schema.is(DocumentUriSchema);
 
 /**
  * Judges one concrete origin text against the baked-default rules and returns its origin as the
  * URL parser reads it.
  */
-const judge = (text: string, base: string | undefined, allowInsecure: boolean): Verdict => {
+const judge = (
+  text: string,
+  base: string | undefined,
+  allowInsecure: boolean,
+): Result.Result<DocumentUri, RuleCode> => {
   if (/[?#]/u.test(text)) {
-    return refused("SRV-18/query-or-fragment");
+    return Result.fail("SRV-18/query-or-fragment");
   }
 
   const url = Url.fromString(text, base);
 
   if (Result.isFailure(url)) {
-    return refused("SRV-02/unparseable");
+    return Result.fail("SRV-02/unparseable");
   }
 
   const parsed = url.success;
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return refused("SRV-02/unsupported-scheme");
+    return Result.fail("SRV-02/unsupported-scheme");
   }
 
   if (parsed.protocol === "http:" && !allowInsecure) {
-    return refused("SRV-02/insecure-scheme");
+    return Result.fail("SRV-02/insecure-scheme");
   }
 
   if (parsed.username !== "" || parsed.password !== "") {
-    return refused("SRV-02/userinfo");
+    return Result.fail("SRV-02/userinfo");
   }
 
   return isDocumentUri(parsed.origin)
-    ? { _tag: "Origin", origin: parsed.origin }
-    : refused("SRV-02/unparseable");
+    ? Result.succeed(parsed.origin)
+    : Result.fail("SRV-02/unparseable");
 };
 
 const sortOrigins = (origins: readonly DocumentUri[]): readonly DocumentUri[] =>
@@ -377,15 +375,13 @@ const expandOrigins = (
           allowInsecure,
         ),
   );
-  const failure = verdicts.find((verdict) => verdict._tag === "Refused");
+  const failure = Arr.findFirst(verdicts, Result.isFailure);
 
-  if (failure?._tag === "Refused") {
-    return { code: failure.code, origins: [] };
+  if (Option.isSome(failure)) {
+    return { code: failure.value.failure, origins: [] };
   }
 
-  const origins = sortOrigins(
-    verdicts.flatMap((verdict) => (verdict._tag === "Origin" ? [verdict.origin] : [])),
-  );
+  const origins = sortOrigins(Arr.getSuccesses(verdicts));
   const valueCode = judgePathValues(raw, names, origins, retrievalUri);
 
   return valueCode === undefined ? { origins } : { code: valueCode, origins: [] };
@@ -547,24 +543,24 @@ export const effectiveServers = (levels: ServerLevels, context: ServersContext):
   return normalizeLevel(levels.root, "root", context);
 };
 
-interface AcceptedOrigin {
-  readonly diagnostics: readonly Diagnostic[];
-  readonly origin?: DocumentUri;
-}
-
-const acceptedOrigin = (entry: string, index: number, context: ServersContext): AcceptedOrigin => {
+// One `acceptedOrigins` entry: its origin, or the diagnostic that refuses it.
+const acceptedOrigin = (
+  entry: string,
+  index: number,
+  context: ServersContext,
+): Result.Result<DocumentUri, Diagnostic> => {
   const site = configSite(context, formatPointer(["acceptedOrigins", String(index)]));
   const verdict = judge(entry, undefined, context.config.allowInsecure === true);
 
-  if (verdict._tag === "Refused") {
-    return { diagnostics: [diagnose(context, verdict.code, site)] };
+  if (Result.isFailure(verdict)) {
+    return Result.fail(diagnose(context, verdict.failure, site));
   }
 
   const parsed = new URL(entry);
 
   return parsed.pathname === "/" && parsed.search === "" && parsed.hash === ""
-    ? { diagnostics: [], origin: verdict.origin }
-    : { diagnostics: [diagnose(context, "SRV-02/not-an-origin", site)] };
+    ? Result.succeed(verdict.success)
+    : Result.fail(diagnose(context, "SRV-02/not-an-origin", site));
 };
 
 /**
@@ -577,10 +573,10 @@ export const boundOrigins = (servers: readonly Server[], context: ServersContext
   );
 
   return {
-    diagnostics: listed.flatMap((entry) => entry.diagnostics),
+    diagnostics: Arr.getFailures(listed),
     origins: sortOrigins([
       ...servers.flatMap((server) => (server.accepted ? server.origins : [])),
-      ...Arr.getSomes(listed.map((entry) => Option.fromUndefinedOr(entry.origin))),
+      ...Arr.getSuccesses(listed),
     ]),
   };
 };
