@@ -1,8 +1,7 @@
 import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
-import { PathTemplate } from "../model/brands.ts";
+import { MethodToken, PathTemplate } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
-import { methodTokens } from "../model/method-tokens.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution } from "../resolve/index.ts";
@@ -381,6 +380,8 @@ const duplicateIdFindings = (operations: readonly Operation[]): readonly Finding
   return found;
 };
 
+const isMethodToken = Schema.is(MethodToken);
+
 const additionalKeyFindings = (operation: Operation): readonly Finding[] => {
   if (!operation.additional) {
     return [];
@@ -390,7 +391,7 @@ const additionalKeyFindings = (operation: Operation): readonly Finding[] => {
     return [{ code: "PTH-24/fixed-method-key", operation, pointer: operation.pointer }];
   }
 
-  return methodTokens.includes(operation.method)
+  return isMethodToken(operation.method)
     ? []
     : [{ code: "PTH-23/method-not-allowed", operation, pointer: operation.pointer }];
 };

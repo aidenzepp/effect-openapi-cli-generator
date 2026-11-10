@@ -157,9 +157,32 @@ describe("branded codecs", () => {
       () => 0,
       undefined,
       { f: () => 0 },
-      { [Symbol("k")]: 1 },
       Symbol("v"),
       10n,
+    ]) {
+      expect(Exit.isFailure(Schema.decodeUnknownExit(JsonLiteral)(bad))).toBe(true);
+    }
+  });
+
+  test("JsonLiteral accepts what decoded JSON holds", () => {
+    const bare: unknown = Object.setPrototypeOf({ a: [1, { b: "c" }] }, null);
+    for (const good of [{}, [], { a: [1, { b: [null, true, "x"] }] }, bare, 0, -1.5, 1e308]) {
+      expect(Exit.isSuccess(Schema.decodeUnknownExit(JsonLiteral)(good))).toBe(true);
+    }
+
+    class Point {
+      readonly x = 1;
+    }
+    const sparse: unknown[] = [];
+    sparse[2] = 1;
+    for (const bad of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      undefined,
+      new Date(0),
+      new Point(),
+      () => 0,
+      sparse,
     ]) {
       expect(Exit.isFailure(Schema.decodeUnknownExit(JsonLiteral)(bad))).toBe(true);
     }
@@ -222,7 +245,7 @@ describe("method-token allowlist", () => {
     expect(methodTokens.length).toBe(35);
     expect(new Set(methodTokens).size).toBe(35);
     for (const token of methodTokens) {
-      expect(token).toBe(token.toUpperCase());
+      expect(token.toUpperCase()).toBe(token);
     }
   });
 

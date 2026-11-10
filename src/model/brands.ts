@@ -1,4 +1,4 @@
-import { Array as Arr, Predicate, Schema } from "effect";
+import { Schema } from "effect";
 import { pointerPattern } from "./pointer.ts";
 import { methodTokens } from "./method-tokens.ts";
 
@@ -97,10 +97,7 @@ export const ServerTemplate = pattern(serverPattern).pipe(Schema.brand("ServerTe
 /**
  * An HTTP method token in the Bun allowlist.
  */
-export const MethodToken = Schema.String.pipe(
-  Schema.check(Schema.makeFilter((value: string) => methodTokens.includes(value))),
-  Schema.brand("MethodToken"),
-);
+export const MethodToken = Schema.Literals(methodTokens).pipe(Schema.brand("MethodToken"));
 
 /**
  * Help-safe plain text: no controls except LF and TAB, no format, separator or lone surrogate
@@ -121,38 +118,7 @@ export const JsonPointer = Schema.String.pipe(
   Schema.brand("JsonPointer"),
 );
 
-// Iterative so a deeply nested literal cannot overflow the stack.
-const isJsonValue = (root: unknown): root is Schema.Json => {
-  const pending: unknown[] = [root];
-  while (pending.length > 0) {
-    const next = pending.pop();
-    if (Arr.isArray(next)) {
-      pending.push(...next);
-    } else if (Predicate.isObject(next) && typeof next === "object") {
-      // SAFETY: getPrototypeOf is typed any; the value is only compared by identity.
-      const proto = Object.getPrototypeOf(next) as unknown;
-      if (
-        (proto !== Object.prototype && proto !== null) ||
-        Object.getOwnPropertySymbols(next).length > 0
-      ) {
-        return false;
-      }
-
-      pending.push(...Object.values(next));
-    } else if (
-      next !== null &&
-      !Predicate.isString(next) &&
-      !Predicate.isBoolean(next) &&
-      !(Predicate.isNumber(next) && Number.isFinite(next))
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
 /**
  * A finite JSON value. Resource bounds belong to the stage budgets, not the brand.
  */
-export const JsonLiteral = Schema.declare(isJsonValue).pipe(Schema.brand("JsonLiteral"));
+export const JsonLiteral = Schema.Json.pipe(Schema.brand("JsonLiteral"));
