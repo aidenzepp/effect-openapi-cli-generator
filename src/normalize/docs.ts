@@ -1,5 +1,7 @@
+import { safeTextCategories } from "../model/brands.ts";
+
 // Controls, format characters, U+2028, U+2029 and lone surrogates; LF and TAB are kept.
-const unsafeText = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
+const unsafeText = new RegExp(`(?![\\n\\t])[${safeTextCategories}]`, "gu");
 
 /**
  * Source text with every unsafe code point removed, for docs fields and diagnostic messages.
