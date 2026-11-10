@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { BunFileSystem } from "@effect/platform-bun";
-import { Effect, Layer, Option, Sink, Stdio, Stream } from "effect";
+import { Effect, Layer, Option, Schema, Sink, Stdio, Stream } from "effect";
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { PlatformError } from "effect/PlatformError";
 import { systemError } from "effect/PlatformError";
@@ -9,6 +9,7 @@ import type { RecordedRequest } from "../fixtures/capture-server.ts";
 import { FileBody } from "../../src/runtime-src/runtime/file-body.ts";
 import { UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
+import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
 
 const none = Option.none<string>();
@@ -140,5 +141,32 @@ describe("binary body from stdin", () => {
     expect(error).toBeInstanceOf(UsageError);
     expect(error).toMatchObject({ flag: "body-file" });
     expect(error instanceof UsageError ? error.message : "").not.toContain("secret");
+  });
+});
+
+describe("a secret-file flag that is not UTF-8", () => {
+  test("stdin bytes that are not UTF-8 fail with --<flag>: is not valid UTF-8", async () => {
+    const error = await run(
+      Input.mergeBody({
+        body: none,
+        bodyFile: none,
+        fields: {
+          "/password": Option.some(new Input.SecretField({ flag: "password-file", path: "-" })),
+        },
+        required: false,
+        schema: Schema.Unknown,
+      }).pipe(
+        Effect.flip,
+        Effect.provide(
+          Layer.mergeAll(inputLayer(Stream.fromIterable(chunks)), runCredentialsLayer),
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error).toMatchObject({
+      flag: "password-file",
+      message: "--password-file: is not valid UTF-8",
+    });
   });
 });

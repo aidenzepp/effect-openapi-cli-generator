@@ -1,9 +1,9 @@
+import type { FileSystem } from "effect";
 import {
   Array as Arr,
   Config,
   Context,
   Effect,
-  FileSystem,
   Layer,
   Option,
   Path,
@@ -19,7 +19,7 @@ import type { FetchHttpClient } from "effect/http";
 import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
-import { StdinClaim, stripLineEnd } from "./input.ts";
+import { StdinClaim, decodeUtf8, readBounded, stdinOrFile, stripLineEnd } from "./input.ts";
 import { loneSurrogate } from "./redact.ts";
 import { cookieOctets, headerValueBreaks } from "./serialize.ts";
 
@@ -182,56 +182,24 @@ export const credentialFileSetting = (scheme: string): FileSetting => {
   return created;
 };
 
-class OverLimit {
-  readonly _tag = "OverLimit";
-}
-
-class ReadFailed {
-  readonly _tag = "ReadFailed";
-}
-
 const usage = (scheme: string, message: string): UsageError =>
   new UsageError({ flag: `${schemeSlug(scheme)}-file`, message });
 
-const decodeUtf8 = (scheme: string, bytes: Uint8Array): Effect.Effect<string, UsageError> =>
-  Effect.try({
-    catch: () => usage(scheme, `the credential for ${scheme} is not valid UTF-8`),
-    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-  });
-
-const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
-  let size = 0;
-  for (const chunk of chunks) {
-    size += chunk.length;
-  }
-
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return joined;
-};
-
-const readBounded = (
+const credentialFromSource = (
   scheme: string,
   source: Stream.Stream<Uint8Array, unknown>,
 ): Effect.Effect<string, UsageError> =>
-  source.pipe(
-    Stream.mapError((): OverLimit | ReadFailed => new ReadFailed()),
-    Stream.limitBytes(maxCredentialBytes, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
-      Stream.fail(new OverLimit()),
+  readBounded(source, maxCredentialBytes).pipe(
+    Effect.catchTags({
+      OverLimit: () =>
+        Effect.fail(
+          usage(scheme, `the credential for ${scheme} is over ${maxCredentialBytes} bytes`),
+        ),
+      ReadFailed: () => Effect.fail(usage(scheme, `cannot read the credential for ${scheme}`)),
+    }),
+    Effect.flatMap((joined) =>
+      decodeUtf8(joined, usage(scheme, `the credential for ${scheme} is not valid UTF-8`)),
     ),
-    Stream.runCollect,
-    Effect.mapError((cause) =>
-      cause instanceof OverLimit
-        ? usage(scheme, `the credential for ${scheme} is over ${maxCredentialBytes} bytes`)
-        : usage(scheme, `cannot read the credential for ${scheme}`),
-    ),
-    Effect.map(concat),
-    Effect.flatMap((joined) => decodeUtf8(scheme, joined)),
     Effect.map(stripLineEnd),
   );
 
@@ -239,15 +207,9 @@ const fromFile = (
   scheme: string,
   path: string,
 ): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(`${schemeSlug(scheme)}-file`)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => readBounded(scheme, stdio.stdin)),
-      )
-    : Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
-        readBounded(scheme, fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
-      );
+  stdinOrFile(`${schemeSlug(scheme)}-file`, path, (fs) =>
+    Effect.succeed(fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
+  ).pipe(Effect.flatMap((source) => credentialFromSource(scheme, source)));
 
 const fromEnv = (scheme: string, name: string): Effect.Effect<Option.Option<string>, UsageError> =>
   Config.option(Config.Redacted(name)).pipe(

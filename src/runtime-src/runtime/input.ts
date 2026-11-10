@@ -112,31 +112,23 @@ const overLimit = (limit: number): UsageError => overLimitIn(bodyFileName, limit
 const notAFile = (): UsageError =>
   usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
 
-class OverLimit {
-  readonly _tag = "OverLimit";
-}
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 
-class ReadFailed {
-  readonly _tag = "ReadFailed";
-}
+/**
+ * A bounded read stopped at its limit.
+ */
+export class OverLimit extends Schema.TaggedError<OverLimit>()("OverLimit", {}) {}
 
-const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
-  let size = 0;
-  for (const chunk of chunks) {
-    size += chunk.length;
-  }
+/**
+ * A bounded read whose source failed; the cause stays out of the message.
+ */
+export class ReadFailed extends Schema.TaggedError<ReadFailed>()("ReadFailed", {}) {}
 
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return joined;
-};
-
-const bounded = (
+/**
+ * `source` bounded to `limit` bytes: a source failure becomes `ReadFailed`, and the chunk that
+ * crosses the limit becomes `OverLimit`.
+ */
+export const bounded = (
   source: Stream.Stream<Uint8Array, unknown>,
   limit: number = maxBodyBytes,
 ): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
@@ -147,13 +139,50 @@ const bounded = (
     ),
   );
 
-const toUsage = (
-  cause: OverLimit | ReadFailed,
-  flag: string = bodyFileName,
-  limit: number = maxBodyBytes,
-  subject?: string,
-): UsageError =>
-  cause instanceof OverLimit ? overLimitIn(flag, limit, subject) : cannotReadIn(flag);
+/**
+ * The bytes of `source` read under `limit`, joined. The caller maps `OverLimit` and `ReadFailed`
+ * to its own messages with `Effect.catchTags`.
+ */
+export const readBounded = (
+  source: Stream.Stream<Uint8Array, unknown>,
+  limit: number,
+): Effect.Effect<Uint8Array, OverLimit | ReadFailed> => Stream.mkUint8Array(bounded(source, limit));
+
+/**
+ * Decodes `bytes` as UTF-8, failing with `invalid` when they are not.
+ */
+export const decodeUtf8 = (
+  bytes: Uint8Array,
+  invalid: UsageError,
+): Effect.Effect<string, UsageError> =>
+  Effect.try({
+    catch: () => invalid,
+    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+  });
+
+/**
+ * The source behind a `--<flag> <path|->` value: stdin for `-`, after claiming it for `flag`, or
+ * whatever `openFile` returns for a path. Callers differ in what a path needs (`multipart.ts`
+ * checks it first, the bounded reads cap the stream) and in what follows (collect or stream).
+ */
+export const stdinOrFile = (
+  flag: string,
+  path: string,
+  openFile: (
+    fs: FileSystem.FileSystem,
+  ) => Effect.Effect<Stream.Stream<Uint8Array, unknown>, UsageError>,
+): Effect.Effect<
+  Stream.Stream<Uint8Array, unknown>,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(flag)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.map((stdio) => stdio.stdin),
+      )
+    : Effect.flatMap(Effect.service(FileSystem.FileSystem), openFile);
 
 // What a bounded read of a flag's file refuses past: `limit` bytes, named as `subject`.
 interface ReadBound {
@@ -168,10 +197,11 @@ const collect = (
   flag: string = bodyFileName,
   bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError> =>
-  bounded(source, bound.limit).pipe(
-    Stream.runCollect,
-    Effect.map(concat),
-    Effect.mapError((cause) => toUsage(cause, flag, bound.limit, bound.subject)),
+  readBounded(source, bound.limit).pipe(
+    Effect.catchTags({
+      OverLimit: () => Effect.fail(overLimitIn(flag, bound.limit, bound.subject)),
+      ReadFailed: () => Effect.fail(cannotReadIn(flag)),
+    }),
   );
 
 // A bounded read of a path, or of stdin for `-` under the one stdin claim, failing in `flag`.
@@ -180,17 +210,9 @@ const readFlagFile = (
   flag: string,
   bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(flag)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => collect(stdio.stdin, flag, bound)),
-      )
-    : Effect.service(FileSystem.FileSystem).pipe(
-        Effect.flatMap((fs) =>
-          collect(fs.stream(path, { bytesToRead: bound.limit + 1 }), flag, bound),
-        ),
-      );
+  stdinOrFile(flag, path, (fs) =>
+    Effect.succeed(fs.stream(path, { bytesToRead: bound.limit + 1 })),
+  ).pipe(Effect.flatMap((source) => collect(source, flag, bound)));
 
 /**
  * Reads `--body-file` into memory, bounded: a file by path, or stdin for `-` (which takes the one
@@ -216,7 +238,10 @@ const limited = (
     : Effect.succeed(
         HttpBody.stream(
           bounded(body.stream, limit).pipe(
-            Stream.mapError((cause) => toUsage(cause, bodyFileName, limit)),
+            Stream.catchTags({
+              OverLimit: () => Stream.fail(overLimit(limit)),
+              ReadFailed: () => Stream.fail(cannotRead()),
+            }),
           ),
           body.contentType,
           body.contentLength,
@@ -824,10 +849,7 @@ const readEncoded = (
   );
 
 const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
-  Effect.try({
-    catch: () => usage(flag, "is not valid UTF-8"),
-    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-  });
+  decodeUtf8(bytes, usage(flag, "is not valid UTF-8"));
 
 // Records `secret` for the run when `RunCredentials` is present. It is optional so `mergeBody` and
 // `structuredBody` keep their requirements for callers that pass no secret field; every emitted

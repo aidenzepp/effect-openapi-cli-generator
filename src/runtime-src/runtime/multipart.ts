@@ -1,8 +1,10 @@
-import { Effect, FileSystem, Stdio, Stream } from "effect";
+import type { FileSystem, Stdio } from "effect";
+import { Bytes, Effect, Stream } from "effect";
 import { Base64, Hex } from "effect/encoding";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
-import { StdinClaim } from "./input.ts";
+import type { StdinClaim } from "./input.ts";
+import { stdinOrFile } from "./input.ts";
 
 /**
  * Per-part encoding facts from an OpenAPI Encoding Object, already resolved by the caller.
@@ -173,10 +175,7 @@ const base64Stream = (
     Stream.mapAccum(
       () => new Uint8Array(0),
       (carry: Uint8Array, chunk: Uint8Array) => {
-        const joined = new Uint8Array(carry.length + chunk.length);
-
-        joined.set(carry);
-        joined.set(chunk, carry.length);
+        const joined = Bytes.concat([carry, chunk]);
 
         const whole = joined.length - (joined.length % 3);
 
@@ -226,9 +225,7 @@ const encode = (
         Stream.concat(Stream.succeed(crlf)),
       );
     }),
-    Stream.concat(
-      Stream.succeed(Uint8Array.from([...encoder.encode(`--${boundary}--`), ...terminator])),
-    ),
+    Stream.concat(Stream.succeed(Bytes.concat([encoder.encode(`--${boundary}--`), terminator]))),
   );
 
 const write = (
@@ -333,13 +330,4 @@ export const fileBody = (
   Stream.Stream<Uint8Array, unknown>,
   UsageError,
   FileSystem.FileSystem | Stdio.Stdio | StdinClaim
-> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(flag)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.map((stdio) => stdio.stdin),
-      )
-    : Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
-        Effect.as(checkedPath(fs, flag, path), fs.stream(path)),
-      );
+> => stdinOrFile(flag, path, (fs) => Effect.as(checkedPath(fs, flag, path), fs.stream(path)));
