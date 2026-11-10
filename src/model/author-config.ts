@@ -1,8 +1,8 @@
-import { Array as Arr, Data, Effect, Match, Schema } from "effect";
+import { Array as Arr, Effect, Match, Schema } from "effect";
 import type { SchemaIssue } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
-import { makeDiagnostic, sortDiagnostics } from "./diagnostic.ts";
-import type { Diagnostic, DiagnosticInput } from "./diagnostic.ts";
+import { Diagnostic, makeDiagnostic, sortDiagnostics } from "./diagnostic.ts";
+import type { DiagnosticInput } from "./diagnostic.ts";
 import { formatPointer, nonEmptyPointerPattern } from "./pointer.ts";
 
 const binNamePattern = /^[a-z][a-z0-9-]*$/u;
@@ -173,9 +173,11 @@ export class AuthorConfig extends Schema.Class<AuthorConfig>("AuthorConfig")({
 /**
  * The author config was refused; every diagnostic is a `document`-scope refusal, sorted by pointer.
  */
-export class AuthorConfigRefused extends Data.TaggedError("AuthorConfigRefused")<{
-  readonly diagnostics: readonly Diagnostic[];
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class AuthorConfigRefused extends Schema.TaggedError<AuthorConfigRefused>()(
+  "AuthorConfigRefused",
+  { diagnostics: Schema.Array(Diagnostic) },
+) {}
 
 /**
  * Where the config was read from and, when known, the folded `info.title` that a missing `binName`
@@ -332,14 +334,15 @@ const refuseIssueOf = (context: AuthorConfigContext) => (error: Schema.SchemaErr
  * Decodes untrusted author config JSON into an `AuthorConfig` or the refusals that explain why not.
  * Every problem is reported at once; unknown keys are refused.
  */
-export const decodeAuthorConfig = (
+export const decodeAuthorConfig = Effect.fnUntraced(function* decodeAuthorConfig(
   input: Schema.Json,
   context: AuthorConfigContext,
-): Effect.Effect<AuthorConfig, AuthorConfigRefused> =>
-  Schema.decodeUnknownEffect(AuthorConfig)(input, {
+): Effect.fn.Return<AuthorConfig, AuthorConfigRefused> {
+  return yield* Schema.decodeUnknownEffect(AuthorConfig)(input, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(Effect.catchTag("SchemaError", refuseIssueOf(context)));
+});
 
 /**
  * The runtime settings a generated CLI starts from, every field resolved.
