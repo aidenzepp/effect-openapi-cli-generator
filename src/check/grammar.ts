@@ -1,6 +1,7 @@
 import { Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
@@ -1162,30 +1163,25 @@ const underItem = (operation: Operation, pointer: string): boolean =>
 
 const toDiagnostic = (resolution: Resolution, finding: Finding) => {
   const rule: Rule = rules[finding.code];
-  const [row = ""] = finding.code.split("/");
   const { operation } = finding;
   // Under a Reference Object the use site is the pointer and the target is related (design 3.3).
   const viaReference = operation !== undefined && underItem(operation, finding.pointer);
   const declared = isObject(resolution.value) ? resolution.value.openapi : undefined;
-  const base = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: resolution.document,
     element: rule.element,
     hint: rule.hint,
     message: rule.message,
     openapi: Predicate.isString(declared) ? declared : patchVersion[resolution.line],
+    operation: operation === undefined ? undefined : operationOf(operation),
     pointer: viaReference ? operation.item.use : finding.pointer,
-    row,
+    related: viaReference ? [site(resolution, finding.pointer)] : undefined,
     scope: finding.scope ?? rule.scope,
     severity: finding.severity ?? rule.severity,
     specSection: specSectionUrl(resolution.line, rule.anchor),
-  };
-  const located = operation === undefined ? base : { ...base, operation: operationOf(operation) };
-  const fields = viaReference
-    ? { ...located, related: [site(resolution, finding.pointer)] }
-    : located;
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 /**
