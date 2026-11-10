@@ -1498,7 +1498,7 @@ const branchKeys = ["allOf", "anyOf", "oneOf"] as const;
 // member and each `anyOf` or `oneOf` branch. A node already on the walk is not read twice, so a
 // cycle ends; past the node budget the answer is yes, so a secret never prints by exhaustion. An
 // unreadable node is not marked.
-const schemaMarked = Effect.fnUntraced(function* schemaMarked(
+const schemaMarked = Effect.fnUntraced(function* marked(
   resolution: Resolution,
   key: CanonicalKey,
   budget: Budget,
