@@ -1,4 +1,4 @@
-import { Array as Arr, Order, Schema } from "effect";
+import { Array as Arr, Effect, Order, Predicate, Record, Schema } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
 
 const codePattern = /^(?<row>[A-Z][A-Z0-9]*-[0-9]+)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -59,12 +59,65 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")(
   ),
 ) {}
 
+type EncodedWithoutRow = Omit<typeof Diagnostic.Encoded, "row">;
+
+/**
+ * The encoded `Diagnostic` fields except `row`, which the factory derives from the code. Every
+ * optional key also accepts `undefined`, so a caller can pass a maybe-absent value without a
+ * branch.
+ */
+export type DiagnosticInput = {
+  readonly [
+    Key in keyof EncodedWithoutRow as Record<never, never> extends Pick<EncodedWithoutRow, Key>
+      ? never
+      : Key
+  ]: EncodedWithoutRow[Key];
+} & {
+  readonly [
+    Key in keyof EncodedWithoutRow as Record<never, never> extends Pick<EncodedWithoutRow, Key>
+      ? Key
+      : never
+  ]?: EncodedWithoutRow[Key] | undefined;
+};
+
+/**
+ * Builds a `Diagnostic` from its fields: drops `undefined` keys, sets `row` from the code's row
+ * prefix and decodes. Fails with `SchemaError` when the fields do not decode, such as a malformed
+ * code.
+ */
+export const diagnosticOf = (
+  input: DiagnosticInput,
+): Effect.Effect<Diagnostic, Schema.SchemaError> =>
+  Schema.decodeUnknownEffect(Diagnostic)({
+    ...Record.filter<string, unknown>(Predicate.isNotUndefined)(input),
+    row: rowOfCode(input.code),
+  });
+
+/**
+ * `diagnosticOf` for sites whose fields are program constants: a decode failure is a defect.
+ */
+export const makeDiagnostic = (input: DiagnosticInput): Effect.Effect<Diagnostic> =>
+  diagnosticOf(input).pipe(Effect.orDie);
+
 const isIndex = (token: string): boolean => /^(?:0|[1-9][0-9]*)$/u.test(token);
 
 const tokenOrder = Order.make<string>((left, right) =>
   isIndex(left) && isIndex(right)
     ? Order.Number(Number(left), Number(right))
     : Order.String(left, right),
+);
+
+/**
+ * Whether a diagnostic is a refusal; the only other severity is `notice`.
+ */
+export const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
+
+/**
+ * Whether a diagnostic is a refusal of the whole document.
+ */
+export const isDocumentRefusal: (diagnostic: Diagnostic) => boolean = Predicate.and(
+  isRefusal,
+  (diagnostic) => diagnostic.scope === "document",
 );
 
 /**

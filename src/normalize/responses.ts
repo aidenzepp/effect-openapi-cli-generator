@@ -1,7 +1,8 @@
 import { Array as Arr, Effect, Option, Order, Schema } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { HeaderName, MediaRange } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { ResponseCase } from "../model/entities.ts";
 import type { MediaAlternative } from "../model/entities.ts";
 import { defsKey } from "../resolve/canonical.ts";
@@ -338,30 +339,25 @@ const caseOf = (
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule: Rule = rules[finding.code];
-  const [row = ""] = finding.code.split("/");
   const openapi = Schema.decodeUnknownOption(Schema.Struct({ openapi: Schema.String }))(
     resolution.value,
   ).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  const fields: Plain<typeof Diagnostic.Encoded> = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: finding.at.document,
     element: rule.element,
+    hint: rule.hint,
     message: rule.message,
     openapi,
     pointer: finding.at.pointer,
-    row,
     scope: "element",
     severity: rule.severity,
     specSection: specSectionUrl(resolution.line, rule.anchor),
-  };
-  if (rule.hint !== undefined) {
-    fields.hint = rule.hint;
-  }
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 const responseKeys = (

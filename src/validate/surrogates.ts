@@ -1,6 +1,7 @@
-import { Effect, Predicate, Record, Schema } from "effect";
-import { Diagnostic } from "../model/diagnostic.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { Effect, Predicate, Record } from "effect";
+import type { Schema } from "effect";
+import { diagnosticOf } from "../model/diagnostic.ts";
+import { formatPointer } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Refusal } from "./disagreements.ts";
@@ -19,8 +20,7 @@ const printable = (text: string): string =>
     (unit) => `\\u${(unit.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`,
   );
 
-const pointerOf = (tokens: readonly string[]): string =>
-  tokens.map((token) => `/${printable(escapeToken(token))}`).join("");
+const pointerOf = (tokens: readonly string[]): string => formatPointer(tokens.map(printable));
 
 /**
  * The pointers of every property name that holds a lone surrogate, in document order, with the
@@ -52,14 +52,13 @@ export const surrogateRefusal = (
   where: Where,
   pointer: string,
 ): Effect.Effect<Refusal, Schema.SchemaError> =>
-  Schema.decodeUnknownEffect(Diagnostic)({
+  diagnosticOf({
     code: "DOC-14/invalid-encoding",
     document: where.document,
     element: "document",
     message: `A property name at ${pointer} holds a lone UTF-16 surrogate, which is not valid Unicode text.`,
     openapi: where.openapi,
     pointer,
-    row: "DOC-14",
     scope: "document",
     severity: "refusal",
     specSection: "https://spec.openapis.org/oas/v3.1.2.html#format",

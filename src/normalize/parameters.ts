@@ -1,8 +1,8 @@
 import { Array as Arr, Data, Effect, Option, Order, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
-import type { DiagnosticOperation } from "../model/diagnostic.ts";
+import { diagnosticOf } from "../model/diagnostic.ts";
+import type { Diagnostic, DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
@@ -796,23 +796,6 @@ interface Related {
   readonly pointer: string;
 }
 
-interface DiagnosticFields {
-  code: string;
-  document: string;
-  element: string;
-  hint?: string;
-  message: string;
-  openapi: string;
-  operation?: typeof DiagnosticOperation.Type;
-  pointer: string;
-  related?: readonly Related[];
-  row: string;
-  scope: "element";
-  severity: "notice" | "refusal";
-  specSection: string;
-  wire?: string;
-}
-
 const toDiagnostics = (
   resolution: Resolution,
   site: ParameterSite,
@@ -823,37 +806,23 @@ const toDiagnostics = (
   const wire = sanitize(wireName);
 
   return Effect.all(
-    findings.map((finding) => {
-      const fields: DiagnosticFields = {
+    findings.map((finding) =>
+      diagnosticOf({
         code: finding.code,
         document: resolution.document,
         element: finding.element,
+        hint: finding.hint,
         message: finding.message,
         openapi: site.openapi,
+        operation: site.operation,
         pointer: site.pointer,
-        row: finding.code.slice(0, finding.code.indexOf("/")),
+        related: related.length > 0 ? related : undefined,
         scope: "element",
         severity: finding.severity,
         specSection: specSectionUrl(resolution.line, finding.anchor),
-      };
-      if (finding.hint !== undefined) {
-        fields.hint = finding.hint;
-      }
-
-      if (site.operation !== undefined) {
-        fields.operation = site.operation;
-      }
-
-      if (related.length > 0) {
-        fields.related = related;
-      }
-
-      if (wire !== "") {
-        fields.wire = wire;
-      }
-
-      return Schema.decodeUnknownEffect(Diagnostic)(fields);
-    }),
+        wire: wire === "" ? undefined : wire,
+      }),
+    ),
   ).pipe(Effect.orDie);
 };
 

@@ -1,11 +1,11 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
-import type { DiagnosticOperation } from "../model/diagnostic.ts";
+import { diagnosticOf, makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic, DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body, EncodingRule } from "../model/entities.ts";
 import type { DiscriminatorHint } from "../model/entities.ts";
 import { nodeAt as jsonAt } from "../model/json-tree.ts";
-import { childPointer, formatPointer } from "../model/pointer.ts";
+import { childPointer, formatPointer, isPointerWithin } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
@@ -337,21 +337,17 @@ interface Walk {
 }
 
 const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
-  Schema.decodeUnknownEffect(Diagnostic)({
+  makeDiagnostic({
     code: "REF-18/node-budget",
     document: walk.resolution.document,
     element: "Schema inspection",
     message: "Inspecting the request body schemas visits more nodes than the node budget allows.",
     openapi: walk.site.openapi,
     pointer: walk.site.pointer,
-    row: "REF-18",
     scope: "document",
     severity: "refusal",
     specSection: specSectionUrl(walk.resolution.line, "reference-object"),
-  }).pipe(
-    Effect.orDie,
-    Effect.flatMap((diagnostic) => Effect.fail(new BodyNodeBudget({ diagnostic }))),
-  );
+  }).pipe(Effect.flatMap((diagnostic) => Effect.fail(new BodyNodeBudget({ diagnostic }))));
 
 // The schema and its `allOf` members in document order, each distinct schema once, so a graph
 // that reuses members costs its size and a cycle ends at the first repeat.
@@ -2420,23 +2416,6 @@ const normalizeAlternative = (
 
 // --- Diagnostics and the body ---
 
-interface DiagnosticFields {
-  code: string;
-  document: string;
-  element: string;
-  hint?: string;
-  message: string;
-  openapi: string;
-  operation?: typeof DiagnosticOperation.Type;
-  pointer: string;
-  related?: readonly { readonly document: string; readonly pointer: string }[];
-  row: string;
-  scope: "element" | "field";
-  severity: "notice" | "refusal";
-  specSection: string;
-  wire?: string;
-}
-
 // Where `at` sits below the content entry `mediaSite` when that entry is a reference, as a 3.2
 // `components/mediaTypes` one is: the same path under the entry instead of under its target. Undefined
 // when the entry is no reference or `at` lies outside its target.
@@ -2450,7 +2429,7 @@ const underMediaSite = (
   }
 
   const home = follow(resolution, mediaSite);
-  const below = at.pointer === home.pointer || at.pointer.startsWith(`${home.pointer}/`);
+  const below = isPointerWithin(home.pointer, at.pointer);
   if (keyOf(home) === keyOf(mediaSite) || at.document !== home.document || !below) {
     return undefined;
   }
@@ -2476,40 +2455,27 @@ const toDiagnostics = (
     findings.map((item) => {
       const viaEntry = underMediaSite(ctx.resolution, mediaSite, item.at);
       const own = viaEntry ?? item.at;
-      const fields: DiagnosticFields = {
-        code: item.code,
-        document: ctx.reference === undefined ? own.document : ctx.resolution.document,
-        element: item.element,
-        message: item.message,
-        openapi: ctx.site.openapi,
-        pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
-        row: item.code.slice(0, item.code.indexOf("/")),
-        scope: item.scope ?? "element",
-        severity: item.severity,
-        specSection: specSectionUrl(ctx.line, item.anchor),
-      };
-      if (item.hint !== undefined) {
-        fields.hint = item.hint;
-      }
-
-      if (item.wire !== undefined) {
-        fields.wire = item.wire;
-      }
-
-      if (ctx.site.operation !== undefined) {
-        fields.operation = ctx.site.operation;
-      }
-
       // Placed away from its own location, the element names it first; under a referenced body,
       // the same place below the body's content entry follows.
       const moved = ctx.reference !== undefined || viaEntry !== undefined;
       const bodyEntry = ctx.reference === undefined || viaEntry === undefined ? [] : [viaEntry];
       const related = [...(moved ? [item.at] : []), ...bodyEntry, ...(item.related ?? [])];
-      if (related.length > 0) {
-        fields.related = related;
-      }
 
-      return Schema.decodeUnknownEffect(Diagnostic)(fields);
+      return diagnosticOf({
+        code: item.code,
+        document: ctx.reference === undefined ? own.document : ctx.resolution.document,
+        element: item.element,
+        hint: item.hint,
+        message: item.message,
+        openapi: ctx.site.openapi,
+        operation: ctx.site.operation,
+        pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
+        related: related.length > 0 ? related : undefined,
+        scope: item.scope ?? "element",
+        severity: item.severity,
+        specSection: specSectionUrl(ctx.line, item.anchor),
+        wire: item.wire,
+      });
     }),
   ).pipe(Effect.orDie);
 
@@ -2559,7 +2525,7 @@ const discriminatorRefused = (findings: readonly Diagnostic[], root: CanonicalKe
       finding.severity === "refusal" &&
       finding.scope === "element" &&
       finding.document === root.document &&
-      (finding.pointer === at || finding.pointer.startsWith(`${at}/`)),
+      isPointerWithin(at, finding.pointer),
   );
 };
 

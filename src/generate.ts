@@ -20,7 +20,13 @@ import { readFileBounded, readStreamBounded } from "./load/budget.ts";
 import { decodeAuthorConfig } from "./model/author-config.ts";
 import type { AuthorConfig } from "./model/author-config.ts";
 import type { DocumentUri } from "./model/brands.ts";
-import { Diagnostic, sortDiagnostics } from "./model/diagnostic.ts";
+import type { Diagnostic } from "./model/diagnostic.ts";
+import {
+  isDocumentRefusal,
+  isRefusal,
+  makeDiagnostic,
+  sortDiagnostics,
+} from "./model/diagnostic.ts";
 import { Api } from "./model/entities.ts";
 import type { Operation } from "./model/entities.ts";
 import { planNames } from "./names/index.ts";
@@ -146,11 +152,6 @@ const GeneratorVersion = Schema.Struct({ version: Schema.String });
 
 const DeclaredOpenapi = Schema.Struct({ openapi: Schema.String });
 
-const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
-
-const isDocumentRefusal = (diagnostic: Diagnostic): boolean =>
-  isRefusal(diagnostic) && diagnostic.scope === "document";
-
 const refused =
   (reason: GenerateRefused["reason"]) =>
   (diagnostics: readonly Diagnostic[]): GenerateRefused =>
@@ -272,7 +273,7 @@ export const otherDocumentPathItems = (
 
   return Effect.all(
     references.map((reference) =>
-      Schema.decodeUnknownEffect(Diagnostic)({
+      makeDiagnostic({
         code: "PTH-10/other-document",
         document: resolution.document,
         element: "Path Item",
@@ -282,11 +283,10 @@ export const otherDocumentPathItems = (
         openapi,
         pointer: reference.site.pointer,
         related: [reference.target],
-        row: "PTH-10",
         scope: "element",
         severity: "refusal",
         specSection: specSectionUrl(resolution.line, "path-item-ref"),
-      }).pipe(Effect.orDie),
+      }),
     ),
   );
 };
@@ -435,23 +435,20 @@ const emitRefusal = (
       operation.operationId === undefined
         ? { method, path }
         : { method, operationId: operation.operationId, path };
-    const base = {
+
+    return yield* makeDiagnostic({
       code: `EMT-1/${refusal.reason}`,
       document: operation.origin.document,
       element: "Emitted command",
+      hint: emitHints[refusal.reason],
       message,
       openapi: api.openapi,
       operation: key,
       pointer: operation.origin.pointer,
-      row: "EMT-1",
       scope: refusal.scope,
       severity: "refusal",
       specSection: specSectionUrl(api.line, "operation-object"),
-    };
-    const hint = emitHints[refusal.reason];
-    const fields = hint === undefined ? base : { ...base, hint };
-
-    return yield* Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+    });
   });
 
 // The accepted servers' templates in model order: root servers, then each operation's.

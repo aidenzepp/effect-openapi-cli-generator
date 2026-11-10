@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { refuse } from "./budget.ts";
 import type { LoadLimits, LoadRefusal, Position } from "./budget.ts";
@@ -146,7 +146,7 @@ const valueContext = (frame: Frame | undefined): Context => {
 };
 
 const pointerOf = (frames: readonly Frame[]): string =>
-  frames.map((frame) => `/${escapeToken(frame.array ? String(frame.index) : frame.key)}`).join("");
+  formatPointer(frames.map((frame) => (frame.array ? String(frame.index) : frame.key)));
 
 const stringEnd = (text: string, start: number): number => {
   let end = start + 1;

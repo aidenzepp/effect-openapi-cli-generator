@@ -1,8 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
-import { PointerMemberNotFound, childPointer, evaluatePointer } from "../model/pointer.ts";
+import { PointerMemberNotFound, childPointer, evaluatePointerResult } from "../model/pointer.ts";
 import type { Json, PointerEvalError, PointerSyntaxError } from "../model/pointer.ts";
 
 /**
@@ -23,16 +23,25 @@ export const follow = (resolution: Resolution, site: CanonicalKey): CanonicalKey
  * The node at `key`, read from its own document of the set. A document outside the set has no
  * member for its URI.
  */
-export const nodeIn = (
+export const nodeInResult = (
   resolution: Resolution,
   key: CanonicalKey,
-): Effect.Effect<Json, PointerSyntaxError | PointerEvalError> => {
+): Result.Result<Json, PointerSyntaxError | PointerEvalError> => {
   const value = resolution.documents.get(key.document);
 
   return value === undefined
-    ? Effect.fail(new PointerMemberNotFound({ pointer: key.pointer, token: key.document }))
-    : evaluatePointer(value, key.pointer);
+    ? Result.fail(new PointerMemberNotFound({ pointer: key.pointer, token: key.document }))
+    : evaluatePointerResult(value, key.pointer);
 };
+
+/**
+ * The node at `key`, read from its own document of the set.
+ */
+export const nodeIn = (
+  resolution: Resolution,
+  key: CanonicalKey,
+): Effect.Effect<Json, PointerSyntaxError | PointerEvalError> =>
+  Effect.suspend(() => Effect.fromResult(nodeInResult(resolution, key)));
 
 /**
  * The key `tokens` below `key`, in the same document.

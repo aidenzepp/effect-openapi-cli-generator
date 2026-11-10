@@ -254,6 +254,10 @@ describe("generate: path content and form content outside querystring", () => {
       refusals.find((entry) => entry.operation?.operationId === operationId);
 
     expect(refusals).toHaveLength(2);
+    for (const refusal of refusals) {
+      expect(Object.keys(refusal)).not.toContain("hint");
+    }
+
     expect(byOperation("notes-read")).toMatchObject({
       code: "EMT-1/unsupported-parameter",
       operation: { method: "GET", operationId: "notes-read", path: "/notes/{id}" },

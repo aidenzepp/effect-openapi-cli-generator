@@ -1,3 +1,5 @@
+import { JsonPointer } from "effect";
+import { isRefusal } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 
 const unsafeCharacter = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/gu;
@@ -20,15 +22,13 @@ const operationLabel = (operation: NonNullable<Diagnostic["operation"]>): string
   return ` (${sanitizeField(label)})`;
 };
 
-const unescapeToken = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
-
 // A field refusal sits at its Encoding entry, `<media>/encoding/<name>` (design 8.5 rule 4), so the
 // pointer names the field and its media type; any other pointer falls back to `element`.
 const fieldLabel = (diagnostic: Diagnostic): string => {
   const [media, keyword, name] = diagnostic.pointer.split("/").slice(-3);
   const entry = keyword === "encoding" && media !== undefined && name !== undefined;
-  const field = JSON.stringify(entry ? unescapeToken(name) : diagnostic.element);
-  const label = entry ? `${field} in ${unescapeToken(media)}` : field;
+  const field = JSON.stringify(entry ? JsonPointer.unescapeToken(name) : diagnostic.element);
+  const label = entry ? `${field} in ${JsonPointer.unescapeToken(media)}` : field;
 
   return ` field ${sanitizeField(label)}`;
 };
@@ -40,7 +40,7 @@ const fieldLabel = (diagnostic: Diagnostic): string => {
  * `line`, `column`, `hint` and `related` stay out of the line.
  */
 export const humanLine = (diagnostic: Diagnostic): string => {
-  const severity = diagnostic.severity === "refusal" ? "refused" : "notice";
+  const severity = isRefusal(diagnostic) ? "refused" : "notice";
   const where = `#${sanitizeField(diagnostic.pointer)}`;
   const operation = diagnostic.operation === undefined ? "" : operationLabel(diagnostic.operation);
   const field = diagnostic.scope === "field" ? fieldLabel(diagnostic) : "";

@@ -2,12 +2,12 @@ import { Data, Effect, Option, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import type { Json } from "../model/pointer.ts";
-import { patchVersion, specSectionUrl } from "../model/spec-section.ts";
+import { patchVersion, SpecLine, specSectionUrl } from "../model/spec-section.ts";
 
 /**
  * The OpenAPI line a document declares.
  */
-export type Line = "3.0" | "3.1" | "3.2";
+export type Line = SpecLine;
 
 /**
  * The document has no `openapi` string, or names a line other than 3.0, 3.1 or 3.2. A run reports
@@ -34,7 +34,7 @@ const Declared = Schema.Struct({ openapi: Schema.String });
 const lineOfVersion = (openapi: string): Line | undefined => {
   const line = linePattern.exec(openapi)?.groups?.line;
 
-  return line === "3.0" || line === "3.1" || line === "3.2" ? line : undefined;
+  return Schema.is(SpecLine)(line) ? line : undefined;
 };
 
 /**
@@ -66,7 +66,7 @@ export const versionRefusal = (
 ): Effect.Effect<Diagnostic, Schema.SchemaError> => {
   const found =
     error.openapi === undefined ? undefined : knownLine.exec(error.openapi)?.groups?.line;
-  const line = found === "3.0" || found === "3.1" ? found : "3.2";
+  const line = Schema.is(SpecLine)(found) ? found : "3.2";
   const declare = "Declare a 3.0.x, 3.1.x or 3.2.x version.";
 
   return Schema.decodeUnknownEffect(Diagnostic)({
