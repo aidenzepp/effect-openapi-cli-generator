@@ -622,12 +622,11 @@ export interface CredentialGate {
   readonly provenance: Provenance;
 }
 
-const originOf = (raw: string): Option.Option<string> => {
-  return Result.match(Url.fromString(raw), {
+const originOf = (raw: string): Option.Option<string> =>
+  Result.match(Url.fromString(raw), {
     onFailure: () => Option.none(),
     onSuccess: ({ origin }) => (origin === "null" ? Option.none() : Option.some(origin)),
   });
-};
 
 /**
  * The origins that may carry credentials for one run (design 6.5, D-SEC2): the bound origin set,
