@@ -15,6 +15,7 @@ import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
+import { loneSurrogate } from "./redact.ts";
 import { isJsonFamily, mediaEssence } from "./sequential.ts";
 
 /**
@@ -77,7 +78,6 @@ type Refusal = Effect.Effect<never, UsageError>;
  */
 const refuse = (message: string): Refusal => Effect.fail(new UsageError({ message }));
 
-const unpairedSurrogate = /\p{Surrogate}/u;
 
 const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefined, UsageError> => {
   if (value instanceof JsonNumber) {
@@ -87,7 +87,7 @@ const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefin
   }
 
   if (Predicate.isString(value)) {
-    return unpairedSurrogate.test(value)
+    return loneSurrogate.test(value)
       ? refuse(`parameter ${name} holds an unpaired surrogate, which has no UTF-8 form`)
       : Effect.succeed(value);
   }
@@ -349,7 +349,7 @@ const styled =
   (name: string, value: Nested, options: PathOptions): PathParameter => ({
     expand: Effect.gen(function* styleExpansion() {
       // Only a matrix expansion emits the name.
-      if (style === "matrix" && unpairedSurrogate.test(name)) {
+      if (style === "matrix" && loneSurrogate.test(name)) {
         return yield* refuse("a matrix parameter has a name with no UTF-8 form");
       }
 
@@ -702,7 +702,7 @@ const queryStyled =
   (style: QueryStyle) =>
   (name: string, value: Nested, options: QueryOptions): QueryParameter => ({
     expand: Effect.gen(function* queryExpansion() {
-      if (unpairedSurrogate.test(name)) {
+      if (loneSurrogate.test(name)) {
         return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
       }
 
@@ -795,14 +795,18 @@ const edgeSpace = /^[\t ]|[\t ]$/u;
 const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
 
 /**
- * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
- * 5.5): CR, LF, NUL, leading or trailing whitespace and a code point above U+00FF.
+ * The part of the header-value rule that credentials and parameters share: CR, LF, NUL and a code
+ * point above U+00FF. They differ on edge whitespace, so each caller adds its own edge rule
+ * (`edgeSpace` here, `trim` for a credential).
  */
-const unsafeHeaderText = (text: string) =>
-  headerLineBreak.test(text) ||
-  text.includes("\u0000") ||
-  edgeSpace.test(text) ||
-  wideCodePoint.test(text);
+export const headerValueBreaks = (text: string): boolean =>
+  headerLineBreak.test(text) || text.includes("\u0000") || wideCodePoint.test(text);
+
+/**
+ * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
+ * 5.5): CR, LF, NUL, leading or trailing tab or space and a code point above U+00FF.
+ */
+const unsafeHeaderText = (text: string) => headerValueBreaks(text) || edgeSpace.test(text);
 
 const headerTexts = (text: Text): readonly string[] =>
   text.kind === "primitive" ? [text.text] : parts(text);
@@ -880,7 +884,7 @@ export interface CookieParameter {
 /**
  * RFC 6265 `cookie-octet`: `%x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E`.
  */
-const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
+export const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 /**
  * Reserved characters a 3.2 `form` cookie value may pass under `allowReserved`: RFC 3986 reserved
@@ -1056,7 +1060,7 @@ const bodyOf = (mediaType: string, value: Body) =>
       return yield* refuse("a body for a non-JSON media type must be text or a binary stream");
     }
 
-    if (unpairedSurrogate.test(value)) {
+    if (loneSurrogate.test(value)) {
       return yield* refuse("the body holds an unpaired surrogate, which has no UTF-8 form");
     }
 
@@ -1244,7 +1248,7 @@ const formText = (value: Exclude<LeafValue, FormFile>) => {
     return refuse("a multipart part holds a number with no text form");
   }
 
-  if (Predicate.isString(value) && unpairedSurrogate.test(value)) {
+  if (Predicate.isString(value) && loneSurrogate.test(value)) {
     return refuse("a multipart part holds an unpaired surrogate, which has no UTF-8 form");
   }
 
@@ -1799,7 +1803,7 @@ const isJsonScalar = (value: Json): value is Exclude<Json, object> | JsonNumber 
  */
 const hasLoneSurrogate = (value: Json): boolean => {
   if (Predicate.isString(value)) {
-    return unpairedSurrogate.test(value);
+    return loneSurrogate.test(value);
   }
 
   if (Array.isArray(value)) {
@@ -1809,7 +1813,7 @@ const hasLoneSurrogate = (value: Json): boolean => {
   return (
     isJsonObject(value) &&
     Object.entries(value).some(
-      ([member, text]) => unpairedSurrogate.test(member) || hasLoneSurrogate(text),
+      ([member, text]) => loneSurrogate.test(member) || hasLoneSurrogate(text),
     )
   );
 };
@@ -1969,7 +1973,7 @@ export const urlEncode = (
         continue;
       }
 
-      if (unpairedSurrogate.test(name)) {
+      if (loneSurrogate.test(name)) {
         return yield* refuse("a form property has a name with no UTF-8 form");
       }
 
@@ -2141,7 +2145,7 @@ const contentText = (name: string, mediaType: string, value: Json) =>
       return yield* refuse(`parameter ${name} must be text under a non-JSON media type`);
     }
 
-    return unpairedSurrogate.test(value)
+    return loneSurrogate.test(value)
       ? yield* refuse(`parameter ${name} holds an unpaired surrogate, which has no UTF-8 form`)
       : value;
   });
@@ -2187,7 +2191,7 @@ export const queryContent = (
   options: ContentOptions,
 ): QueryParameter => ({
   expand: Effect.gen(function* queryContentExpansion() {
-    if (unpairedSurrogate.test(name)) {
+    if (loneSurrogate.test(name)) {
       return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
     }
 

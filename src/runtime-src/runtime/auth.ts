@@ -20,6 +20,8 @@ import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
 import { StdinClaim, stripLineEnd } from "./input.ts";
+import { loneSurrogate } from "./redact.ts";
+import { cookieOctets, headerValueBreaks } from "./serialize.ts";
 
 /**
  * A scheme's security requirement list: alternatives in document order, each the scheme names that
@@ -811,20 +813,13 @@ const strip = (
   );
 };
 
-// A header field carries one byte per character, so a code point above U+00FF has no form.
-const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
-
+// A credential also refuses any edge `trim` removes; a header parameter refuses only a tab or space
+// edge (serialize.ts `edgeSpace`). The two rules drift and stay as they are.
 const unsafeHeaderValue = (value: string): boolean =>
-  value.includes("\r") ||
-  value.includes("\n") ||
-  value.includes("\u0000") ||
-  value !== value.trim() ||
-  wideCodePoint.test(value);
+  headerValueBreaks(value) || value !== value.trim();
 
 // An RFC 6265 cookie-name is an RFC 9110 token.
 const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
-
-const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> =>
   Effect.fail(usage(scheme, `the credential for ${scheme} ${rule}`));
@@ -846,7 +841,7 @@ const basicParts = (
     return refuse(scheme, "must be <user-id>:<password>");
   }
 
-  if (/\p{Cs}/u.test(value)) {
+  if (loneSurrogate.test(value)) {
     return refuse(scheme, "has a lone surrogate");
   }
 

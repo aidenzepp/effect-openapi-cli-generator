@@ -51,13 +51,17 @@ const searchParamsForm = (text: string): string =>
   new URLSearchParams([["", text]]).toString().slice(1);
 
 /**
+ * A lone surrogate (any \p{Cs} unit), which has no UTF-8 form; the one test every runtime module
+ * shares.
+ */
+export const loneSurrogate = /\p{Cs}/u;
+
+/**
  * The forms a value takes in a URL or a form-urlencoded body, shared by credentials and secrets:
  * as `encodeURIComponent` writes it, as the request target carries it (`queryWireForm`), and as
  * URLSearchParams writes it, `+` for a space. `encodeURIComponent` throws on a lone surrogate, so
  * such a value gets only the URLSearchParams form.
  */
-const loneSurrogate = /\p{Cs}/u;
-
 const encodedForms = (text: string): readonly string[] =>
   loneSurrogate.test(text)
     ? [searchParamsForm(text)]
