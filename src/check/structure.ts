@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Option, Predicate, Record, Schema } from "effect";
 import { ComponentName, componentNamePattern, MethodToken, PathTemplate } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
@@ -106,7 +106,7 @@ const rules = {
     message: "A querystring parameter appears more than once or beside a query parameter.",
     scope: "operation",
   },
-} as const satisfies Record<string, Rule>;
+} as const satisfies Record.ReadonlyRecord<string, Rule>;
 
 type Code = keyof typeof rules;
 
@@ -287,6 +287,8 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
   });
 };
 
+// Not `Arr.groupBy`: a set-once first-seen map. A grouped form emits per id group (ids x, y, y, x
+// give [4th, 3rd] for today's [3rd, 4th]); only checkStructure's unsorted output could see it.
 const duplicateIdFindings = (operations: readonly Operation[]): readonly Finding[] => {
   const first = new Map<string, string>();
   const found: Finding[] = [];
@@ -415,15 +417,14 @@ const operationFindings = (
 
 const findingsOf = (resolution: Resolution): readonly Finding[] => {
   const items = pathItems(resolution);
-  const byTemplate = new Map<string, PathItem[]>();
-  for (const item of items) {
-    const template = normalizedTemplate(item.key);
-    byTemplate.set(template, [...(byTemplate.get(template) ?? []), item]);
-  }
+  const byTemplate = Arr.groupBy(items, (item) => normalizedTemplate(item.key));
 
   const operations = items.flatMap((item) => operationsOf(resolution, item));
   const twinsOf = (item: PathItem): readonly string[] =>
-    (byTemplate.get(normalizedTemplate(item.key)) ?? [])
+    Option.getOrElse(
+      Record.get(byTemplate, normalizedTemplate(item.key)),
+      (): readonly PathItem[] => [],
+    )
       .filter((other) => other.use !== item.use)
       .map((other) => other.use);
 
