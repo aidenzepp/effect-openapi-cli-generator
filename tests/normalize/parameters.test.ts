@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 import { normalizeParameter } from "../../src/normalize/parameters.ts";
 import type { ParameterOutcome } from "../../src/normalize/parameters.ts";
 import { resolve } from "../../src/resolve/index.ts";
@@ -8,6 +9,8 @@ import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const openapi: Record<Line, string> = { "3.0": "3.0.3", "3.1": "3.1.1", "3.2": "3.2.0" };
 
@@ -403,7 +406,7 @@ describe("PRM-19 PRM-21 reserved header names", () => {
         expect(outcome._tag).toBe("Ignored");
         expect(codes(outcome)).toEqual(["PRM-19/ignored-header"]);
         expect(outcome.diagnostics[0]?.severity).toBe("notice");
-        expect(outcome.diagnostics[0]?.row).toBe("PRM-19");
+        expect(outcome.diagnostics[0]?.row).toBe(rowId("PRM-19"));
         expect(plain(outcome.diagnostics[0]?.pointer)).toBe(site);
       }
     });
@@ -680,8 +683,8 @@ describe("STY-40 STY-18 combinations outside the style table", () => {
 
     expect(codes(outcome)).toEqual(["STY-40/style-location"]);
     expect(outcome.diagnostics[0]?.scope).toBe("element");
-    expect(refused("3.1", path({ style: "form" })).diagnostics[0]?.row).toBe("STY-40");
-    expect(refused("3.1", header({ style: "label" })).diagnostics[0]?.row).toBe("STY-40");
+    expect(refused("3.1", path({ style: "form" })).diagnostics[0]?.row).toBe(rowId("STY-40"));
+    expect(refused("3.1", header({ style: "label" })).diagnostics[0]?.row).toBe(rowId("STY-40"));
     expect(refused("3.1", cookie({ style: "cookie" })).diagnostics[0]?.code).toBe(
       "STY-40/style-location",
     );

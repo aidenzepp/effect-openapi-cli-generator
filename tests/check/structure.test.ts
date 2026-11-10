@@ -3,11 +3,14 @@ import { Array as Arr, Effect, Order, Schema } from "effect";
 import { checkStructure } from "../../src/check/structure.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
+import { RowId } from "../../src/model/entities.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const openapi: Record<Line, string> = { "3.0": "3.0.4", "3.1": "3.1.2", "3.2": "3.2.1" };
 
@@ -147,7 +150,10 @@ describe("PTH-03 and PTH-08 template and path parameters", () => {
   });
 
   test("PTH-03 is one diagnostic per distinct expression", () => {
-    expect(rows("3.1", paths({ "/a/{x}/{y}": { get: op() } }))).toEqual(["PTH-03", "PTH-03"]);
+    expect(rows("3.1", paths({ "/a/{x}/{y}": { get: op() } }))).toEqual([
+      rowId("PTH-03"),
+      rowId("PTH-03"),
+    ]);
   });
 
   test("PTH-08: a path parameter with no expression", () => {
@@ -158,8 +164,8 @@ describe("PTH-03 and PTH-08 template and path parameters", () => {
 
   test("a case mismatch yields both rows", () => {
     expect(rows("3.1", paths({ "/a/{Id}": { get: op({ parameters: [idParameter] }) } }))).toEqual([
-      "PTH-03",
-      "PTH-08",
+      rowId("PTH-03"),
+      rowId("PTH-08"),
     ]);
   });
 
@@ -178,7 +184,7 @@ describe("PTH-03 and PTH-08 template and path parameters", () => {
   test("a path-item parameter with no expression is refused for each operation", () => {
     const members = paths({ "/a": { get: op(), parameters: [idParameter], put: op() } });
 
-    expect(rows("3.1", members)).toEqual(["PTH-08", "PTH-08"]);
+    expect(rows("3.1", members)).toEqual([rowId("PTH-08"), rowId("PTH-08")]);
   });
 
   test("a path parameter reached through $ref counts", () => {
@@ -293,7 +299,7 @@ describe("PTH-28 duplicate parameters", () => {
       },
     });
 
-    expect(rows("3.1", members)).toEqual(["PTH-28", "PTH-28"]);
+    expect(rows("3.1", members)).toEqual([rowId("PTH-28"), rowId("PTH-28")]);
   });
 
   test("header names compare case-insensitively, other names case-sensitively", () => {
@@ -311,7 +317,7 @@ describe("PTH-28 duplicate parameters", () => {
           },
         }),
       ),
-    ).toEqual(["PTH-28"]);
+    ).toEqual([rowId("PTH-28")]);
     expect(
       rows(
         "3.1",
@@ -367,7 +373,7 @@ describe("PTH-28 duplicate parameters", () => {
       }),
     };
 
-    expect(rows("3.1", members)).toEqual(["PTH-28"]);
+    expect(rows("3.1", members)).toEqual([rowId("PTH-28")]);
   });
 });
 
@@ -400,7 +406,7 @@ describe("STY-44 querystring", () => {
       "/a": { get: op({ parameters: [qs("b")] }), parameters: [qs("a")] },
     });
 
-    expect(rows("3.2", members)).toEqual(["STY-44"]);
+    expect(rows("3.2", members)).toEqual([rowId("STY-44")]);
   });
 
   test("through $ref", () => {
@@ -415,7 +421,7 @@ describe("STY-44 querystring", () => {
       }),
     };
 
-    expect(rows("3.2", members)).toEqual(["STY-44"]);
+    expect(rows("3.2", members)).toEqual([rowId("STY-44")]);
   });
 
   test("one querystring, or one overridden by name, is fine", () => {

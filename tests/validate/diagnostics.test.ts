@@ -2,12 +2,15 @@ import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 import { rewriteDialect } from "../../src/validate/dialect.ts";
 import { groupErrors } from "../../src/validate/locations.ts";
 import { diagnoseDocument } from "../../src/validate/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
 
 const uri = Schema.decodeUnknownSync(DocumentUri)("https://example.com/openapi.json");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const dialectBase = "https://spec.openapis.org/oas/3.1/dialect/base";
 
@@ -84,7 +87,7 @@ describe("known disagreements", () => {
       [found.code, found.pointer],
     ]);
     expect(result.notices[0]?.severity).toBe("notice");
-    expect(result.notices[0]?.row).toBe(found.code.split("/")[0]);
+    expect(result.notices[0]?.row).toBe(rowId(found.code.split("/")[0]));
   });
 
   test("a valid document has no diagnostics", async () => {
@@ -119,7 +122,7 @@ describe("refusals", () => {
   test("use the row of the declared line", async () => {
     const result = await diagnose(document("3.0.3", { paths: { "/a": { get: {} } } }));
 
-    expect(result.refusals.map((refusal) => refusal.diagnostic.row)).toEqual(["VAL-02"]);
+    expect(result.refusals.map((refusal) => refusal.diagnostic.row)).toEqual([rowId("VAL-02")]);
   });
 
   test("a disagreement does not hide another error", async () => {

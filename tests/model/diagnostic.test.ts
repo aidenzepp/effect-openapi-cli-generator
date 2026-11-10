@@ -9,8 +9,10 @@ import {
   Site,
   sortDiagnostics,
 } from "../../src/model/diagnostic.ts";
-import { Origin } from "../../src/model/entities.ts";
+import { Origin, RowId } from "../../src/model/entities.ts";
 import { Verdict } from "../../src/model/verdict.ts";
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const base: typeof Diagnostic.Encoded = {
   code: "PRM-27/compound-nested",
@@ -208,7 +210,7 @@ describe("diagnosticOf and makeDiagnostic", () => {
   test("row equals the code prefix", async () => {
     const diagnostic = await Effect.runPromise(makeDiagnostic(input));
 
-    expect(diagnostic.row).toBe("PRM-27");
+    expect(diagnostic.row).toBe(rowId("PRM-27"));
   });
 
   test("an invalid code dies through makeDiagnostic and fails with SchemaError through diagnosticOf", async () => {

@@ -4,12 +4,15 @@ import { Effect, Schema } from "effect";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 import { loadBytes, loadFile } from "../../src/load/index.ts";
 import type { LoadOptions, LoadRefusal } from "../../src/load/index.ts";
 
 const fixture = (name: string) => path.join(import.meta.dir, "..", "fixtures", "yaml", name);
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///spec.yaml");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const options = (limits?: LoadOptions["limits"]): LoadOptions =>
   limits === undefined ? { document } : { document, limits };
@@ -52,7 +55,7 @@ describe("load: strict YAML hazards", () => {
     const error = await refusal(file(name));
     expect(error._tag).toBe("LoadRefusal");
     expect(error.diagnostic.code).toBe(code);
-    expect(error.diagnostic.row).toBe("DOC-14");
+    expect(error.diagnostic.row).toBe(rowId("DOC-14"));
   });
 
   test("the merge key stays an ordinary key", async () => {
