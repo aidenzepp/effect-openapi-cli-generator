@@ -115,6 +115,24 @@ const redactedParameters = [
     rule: "x-sensitive: true on the schema",
     value: "shd-6b0e93c7",
   },
+  {
+    flag: "--x-ref",
+    name: "x-ref",
+    rule: "x-sensitive: true behind the schema's $ref",
+    value: "ref-93a6d1f0",
+  },
+  {
+    flag: "--x-wrap",
+    name: "x-wrap",
+    rule: "x-sensitive: true behind an allOf wrapper",
+    value: "wrp-1e57c08b",
+  },
+  {
+    flag: "--x-alias",
+    name: "x-alias",
+    rule: "x-sensitive: true behind a two-hop alias",
+    value: "als-c6f2849e",
+  },
 ] as const;
 
 const ordinary = { flag: "--x-request-id", name: "x-request-id", value: "req-2e6d8f15" };
@@ -189,6 +207,24 @@ const redactedPartHeaders = [
     name: "X-Part-Shield",
     rule: "x-sensitive: true on the schema",
     value: "pshd-2f71e0b8",
+  },
+  {
+    flag: "--note-x-part-ref",
+    name: "X-Part-Ref",
+    rule: "x-sensitive: true behind the schema's $ref",
+    value: "pref-5ab0e3d9",
+  },
+  {
+    flag: "--note-x-part-wrap",
+    name: "X-Part-Wrap",
+    rule: "x-sensitive: true behind an allOf wrapper",
+    value: "pwrp-8c41f27a",
+  },
+  {
+    flag: "--note-x-part-alias",
+    name: "X-Part-Alias",
+    rule: "x-sensitive: true behind a two-hop alias",
+    value: "pals-0e9b63d5",
   },
 ] as const;
 
