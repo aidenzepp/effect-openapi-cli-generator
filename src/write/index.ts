@@ -13,6 +13,7 @@ import {
   Ref,
   Stream,
 } from "effect";
+import type { Digest } from "effect/crypto";
 import type { PlatformError } from "effect/PlatformError";
 import { acquireRunLock, runLockFileName } from "./lock.ts";
 import type { RunLock, RunLockHeld, RunLockUnavailable } from "./lock.ts";
@@ -64,7 +65,7 @@ export interface WriteNotice {
  */
 export const maxPreviousManifestBytes = 4 * 1024 * 1024;
 
-type Services = FileSystem.FileSystem | Path.Path;
+type Services = FileSystem.FileSystem | Path.Path | Digest.Digest;
 
 const fold = (path: string): string => path.normalize("NFC").toLowerCase();
 
@@ -442,9 +443,12 @@ const writeLocked = (
       files,
       Order.mapInput(Order.String, (file: GeneratedFile) => file.path),
     );
-    const manifest = yield* printManifest(
-      sorted.map((file) => ({ path: file.path, sha256: sha256Hex(file.content) })),
-    ).pipe(
+    // Effect.forEach takes (items, f); it is not an array method with a thisArg.
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument
+    const entries = yield* Effect.forEach(sorted, (file) =>
+      sha256Hex(file.content).pipe(Effect.map((sha256) => ({ path: file.path, sha256 }))),
+    );
+    const manifest = yield* printManifest(entries).pipe(
       Effect.mapError(() => new WriteRefused({ reason: "unsafe-path", subject: manifestFileName })),
     );
     const lock = yield* acquireRunLock(outputDir);

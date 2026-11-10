@@ -611,14 +611,16 @@ export const generate = (
     const { version } = yield* Schema.decodeUnknownEffect(GeneratorVersion)(
       input.generator.packageJson,
     ).pipe(Effect.mapError(() => new PackageEmitError({ reason: "invalid-generator-source" })));
+    const documentSha256 = yield* sha256Hex(bytes);
+    const configSha256 = yield* sha256Hex(author.bytes);
     const report = makeGenerationReport({
       acceptedServers: acceptedServers(api),
       commandNames: commandNames(commands, cli.refusals),
       diagnostics,
       inputs: [
-        { document, sha256: sha256Hex(bytes) },
+        { document, sha256: documentSha256 },
         ...memberInputs(document, input.documents),
-        { document: configDocument, sha256: sha256Hex(author.bytes) },
+        { document: configDocument, sha256: configSha256 },
       ],
       nonStandard: nonStandardEntries(api, order),
       // The names plan reports renames as notices only; it carries no from/to pairs yet.

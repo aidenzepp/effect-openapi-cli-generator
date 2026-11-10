@@ -1,6 +1,16 @@
 import { homedir } from "node:os";
-import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Array as Arr, Data, Effect, FileSystem, Order, Path, Runtime, Schema } from "effect";
+import { BunCrypto, BunRuntime, BunServices } from "@effect/platform-bun";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Order,
+  Path,
+  Runtime,
+  Schema,
+} from "effect";
 import { FetchHttpClient } from "effect/http";
 import generatorPackage from "../../package.json" with { type: "json" };
 import { GenerateRefused } from "../../src/generate.ts";
@@ -414,12 +424,13 @@ const runEntry = (entry: Entry, corpusVersion: number, context: Context) =>
     };
 
     const { commandNames, nonStandard } = generated;
+    const configSha256 = yield* sha256Hex(configBytes);
     const verdict = makeVerdict({
       commandNames,
       corpusVersion,
       coverage: yield* coverageEntries(coverage),
       diagnostics: generated.diagnostics,
-      generator: { config: configName, configSha256: sha256Hex(configBytes), version },
+      generator: { config: configName, configSha256, version },
       informational,
       nonStandard,
       operations,
@@ -704,5 +715,7 @@ if (import.meta.main) {
       ? Effect.fail(new CorpusFindings({ findings: parsed.problems }))
       : run(parsed.options);
 
-  BunRuntime.runMain(program.pipe(Effect.provide(BunServices.layer)));
+  BunRuntime.runMain(
+    program.pipe(Effect.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layerDigest))),
+  );
 }
