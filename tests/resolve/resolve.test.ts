@@ -695,6 +695,68 @@ describe("SCH-05 $dynamicRef", () => {
   });
 });
 
+const scoped = (diagnostic: { code: string; scope: string; severity: string }) => [
+  diagnostic.code,
+  diagnostic.scope,
+  diagnostic.severity,
+];
+
+describe("rule scope and severity", () => {
+  const elements: readonly (readonly [Line, Json])[] = [
+    [
+      "3.0",
+      spec("3.0", {
+        components: { parameters: { P: parameter } },
+        ...usesParameter({ $ref: "#/components/parameters/P", description: "ignored" }),
+      }),
+    ],
+    [
+      "3.1",
+      spec("3.1", {
+        components: { parameters: { P: parameter } },
+        ...usesParameter({ $ref: "#/components/parameters/P", "x-other": true }),
+      }),
+    ],
+    [
+      "3.0",
+      spec("3.0", {
+        components: {
+          schemas: { A: { $ref: "#/components/schemas/B", nullable: true }, B: { type: "string" } },
+        },
+      }),
+    ],
+    [
+      "3.1",
+      spec("3.1", {
+        components: {
+          schemas: {
+            S: { $defs: { T: { type: "string" } }, $id: "https://example.com/s.json" },
+          },
+        },
+        ...usesSchema("#/components/schemas/S/$defs/T"),
+      }),
+    ],
+    ["3.1", spec("3.1", { components: { schemas: { A: { $dynamicRef: "#meta" } } } })],
+    ["3.2", uriLikeScheme("3.2")],
+  ];
+
+  test("scope and severity of every resolve rule", () => {
+    expect(
+      elements.flatMap(([line, value]) => resolved(line, value).diagnostics.map(scoped)),
+    ).toEqual([
+      ["REF-05/sibling-ignored", "element", "notice"],
+      ["REF-06/sibling-ignored", "element", "notice"],
+      ["REF-07/sibling-ignored", "element", "notice"],
+      ["REF-14/pointer-crosses-id", "element", "notice"],
+      ["SCH-05/dynamic-ref", "element", "refusal"],
+      ["SEC-10/uri-like-name", "element", "refusal"],
+    ]);
+    expect(
+      scoped(refusal("3.1", spec("3.1", usesParameter({ $ref: "#/components/parameters/X" })))),
+    ).toEqual(["REF-18/unresolvable", "document", "refusal"]);
+  });
+});
+
 describe("DOC-20, SEC-10 implicit connections from the entry document", () => {
   const members: Members = {
     components: {

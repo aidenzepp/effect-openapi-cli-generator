@@ -1,7 +1,8 @@
-import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
+import { Array as Arr, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { makeDiagnostic } from "../model/diagnostic.ts";
-import type { Diagnostic } from "../model/diagnostic.ts";
+import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
 import type { Line } from "../validate/index.ts";
 import {
   documentBase,
@@ -104,9 +105,11 @@ export interface ResolvedReference extends Docs {
  * target to its `$defs` key. `diagnostics` holds notices and element-scope refusals; a
  * document-scope refusal fails the resolution instead. `value` is the entry document, not a copy;
  * `documents` holds every document of the set, the entry included, by retrieval URI, so a target
- * key's node is `nodeAt(documents.get(key.document), key.pointer)`.
+ * key's node is `nodeAt(documents.get(key.document), key.pointer)`. `allOfReferrers` maps each
+ * target to the `allOf` member use sites that reference it, in reference order.
  */
 export interface Resolution {
+  readonly allOfReferrers: ReadonlyMap<string, readonly CanonicalKey[]>;
   readonly base: string;
   readonly defs: ReadonlyMap<string, string>;
   readonly diagnostics: readonly Diagnostic[];
@@ -121,14 +124,26 @@ export interface Resolution {
 /**
  * The document set cannot be resolved; the model is not built (design 2.4).
  */
-export class ResolveRefusal extends Data.TaggedError("ResolveRefusal")<{
-  readonly diagnostic: Diagnostic;
-}> {}
+export class ResolveRefusal extends Schema.TaggedError<ResolveRefusal>()("ResolveRefusal", {
+  diagnostic: Diagnostic,
+}) {}
 
 /**
  * A Components map whose names implicit connections refer to.
  */
 export type ComponentSection = "schemas" | "securitySchemes";
+
+/**
+ * How a resolve finding is reported: its scope and severity, and the text and spec section it
+ * cites.
+ */
+interface Rule {
+  readonly anchor: string;
+  readonly element: string;
+  readonly message: string;
+  readonly scope: "document" | "element";
+  readonly severity: "notice" | "refusal";
+}
 
 const rules = {
   "DOC-19/two-object-types": {
@@ -136,99 +151,137 @@ const rules = {
     element: "Object used as two types",
     message:
       "One object is used as two different Object types; the related pointer names its other use.",
+    scope: "document",
+    severity: "refusal",
   },
   "DOC-23/non-schema-cycle": {
     anchor: "handling-reference-cycles",
     element: "Reference cycle",
     message: "A chain of non-schema references returns to an object already on the chain.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-02/non-schema-target": {
     anchor: "reference-object",
     element: "Reference to the document root",
     message: "The reference target is the document root, which is not an object of this kind.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-05/sibling-ignored": {
     anchor: "reference-object",
     element: "Reference Object sibling",
     message: "Members beside $ref in a Reference Object are ignored.",
+    scope: "element",
+    severity: "notice",
   },
   "REF-06/sibling-ignored": {
     anchor: "reference-object",
     element: "Reference Object sibling",
     message: "Members beside $ref other than summary and description are ignored.",
+    scope: "element",
+    severity: "notice",
   },
   "REF-07/sibling-ignored": {
     anchor: "reference-object",
     element: "Schema $ref sibling",
     message: "Keywords beside a 3.0 schema $ref are ignored.",
+    scope: "element",
+    severity: "notice",
   },
   "REF-11/invalid-base": {
     anchor: "relative-references-in-api-description-uris",
     element: "Schema $id",
     message: "The $id does not resolve to a URI.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-12/invalid-base": {
     anchor: "establishing-the-base-uri",
     element: "Base URI",
     message: "The $self or $id value does not resolve to a URI.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-14/duplicate-anchor": {
     anchor: "parsing-documents",
     element: "Schema $anchor",
     message: "Two schemas declare the same $anchor in one resource.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-14/duplicate-id": {
     anchor: "parsing-documents",
     element: "Schema $id",
     message: "Two schemas, or a schema and a document, declare the same URI.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-14/pointer-crosses-id": {
     anchor: "parsing-documents",
     element: "Schema $ref",
     message:
       "The JSON Pointer enters a schema with its own $id, which is not interoperable; reference that schema by its $id.",
+    scope: "element",
+    severity: "notice",
   },
   "REF-15/outside-set": {
     anchor: "reference-object",
     element: "Reference to another document",
     message: "The reference names a document outside the document set; nothing is fetched.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-16/outside-set": {
     anchor: "reference-object",
     element: "Reference to a remote URI",
     message: "The reference names a URI outside the document set; nothing is fetched.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-18/hop-limit": {
     anchor: "reference-object",
     element: "Reference chain",
     message: "The reference chain is longer than the hop limit.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-18/node-budget": {
     anchor: "reference-object",
     element: "Reference resolution",
     message: "Resolution visits more nodes than the node budget allows.",
+    scope: "document",
+    severity: "refusal",
   },
   "REF-18/unresolvable": {
     anchor: "reference-object",
     element: "Reference Object",
     message: "The reference target does not exist in the document set.",
+    scope: "document",
+    severity: "refusal",
   },
   "SCH-03/non-schema-target": {
     anchor: "json-schema-keywords",
     element: "Schema $ref target",
     message: "The $ref target is the document root, which is not a schema.",
+    scope: "document",
+    severity: "refusal",
   },
   "SCH-05/dynamic-ref": {
     anchor: "json-schema-keywords",
     element: "Schema $dynamicRef",
     message: "$dynamicRef is not supported.",
+    scope: "element",
+    severity: "refusal",
   },
   "SEC-10/uri-like-name": {
     anchor: "security-requirements-name",
     element: "Security Scheme component name",
     message: "A Security Scheme component name that parses as a URI is refused.",
+    scope: "element",
+    severity: "refusal",
   },
-} as const;
+} as const satisfies Record<string, Rule>;
 
 type Code = keyof typeof rules;
 
@@ -238,27 +291,12 @@ const anchorOn = (code: Code, line: Line): string =>
     ? "conflicts-between-field-types-and-reference-contexts"
     : rules[code].anchor;
 
-type NoticeCode =
-  | "REF-05/sibling-ignored"
-  | "REF-06/sibling-ignored"
-  | "REF-07/sibling-ignored"
-  | "REF-14/pointer-crosses-id";
+// The codes whose rule has the fields of `R`.
+type CodeOf<R> = { [C in Code]: (typeof rules)[C] extends R ? C : never }[Code];
 
-type ElementCode = "SCH-05/dynamic-ref" | "SEC-10/uri-like-name";
+type NoticeCode = CodeOf<{ readonly severity: "notice" }>;
 
-type DocumentCode = Exclude<Code, ElementCode | NoticeCode>;
-
-const notices: ReadonlySet<Code> = new Set<Code>([
-  "REF-05/sibling-ignored",
-  "REF-06/sibling-ignored",
-  "REF-07/sibling-ignored",
-  "REF-14/pointer-crosses-id",
-]);
-
-const elementRefusals: ReadonlySet<Code> = new Set<Code>([
-  "SCH-05/dynamic-ref",
-  "SEC-10/uri-like-name",
-]);
+type DocumentCode = CodeOf<{ readonly scope: "document" }>;
 
 interface Finding {
   readonly code: Code;
@@ -1369,27 +1407,19 @@ class Resolver {
   }
 }
 
-const Declared = Schema.Struct({ openapi: Schema.String });
-
 const toDiagnostic = (member: Member, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule = rules[finding.code];
-  const openapi = Schema.decodeUnknownOption(Declared)(member.value).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
-  const scope =
-    notices.has(finding.code) || elementRefusals.has(finding.code) ? "element" : "document";
 
   return makeDiagnostic({
     code: finding.code,
     document: finding.document,
     element: rule.element,
     message: rule.message,
-    openapi,
+    openapi: Option.getOrElse(declaredOpenapi(member.value), () => "unknown"),
     pointer: finding.pointer,
     related: finding.related === undefined ? undefined : [finding.related],
-    scope,
-    severity: notices.has(finding.code) ? "notice" : "refusal",
+    scope: rule.scope,
+    severity: rule.severity,
     specSection: specSectionUrl(member.line, anchorOn(finding.code, member.line)),
   });
 };
@@ -1415,16 +1445,44 @@ const prepare = (input: ResolveMember, line: Line, openapi: boolean): Prepared =
   return { invalidBase: base === undefined, member };
 };
 
+const arrayIndex = /^[0-9]+$/u;
+
+// A use site that is an `allOf` member: its pointer ends in `allOf` and an array index.
+const isAllOfMember = (site: CanonicalKey): boolean => {
+  const tokens = Result.getOrElse(parsePointerResult(site.pointer), (): readonly string[] => []);
+
+  return tokens.at(-2) === "allOf" && arrayIndex.test(tokens.at(-1) ?? "");
+};
+
+const referrersOf = (
+  references: ReadonlyMap<string, ResolvedReference>,
+): ReadonlyMap<string, readonly CanonicalKey[]> => {
+  const referrers = new Map<string, CanonicalKey[]>();
+  for (const reference of references.values()) {
+    if (isAllOfMember(reference.site)) {
+      const key = keyOf(reference.target);
+      const sites = referrers.get(key);
+      if (sites === undefined) {
+        referrers.set(key, [reference.site]);
+      } else {
+        sites.push(reference.site);
+      }
+    }
+  }
+
+  return referrers;
+};
+
 /**
  * Resolves every reference reachable from the entry document across the document set (design
  * 3.3): canonical keys, base URIs per document and line, sibling rules, hop and node budgets over
  * the whole set, cycles, and `$defs` keys for schema targets. A URI outside the set is refused,
  * never fetched.
  */
-export const resolve = (
+export const resolve = Effect.fn("resolve.resolve")(function* resolve(
   input: ResolveInput,
   limits: Partial<ResolveLimits> = {},
-): Effect.Effect<Resolution, ResolveRefusal> => {
+): Effect.fn.Return<Resolution, ResolveRefusal> {
   const head = prepare(input, input.line, true);
   const rest = (input.members ?? []).map((member) =>
     prepare(member, member.line ?? input.line, stringMember(member.value, "openapi") !== undefined),
@@ -1441,27 +1499,28 @@ export const resolve = (
   const memberOfFinding = (finding: Finding): Member =>
     resolver.byDocument.get(finding.document) ?? entry;
   if (failed !== undefined) {
-    return toDiagnostic(memberOfFinding(failed.finding), failed.finding).pipe(
-      Effect.flatMap((diagnostic) => Effect.fail(new ResolveRefusal({ diagnostic }))),
-    );
+    const diagnostic = yield* toDiagnostic(memberOfFinding(failed.finding), failed.finding);
+
+    return yield* new ResolveRefusal({ diagnostic });
   }
 
-  return Effect.all(
+  const diagnostics = yield* Effect.all(
     resolver.findings.map((finding) => toDiagnostic(memberOfFinding(finding), finding)),
-  ).pipe(
-    Effect.map((diagnostics): Resolution => ({
-      base: entry.base,
-      defs: resolver.defs,
-      diagnostics,
-      document: input.document,
-      documents: new Map(resolver.all.map((member) => [member.document, member.value])),
-      line: input.line,
-      operationIds: resolver.operationIds,
-      references: resolver.references,
-      value: input.value,
-    })),
   );
-};
+
+  return {
+    allOfReferrers: referrersOf(resolver.references),
+    base: entry.base,
+    defs: resolver.defs,
+    diagnostics,
+    document: input.document,
+    documents: new Map(resolver.all.map((member) => [member.document, member.value])),
+    line: input.line,
+    operationIds: resolver.operationIds,
+    references: resolver.references,
+    value: input.value,
+  };
+});
 
 /**
  * The resolved reference whose use site is `pointer` in the entry document.
@@ -1517,39 +1576,15 @@ export const implicitComponent = (
     : Option.none();
 };
 
-const referrersMemo = new WeakMap<Resolution, ReadonlyMap<string, readonly CanonicalKey[]>>();
-
 /**
  * The `allOf` members that reference each schema, keyed by `keyOf` of the target: the use sites
  * whose pointer ends `/allOf/<i>`, in every document and component, referenced by an operation or
- * not. These are the children of the allOf discriminator pattern (DSC-05, DSC-11). Built once
- * per resolution.
+ * not. These are the children of the allOf discriminator pattern (DSC-05, DSC-11). Built once,
+ * when the set is resolved.
  */
 export const allOfReferrers = (
   resolution: Resolution,
-): ReadonlyMap<string, readonly CanonicalKey[]> => {
-  const known = referrersMemo.get(resolution);
-  if (known !== undefined) {
-    return known;
-  }
-
-  const referrers = new Map<string, CanonicalKey[]>();
-  for (const reference of resolution.references.values()) {
-    if (/\/allOf\/\d+$/u.test(reference.site.pointer)) {
-      const key = keyOf(reference.target);
-      const sites = referrers.get(key);
-      if (sites === undefined) {
-        referrers.set(key, [reference.site]);
-      } else {
-        sites.push(reference.site);
-      }
-    }
-  }
-
-  referrersMemo.set(resolution, referrers);
-
-  return referrers;
-};
+): ReadonlyMap<string, readonly CanonicalKey[]> => resolution.allOfReferrers;
 
 /**
  * The operation with `operationId` in the entry document, for Link Objects (design 3.3).
