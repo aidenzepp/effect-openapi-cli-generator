@@ -740,22 +740,27 @@ const refusedInSource = (
   return found;
 };
 
+interface DynamicScan {
+  readonly found: boolean;
+  readonly targets: readonly CanonicalKey[];
+}
+
 // Whether the schema at `at` holds a dynamic or recursive keyword in place (subschemas included,
-// nested `$defs` not); the targets of its `$ref`s join `pending`.
+// nested `$defs` not), with the targets of its `$ref`s in visit order.
 const holdsDynamicKeyword = (
   budget: Budget,
   resolution: Resolution,
   at: CanonicalKey,
-  pending: CanonicalKey[],
-): boolean => {
+): DynamicScan => {
   const value = resolution.documents.get(at.document);
   const tokens = tokensOf(at.pointer);
   const node = value === undefined ? undefined : nodeAt(value, at.pointer);
   if (tokens === undefined || node === undefined) {
-    return false;
+    return { found: false, targets: [] };
   }
 
   const where = resolution.line === "3.0" ? positions30 : copyPositions;
+  const targets: CanonicalKey[] = [];
   let found = false;
   forEachSchema(
     budget,
@@ -770,13 +775,13 @@ const holdsDynamicKeyword = (
           ? undefined
           : referenceIn(resolution, { document: at.document, pointer });
       if (reference !== undefined) {
-        pending.push(reference.target);
+        targets.push(reference.target);
       }
     },
     tokens,
   );
 
-  return found;
+  return { found, targets };
 };
 
 /**
@@ -796,9 +801,13 @@ export const appliesDynamicKeyword = (
   for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
     if (!seen.has(keyOf(at))) {
       seen.add(keyOf(at));
-      if (holdsDynamicKeyword(budget, resolution, at, pending)) {
+
+      const scan = holdsDynamicKeyword(budget, resolution, at);
+      if (scan.found) {
         return true;
       }
+
+      pending.push(...scan.targets);
     }
   }
 
@@ -1224,13 +1233,15 @@ const replaceAt = (node: Json, path: readonly string[]): Json => {
   );
 };
 
+// A copy of the definitions with the edits that made it, in the order they were made.
+interface EditedCopy {
+  readonly definitions: ReadonlyMap<string, Json>;
+  readonly edits: readonly SchemaEdit[];
+}
+
 // Refuses every reference site on a cycle that returns to a schema without descending into the
 // instance (D-AD12 refused tier, DOC-23/alias-cycle): each such site becomes `{}` in the copy.
-const breakAliasCycles = (
-  budget: Budget,
-  initial: ReadonlyMap<string, Json>,
-  edits: SchemaEdit[],
-): ReadonlyMap<string, Json> => {
+const breakAliasCycles = (budget: Budget, initial: ReadonlyMap<string, Json>): EditedCopy => {
   const edges = edgesOf(budget, initial);
   const component = componentsOf(sortedKeys(initial), edges);
   const sizes = new Map<number, number>();
@@ -1239,6 +1250,7 @@ const breakAliasCycles = (
   }
 
   const definitions = new Map(initial);
+  const edits: SchemaEdit[] = [];
   for (const edge of edges) {
     const id = component.get(edge.from);
     const cyclic =
@@ -1256,7 +1268,7 @@ const breakAliasCycles = (
     }
   }
 
-  return definitions;
+  return { definitions, edits };
 };
 
 // The importer's failure classes D-AD12 names (spike S7); any other class is a defect.
@@ -1404,9 +1416,9 @@ const importCopy = Effect.fnUntraced(function* importCopy(
   budget: Budget,
   line: Line,
   initial: ReadonlyMap<string, Json>,
-  edits: SchemaEdit[],
-): Effect.fn.Return<ReadonlyMap<string, Json>, SchemaBudgetExceeded | SchemaImportDefect> {
+): Effect.fn.Return<EditedCopy, SchemaBudgetExceeded | SchemaImportDefect> {
   const definitions = new Map(initial);
+  const edits: SchemaEdit[] = [];
   budget.spent += definitions.size;
   yield* within(budget, definitions);
   let failure = yield* importOnce(definitions);
@@ -1423,7 +1435,7 @@ const importCopy = Effect.fnUntraced(function* importCopy(
     failure = yield* importOnce(definitions);
   }
 
-  return definitions;
+  return { definitions, edits };
 });
 
 /**
@@ -1453,10 +1465,13 @@ export const validationCopy = Effect.fnUntraced(function* validationCopy(
       return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
     }),
   );
-  const acyclic = yield* within(budget, breakAliasCycles(budget, filtered, edits));
-  const imported = yield* importCopy(budget, line, acyclic, edits);
+  const acyclic = yield* within(budget, breakAliasCycles(budget, filtered));
+  const imported = yield* importCopy(budget, line, acyclic.definitions);
 
-  return { definitions: imported, edits };
+  return {
+    definitions: imported.definitions,
+    edits: [...edits, ...acyclic.edits, ...imported.edits],
+  };
 });
 
 // ---------------------------------------------------------------------------------------------

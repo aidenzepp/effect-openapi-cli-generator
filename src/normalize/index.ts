@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Record, Schema } from "effect";
 import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import type { AuthorConfig } from "../model/author-config.ts";
@@ -85,8 +85,8 @@ const tagOf = (entry: Json): readonly PlainTag[] => {
   }
 
   const tag: PlainTag = { name: found.value.name };
-  const docs = docsOf(found.value);
-  if (Object.keys(docs).length > 0) {
+  const docs: Record<string, string> = docsOf(found.value);
+  if (!Record.isEmptyRecord(docs)) {
     tag.docs = docs;
   }
 

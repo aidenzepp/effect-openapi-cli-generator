@@ -376,3 +376,29 @@ describe("order", () => {
     ]);
   });
 });
+
+describe("finding order", () => {
+  test("response findings follow key order, alternatives before headers", () => {
+    // A lowercase range is outside the key grammar; it sorts first and is listed first.
+    const result = normalize("3.1", {
+      "1xx": ok,
+      "2XX": {
+        content: { "application/json": { encoding: {} }, "not media": {} },
+        description: "ok",
+        headers: { "Content-Type": {}, "not a token": {} },
+      },
+      default: { description: "ok", headers: { "also not a token": {} } },
+    });
+
+    expect(
+      result.diagnostics.map((diagnostic) => [diagnostic.code, text(diagnostic.pointer)]),
+    ).toEqual([
+      ["RSS-06/invalid-key", `${responsesPointer}/1xx`],
+      ["MED-10/encoding-ignored", `${responsesPointer}/2XX/content/application~1json`],
+      ["RSP-05/invalid-media-type", `${responsesPointer}/2XX/content/not media`],
+      ["RSP-09/ignored-content-type", `${responsesPointer}/2XX/headers/Content-Type`],
+      ["RSP-09/invalid-header-name", `${responsesPointer}/2XX/headers/not a token`],
+      ["RSP-09/invalid-header-name", `${responsesPointer}/default/headers/also not a token`],
+    ]);
+  });
+});
