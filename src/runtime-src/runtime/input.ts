@@ -576,8 +576,11 @@ export const jsonNumber = (digits: string, flag: string): Effect.Effect<JsonNumb
     ? Effect.succeed(new JsonNumber(digits))
     : Effect.fail(usage(flag, "an integer field is not a digit string"));
 
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
-const asCliError = (error: UsageError): CliError.CliError =>
+/**
+ * A flag's `mapEffect` fails in `CliError`; the `UsageError` rides as the cause with its own
+ * message.
+ */
+export const asCliError = (error: UsageError): CliError.CliError =>
   new CliError.UserError({ cause: error, userMessage: error.message });
 
 /**

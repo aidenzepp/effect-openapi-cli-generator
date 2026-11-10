@@ -14,10 +14,12 @@ import {
   Ref,
   Result,
   Schedule,
+  Schema,
+  SchemaTransformation,
   Scope,
   Stream,
 } from "effect";
-import { CliError, Flag, GlobalFlag } from "effect/cli";
+import { Flag, GlobalFlag } from "effect/cli";
 import {
   FetchHttpClient,
   Headers,
@@ -35,7 +37,7 @@ import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
-import { printStderr } from "./input.ts";
+import { asCliError, printStderr } from "./input.ts";
 import { queryWireForm, redactedPlaceholder } from "./redact.ts";
 import { mapClientError } from "./response.ts";
 
@@ -51,7 +53,15 @@ export const maxRedirects = 10;
  */
 export const defaultTimeoutSeconds = 30;
 
-const wholeSeconds = /^\d+$/u;
+/**
+ * A whole number the operator typed: ASCII digits only, decoded to a safe integer. Each caller
+ * adds its own bounds and maps a failure to its own `UsageError`, which never carries the text.
+ */
+export const wholeNumber = Schema.String.check(Schema.isPattern(/^\d+$/u)).pipe(
+  Schema.decodeTo(Schema.Int, SchemaTransformation.numberFromString),
+);
+
+export const decodeWholeNumber = Schema.decodeEffect(wholeNumber);
 
 const invalidTimeout = (): UsageError =>
   new UsageError({
@@ -60,17 +70,8 @@ const invalidTimeout = (): UsageError =>
   });
 
 // Whole seconds, 0 or more. The failure names `--timeout` only, never the value.
-const parseTimeout = (raw: string): Effect.Effect<number, UsageError> => {
-  const seconds = Number(raw);
-
-  return wholeSeconds.test(raw) && Number.isSafeInteger(seconds)
-    ? Effect.succeed(seconds)
-    : Effect.fail(invalidTimeout());
-};
-
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
-const asCliError = (error: UsageError): CliError.CliError =>
-  new CliError.UserError({ cause: error, userMessage: error.message });
+const parseTimeout = (raw: string): Effect.Effect<number, UsageError> =>
+  decodeWholeNumber(raw).pipe(Effect.mapError(invalidTimeout));
 
 /**
  * `--timeout <seconds>` bounds each attempt's wait for response headers; 0 disables it (design
@@ -608,13 +609,11 @@ const invalidRetries = (): UsageError =>
   });
 
 // A whole number from 0 to `maxRetries`. The failure names `--retries` only, never the value.
-const parseRetries = (raw: string): Effect.Effect<number, UsageError> => {
-  const retries = Number(raw);
-
-  return wholeSeconds.test(raw) && retries <= maxRetries
-    ? Effect.succeed(retries)
-    : Effect.fail(invalidRetries());
-};
+const parseRetries = (raw: string): Effect.Effect<number, UsageError> =>
+  decodeWholeNumber(raw).pipe(
+    Effect.mapError(invalidRetries),
+    Effect.filterOrFail((retries) => retries <= maxRetries, invalidRetries),
+  );
 
 /**
  * `--retries <n>`: how many times a transient failure is retried (design D-AD7). The flag holds
