@@ -1,8 +1,8 @@
-import { Array as Arr, ByteSize, Data, Effect, FileSystem, Option, Stream } from "effect";
-import type { PlatformError } from "effect";
+import { ByteSize, Bytes, Effect, FileSystem, Option, Schema, Stream } from "effect";
+import type { PlatformError, Scope } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import type { Diagnostic, DiagnosticInput } from "../model/diagnostic.ts";
-import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { DiagnosticInput } from "../model/diagnostic.ts";
+import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -44,10 +44,11 @@ export type LoadCode = keyof typeof messages;
 /**
  * The loader refused its input. `offset` is a byte offset into the input when one is known.
  */
-export class LoadRefusal extends Data.TaggedError("LoadRefusal")<{
-  readonly diagnostic: Diagnostic;
-  readonly offset?: number;
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class LoadRefusal extends Schema.TaggedError<LoadRefusal>()("LoadRefusal", {
+  diagnostic: Diagnostic,
+  offset: Schema.optionalKey(Schema.Number),
+}) {}
 
 /**
  * Where in the input a refusal points: 1-based line and column, 0-based byte offset.
@@ -103,19 +104,6 @@ export const refuse = (
   );
 };
 
-const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
-  const total = Arr.reduce(chunks, 0, (sum, chunk) => sum + chunk.length);
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return bytes;
-};
-
 /**
  * Collects a byte stream through `Stream.limitBytes`; the chunk that crosses the limit refuses.
  */
@@ -130,7 +118,7 @@ export const readStreamBounded = (
       () => Stream.fromEffect(refuse(document, "DOC-14/too-large")),
     ),
     Stream.runCollect,
-    Effect.map(concat),
+    Effect.map(Bytes.concat),
     Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")),
   );
 
@@ -201,30 +189,29 @@ type VerifyAgainst = (
  * swapped before the open is not detected here, so what `verify` can prove is limited to the
  * window between the pre-open `stat` and the open.
  */
-const readOpened = (
+const readOpened = Effect.fnUntraced(function* readBounded(
   path: string,
   limits: LoadLimits,
   document: Document,
   verify: VerifyAgainst,
-): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* readBounded() {
-    const fs = yield* FileSystem.FileSystem;
-    const unreadable = () => refuse(document, "DOC-14/unreadable");
+): Effect.fn.Return<Uint8Array, LoadRefusal, FileSystem.FileSystem | Scope.Scope> {
+  const fs = yield* FileSystem.FileSystem;
+  const unreadable = () => refuse(document, "DOC-14/unreadable");
 
-    const before = yield* fs.stat(path).pipe(Effect.catchTag("PlatformError", unreadable));
+  const before = yield* fs.stat(path).pipe(Effect.catchTag("PlatformError", unreadable));
 
-    yield* checkRegular(before, limits, document);
+  yield* checkRegular(before, limits, document);
 
-    const file = yield* fs
-      .open(path, { flag: "r", noFollow: true })
-      .pipe(Effect.catchTag("PlatformError", unreadable));
-    const opened = yield* file.stat.pipe(Effect.catchTag("PlatformError", unreadable));
+  const file = yield* fs
+    .open(path, { flag: "r", noFollow: true })
+    .pipe(Effect.catchTag("PlatformError", unreadable));
+  const opened = yield* file.stat.pipe(Effect.catchTag("PlatformError", unreadable));
 
-    yield* checkRegular(opened, limits, document);
-    yield* verify(before, opened);
+  yield* checkRegular(opened, limits, document);
+  yield* verify(before, opened);
 
-    return yield* readStreamBounded(handleStream(file), limits, document);
-  }).pipe(Effect.scoped);
+  return yield* readStreamBounded(handleStream(file), limits, document);
+}, Effect.scoped);
 
 /**
  * Reads a path the operator named (the entry document, a `--document` pair). A symlinked name is
@@ -234,21 +221,20 @@ const readOpened = (
  * a file or final-component link swapped in there is refused, not read. A swap between
  * `realPath` and the `stat` is not detected.
  */
-export const readFileBounded = (
+export const readFileBounded = Effect.fnUntraced(function* readOperatorPath(
   path: string,
   limits: LoadLimits,
   document: Document,
-): Effect.Effect<Uint8Array, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* readOperatorPath() {
-    const fs = yield* FileSystem.FileSystem;
-    const real = yield* fs
-      .realPath(path)
-      .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
+): Effect.fn.Return<Uint8Array, LoadRefusal, FileSystem.FileSystem> {
+  const fs = yield* FileSystem.FileSystem;
+  const real = yield* fs
+    .realPath(path)
+    .pipe(Effect.catchTag("PlatformError", () => refuse(document, "DOC-14/unreadable")));
 
-    return yield* readOpened(real, limits, document, (before, opened) =>
-      sameFile(before, opened) ? Effect.void : refuse(document, "DOC-14/unreadable"),
-    );
-  });
+  return yield* readOpened(real, limits, document, (before, opened) =>
+    sameFile(before, opened) ? Effect.void : refuse(document, "DOC-14/unreadable"),
+  );
+});
 
 /**
  * Reads a file found inside a trust boundary (a `--ref-root` member). `path` is opened as given,

@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 import {
   defaultLimits,
+  LoadRefusal,
   readFileBounded,
   readMemberBounded,
   refuse,
@@ -179,5 +180,33 @@ describe("readFileBounded: an operator's path", () => {
 
     expect(opened).toBe(target);
     expect(error.diagnostic.code).toBe("DOC-14/unreadable");
+  });
+});
+
+describe("LoadRefusal", () => {
+  test("LoadRefusal keeps its tag and fields", async () => {
+    const located = await Effect.runPromise(
+      Effect.flip(
+        refuse(document, "DOC-14/invalid-json", {
+          pointer: "/a",
+          position: { column: 3, line: 2, offset: 7 },
+        }),
+      ),
+    );
+    const bare = await Effect.runPromise(Effect.flip(refuse(document, "DOC-14/unreadable")));
+
+    expect(located).toBeInstanceOf(LoadRefusal);
+    expect(located._tag).toBe("LoadRefusal");
+    expect(located.diagnostic.code).toBe("DOC-14/invalid-json");
+    expect(String(located.diagnostic.pointer)).toBe("/a");
+    expect(located.diagnostic.line).toBe(2);
+    expect(located.diagnostic.column).toBe(3);
+    expect(located.offset).toBe(7);
+    expect("offset" in located).toBe(true);
+
+    expect(bare._tag).toBe("LoadRefusal");
+    expect(bare.diagnostic.code).toBe("DOC-14/unreadable");
+    expect(bare.offset).toBeUndefined();
+    expect("offset" in bare).toBe(false);
   });
 });

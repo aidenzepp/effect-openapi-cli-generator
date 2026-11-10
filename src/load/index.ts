@@ -35,53 +35,51 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
  * Loads one document from bytes already read. The first non-whitespace character picks the
  * format, never the extension: `{` is JSON, anything else is YAML (design 3.1).
  */
-export const loadBytes = (
+export const loadBytes = Effect.fn("load.loadBytes")(function* loadBytes(
   bytes: Uint8Array,
   options: LoadOptions,
-): Effect.Effect<Loaded, LoadRefusal> => {
+): Effect.fn.Return<Loaded, LoadRefusal> {
   const limits = limitsOf(options);
   const { document } = options;
 
   if (bytes.length > limits.maxBytes) {
-    return refuse(document, "DOC-14/too-large");
+    return yield* refuse(document, "DOC-14/too-large");
   }
 
-  return Effect.try({
-    catch: () => "DOC-14/invalid-encoding" as const,
-    try: () => decoder.decode(bytes),
-  }).pipe(
-    Effect.matchEffect({
-      onFailure: (code) => refuse(document, code),
-      onSuccess: (text) =>
-        text.trimStart().startsWith("{")
-          ? parseStrictJson(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
-              Effect.map((value): Loaded => ({ document, format: "json", value })),
-            )
-          : parseStrictYaml(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
-              Effect.map((value): Loaded => ({ document, format: "yaml", value })),
-            ),
-    }),
+  return yield* Effect.try(() => decoder.decode(bytes)).pipe(
+    Effect.catch(() => refuse(document, "DOC-14/invalid-encoding")),
+    Effect.flatMap((text) =>
+      text.trimStart().startsWith("{")
+        ? parseStrictJson(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
+            Effect.map((value): Loaded => ({ document, format: "json", value })),
+          )
+        : parseStrictYaml(text, limits, document, hasBom(bytes) ? 3 : 0).pipe(
+            Effect.map((value): Loaded => ({ document, format: "yaml", value })),
+          ),
+    ),
   );
-};
+});
 
 /**
  * Loads one document from a file through a bounded stream, so `maxBytes` caps the bytes read.
  */
-export const loadFile = (
+export const loadFile = Effect.fn("load.loadFile")(function* loadFile(
   path: string,
   options: LoadOptions,
-): Effect.Effect<Loaded, LoadRefusal, FileSystem.FileSystem> =>
-  readFileBounded(path, limitsOf(options), options.document).pipe(
-    Effect.flatMap((bytes) => loadBytes(bytes, options)),
-  );
+): Effect.fn.Return<Loaded, LoadRefusal, FileSystem.FileSystem> {
+  const bytes = yield* readFileBounded(path, limitsOf(options), options.document);
+
+  return yield* loadBytes(bytes, options);
+});
 
 /**
  * Loads one document from a byte stream (stdin) through `Stream.limitBytes`.
  */
-export const loadStream = (
+export const loadStream = Effect.fn("load.loadStream")(function* loadStream(
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   options: LoadOptions,
-): Effect.Effect<Loaded, LoadRefusal> =>
-  readStreamBounded(stream, limitsOf(options), options.document).pipe(
-    Effect.flatMap((bytes) => loadBytes(bytes, options)),
-  );
+): Effect.fn.Return<Loaded, LoadRefusal> {
+  const bytes = yield* readStreamBounded(stream, limitsOf(options), options.document);
+
+  return yield* loadBytes(bytes, options);
+});
