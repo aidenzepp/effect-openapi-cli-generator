@@ -595,6 +595,48 @@ describe("I5 hop and node budgets", () => {
   });
 });
 
+// Path items A and B each reach themselves through a callback. Components precede paths here, so
+// the walk meets A's reference first: A is the first name and the first owner of an edge.
+const selfCycles = (paths: Json): Json => ({
+  components: {
+    pathItems: {
+      A: {
+        get: {
+          callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/A" } } },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      B: {
+        get: {
+          callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/B" } } },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+    },
+  },
+  info: { title: "t", version: "1" },
+  openapi: openapi["3.1"],
+  paths,
+});
+
+type ClosingEdge = readonly [
+  code: string,
+  pointer: string,
+  related: readonly { document: string; pointer: string }[] | undefined,
+];
+
+const closingEdge = (value: Json): ClosingEdge => {
+  const diagnostic = refusal("3.1", value);
+
+  return [diagnostic.code, diagnostic.pointer, diagnostic.related];
+};
+
+const closedBy = (name: string): ClosingEdge => [
+  "DOC-23/non-schema-cycle",
+  `/components/pathItems/${name}/get/callbacks/cb/{$u}`,
+  [{ document: entry, pointer: `/components/pathItems/${name}` }],
+];
+
 describe("DOC-23 reference cycles", () => {
   test("a non-schema reference chain cycle is a document refusal", () => {
     const value = spec("3.0", {
@@ -664,36 +706,16 @@ describe("DOC-23 reference cycles", () => {
   });
 
   test("DOC-23 names the edge that closes the first cycle", () => {
-    // Path items A and B each reach themselves through a callback. Only B is reachable from the
-    // root, the first start; A is reachable only from its own start, though its edges come first.
-    const value = spec("3.1", {
-      components: {
-        pathItems: {
-          A: {
-            get: {
-              callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/A" } } },
-              responses: { "200": { description: "ok" } },
-            },
-          },
-          B: {
-            get: {
-              callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/B" } } },
-              responses: { "200": { description: "ok" } },
-            },
-          },
-        },
-      },
-      paths: { "/b": { $ref: "#/components/pathItems/B" } },
-    });
-    const diagnostic = refusal("3.1", value);
+    // Only B is reachable from the root. The root is visited before every name, so B's cycle is
+    // reported though A comes first in reference order and owns the first edge.
+    expect(closingEdge(selfCycles({ "/b": { $ref: "#/components/pathItems/B" } }))).toEqual(
+      closedBy("B"),
+    );
+  });
 
-    expect([diagnostic.code, diagnostic.pointer]).toEqual([
-      "DOC-23/non-schema-cycle",
-      "/components/pathItems/B/get/callbacks/cb/{$u}",
-    ]);
-    expect<readonly { document: string; pointer: string }[] | undefined>(
-      diagnostic.related,
-    ).toEqual([{ document: entry, pointer: "/components/pathItems/B" }]);
+  test("DOC-23 visits names in reference order when the root reaches no cycle", () => {
+    // Neither cycle is reachable from the root, so the first name in reference order, A, decides.
+    expect(closingEdge(selfCycles({}))).toEqual(closedBy("A"));
   });
 
   test("schema cycles are allowed", () => {

@@ -1,6 +1,7 @@
 import { Array as Arr, Effect, Option, Predicate, Result, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
@@ -1159,7 +1160,7 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
 export const checkGrammar = Effect.fnUntraced(function* checkGrammar(
   resolution: Resolution,
   limits: Pick<ResolveLimits, "maxNodes"> = defaultLimits,
-) {
+): Effect.fn.Return<readonly Diagnostic[]> {
   const search = startSearch(limits.maxNodes);
   const findings = [...elementFindings(resolution, search), ...operationFindingsOf(resolution)];
   const reported = search.exhausted ? [at("REF-18/node-budget", "")()] : findings;
