@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
 import {
   escapeToken,
   evaluateFragment,
@@ -14,6 +14,10 @@ import {
   parseFragmentResult,
   parsePointer,
   parsePointerResult,
+  PointerIndexOutOfRange,
+  PointerMemberNotFound,
+  PointerNotContainer,
+  PointerSyntaxError,
   unescapeToken,
   unescapeTokenResult,
 } from "../../src/model/pointer.ts";
@@ -206,5 +210,38 @@ describe("isPointerWithin", () => {
   test("a shared text prefix is not a descendant", () => {
     expect(isPointerWithin("/a", "/ab")).toBe(false);
     expect(isPointerWithin("/a/b", "/a")).toBe(false);
+  });
+});
+
+// Reflect.construct passes a reason outside the four literals past the type checker.
+const constructWithUnknownReason = (): void => {
+  Reflect.construct(PointerSyntaxError, [{ pointer: "a", reason: "bad-reason" }]);
+};
+
+describe("pointer error classes", () => {
+  test("pointer errors are schema classes", () => {
+    const syntax = new PointerSyntaxError({ pointer: "a", reason: "missing-leading-slash" });
+    expect(syntax._tag).toBe("PointerSyntaxError");
+    expect({ pointer: syntax.pointer, reason: syntax.reason }).toEqual({
+      pointer: "a",
+      reason: "missing-leading-slash",
+    });
+    expect(Schema.is(PointerSyntaxError)(syntax)).toBe(true);
+
+    for (const [ErrorClass, tag] of [
+      [PointerMemberNotFound, "PointerMemberNotFound"],
+      [PointerIndexOutOfRange, "PointerIndexOutOfRange"],
+      [PointerNotContainer, "PointerNotContainer"],
+    ] as const) {
+      const failure = new ErrorClass({ pointer: "/foo/9", token: "9" });
+      expect(failure._tag).toBe(tag);
+      expect({ pointer: failure.pointer, token: failure.token }).toEqual({
+        pointer: "/foo/9",
+        token: "9",
+      });
+      expect(Schema.is(ErrorClass)(failure)).toBe(true);
+    }
+
+    expect(constructWithUnknownReason).toThrow();
   });
 });
