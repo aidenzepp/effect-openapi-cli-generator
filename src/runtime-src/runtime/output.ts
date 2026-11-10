@@ -785,8 +785,6 @@ export const runRecordLayer: Layer.Layer<RunRecord> = Layer.effect(RunRecord)(
 
 const errorFormatName = (envPrefix: string): string => `${envPrefix}_ERROR_FORMAT`;
 
-const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
-
 /**
  * `<envPrefix>_ERROR_FORMAT`, read by that explicit name (memo 6f21e261), then `text`. A value
  * other than `text` or `json` is a `UsageError` naming the variable, never the value.
@@ -794,12 +792,11 @@ const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
 const envErrorFormat = Effect.fnUntraced(function* readErrorFormat(envPrefix: string) {
   const name = errorFormatName(envPrefix);
   const invalid = new UsageError({ flag: name, message: `${name} must be text or json` });
-  const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
-  if (Option.isNone(env)) {
-    return "text" as const;
-  }
+  const env = yield* Config.option(Config.Literals(errorFormats, name)).pipe(
+    Effect.mapError(() => invalid),
+  );
 
-  return isErrorFormat(env.value) ? env.value : yield* invalid;
+  return Option.getOrElse(env, () => "text" as const);
 });
 
 // The operator's `--error-format`, if the root registers the setting and the flag was given.

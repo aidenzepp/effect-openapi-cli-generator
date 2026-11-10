@@ -313,6 +313,18 @@ describe("recordRun records the run's format before the handler's first step (F1
     expect(rendered.code).toBe(2);
   });
 
+  test("an invalid <PREFIX>_ERROR_FORMAT fails with <PREFIX>_ERROR_FORMAT must be text or json, naming the variable and not the value", async () => {
+    const rendered = await runCatch(Output.recordRun(PREFIX), {
+      env: { EXAMPLE_ERROR_FORMAT: "yaml-VALUE" },
+      record: {},
+    });
+
+    expect(rendered.error).toBeInstanceOf(UsageError);
+    expect(rendered.error).toMatchObject({ message: "EXAMPLE_ERROR_FORMAT must be text or json" });
+    expect(rendered.code).toBe(2);
+    expect(rendered.stderr).not.toContain("yaml-VALUE");
+  });
+
   test("without the record's layer recordRun succeeds and errors render as text", async () => {
     const rendered = await runCatch(usageAfterRecord, { flag: "json" });
 

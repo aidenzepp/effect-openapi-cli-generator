@@ -156,13 +156,18 @@ export const schemeSlug = (scheme: string): string =>
     .toLowerCase();
 
 /**
+ * An identifier in `SCREAMING_SNAKE` form: upper case, with `-` as `_`.
+ */
+export const screamingSnake = (name: string): string => name.toUpperCase().replaceAll("-", "_");
+
+/**
  * The environment name of a token scheme's credential: the scheme's own `env`, else
  * `<PREFIX>_<SCHEME>`. A `mutualTLS` scheme has no single credential name: the runtime reads its
  * `certEnv`, `keyEnv` and `caEnv` instead and never calls this for one.
  */
 export const envName = (envPrefix: string, scheme: string, definition: SecurityScheme): string =>
   ("env" in definition ? definition.env : undefined) ??
-  `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
+  `${envPrefix}_${screamingSnake(schemeSlug(scheme))}`;
 
 type FileSetting = GlobalFlag.Setting<string, Option.Option<string>>;
 
@@ -216,10 +221,12 @@ const fromFile = (
     Effect.succeed(fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
   ).pipe(Effect.flatMap((source) => credentialFromSource(scheme, source)));
 
-const fromEnv = (scheme: string, name: string): Effect.Effect<Option.Option<string>, UsageError> =>
+const fromEnv = (
+  scheme: string,
+  name: string,
+): Effect.Effect<Option.Option<Redacted.Redacted>, UsageError> =>
   Config.option(Config.Redacted(name)).pipe(
-    Effect.map(Option.map(Redacted.value)),
-    Effect.map(Option.filter((value) => value !== "")),
+    Effect.map(Option.filter((value) => Redacted.value(value) !== "")),
     Effect.mapError(() => usage(scheme, `cannot read ${name} for ${scheme}`)),
   );
 
@@ -291,15 +298,15 @@ const credentialOf = (
             (text) => text !== "",
             () => usage(scheme, `the credential for ${scheme} is empty`),
           ),
-          Effect.map(Option.some),
+          Effect.map((text) => Option.some(Redacted.make(text))),
         )
       : yield* fromEnv(scheme, envName(envPrefix, scheme, definition));
 
     return value.pipe(
-      Option.map((text) => ({
+      Option.map((credential) => ({
         definition,
         scheme,
-        value: Redacted.make(text),
+        value: credential,
       })),
     );
   });
