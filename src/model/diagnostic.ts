@@ -1,6 +1,6 @@
 import { Array as Arr, Effect, Option, Order, Predicate, Record, Schema } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
-import { Origin, rowIdPattern } from "./entities.ts";
+import { Origin, RowId } from "./entities.ts";
 
 const codePattern = /^(?<row>[A-Z][A-Z0-9]*-[0-9]+)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
@@ -47,7 +47,7 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")(
     operation: Schema.optionalKey(DiagnosticOperation),
     pointer: JsonPointer,
     related: Schema.optionalKey(Schema.Array(Site)),
-    row: Schema.String.pipe(Schema.check(Schema.isPattern(rowIdPattern))),
+    row: RowId,
     scope: DiagnosticScope,
     severity: Schema.Literals(["refusal", "notice"]),
     specSection: DocumentUri,
