@@ -5,6 +5,7 @@ import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution } from "../resolve/index.ts";
+import { methodMembers } from "../model/path-item.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
@@ -142,17 +143,6 @@ const componentName = /^[a-zA-Z0-9.\-_]+$/u;
 
 const expression = /\{(?<name>[^{}]+)\}/gu;
 
-const fixedMethods: readonly string[] = [
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-];
-
 const sections30 = [
   "schemas",
   "responses",
@@ -194,9 +184,6 @@ const locate = (
     ? { document: at.document, node: target, pointer: at.pointer }
     : undefined;
 };
-
-const methodMembers = (line: Resolution["line"]): readonly string[] =>
-  line === "3.2" ? [...fixedMethods, "query"] : fixedMethods;
 
 const pathItems = (resolution: Resolution): readonly PathItem[] => {
   const paths = isObject(resolution.value) ? resolution.value.paths : undefined;
@@ -387,7 +374,7 @@ const additionalKeyFindings = (operation: Operation): readonly Finding[] => {
     return [];
   }
 
-  if ([...fixedMethods, "query"].includes(operation.method.toLowerCase())) {
+  if (methodMembers("3.2").includes(operation.method.toLowerCase())) {
     return [{ code: "PTH-24/fixed-method-key", operation, pointer: operation.pointer }];
   }
 
