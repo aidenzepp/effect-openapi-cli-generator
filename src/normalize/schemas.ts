@@ -1,6 +1,8 @@
 import {
   Array as Arr,
   Effect,
+  Equal,
+  Graph,
   HashSet,
   JsonPointer,
   JsonSchema,
@@ -225,7 +227,7 @@ const inPlace: Positions = {
 type Visit = (node: JsonObject, path: readonly string[]) => JsonObject;
 
 // Rebuilds a schema node: `visit` rewrites the node itself, then its subschemas are transformed.
-// Objects are rebuilt with `Object.fromEntries`, so a `__proto__` member stays an own key.
+// Objects are rebuilt with `Record.map`, so a `__proto__` member stays an own key.
 const transformSchema = (
   budget: Budget,
   node: Json,
@@ -240,28 +242,22 @@ const transformSchema = (
   const child = (value: Json, tokens: readonly string[]): Json =>
     transformSchema(budget, value, [...path, ...tokens], where, visit);
 
-  return Object.fromEntries(
-    Object.entries(visit(node, path)).map(([key, value]): [string, Json] => {
-      if (where.one.has(key)) {
-        return [key, child(value, [key])];
-      }
+  return Record.map(visit(node, path), (value, key): Json => {
+    if (where.one.has(key)) {
+      return child(value, [key]);
+    }
 
-      if (where.list.has(key) && isArray(value)) {
-        return [key, value.map((item, index) => child(item, [key, String(index)]))];
-      }
+    if (where.list.has(key) && isArray(value)) {
+      return value.map((item, index) => child(item, [key, String(index)]));
+    }
 
-      if (where.map.has(key) && isObject(value)) {
-        const entries = Object.entries(value).map(([name, item]): [string, Json] => [
-          name,
-          child(item, [key, name]),
-        ]);
+    if (where.map.has(key) && isObject(value)) {
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+      return Record.map(value, (item, name) => child(item, [key, name]));
+    }
 
-        return [key, Object.fromEntries(entries)];
-      }
-
-      return [key, value];
-    }),
-  );
+    return value;
+  });
 };
 
 const forEachSchema = (
@@ -473,16 +469,14 @@ const rewriteReferences = (
     // A reference the resolver left without a key names the document root, which is no schema
     // (D-AD12): the `$ref` is dropped here and `diagnosticsOf` refuses the site.
     if (reference.defsKey === undefined) {
-      return Object.fromEntries(Object.entries(current).filter(([key]) => key !== "$ref"));
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+      return Record.filter(current, (_, key) => key !== "$ref");
     }
 
     const ref = refFor(reference.defsKey);
 
-    return Object.fromEntries(
-      Object.entries(current).map(([key, value]): [string, Json] =>
-        key === "$ref" ? [key, ref] : [key, value],
-      ),
-    );
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+    return Record.map(current, (value, key): Json => (key === "$ref" ? ref : value));
   });
 };
 
@@ -1109,114 +1103,6 @@ const edgesOf = (budget: Budget, definitions: ReadonlyMap<string, Json>): readon
   return edges;
 };
 
-interface Frame {
-  at: number;
-  readonly key: string;
-  readonly targets: readonly string[];
-}
-
-interface Tarjan {
-  counter: number;
-  readonly component: Map<string, number>;
-  readonly index: Map<string, number>;
-  readonly low: Map<string, number>;
-  readonly next: ReadonlyMap<string, readonly string[]>;
-  readonly onStack: Set<string>;
-  readonly stack: string[];
-  readonly work: Frame[];
-}
-
-const lower = (state: Tarjan, key: string, value: number): void => {
-  state.low.set(key, Math.min(state.low.get(key) ?? value, value));
-};
-
-const open = (state: Tarjan, key: string): void => {
-  state.index.set(key, state.counter);
-  state.low.set(key, state.counter);
-  state.counter += 1;
-  state.stack.push(key);
-  state.onStack.add(key);
-  state.work.push({ at: 0, key, targets: state.next.get(key) ?? [] });
-};
-
-// Closes a finished node: its low link flows to its caller, and a root pops its component.
-const close = (state: Tarjan, frame: Frame): void => {
-  const own = state.index.get(frame.key) ?? 0;
-  const low = state.low.get(frame.key) ?? own;
-  const caller = state.work.at(-1);
-  if (caller !== undefined) {
-    lower(state, caller.key, low);
-  }
-
-  if (low !== own) {
-    return;
-  }
-
-  let popped = state.stack.pop();
-  while (popped !== undefined) {
-    state.onStack.delete(popped);
-    state.component.set(popped, own);
-    popped = popped === frame.key ? undefined : state.stack.pop();
-  }
-};
-
-// One depth-first search with an explicit work stack, so a long reference chain cannot exhaust
-// the call stack.
-const connect = (state: Tarjan, root: string): void => {
-  open(state, root);
-  let frame = state.work.at(-1);
-  while (frame !== undefined) {
-    const target = frame.targets[frame.at];
-    if (target === undefined) {
-      state.work.pop();
-      close(state, frame);
-    } else {
-      frame.at += 1;
-      if (!state.index.has(target)) {
-        open(state, target);
-      } else if (state.onStack.has(target)) {
-        lower(state, frame.key, state.index.get(target) ?? 0);
-      }
-    }
-
-    frame = state.work.at(-1);
-  }
-};
-
-// Tarjan's strongly connected components over the in-place reference graph, iteratively.
-const componentsOf = (
-  keys: readonly string[],
-  edges: readonly Edge[],
-): ReadonlyMap<string, number> => {
-  const next = new Map<string, string[]>();
-  for (const edge of edges) {
-    const targets = next.get(edge.from);
-    if (targets === undefined) {
-      next.set(edge.from, [edge.to]);
-    } else {
-      targets.push(edge.to);
-    }
-  }
-
-  const state: Tarjan = {
-    component: new Map(),
-    counter: 0,
-    index: new Map(),
-    low: new Map(),
-    next,
-    onStack: new Set(),
-    stack: [],
-    work: [],
-  };
-  for (const key of keys) {
-    if (!state.index.has(key)) {
-      connect(state, key);
-    }
-  }
-
-  return state.component;
-};
-
 const replaceAt = (node: Json, path: readonly string[]): Json => {
   const [token, ...rest] = path;
   if (token === undefined) {
@@ -1231,11 +1117,8 @@ const replaceAt = (node: Json, path: readonly string[]): Json => {
     return node;
   }
 
-  return Object.fromEntries(
-    Object.entries(node).map(([key, value]): [string, Json] =>
-      key === token ? [key, replaceAt(value, rest)] : [key, value],
-    ),
-  );
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+  return Record.map(node, (value, key) => (key === token ? replaceAt(value, rest) : value));
 };
 
 // A copy of the definitions with the edits that made it, in the order they were made.
@@ -1248,7 +1131,31 @@ interface EditedCopy {
 // instance (D-AD12 refused tier, DOC-23/alias-cycle): each such site becomes `{}` in the copy.
 const breakAliasCycles = (budget: Budget, initial: ReadonlyMap<string, Json>): EditedCopy => {
   const edges = edgesOf(budget, initial);
-  const component = componentsOf(sortedKeys(initial), edges);
+  // The strongly connected components of the in-place reference graph. Graph's search keeps an
+  // explicit stack, so a long reference chain cannot exhaust the call stack.
+  const nodes = new Map<string, Graph.NodeIndex>();
+  const graph = Graph.directed<string, Edge>((mutable) => {
+    for (const key of sortedKeys(initial)) {
+      nodes.set(key, Graph.addNode(mutable, key));
+    }
+    for (const edge of edges) {
+      const from = nodes.get(edge.from);
+      const to = nodes.get(edge.to);
+      if (from !== undefined && to !== undefined) {
+        Graph.addEdge(mutable, from, to, edge);
+      }
+    }
+  });
+  const component = new Map<string, number>();
+  for (const [id, members] of Graph.stronglyConnectedComponents(graph).entries()) {
+    for (const node of members) {
+      const key = Graph.getNode(graph, node);
+      if (Option.isSome(key)) {
+        component.set(key.value, id);
+      }
+    }
+  }
+
   const sizes = new Map<number, number>();
   for (const id of component.values()) {
     sizes.set(id, (sizes.get(id) ?? 0) + 1);
@@ -1387,9 +1294,6 @@ const importOnce = (
   );
 };
 
-const sameJson = (left: Json | undefined, right: Json | undefined): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
-
 // The edit for one importer failure, or `undefined` when its class is unnamed or it makes no
 // progress (the located node is already `{}`).
 const importEdit = (
@@ -1408,7 +1312,7 @@ const importEdit = (
 
   const path = root === "definitions" ? deepestSchema(node, tokens) : [];
 
-  return sameJson(replaceAt(node, path), node)
+  return Equal.equals(replaceAt(node, path), node)
     ? undefined
     : { action: "replace", code: found[1](line), key, path };
 };
@@ -1773,22 +1677,18 @@ export const normalizeSchemas = Effect.fnUntraced(function* normalizeSchemas(
 const annotationsDropped: ReadonlySet<string> = new Set(["default", "example", "examples"]);
 
 const forCodeGeneration: Visit = (node) =>
-  Object.fromEntries(
-    Object.entries(node).flatMap(([keyword, value]): [string, Json][] => {
-      if (annotationsDropped.has(keyword)) {
-        return [];
-      }
-
+  Record.map(
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+    Record.filter(node, (_, keyword) => !annotationsDropped.has(keyword)),
+    (value, keyword): Json => {
       if (keyword !== "properties" || !isObject(value)) {
-        return [[keyword, value]];
+        return value;
       }
 
       const names = Arr.sort(Object.keys(value), byString);
 
-      return [
-        [keyword, Object.fromEntries(names.map((name) => [name, member(value, name) ?? {}]))],
-      ];
-    }),
+      return Object.fromEntries(names.map((name) => [name, member(value, name) ?? {}]));
+    },
   );
 
 const referencedKeys = (budget: Budget, node: Json): readonly string[] => {
