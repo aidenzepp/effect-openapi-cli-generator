@@ -1,4 +1,5 @@
-import { Data, Effect, JsonPointer, Predicate, Result } from "effect";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
+import { Effect, JsonPointer, Option, Predicate, Record, Result, Schema } from "effect";
 
 /**
  * A JSON value.
@@ -14,38 +15,42 @@ export type Json =
 /**
  * The pointer or fragment text is not valid RFC 6901 syntax.
  */
-export class PointerSyntaxError extends Data.TaggedError("PointerSyntaxError")<{
-  readonly pointer: string;
-  readonly reason:
-    | "missing-leading-slash"
-    | "invalid-escape"
-    | "invalid-percent-escape"
-    | "missing-hash";
-}> {}
+export class PointerSyntaxError extends Schema.TaggedError<PointerSyntaxError>()(
+  "PointerSyntaxError",
+  {
+    pointer: Schema.String,
+    reason: Schema.Literals([
+      "missing-leading-slash",
+      "invalid-escape",
+      "invalid-percent-escape",
+      "missing-hash",
+    ]),
+  },
+) {}
 
 /**
  * An object has no own member for a pointer token.
  */
-export class PointerMemberNotFound extends Data.TaggedError("PointerMemberNotFound")<{
-  readonly pointer: string;
-  readonly token: string;
-}> {}
+export class PointerMemberNotFound extends Schema.TaggedError<PointerMemberNotFound>()(
+  "PointerMemberNotFound",
+  { pointer: Schema.String, token: Schema.String },
+) {}
 
 /**
  * An array index token is not a valid index into the array.
  */
-export class PointerIndexOutOfRange extends Data.TaggedError("PointerIndexOutOfRange")<{
-  readonly pointer: string;
-  readonly token: string;
-}> {}
+export class PointerIndexOutOfRange extends Schema.TaggedError<PointerIndexOutOfRange>()(
+  "PointerIndexOutOfRange",
+  { pointer: Schema.String, token: Schema.String },
+) {}
 
 /**
  * A token tried to descend into a scalar.
  */
-export class PointerNotContainer extends Data.TaggedError("PointerNotContainer")<{
-  readonly pointer: string;
-  readonly token: string;
-}> {}
+export class PointerNotContainer extends Schema.TaggedError<PointerNotContainer>()(
+  "PointerNotContainer",
+  { pointer: Schema.String, token: Schema.String },
+) {}
 
 export type PointerEvalError = PointerMemberNotFound | PointerIndexOutOfRange | PointerNotContainer;
 
@@ -187,12 +192,12 @@ export const evaluateTokensResult = (
 
       current = item;
     } else if (Predicate.isObject(current)) {
-      const member = Object.hasOwn(current, token) ? current[token] : undefined;
-      if (member === undefined) {
+      const member = Record.get(current, token);
+      if (Option.isNone(member)) {
         return Result.fail(new PointerMemberNotFound({ pointer, token }));
       }
 
-      current = member;
+      current = member.value;
     } else {
       return Result.fail(new PointerNotContainer({ pointer, token }));
     }
