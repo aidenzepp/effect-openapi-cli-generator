@@ -51,7 +51,15 @@ const uriPattern = new RegExp(`^[A-Za-z][A-Za-z0-9+.-]*:${uriChar}*$`, "u");
 
 const wireNamePattern = /^[^\p{Cc}\p{Cs}]+$/u;
 
-const safeTextPattern = /^(?:[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]|[\n\t])*$/u;
+/**
+ * The Unicode categories that safe text excludes, as a regular expression class body.
+ *
+ * Controls, format characters, line and paragraph separators and lone surrogates; LF and TAB are
+ * re-admitted by each pattern built from it.
+ */
+export const safeTextCategories = "\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}";
+
+const safeTextPattern = new RegExp(`^(?:[^${safeTextCategories}]|[\\n\\t])*$`, "u");
 
 const pattern = (regExp: RegExp) => Schema.String.pipe(Schema.check(Schema.isPattern(regExp)));
 
