@@ -1,12 +1,15 @@
 import {
   Array as Arr,
+  Data,
   Effect,
+  Match,
   Option,
   Order,
   pipe,
   Predicate,
   Record,
   Schema,
+  Struct,
   UndefinedOr,
 } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
@@ -27,13 +30,18 @@ import { headerMarks } from "./header-object.ts";
 import {
   authorChoiceCodes,
   bracketChoiceCode,
+  compound,
   deepObjectExplodeText,
   formStyleRefusal,
   partHeader,
+  PartHeaderOutcome,
+  ScalarCover,
   scalarChoiceCode,
   scalarCover,
+  styleNames,
+  typeNames,
 } from "./parameters.ts";
-import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
+import type { StyleName } from "./parameters.ts";
 import { appliesDynamicKeyword, budgetOf, charge, schemaKeyAt } from "./schemas.ts";
 import type { Budget } from "./schemas.ts";
 
@@ -57,17 +65,16 @@ export interface BodySite {
  * survived; `Refused` means none did, and keeps `required` so the operation assembly can raise the
  * refusal to operation scope.
  */
-export type BodyOutcome =
-  | {
-      readonly _tag: "Implemented";
-      readonly body: Body;
-      readonly diagnostics: readonly Diagnostic[];
-    }
-  | {
-      readonly _tag: "Refused";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly required: boolean;
-    };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type BodyOutcome = Data.TaggedEnum<{
+  Implemented: { readonly body: Body; readonly diagnostics: readonly Diagnostic[] };
+  Refused: { readonly diagnostics: readonly Diagnostic[]; readonly required: boolean };
+}>;
+
+/**
+ * Constructors and dispatch for {@link BodyOutcome}.
+ */
+export const BodyOutcome = Data.taggedEnum<BodyOutcome>();
 
 /**
  * The site is not a Request Body Object the earlier stages could have passed: validation or
@@ -86,19 +93,6 @@ export class BodyNotReadable extends Schema.TaggedError<BodyNotReadable>()("Body
 export class BodyNodeBudget extends Schema.TaggedError<BodyNodeBudget>()("BodyNodeBudget", {
   diagnostic: Diagnostic,
 }) {}
-
-const styleNames = [
-  "cookie",
-  "deepObject",
-  "form",
-  "label",
-  "matrix",
-  "pipeDelimited",
-  "simple",
-  "spaceDelimited",
-] as const;
-
-type StyleName = (typeof styleNames)[number];
 
 const ObjectValue = Schema.Record(Schema.String, Schema.Unknown);
 
@@ -298,7 +292,7 @@ const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly
 // anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4),
 // and names the property by `wire`.
 const fieldRefusal = (entry: CanonicalKey, finding: Finding, wire: string): Finding => {
-  const { drops: _drops, ...kept } = finding;
+  const kept = Struct.omit(finding, ["drops"]);
   const field: Finding = { ...kept, at: entry, scope: "field", wire };
 
   return keyOf(finding.at) === keyOf(entry)
@@ -558,7 +552,7 @@ const factsOf = Effect.fnUntraced(function* facts(
     contentEncoding: firstLocated(nodes, (node) => node.contentEncoding),
     format: firstLocated(nodes, (node) => node.format)?.value,
     items: itemFacts,
-    type: type === undefined ? [] : Arr.ensure(type),
+    type: typeNames(type),
   };
 });
 
@@ -584,27 +578,17 @@ const stringDefault = (line: Line, facts: Facts): Default => {
   return { row: "ENC-20", type: "text/plain" };
 };
 
-const scalarDefault = (line: Line, name: string, facts: Facts): Default => {
-  switch (name) {
-    case "string": {
-      return stringDefault(line, facts);
-    }
-    case "number":
-    case "integer":
-    case "boolean": {
-      return { row: "ENC-21", type: "text/plain" };
-    }
-    case "object": {
-      return { row: "ENC-22", type: "application/json" };
-    }
-    case "null": {
-      return { row: "ENC-25", type: "text/plain" };
-    }
-    default: {
-      return absentDefault(line);
-    }
-  }
-};
+const scalarDefault = (line: Line, name: string, facts: Facts): Default =>
+  Match.value(name).pipe(
+    Match.when("string", (): Default => stringDefault(line, facts)),
+    Match.whenOr("number", "integer", "boolean", (): Default => ({
+      row: "ENC-21",
+      type: "text/plain",
+    })),
+    Match.when("object", (): Default => ({ row: "ENC-22", type: "application/json" })),
+    Match.when("null", (): Default => ({ row: "ENC-25", type: "text/plain" })),
+    Match.orElse((): Default => absentDefault(line)),
+  );
 
 type ArrayDefault = (line: Line, facts: Facts) => Default;
 
@@ -1000,7 +984,7 @@ const headersOf = Effect.fnUntraced(function* headersOf(
     }
 
     const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.budget.limit });
-    if (typed._tag === "Unsupported") {
+    if (PartHeaderOutcome.$is("Unsupported")(typed)) {
       findings.push(
         dropping(
           refusal(
@@ -1784,7 +1768,7 @@ const partInputs = (
 const typesOf = (nodes: readonly Located[]): readonly string[] => {
   const type = firstLocated(nodes, (node) => node.type)?.value;
 
-  return type === undefined ? [] : Arr.ensure(type);
+  return typeNames(type);
 };
 
 // An array root: typed array, or item schemas with no declared properties.
@@ -1993,9 +1977,6 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
     ),
   );
 
-const isCompound = (types: readonly string[]): boolean =>
-  types.some((name) => name === "object" || name === "array");
-
 // PRM-27 (design 6.1): a deepObject value is nested when its schema is an array, or declares a
 // property or additionalProperties schema whose type is or includes object or array. An untyped
 // member is not nested.
@@ -2019,7 +2000,7 @@ const isNested = Effect.fnUntraced(function* isNested(
       : []),
   ]);
   for (const member of members) {
-    if (isCompound(typesOf(yield* flatten(walk, member)))) {
+    if (compound(typesOf(yield* flatten(walk, member)))) {
       return true;
     }
   }
@@ -2065,7 +2046,7 @@ const scalarCoverOf = (
   serialization: PlainSerialization | undefined,
 ): Effect.Effect<ScalarCover> =>
   serialization?.style !== "deepObject" || input.schema === undefined
-    ? Effect.succeed({ _tag: "Strict" })
+    ? Effect.succeed(ScalarCover.Strict())
     : scalarCover(ctx.resolution, input.schema, ctx.site.nonStandard, {
         maxNodes: ctx.walk.budget.limit,
       });
@@ -2119,11 +2100,13 @@ const deepObjectExplode = (
 
 // What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
 // bracket convention (the author config's switch, never defaulted or inferred).
+type DeepObjectAction = "mark" | "none" | "refuse";
+
 const deepObjectOf = Effect.fnUntraced(function* deepObjectOf(
   ctx: Context,
   input: RuleInput,
   serialization: PlainSerialization | undefined,
-): Effect.fn.Return<"mark" | "none" | "refuse", BodyNodeBudget> {
+): Effect.fn.Return<DeepObjectAction, BodyNodeBudget> {
   if (serialization?.style !== "deepObject" || !(yield* isNested(ctx.walk, input.schema))) {
     return "none";
   }
@@ -2139,17 +2122,14 @@ const coveredDeepObject = (
   input: RuleInput,
   serialization: PlainSerialization | undefined,
   cover: ScalarCover,
-): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> => {
-  if (cover._tag === "Uncovered") {
-    return Effect.succeed("refuse");
-  }
-
-  if (cover._tag === "Covered") {
-    return Effect.succeed(cover.nested ? "mark" : "none");
-  }
-
-  return deepObjectOf(ctx, input, serialization);
-};
+): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+  ScalarCover.$match(cover, {
+    Covered: ({ nested }): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+      Effect.succeed(nested ? "mark" : "none"),
+    Strict: (): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+      deepObjectOf(ctx, input, serialization),
+    Uncovered: (): Effect.Effect<DeepObjectAction, BodyNodeBudget> => Effect.succeed("refuse"),
+  });
 
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
@@ -2169,10 +2149,9 @@ const formRule = Effect.fnUntraced(function* formRule(
   // Under the scalar switch the branch walk decides a deepObject entry the strict object test
   // would refuse; the style table refuses nothing else for deepObject (design 6.1 Scalar switch).
   const cover = yield* scalarCoverOf(ctx, input, typing.serialization);
-  const inapplicable =
-    cover._tag === "Strict"
-      ? yield* styleRefusalOf(ctx, input, typing.serialization)
-      : Option.none();
+  const inapplicable = ScalarCover.$is("Strict")(cover)
+    ? yield* styleRefusalOf(ctx, input, typing.serialization)
+    : Option.none();
   if (Option.isSome(inapplicable)) {
     return { findings: [...typing.findings, inapplicable.value], rule: undefined };
   }
@@ -2217,7 +2196,8 @@ const formRule = Effect.fnUntraced(function* formRule(
     rule.nonStandard = "deepObjectBrackets";
   }
 
-  if (cover._tag === "Covered") {
+  const covered = ScalarCover.$is("Covered")(cover);
+  if (covered) {
     rule.nonStandardScalars = "deepObjectScalars";
   }
 
@@ -2225,7 +2205,7 @@ const formRule = Effect.fnUntraced(function* formRule(
     findings: [
       ...typing.findings,
       ...(deepObject === "mark" ? [bracketChoice(input)] : []),
-      ...(cover._tag === "Covered" ? [scalarChoice(input)] : []),
+      ...(covered ? [scalarChoice(input)] : []),
       ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
       ...formIgnored(node, input.actual),
     ],
@@ -2691,7 +2671,7 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
   if (keys.length === 0) {
     const empty = emptyContent(resolution.line, childKey(target, "content"));
 
-    return { _tag: "Refused", diagnostics: yield* toDiagnostics(ctx, [empty]), required };
+    return BodyOutcome.Refused({ diagnostics: yield* toDiagnostics(ctx, [empty]), required });
   }
 
   // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
@@ -2705,7 +2685,7 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
     results.map((result) => Option.fromUndefinedOr(result.alternative)),
   );
   if (alternatives.length === 0) {
-    return { _tag: "Refused", diagnostics, required };
+    return BodyOutcome.Refused({ diagnostics, required });
   }
 
   const body = yield* Schema.decodeUnknownEffect(Body)({
@@ -2716,7 +2696,7 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
     rows: ["RQB-01", "RQB-03", "RQB-04"],
   }).pipe(Effect.orDie);
 
-  return { _tag: "Implemented", body, diagnostics };
+  return BodyOutcome.Implemented({ body, diagnostics });
 });
 
 /**
@@ -2724,13 +2704,19 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
  * `Implemented` holds one rule per declared property in document order; `Refused` means a rule
  * refused the entry, as it would drop a form body alternative.
  */
-export type FormContentOutcome =
-  | {
-      readonly _tag: "Implemented";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly encoding: readonly EncodingRule[];
-    }
-  | { readonly _tag: "Refused"; readonly diagnostics: readonly Diagnostic[] };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type FormContentOutcome = Data.TaggedEnum<{
+  Implemented: {
+    readonly diagnostics: readonly Diagnostic[];
+    readonly encoding: readonly EncodingRule[];
+  };
+  Refused: { readonly diagnostics: readonly Diagnostic[] };
+}>;
+
+/**
+ * Constructors and dispatch for {@link FormContentOutcome}.
+ */
+export const FormContentOutcome = Data.taggedEnum<FormContentOutcome>();
 
 /**
  * The form-urlencoded rules of the content entry `mediaType` of the element at `site`, decided
@@ -2745,7 +2731,7 @@ export const formContentRules = Effect.fnUntraced(function* formContentRules(
   limits: ResolveLimits = defaultLimits,
 ): Effect.fn.Return<FormContentOutcome, BodyNodeBudget | BodyNotReadable> {
   if (codecOf(baseType(mediaType)) !== "form") {
-    return { _tag: "Implemented", diagnostics: [], encoding: [] };
+    return FormContentOutcome.Implemented({ diagnostics: [], encoding: [] });
   }
 
   const use = { document: resolution.document, pointer: site.pointer };
@@ -2756,17 +2742,15 @@ export const formContentRules = Effect.fnUntraced(function* formContentRules(
   const media = yield* readMedia(resolution, mediaSite);
   const parts = yield* formParts(ctx, media, false);
   if (parts.refused) {
-    return {
-      _tag: "Refused",
+    return FormContentOutcome.Refused({
       diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings), mediaSite),
-    };
+    });
   }
 
-  return {
-    _tag: "Implemented",
+  return FormContentOutcome.Implemented({
     diagnostics: yield* toDiagnostics(ctx, parts.findings, mediaSite),
     encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
       Effect.orDie,
     ),
-  };
+  });
 });

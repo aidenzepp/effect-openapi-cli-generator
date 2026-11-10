@@ -33,10 +33,16 @@ import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
+import {
+  BodyOutcome,
+  FormContentOutcome,
+  formContentRules,
+  hintDiscriminators,
+  normalizeBody,
+} from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
-import { authorChoiceCodes, normalizeParameter } from "./parameters.ts";
-import type { ParameterNotReadable, ParameterOutcome, ParameterSite } from "./parameters.ts";
+import { authorChoiceCodes, normalizeParameter, ParameterOutcome } from "./parameters.ts";
+import type { ParameterNotReadable, ParameterSite } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
 import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
@@ -409,7 +415,10 @@ const withFormRules = Effect.fnUntraced(function* withFormRules(
   site: ParameterSite,
   outcome: ParameterOutcome,
 ): Effect.fn.Return<ParameterOutcome, BodyNodeBudget | BodyNotReadable> {
-  if (outcome._tag !== "Implemented" || outcome.parameter.location !== "querystring") {
+  if (
+    !ParameterOutcome.$is("Implemented")(outcome) ||
+    outcome.parameter.location !== "querystring"
+  ) {
     return outcome;
   }
 
@@ -432,20 +441,19 @@ const withFormRules = Effect.fnUntraced(function* withFormRules(
     shared.limits,
   );
   const diagnostics = [...outcome.diagnostics, ...decided.diagnostics];
-  if (decided._tag === "Refused") {
-    return { _tag: "Refused", diagnostics, required: parameter.required };
+  if (FormContentOutcome.$is("Refused")(decided)) {
+    return ParameterOutcome.Refused({ diagnostics, required: parameter.required });
   }
 
   // Each spread feeds a class constructor, which checks the fields and gives back the class.
   // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
   const filled = new ContentSerialization({ ...serialization, encoding: decided.encoding });
 
-  return {
-    _tag: "Implemented",
+  return ParameterOutcome.Implemented({
     diagnostics,
     // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
     parameter: new ParameterEntity({ ...parameter, serialization: filled }),
-  };
+  });
 });
 
 // One merged entry's outcome, read through the shared cache: a path item parameter is the item's
@@ -490,10 +498,10 @@ const assembleParameters = Effect.fnUntraced(function* assembleParameters(
   return {
     diagnostics: outcomes.flatMap((outcome) => outcome.diagnostics),
     parameters: outcomes.flatMap((outcome) =>
-      outcome._tag === "Implemented" ? [outcome.parameter] : [],
+      ParameterOutcome.$is("Implemented")(outcome) ? [outcome.parameter] : [],
     ),
     refusedRequired: read.flatMap(([entry, outcome]) =>
-      outcome._tag === "Refused" && outcome.required ? [entry.pointer] : [],
+      ParameterOutcome.$is("Refused")(outcome) && outcome.required ? [entry.pointer] : [],
     ),
   };
 });
@@ -561,7 +569,7 @@ const assembleBody = Effect.fnUntraced(function* assembleBody(
   }
 
   const outcome = yield* normalizeBody(shared.resolution, site, shared.limits);
-  if (outcome._tag === "Refused") {
+  if (BodyOutcome.$is("Refused")(outcome)) {
     return { diagnostics: outcome.diagnostics, refusedRequired: outcome.required };
   }
 
