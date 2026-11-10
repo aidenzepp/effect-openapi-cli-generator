@@ -62,11 +62,11 @@ const mediaTypeOf = (response: HttpClientResponse.HttpClientResponse): string | 
   );
 
 /**
- * The characters `sanitize` in `output.ts` removes (C0 except LF and TAB, DEL, C1, format
- * characters, U+2028, U+2029, lone surrogates). `output.ts` imports this module, so the set is
- * restated here rather than imported.
+ * The characters a request id loses: every control character (so LF and TAB too, which `sanitize`
+ * in `output.ts` keeps), format characters, U+2028, U+2029 and lone surrogates. Its bytes are
+ * pinned by `request-id.test.ts`; it is not `sanitize`'s class.
  */
-const unsafeText = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
+const requestIdUnsafeText = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
 
 /**
  * The first `maxRequestIdLength` UTF-16 units of `text`, never ending in half a surrogate pair.
@@ -74,6 +74,7 @@ const unsafeText = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
 const boundRequestId = (text: string): string => {
   const head = text.slice(0, maxRequestIdLength);
 
+  // A trailing high surrogate, not a lone-surrogate test: it asks whether the cut split a pair.
   return /[\uD800-\uDBFF]$/u.test(head) && text.length > maxRequestIdLength
     ? head.slice(0, -1)
     : head;
@@ -98,7 +99,7 @@ const requestIdOf = (
 
   return header === undefined
     ? undefined
-    : boundRequestId(scrubAround(header, scrubbed, (text) => text.replaceAll(unsafeText, "")));
+    : boundRequestId(scrubAround(header, scrubbed, (text) => text.replaceAll(requestIdUnsafeText, "")));
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
