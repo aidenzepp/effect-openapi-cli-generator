@@ -35,7 +35,7 @@ import {
 import { RedirectRefused, UsageError } from "../domain/errors.ts";
 import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
-import { isLoopbackHost } from "./auth.ts";
+import { credentialHeaders, isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
 import { asCliError, printStderr } from "./input.ts";
 import { queryWireForm, redactedPlaceholder } from "./redact.ts";
@@ -162,11 +162,6 @@ export type CertificateDecision = (url: string) => Effect.Effect<Option.Option<C
 export const noCertificate: CertificateDecision = () => Effect.succeedNone;
 
 /**
- * Dropped on an origin change; `Auth.attach` re-adds managed credentials for bound origins only.
- */
-const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
-
-/**
  * The statuses the loop follows. Any other 3xx, and a 3xx without a usable `Location`, is the
  * final response.
  */
@@ -231,7 +226,9 @@ const asGet = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.
 /**
  * The next hop's request, or `None` when the response is final. `request` is the hop as it was
  * before the attach step, so the next hop starts from the caller's headers and never inherits an
- * attached credential. Every refusal is decided here, before the next hop is sent.
+ * attached credential. Every refusal is decided here, before the next hop is sent. An origin change
+ * drops every `Auth.credentialHeaders` name; `Auth.attach` re-adds managed credentials for bound
+ * origins only.
  */
 const nextHop = (
   request: HttpClientRequest.HttpClientRequest,

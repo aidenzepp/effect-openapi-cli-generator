@@ -978,15 +978,23 @@ export const attachPlaceholders =
     attachWith(table, placeholders, origins, request, placeholderOne);
 
 /**
- * Extend `Headers.CurrentRedactedNames` with every `apiKey` header name and
- * `UrlParams.CurrentRedactedNames` with every `apiKey` query name, keeping Effect's defaults
- * (design 7.5). A cookie name needs no entry: the whole `Cookie` header is redacted by default.
+ * The headers that carry a credential, whatever route set them. Output redacts each one by name,
+ * and the redirect loop drops each one on an origin change.
+ */
+export const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
+
+/**
+ * Extend `Headers.CurrentRedactedNames` with every credential header name and every `apiKey`
+ * header name, and `UrlParams.CurrentRedactedNames` with every `apiKey` query name, keeping
+ * Effect's defaults (design 7.5). A cookie name needs no entry: the whole `Cookie` header is
+ * redacted.
  */
 export const redactedNames = (table: SecurityTable) =>
   Layer.mergeAll(
     Layer.effect(Headers.CurrentRedactedNames)(
       Effect.map(Effect.service(Headers.CurrentRedactedNames), (current) => [
         ...current,
+        ...credentialHeaders,
         ...apiKeyNames(table, "header"),
       ]),
     ),
