@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, HashMap, Option, Order, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
 import { diagnosticOf } from "../model/diagnostic.ts";
@@ -132,12 +132,14 @@ const styleTable: readonly (readonly [string, StyleName, boolean, boolean, strin
   ["header", "simple", true, false, "STY-32"],
 ];
 
-const rowKey = (location: string, style: string, explode: boolean, allowReserved: boolean) =>
-  `${location} ${style} ${explode} ${allowReserved}`;
-
-const rowOf: ReadonlyMap<string, string> = new Map(
+// The style table's row by its `[location, style, explode, allowReserved]` key; a lookup builds a
+// fresh key, compared structurally.
+const rowOf = HashMap.fromIterable<
+  readonly [location: string, style: string, explode: boolean, allowReserved: boolean],
+  string
+>(
   styleTable.map(([location, style, explode, allowReserved, row]) => [
-    rowKey(location, style, explode, allowReserved),
+    [location, style, explode, allowReserved],
     row,
   ]),
 );
@@ -636,7 +638,8 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
 
   const deepRow =
     style === "deepObject" ? deepObjectRow(line, node.explode === true, allowReserved) : undefined;
-  const row = deepRow ?? rowOf.get(rowKey(location, style, explode, allowReserved));
+  const row =
+    deepRow ?? Option.getOrUndefined(HashMap.get(rowOf, [location, style, explode, allowReserved]));
   if (row === undefined) {
     return refuse(styleLocation);
   }
@@ -1342,7 +1345,9 @@ export const formStyleRefusal = Effect.fnUntraced(function* formStyleRefusal(
   const row =
     style === "deepObject"
       ? deepObjectRow(resolution.line, given.explode === true, allowReserved)
-      : rowOf.get(rowKey("query", style, given.explode ?? style === "form", allowReserved));
+      : Option.getOrUndefined(
+          HashMap.get(rowOf, ["query", style, given.explode ?? style === "form", allowReserved]),
+        );
   if (row === undefined) {
     return Option.none();
   }

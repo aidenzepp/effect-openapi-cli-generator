@@ -26,7 +26,8 @@ import {
   scalarCover,
 } from "./parameters.ts";
 import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
-import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
+import { appliesDynamicKeyword, budgetOf, charge, schemaKeyAt } from "./schemas.ts";
+import type { Budget } from "./schemas.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -330,12 +331,11 @@ const nodeAt = (resolution: Resolution, at: CanonicalKey): Effect.Effect<SchemaN
   );
 
 // What one body spends on schema inspection: every visit of an `allOf` member is charged to
-// `spent`, against the resolution limits' node budget (design 9 I5).
+// `budget`, the resolution limits' node budget (design 9 I5).
 interface Walk {
-  readonly maxNodes: number;
+  readonly budget: Budget;
   readonly resolution: Resolution;
   readonly site: BodySite;
-  spent: number;
 }
 
 const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
@@ -363,8 +363,7 @@ const flatten = Effect.fnUntraced(function* flatten(
   let next = pending.pop();
   while (next !== undefined) {
     const at = settle(walk.resolution, next);
-    walk.spent += 1;
-    if (walk.spent > walk.maxNodes) {
+    if (!charge(walk.budget)) {
       return yield* budgetFailure(walk);
     }
 
@@ -480,8 +479,7 @@ const requirementOf = Effect.fnUntraced(function* requirementOf(
     start: CanonicalKey,
   ): Effect.fn.Return<void, BodyNodeBudget> {
     const at = settle(walk.resolution, start);
-    walk.spent += 1;
-    if (walk.spent > walk.maxNodes) {
+    if (!charge(walk.budget)) {
       yield* budgetFailure(walk);
     }
 
@@ -993,7 +991,7 @@ const headersOf = Effect.fnUntraced(function* headersOf(
       continue;
     }
 
-    const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.maxNodes });
+    const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.budget.limit });
     if (typed._tag === "Unsupported") {
       findings.push(
         dropping(
@@ -2052,7 +2050,7 @@ const scalarCoverOf = (
   serialization?.style !== "deepObject" || input.schema === undefined
     ? Effect.succeed({ _tag: "Strict" })
     : scalarCover(ctx.resolution, input.schema, ctx.site.nonStandard, {
-        maxNodes: ctx.walk.maxNodes,
+        maxNodes: ctx.walk.budget.limit,
       });
 
 // The query style table's refusal for a form property's explicit style fields (design 6.3, through
@@ -2065,7 +2063,7 @@ const styleRefusalOf = (
   serialization === undefined
     ? Effect.succeedNone
     : formStyleRefusal(ctx.resolution, input.schema, serialization, {
-        maxNodes: ctx.walk.maxNodes,
+        maxNodes: ctx.walk.budget.limit,
       }).pipe(
         Effect.map(
           Option.map((found) =>
@@ -2361,7 +2359,7 @@ const normalizeAlternative = Effect.fnUntraced(function* normalizeAlternative(
     : (["schema", "itemSchema"] as const).flatMap((field) =>
         node[field] === undefined ? [] : [childKey(home, field)],
       );
-  const limits = { maxNodes: ctx.walk.maxNodes };
+  const limits = { maxNodes: ctx.walk.budget.limit };
   if (schemaSites.some((site) => appliesDynamicKeyword(resolution, site, limits))) {
     // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
     // the body cannot be checked without it, so the alternative is refused with no second
@@ -2675,7 +2673,7 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
     Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
     Effect.mapError(() => unreadable),
   );
-  const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
+  const walk: Walk = { budget: budgetOf({ maxNodes: limits.maxNodes }), resolution, site };
   const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
   const required = node.required ?? false;
   const keys = Object.keys(node.content);
@@ -2741,7 +2739,7 @@ export const formContentRules = Effect.fnUntraced(function* formContentRules(
 
   const use = { document: resolution.document, pointer: site.pointer };
   const reference = referenceIn(resolution, use);
-  const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
+  const walk: Walk = { budget: budgetOf({ maxNodes: limits.maxNodes }), resolution, site };
   const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
   const mediaSite = childKey(follow(resolution, use), "content", mediaType);
   const media = yield* readMedia(resolution, mediaSite);
