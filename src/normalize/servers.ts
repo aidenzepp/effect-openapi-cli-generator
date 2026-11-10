@@ -309,7 +309,7 @@ const judgePathValues = (
   const variables = raw.variables ?? {};
   const defaults = (name: string) => variables[name]?.default ?? "";
 
-  for (const name of variableNames(raw.url).filter((each) => !spanNames.includes(each))) {
+  for (const name of Arr.difference(variableNames(raw.url), spanNames)) {
     for (const value of domainOf(variables[name] ?? { default: "" })) {
       if (/[?#]/u.test(value)) {
         return "SRV-18/query-or-fragment";
@@ -327,7 +327,7 @@ const judgePathValues = (
 
       const { origin } = url.success;
 
-      if (!origins.some((accepted) => accepted === origin)) {
+      if (!Arr.contains(origins, origin)) {
         return "SRV-02/value-leaves-authority";
       }
     }
