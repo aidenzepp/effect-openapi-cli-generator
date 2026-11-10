@@ -252,9 +252,6 @@ const flagEnvironment = Layer.mergeAll(
   ),
 );
 
-const envProvider = (env: Record<string, string>) =>
-  Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env }));
-
 type MessageKey = "message" | "userMessage";
 
 const expectFailure = (exit: Exit.Exit<unknown, unknown>, key: MessageKey, text: string): void => {
@@ -283,12 +280,16 @@ const flagRefused = async (
 };
 
 const envRefused = async (
-  read: Effect.Effect<number, unknown, ConfigProvider.ConfigProvider>,
+  read: Effect.Effect<number, unknown>,
   env: Record<string, string>,
   message: string,
 ): Promise<void> => {
   expectFailure(
-    await Effect.runPromiseExit(read.pipe(Effect.provide(envProvider(env)))),
+    await Effect.runPromiseExit(
+      read.pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
+      ),
+    ),
     "message",
     message,
   );
