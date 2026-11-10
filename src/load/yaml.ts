@@ -1,4 +1,5 @@
-import { Data, Effect, Schema } from "effect";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
+import { Effect, Record, Schema } from "effect";
 import { isAlias, isScalar, isSeq, LineCounter, parseAllDocuments } from "yaml";
 import type {
   Alias,
@@ -14,6 +15,7 @@ import { formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { refuse } from "./budget.ts";
 import type { LoadCode, LoadLimits, LoadRefusal, Position } from "./budget.ts";
+import { byteOffset } from "./offset.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -29,7 +31,9 @@ interface Failure {
 /**
  * The one throwing seam: `yaml`'s parser, which can throw on pathological input (design 13.1 R7).
  */
-class YamlParserFault extends Data.TaggedError("YamlParserFault")<{ readonly cause: unknown }> {}
+class YamlParserFault extends Schema.TaggedError<YamlParserFault>()("YamlParserFault", {
+  cause: Schema.Defect(),
+}) {}
 
 const jsonTags: ReadonlySet<string> = new Set(
   ["bool", "float", "int", "map", "null", "seq", "str"].map((name) => `tag:yaml.org,2002:${name}`),
@@ -168,7 +172,7 @@ const buildMap = (walk: Walk, node: YAMLMap.Parsed, depth: number, child: Child)
     }
   }
 
-  return { height: height + 1, size: 1, value: Object.fromEntries(entries) };
+  return { height: height + 1, size: 1, value: Record.fromEntries(entries) };
 };
 
 const buildCollection = (
@@ -284,7 +288,7 @@ const locate = (
   return {
     column: col,
     line,
-    offset: byteBase + new TextEncoder().encode(text.slice(0, index)).length,
+    offset: byteOffset(text, index, byteBase),
   };
 };
 
