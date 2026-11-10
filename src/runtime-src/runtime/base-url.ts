@@ -1,7 +1,8 @@
 import { Config, Context, Effect, Layer, Option, Result } from "effect";
-import { CliError, Flag, GlobalFlag } from "effect/cli";
+import { Flag, GlobalFlag } from "effect/cli";
 import { Url } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
+import { asCliError } from "./input.ts";
 
 /**
  * One server variable of the OpenAPI Server Object. `enum` is optional.
@@ -203,10 +204,6 @@ export const select = (
 
     return { provenance: "server", server, variables } as const;
   });
-
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
-const asCliError = (error: UsageError): CliError.CliError =>
-  new CliError.UserError({ cause: error, userMessage: error.message });
 
 export const baseUrlSetting = GlobalFlag.Setting("base-url")({
   flag: Flag.String("base-url").pipe(

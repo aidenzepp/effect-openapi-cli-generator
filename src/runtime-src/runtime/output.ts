@@ -64,6 +64,7 @@ import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import {
   decodedQueryName,
+  decodeWholeNumber,
   querySeparator,
   redirectLoop,
   RetryAfterCap,
@@ -1435,8 +1436,6 @@ const withheldNotice = (headers: readonly Credential[], certificate: boolean): s
  */
 export const defaultIdleTimeoutSeconds = 300;
 
-const wholeSeconds = /^\d+$/u;
-
 /**
  * The effective stream idle timeout in seconds: `<envPrefix>_IDLE_TIMEOUT` read by that explicit
  * name (as `base-url.ts` reads `<PREFIX>_BASE_URL`), then `defaultIdleTimeoutSeconds`. The author
@@ -1456,11 +1455,9 @@ export const effectiveIdleTimeoutSeconds = (envPrefix: string): Effect.Effect<nu
       return defaultIdleTimeoutSeconds;
     }
 
-    const seconds = Number(env.value);
+    const seconds = yield* decodeWholeNumber(env.value).pipe(Effect.mapError(() => invalid));
 
-    return wholeSeconds.test(env.value) && Number.isSafeInteger(seconds) && seconds >= 1
-      ? seconds
-      : yield* invalid;
+    return seconds >= 1 ? seconds : yield* invalid;
   });
 
 /**
