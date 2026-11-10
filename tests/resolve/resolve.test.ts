@@ -595,6 +595,48 @@ describe("I5 hop and node budgets", () => {
   });
 });
 
+// Path items A and B each reach themselves through a callback. Components precede paths here, so
+// the walk meets A's reference first: A is the first name and the first owner of an edge.
+const selfCycles = (paths: Json): Json => ({
+  components: {
+    pathItems: {
+      A: {
+        get: {
+          callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/A" } } },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      B: {
+        get: {
+          callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/B" } } },
+          responses: { "200": { description: "ok" } },
+        },
+      },
+    },
+  },
+  info: { title: "t", version: "1" },
+  openapi: openapi["3.1"],
+  paths,
+});
+
+type ClosingEdge = readonly [
+  code: string,
+  pointer: string,
+  related: readonly { document: string; pointer: string }[] | undefined,
+];
+
+const closingEdge = (value: Json): ClosingEdge => {
+  const diagnostic = refusal("3.1", value);
+
+  return [diagnostic.code, diagnostic.pointer, diagnostic.related];
+};
+
+const closedBy = (name: string): ClosingEdge => [
+  "DOC-23/non-schema-cycle",
+  `/components/pathItems/${name}/get/callbacks/cb/{$u}`,
+  [{ document: entry, pointer: `/components/pathItems/${name}` }],
+];
+
 describe("DOC-23 reference cycles", () => {
   test("a non-schema reference chain cycle is a document refusal", () => {
     const value = spec("3.0", {
@@ -663,6 +705,19 @@ describe("DOC-23 reference cycles", () => {
     expect(refusal("3.1", value).code).toBe("DOC-23/non-schema-cycle");
   });
 
+  test("DOC-23 names the edge that closes the first cycle", () => {
+    // Only B is reachable from the root. The root is visited before every name, so B's cycle is
+    // reported though A comes first in reference order and owns the first edge.
+    expect(closingEdge(selfCycles({ "/b": { $ref: "#/components/pathItems/B" } }))).toEqual(
+      closedBy("B"),
+    );
+  });
+
+  test("DOC-23 visits names in reference order when the root reaches no cycle", () => {
+    // Neither cycle is reachable from the root, so the first name in reference order, A, decides.
+    expect(closingEdge(selfCycles({}))).toEqual(closedBy("A"));
+  });
+
   test("schema cycles are allowed", () => {
     const value = spec("3.1", {
       components: {
@@ -692,6 +747,68 @@ describe("SCH-05 $dynamicRef", () => {
     expect(codes(resolution)).toEqual(["SCH-05/dynamic-ref"]);
     expect(resolution.diagnostics[0]?.scope).toBe("element");
     expect<string | undefined>(resolution.diagnostics[0]?.pointer).toBe("/components/schemas/A");
+  });
+});
+
+const scoped = (diagnostic: { code: string; scope: string; severity: string }) => [
+  diagnostic.code,
+  diagnostic.scope,
+  diagnostic.severity,
+];
+
+describe("rule scope and severity", () => {
+  const elements: readonly (readonly [Line, Json])[] = [
+    [
+      "3.0",
+      spec("3.0", {
+        components: { parameters: { P: parameter } },
+        ...usesParameter({ $ref: "#/components/parameters/P", description: "ignored" }),
+      }),
+    ],
+    [
+      "3.1",
+      spec("3.1", {
+        components: { parameters: { P: parameter } },
+        ...usesParameter({ $ref: "#/components/parameters/P", "x-other": true }),
+      }),
+    ],
+    [
+      "3.0",
+      spec("3.0", {
+        components: {
+          schemas: { A: { $ref: "#/components/schemas/B", nullable: true }, B: { type: "string" } },
+        },
+      }),
+    ],
+    [
+      "3.1",
+      spec("3.1", {
+        components: {
+          schemas: {
+            S: { $defs: { T: { type: "string" } }, $id: "https://example.com/s.json" },
+          },
+        },
+        ...usesSchema("#/components/schemas/S/$defs/T"),
+      }),
+    ],
+    ["3.1", spec("3.1", { components: { schemas: { A: { $dynamicRef: "#meta" } } } })],
+    ["3.2", uriLikeScheme("3.2")],
+  ];
+
+  test("scope and severity of every resolve rule", () => {
+    expect(
+      elements.flatMap(([line, value]) => resolved(line, value).diagnostics.map(scoped)),
+    ).toEqual([
+      ["REF-05/sibling-ignored", "element", "notice"],
+      ["REF-06/sibling-ignored", "element", "notice"],
+      ["REF-07/sibling-ignored", "element", "notice"],
+      ["REF-14/pointer-crosses-id", "element", "notice"],
+      ["SCH-05/dynamic-ref", "element", "refusal"],
+      ["SEC-10/uri-like-name", "element", "refusal"],
+    ]);
+    expect(
+      scoped(refusal("3.1", spec("3.1", usesParameter({ $ref: "#/components/parameters/X" })))),
+    ).toEqual(["REF-18/unresolvable", "document", "refusal"]);
   });
 });
 

@@ -127,3 +127,13 @@ export const JsonLiteral = Schema.Json.pipe(Schema.brand("JsonLiteral"));
  * A SHA-256 digest as 64 lowercase hexadecimal digits.
  */
 export const Sha256Hex = pattern(/^[0-9a-f]{64}$/u);
+
+/**
+ * The OpenAPI component-name pattern: the key grammar every Components Object map shares.
+ */
+export const componentNamePattern = /^[a-zA-Z0-9.\-_]+$/u;
+
+/**
+ * A Components Object key that matches the component-name pattern.
+ */
+export const ComponentName = pattern(componentNamePattern);
