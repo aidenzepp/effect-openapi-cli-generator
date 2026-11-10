@@ -222,7 +222,7 @@ const realPathOf = (path: string) =>
 export const setMembers = (
   entry: { readonly document: Document; readonly source: SpecSource },
   documents: DocumentSet | undefined,
-): Effect.Effect<readonly ResolveMember[], LoadRefusal, FileSystem.FileSystem> =>
+): Effect.Effect<readonly ResolveMember[], LoadRefusal, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* members() {
     const found: ResolveMember[] = [];
 
