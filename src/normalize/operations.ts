@@ -1,8 +1,8 @@
 import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
-import { Diagnostic, pointerOrder } from "../model/diagnostic.ts";
-import type { DiagnosticOperation } from "../model/diagnostic.ts";
+import { makeDiagnostic, pointerOrder } from "../model/diagnostic.ts";
+import type { Diagnostic, DiagnosticOperation } from "../model/diagnostic.ts";
 import {
   ContentSerialization,
   Operation,
@@ -484,29 +484,24 @@ const diagnose = (
   related: readonly string[] = [],
 ): Effect.Effect<Diagnostic> => {
   const rule: Rule = rules[code];
-  const [row = ""] = code.split("/");
-  const fields: Plain<typeof Diagnostic.Encoded> = {
+
+  return makeDiagnostic({
     code,
     document: shared.resolution.document,
     element: rule.element,
+    hint: rule.hint,
     message: rule.message,
     openapi: shared.context.openapi,
     operation: site.operation,
     pointer: site.pointer,
-    row,
+    related:
+      related.length > 0
+        ? related.map((pointer) => ({ document: shared.resolution.document, pointer }))
+        : undefined,
     scope: rule.scope,
     severity: rule.severity,
     specSection: specSectionUrl(shared.resolution.line, rule.anchor),
-  };
-  if (rule.hint !== undefined) {
-    fields.hint = rule.hint;
-  }
-
-  if (related.length > 0) {
-    fields.related = related.map((pointer) => ({ document: shared.resolution.document, pointer }));
-  }
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 const assembleBody = (
