@@ -1,9 +1,10 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { refuse } from "./budget.ts";
 import type { LoadLimits, LoadRefusal, Position } from "./budget.ts";
+import { byteOffset } from "./offset.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -33,22 +34,22 @@ const opaqueKeys: ReadonlySet<string> = new Set(["example", "examples"]);
 
 const largestSafeValue = 2 ** 53;
 
-const simpleEscapes: ReadonlyMap<string, string> = new Map([
-  ["b", "\b"],
-  ["f", "\f"],
-  ["n", "\n"],
-  ["r", "\r"],
-  ["t", "\t"],
-]);
+/**
+ * Decodes the text of a JSON document.
+ */
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
-const unescapeKey = (raw: string): string =>
-  raw.replaceAll(
-    /\\(?:u(?<hex>[0-9A-Fa-f]{4})|(?<char>.))/gsu,
-    (_match, hex: string | undefined, char: string | undefined) =>
-      hex === undefined
-        ? (simpleEscapes.get(char ?? "") ?? char ?? "")
-        : String.fromCodePoint(Number.parseInt(hex, 16)),
-  );
+/**
+ * Decodes one quoted JSON string literal.
+ */
+const decodeKey = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.String));
+
+/**
+ * The key a raw (still escaped) member name denotes. A key's decoding matters only once
+ * `JSON.parse` has accepted the text, so every raw key is then a valid JSON string body; on
+ * malformed text the raw spelling stands in.
+ */
+const unescapeKey = (raw: string): string => Option.getOrElse(decodeKey(`"${raw}"`), () => raw);
 
 const numberToken = /^-?(?<int>[0-9]+)(?:\.(?<frac>[0-9]+))?(?:[eE](?<exp>[+-]?[0-9]+))?$/u;
 
@@ -318,7 +319,7 @@ const locate = (text: string, index: number, byteBase: number): Position => {
   return {
     column: codePointCount(lines.at(-1) ?? "") + 1,
     line: lines.length,
-    offset: byteBase + new TextEncoder().encode(before).length,
+    offset: byteOffset(text, index, byteBase),
   };
 };
 
@@ -326,30 +327,34 @@ const locate = (text: string, index: number, byteBase: number): Position => {
  * `JSON.parse` plus a duplicate-key scan over the same text. `byteBase` is the number of bytes
  * before `text` in the input (a byte order mark), so reported offsets are input offsets.
  */
-export const parseStrictJson = (
+export const parseStrictJson: (
   text: string,
   limits: LoadLimits,
   document: Document,
   byteBase: number,
-): Effect.Effect<Json, LoadRefusal> => {
+) => Effect.Effect<Json, LoadRefusal> = Effect.fnUntraced(function* strictJson(
+  text: string,
+  limits: LoadLimits,
+  document: Document,
+  byteBase: number,
+) {
   const scanned = scan(text, limits);
 
   if (scanned.limit !== undefined) {
-    return refuse(document, scanned.limit);
+    return yield* refuse(document, scanned.limit);
   }
 
+  const value = yield* decodeJson(text).pipe(
+    Effect.catchTag("SchemaError", () => refuse(document, "DOC-14/invalid-json")),
+  );
   const { finding } = scanned;
 
-  return Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(text).pipe(
-    Effect.matchEffect({
-      onFailure: () => refuse(document, "DOC-14/invalid-json"),
-      onSuccess: (value) =>
-        finding === undefined
-          ? Effect.succeed(value)
-          : refuse(document, finding.code, {
-              pointer: finding.pointer,
-              position: locate(text, finding.index, byteBase),
-            }),
-    }),
-  );
-};
+  if (finding !== undefined) {
+    return yield* refuse(document, finding.code, {
+      pointer: finding.pointer,
+      position: locate(text, finding.index, byteBase),
+    });
+  }
+
+  return value;
+});

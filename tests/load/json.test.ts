@@ -55,6 +55,26 @@ describe("load: strict JSON", () => {
     const error = await refusal(loadBytes(encode('{"a":1,"\\u0061":2}'), options()));
     expect(error.diagnostic.code).toBe("DOC-14/duplicate-key");
     expect(pointerOf(error)).toBe("/a");
+
+    const escapedFirst = await refusal(loadBytes(encode('{"\\u0061":1,"a":2}'), options()));
+    expect(escapedFirst.diagnostic.code).toBe("DOC-14/duplicate-key");
+    expect(pointerOf(escapedFirst)).toBe("/a");
+  });
+
+  test("offset counts UTF-8 bytes", async () => {
+    const source = '{"é":1,\n"€":2,"é":3}';
+    const plain = await refusal(loadBytes(encode(source), options()));
+    expect(plain.diagnostic.code).toBe("DOC-14/duplicate-key");
+    expect(plain.offset).toBe(17);
+    expect(plain.diagnostic.line).toBe(2);
+    expect(plain.diagnostic.column).toBe(7);
+
+    const withBom = await refusal(
+      loadBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...encode(source)]), options()),
+    );
+    expect(withBom.offset).toBe(3 + 17);
+    expect(withBom.diagnostic.line).toBe(2);
+    expect(withBom.diagnostic.column).toBe(7);
   });
 
   test("the same key in different objects is not a duplicate", async () => {
@@ -139,6 +159,17 @@ describe("load: strict JSON", () => {
     );
 
     expect(loaded.map((item) => item.format)).toEqual(literals.map(() => "json"));
+  });
+
+  test("number literals past BigDecimal's scale keep today's verdict", async () => {
+    const loaded = await Effect.runPromise(
+      loadBytes(encode(`{"default":1.${"0".repeat(10_001)}}`), options()),
+    );
+    expect(loaded.format).toBe("json");
+
+    const error = await refusal(loadBytes(encode('{"default":1e-20000}'), options()));
+    expect(error.diagnostic.code).toBe("DOC-14/unsafe-integer");
+    expect(pointerOf(error)).toBe("/default");
   });
 
   test("a number outside default, enum and const keeps any precision", async () => {

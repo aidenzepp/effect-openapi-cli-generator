@@ -104,6 +104,22 @@ describe("load: strict YAML positions", () => {
     expect(error.diagnostic.line).toBe(2);
     expect(error.offset).toBe(3 + 6);
   });
+
+  test("offset counts UTF-8 bytes", async () => {
+    const source = "€: 1\nx: {é: 1, é: 2}\n";
+    const plain = await refusal(text(source));
+    expect(plain.diagnostic.code).toBe("DOC-14/duplicate-key");
+    expect(plain.offset).toBe(18);
+    expect(plain.diagnostic.line).toBe(2);
+    expect(plain.diagnostic.column).toBe(11);
+
+    const withBom = await refusal(
+      loadBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...encode(source)]), options()),
+    );
+    expect(withBom.offset).toBe(3 + 18);
+    expect(withBom.diagnostic.line).toBe(2);
+    expect(withBom.diagnostic.column).toBe(11);
+  });
 });
 
 describe("load: strict YAML values", () => {
