@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import nodePath from "node:path";
 import { Array as Arr, Effect, Exit, Option } from "effect";
 import type { ManifestError } from "../../src/write/manifest.ts";
@@ -42,6 +43,12 @@ describe("sha256Hex", () => {
   test("hashes text and bytes to lowercase hex", () => {
     expect(sha256Hex("abc")).toBe(abc);
     expect(sha256Hex(encoder.encode("abc"))).toBe(abc);
+  });
+
+  test("hashes a lone surrogate as its UTF-8 bytes", () => {
+    const text = "a\uD800é";
+
+    expect(sha256Hex(text)).toBe(createHash("sha256").update(encoder.encode(text)).digest("hex"));
   });
 });
 
