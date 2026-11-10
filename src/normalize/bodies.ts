@@ -652,6 +652,7 @@ interface PlainHeader {
   readonly name: string;
   readonly required: boolean;
   readonly schema: { readonly key: string };
+  readonly sensitive?: true;
   readonly serialization: Extract<PartHeaderOutcome, { readonly _tag: "Typed" }>["serialization"];
 }
 
@@ -1009,13 +1010,14 @@ const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.E
       }
 
       const marks = yield* headerMarks(resolution, at);
-      kept.push({
+      const header: PlainHeader = {
         deprecated: marks.deprecated,
         name,
         required: marks.required,
         schema: typed.schema,
         serialization: typed.serialization,
-      });
+      };
+      kept.push(typed.sensitive === true ? { ...header, sensitive: true } : header);
     }
 
     return { declares, findings, headers: kept };
