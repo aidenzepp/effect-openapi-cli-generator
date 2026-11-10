@@ -1,13 +1,13 @@
 import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
-import { MethodToken, PathTemplate } from "../model/brands.ts";
+import { ComponentName, componentNamePattern, MethodToken, PathTemplate } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
-import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { methodMembers } from "../model/path-item.ts";
+import { expression, expressionsOf, locate, operationOf, pathItems, site } from "./path-items.ts";
+import type { Operation, PathItem } from "./path-items.ts";
 import { childPointer } from "../model/pointer.ts";
-import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
@@ -25,7 +25,7 @@ const rules = {
     anchor: "components-object",
     element: "Component key",
     hint: "Use only letters, digits, '.', '-' and '_' in component keys.",
-    message: "A component key is outside ^[a-zA-Z0-9.\\-_]+$.",
+    message: `A component key is outside ${componentNamePattern.source}.`,
     scope: "document",
   },
   "OPR-07/duplicate-id": {
@@ -117,31 +117,13 @@ interface Finding {
   readonly related?: readonly string[];
 }
 
-interface PathItem {
-  readonly key: string;
-  readonly node: JsonObject;
-  readonly pointer: string;
-  readonly use: string;
-}
-
-interface Operation {
-  readonly additional: boolean;
-  readonly id: string | undefined;
-  readonly item: PathItem;
-  readonly method: string;
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
 interface Parameter {
   readonly in: string;
   readonly name: string;
   readonly pointer: string;
 }
 
-const componentName = /^[a-zA-Z0-9.\-_]+$/u;
-
-const expression = /\{(?<name>[^{}]+)\}/gu;
+const isComponentName = Schema.is(ComponentName);
 
 const sections30 = [
   "schemas",
@@ -160,47 +142,6 @@ const componentSections = {
   "3.1": [...sections30, "pathItems"],
   "3.2": [...sections30, "pathItems", "mediaTypes"],
 } as const;
-
-interface Place {
-  readonly document: CanonicalKey["document"];
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
-// An object at a use site in the entry document, followed through its Reference Object to the end
-// of the chain, which is read from the document of the set that holds it.
-const locate = (
-  resolution: Resolution,
-  pointer: string,
-  node: Json | undefined,
-): Place | undefined => {
-  const site = { document: resolution.document, pointer };
-  const at = resolution.references.get(keyOf(site))?.target ?? site;
-  const document = resolution.documents.get(at.document);
-  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
-  const target = at === site ? node : read;
-
-  return isObject(target)
-    ? { document: at.document, node: target, pointer: at.pointer }
-    : undefined;
-};
-
-const pathItems = (resolution: Resolution): readonly PathItem[] => {
-  const paths = isObject(resolution.value) ? resolution.value.paths : undefined;
-  if (!isObject(paths)) {
-    return [];
-  }
-
-  return Object.entries(paths).flatMap(([key, value]) => {
-    const use = childPointer("/paths", key);
-    const located = locate(resolution, use, value);
-
-    // A path item in another document of the set is not walked: the checks read entry sites.
-    return located === undefined || located.document !== resolution.document
-      ? []
-      : [{ key, node: located.node, pointer: located.pointer, use }];
-  });
-};
 
 const operationsOf = (resolution: Resolution, item: PathItem): readonly Operation[] => {
   const members = methodMembers(resolution.line);
@@ -248,7 +189,7 @@ const parametersOf = (
 
   return list.flatMap((entry, index) => {
     const pointer = childPointer(childPointer(ownerPointer, "parameters"), String(index));
-    const located = locate(resolution, pointer, entry);
+    const located = locate(resolution, site(resolution, pointer), entry);
     const name = located === undefined ? undefined : stringMember(located.node, "name");
     const location = located === undefined ? undefined : stringMember(located.node, "in");
 
@@ -293,9 +234,6 @@ const duplicates = (
   return pairs;
 };
 
-const expressionsOf = (key: string): readonly string[] =>
-  Arr.map(Arr.fromIterable(key.matchAll(expression)), (match) => match.groups?.name ?? "");
-
 const normalizedTemplate = (key: string): string => key.replaceAll(expression, "{}");
 
 // A sibling of a Path Item `$ref` that the target also defines leaves the result undefined (D-OC6,
@@ -308,7 +246,7 @@ const refSiblingFindings = (resolution: Resolution): readonly Finding[] => {
     const referenced = resolution.references.has(
       keyOf({ document: resolution.document, pointer: use }),
     );
-    const target = referenced ? locate(resolution, use, value) : undefined;
+    const target = referenced ? locate(resolution, site(resolution, use), value) : undefined;
     if (!isObject(value) || target === undefined) {
       return [];
     }
@@ -340,7 +278,7 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
 
     return isObject(map)
       ? Object.keys(map)
-          .filter((name) => !componentName.test(name))
+          .filter((name) => !isComponentName(name))
           .map((name): Finding => ({
             code: "CMP-13/invalid-key",
             pointer: childPointer(childPointer("/components", section), name),
@@ -401,7 +339,7 @@ const templateFindings = (
     return [...found, at("PTH-07/invalid-path-key", operation.pointer)];
   }
 
-  const distinct = [...new Set(names)];
+  const distinct = Arr.dedupe(names);
   const declared = new Map(
     parameters
       .filter((parameter) => parameter.in === "path")
@@ -496,16 +434,6 @@ const findingsOf = (resolution: Resolution): readonly Finding[] => {
     ...duplicateIdFindings(operations),
   ];
 };
-
-const site = (resolution: Resolution, pointer: string) => ({
-  document: resolution.document,
-  pointer,
-});
-
-const operationOf = (operation: Operation) =>
-  operation.id === undefined
-    ? { method: operation.method, path: operation.item.key }
-    : { method: operation.method, operationId: operation.id, path: operation.item.key };
 
 const toDiagnostic = (resolution: Resolution, finding: Finding) => {
   const rule: Rule = rules[finding.code];
