@@ -1,5 +1,6 @@
-import { Effect, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Order, Predicate, Schema } from "effect";
 import { Informational } from "../model/entities.ts";
+import { methodMembers } from "../model/path-item.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
@@ -66,7 +67,7 @@ interface Holds {
   readonly row?: Row;
 }
 
-const methodFields = ["delete", "get", "head", "options", "patch", "post", "put", "query", "trace"];
+const methodFields = Arr.sort(methodMembers("3.2"), Order.String);
 
 const holds = {
   encoding: {
