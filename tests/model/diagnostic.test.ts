@@ -6,8 +6,10 @@ import {
   isDocumentRefusal,
   isRefusal,
   makeDiagnostic,
+  Site,
   sortDiagnostics,
 } from "../../src/model/diagnostic.ts";
+import { Origin } from "../../src/model/entities.ts";
 import { Verdict } from "../../src/model/verdict.ts";
 
 const base: typeof Diagnostic.Encoded = {
@@ -239,5 +241,17 @@ describe("diagnosticOf and makeDiagnostic", () => {
     expect(isDocumentRefusal(at("refusal", "document"))).toBe(true);
     expect(isDocumentRefusal(at("refusal", "element"))).toBe(false);
     expect(isDocumentRefusal(at("notice", "document"))).toBe(false);
+  });
+});
+
+describe("Site", () => {
+  test("Site is the entity Origin: one value decodes the same and encodes document then pointer", () => {
+    const value = { document: "file:///spec.json", pointer: "/paths/~1x/get" };
+    const site = Schema.decodeUnknownSync(Site)(value);
+    const origin = Schema.decodeUnknownSync(Origin)(value);
+
+    expect(site).toEqual(origin);
+    expect(Object.keys(Schema.encodeSync(Site)(site))).toEqual(["document", "pointer"]);
+    expect(Object.keys(Schema.encodeSync(Origin)(origin))).toEqual(["document", "pointer"]);
   });
 });

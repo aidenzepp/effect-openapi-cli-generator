@@ -1,25 +1,26 @@
-import { Array as Arr, Effect, Order, Predicate, Record, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Predicate, Record, Schema } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
+import { Origin, rowIdPattern } from "./entities.ts";
 
 const codePattern = /^(?<row>[A-Z][A-Z0-9]*-[0-9]+)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
-const rowPattern = /^[A-Z][A-Z0-9]*-[0-9]+$/u;
-
 const Code = Schema.String.pipe(Schema.check(Schema.isPattern(codePattern)));
-
-const Row = Schema.String.pipe(Schema.check(Schema.isPattern(rowPattern)));
 
 const Position = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)));
 
-const rowOfCode = (code: string): string | undefined => codePattern.exec(code)?.groups?.row;
+const rowOfCode = (code: string): Option.Option<string> =>
+  Option.fromUndefinedOr(codePattern.exec(code)?.groups?.row);
 
 /**
- * The use site or target of a diagnostic: a document and an RFC 6901 pointer.
+ * The use site or target of a diagnostic: a document and an RFC 6901 pointer, the entity `Origin`.
  */
-export const Site = Schema.Struct({
-  document: DocumentUri,
-  pointer: JsonPointer,
-});
+export const Site = Origin;
+
+/**
+ * How much a diagnostic covers: the whole document, one operation, one element, or one `field`
+ * (design 8.5): a property of a request body alternative that stays generated.
+ */
+export const DiagnosticScope = Schema.Literals(["document", "operation", "element", "field"]);
 
 /**
  * The operation a diagnostic concerns.
@@ -46,15 +47,16 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")(
     operation: Schema.optionalKey(DiagnosticOperation),
     pointer: JsonPointer,
     related: Schema.optionalKey(Schema.Array(Site)),
-    row: Row,
-    // `field` (design 8.5): one property of a request body alternative that stays generated.
-    scope: Schema.Literals(["document", "operation", "element", "field"]),
+    row: Schema.String.pipe(Schema.check(Schema.isPattern(rowIdPattern))),
+    scope: DiagnosticScope,
     severity: Schema.Literals(["refusal", "notice"]),
     specSection: DocumentUri,
     wire: Schema.optionalKey(Schema.String),
   }).check(
     Schema.makeFilter(
-      (fields) => rowOfCode(fields.code) === fields.row || "code must start with its row id",
+      (fields) =>
+        Option.getOrUndefined(rowOfCode(fields.code)) === fields.row ||
+        "code must start with its row id",
     ),
   ),
 ) {}
@@ -90,7 +92,7 @@ export const diagnosticOf = (
 ): Effect.Effect<Diagnostic, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(Diagnostic)({
     ...Record.filter<string, unknown>(Predicate.isNotUndefined)(input),
-    row: rowOfCode(input.code),
+    row: Option.getOrUndefined(rowOfCode(input.code)),
   });
 
 /**
