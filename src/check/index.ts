@@ -9,9 +9,13 @@ import { checkStructure } from "./structure.ts";
  * Every spec-text check (design 3.4): structure, then values and grammars, in document order
  * (pointer, then code). Pure over the resolved document.
  */
-export const checkSpecText = (resolution: Resolution): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.all([checkStructure(resolution), checkGrammar(resolution)]).pipe(
-    Effect.map(([structure, grammar]) =>
-      sortDiagnostics([resolution.document], [...structure, ...grammar]),
-    ),
-  );
+export const checkSpecText = Effect.fn("check.checkSpecText")(function* checkSpecText(
+  resolution: Resolution,
+): Effect.fn.Return<readonly Diagnostic[]> {
+  const [structure, grammar] = yield* Effect.all([
+    checkStructure(resolution),
+    checkGrammar(resolution),
+  ]);
+
+  return sortDiagnostics([resolution.document], [...structure, ...grammar]);
+});
