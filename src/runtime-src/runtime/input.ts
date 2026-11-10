@@ -2,6 +2,7 @@ import {
   Context,
   Effect,
   FileSystem,
+  JsonPointer,
   Layer,
   Option,
   Predicate,
@@ -477,7 +478,7 @@ type Reviver = (key: string, value: JsonNode, context: { readonly source?: strin
 // oxlint-disable-next-line typescript/no-inferrable-types -- the wide type selects Reflect.get's untyped overload
 const jsonGlobal: string = "JSON";
 
-const bunJson: {
+const jsonEngine: {
   readonly parse: (text: string, reviver?: Reviver) => JsonNode;
   readonly rawJSON: (text: string) => RawJson;
   // oxlint-disable-next-line anti-slop/no-reflect-get, typescript/no-unsafe-assignment -- the one way to type Bun's JSON without a global augmentation
@@ -487,7 +488,7 @@ const bunJson: {
  * `text` as raw JSON for a `JSON.stringify` replacer, written unchanged. Throws `SyntaxError` when
  * `text` is not a JSON primitive.
  */
-export const rawJson = (text: string): RawJson => bunJson.rawJSON(text);
+export const rawJson = (text: string): RawJson => jsonEngine.rawJSON(text);
 
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
@@ -681,16 +682,9 @@ const reviveIntegers: Reviver = (key, value, context) => {
 const parsedJson =
   (failure: () => CliError.CliError) =>
   (raw: string): Effect.Effect<JsonNode, CliError.CliError> =>
-    Effect.try({
-      catch: failure,
-      try: () => {
-        if (nestsTooDeep(raw)) {
-          throw new RangeError("JSON nesting is too deep");
-        }
-
-        return bunJson.parse(raw, reviveIntegers);
-      },
-    });
+    nestsTooDeep(raw)
+      ? Effect.fail(failure())
+      : Effect.try({ catch: failure, try: () => jsonEngine.parse(raw, reviveIntegers) });
 
 /**
  * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
@@ -725,16 +719,11 @@ const replace = (_key: string, value: JsonNode): JsonNode | RawJson => {
     throw new SyntaxError("a JSON number has no JSON text form");
   }
 
-  return bunJson.rawJSON(value.text);
+  return jsonEngine.rawJSON(value.text);
 };
 
 const segmentsOf = (pointer: string): readonly string[] | undefined =>
-  pointer.startsWith("/")
-    ? pointer
-        .slice(1)
-        .split("/")
-        .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
-    : undefined;
+  pointer.startsWith("/") ? pointer.slice(1).split("/").map(JsonPointer.unescapeToken) : undefined;
 
 const setAt = (
   root: JsonObject,
@@ -933,7 +922,7 @@ const mergeSources = (
         ? Effect.fail(usage(flag, `is nested over ${maxJsonDepth} levels`))
         : Effect.try({
             catch: () => usage(flag, "is not valid JSON"),
-            try: () => bunJson.parse(text, reviver),
+            try: () => jsonEngine.parse(text, reviver),
           });
     const settled = (merged: Merged) => ({
       merged,

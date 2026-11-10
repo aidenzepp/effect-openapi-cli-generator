@@ -1029,10 +1029,12 @@ const jsonText = (subject: string, value: Json) => {
   // The walk leaves `JSON.rawJSON` no text to refuse; a SyntaxError from it is a refusal all the same.
   return hasUnwritableNumber(value)
     ? refuse(unwritable)
-    : Effect.sync(() => JSON.stringify(value, rawNumbers)).pipe(
-        Effect.catchDefect((defect) =>
-          defect instanceof SyntaxError ? refuse(unwritable) : Effect.die(defect),
+    : Effect.try({ catch: (error) => error, try: () => JSON.stringify(value, rawNumbers) }).pipe(
+        Effect.catchIf(
+          (error): error is SyntaxError => error instanceof SyntaxError,
+          () => refuse(unwritable),
         ),
+        Effect.orDie,
       );
 };
 

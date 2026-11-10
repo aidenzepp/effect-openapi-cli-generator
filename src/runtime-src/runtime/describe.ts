@@ -152,6 +152,8 @@ const rootServerUrls = Effect.serviceOption(Servers).pipe(
   ),
 );
 
+const encodeDescription = Schema.encodeEffect(Schema.fromJsonString(Description, { space: 2 }));
+
 /**
  * `--describe`: prints the live command tree as one `Description` JSON document and stops.
  */
@@ -163,12 +165,9 @@ export const describeFlag = GlobalFlag.Action({
   run: (_, { command }) =>
     rootServerUrls.pipe(
       Effect.flatMap((rootServers) =>
-        Console.log(
-          JSON.stringify(
-            Schema.encodeSync(Description)(describeTree(command, rootServers)),
-            null,
-            2,
-          ),
+        encodeDescription(describeTree(command, rootServers)).pipe(
+          Effect.orDie,
+          Effect.flatMap(Console.log),
         ),
       ),
     ),
