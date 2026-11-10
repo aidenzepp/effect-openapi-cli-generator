@@ -122,6 +122,12 @@ interface Finding {
   readonly code: Code;
 }
 
+// A built value with the findings raised while building it, in the order they were raised.
+interface Built<A> {
+  readonly findings: readonly Finding[];
+  readonly value: A;
+}
+
 const schemaRefAt = (resolution: Resolution, site: CanonicalKey) => {
   const reference = referenceIn(resolution, site);
   const key =
@@ -196,13 +202,10 @@ const alternativeOf = Effect.fnUntraced(function* alternativeOf(
   resolution: Resolution,
   response: CanonicalKey,
   mediaType: string,
-  findings: Finding[],
-): Effect.fn.Return<Option.Option<PlainAlternative>> {
+): Effect.fn.Return<Built<Option.Option<PlainAlternative>>> {
   const site = childKey(response, "content", mediaType);
   if (!isMediaRange(mediaType)) {
-    findings.push({ at: site, code: "RSP-05/invalid-media-type" });
-
-    return Option.none();
+    return { findings: [{ at: site, code: "RSP-05/invalid-media-type" }], value: Option.none() };
   }
 
   const home = follow(resolution, site);
@@ -212,6 +215,7 @@ const alternativeOf = Effect.fnUntraced(function* alternativeOf(
   );
   // Encoding applies to request bodies only (MED-10, 3.0 and 3.1); a 3.2 Media Type description
   // is ignored (MED-09, D-OC5).
+  const findings: Finding[] = [];
   if (media.encoding !== undefined && resolution.line !== "3.2") {
     findings.push({ at: home, code: "MED-10/encoding-ignored" });
   }
@@ -236,7 +240,7 @@ const alternativeOf = Effect.fnUntraced(function* alternativeOf(
     plain.schema = schemaRefAt(resolution, childKey(home, "schema"));
   }
 
-  return Option.some(plain);
+  return { findings, value: Option.some(plain) };
 });
 
 // A 3.0 schema-serialized header carries the D-OC9 notice; a content-based one never was
@@ -248,28 +252,41 @@ const serializedBySchema = (resolution: Resolution, at: CanonicalKey): Effect.Ef
     Effect.orDie,
   );
 
+const headerOf = Effect.fnUntraced(function* headerOf(
+  resolution: Resolution,
+  response: CanonicalKey,
+  name: string,
+): Effect.fn.Return<Built<Option.Option<PlainCase["headers"][number]>>> {
+  const at = childKey(response, "headers", name);
+  if (name.toLowerCase() === "content-type") {
+    return { findings: [{ at, code: "RSP-09/ignored-content-type" }], value: Option.none() };
+  }
+
+  if (!isHeaderName(name)) {
+    return { findings: [{ at, code: "RSP-09/invalid-header-name" }], value: Option.none() };
+  }
+
+  const header = { name, ...(yield* headerMarks(resolution, at)) };
+  const encoded = resolution.line === "3.0" && (yield* serializedBySchema(resolution, at));
+
+  return {
+    findings: encoded ? [{ at, code: "HDR-15/header-percent-encoding" }] : [],
+    value: Option.some(header),
+  };
+});
+
 const headersOf = Effect.fnUntraced(function* headersOf(
   resolution: Resolution,
   headers: readonly string[],
   response: CanonicalKey,
-  findings: Finding[],
-): Effect.fn.Return<PlainCase["headers"]> {
-  const kept: PlainCase["headers"][number][] = [];
-  for (const name of headers) {
-    const at = childKey(response, "headers", name);
-    if (name.toLowerCase() === "content-type") {
-      findings.push({ at, code: "RSP-09/ignored-content-type" });
-    } else if (isHeaderName(name)) {
-      kept.push({ name, ...(yield* headerMarks(resolution, at)) });
-      if (resolution.line === "3.0" && (yield* serializedBySchema(resolution, at))) {
-        findings.push({ at, code: "HDR-15/header-percent-encoding" });
-      }
-    } else {
-      findings.push({ at, code: "RSP-09/invalid-header-name" });
-    }
-  }
+): Effect.fn.Return<Built<PlainCase["headers"]>> {
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const built = yield* Effect.forEach(headers, (name) => headerOf(resolution, response, name));
 
-  return kept;
+  return {
+    findings: built.flatMap((header) => header.findings),
+    value: Arr.getSomes(built.map((header) => header.value)),
+  };
 });
 
 const docsOf = (
@@ -295,34 +312,34 @@ const caseOf = Effect.fnUntraced(function* caseOf(
   responses: CanonicalKey,
   text: string,
   key: ResponseCase["key"],
-  findings: Finding[],
-): Effect.fn.Return<PlainCase> {
+): Effect.fn.Return<Built<PlainCase>> {
   const site = childKey(responses, text);
   const home = follow(resolution, site);
   const response = yield* nodeIn(resolution, home).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(ResponseObject)),
     Effect.orDie,
   );
-  const alternatives = Arr.getSomes(
-    yield* Effect.forEach(Object.keys(response.content ?? {}), (mediaType) =>
-      alternativeOf(resolution, home, mediaType, findings),
-    ),
+  const alternatives = yield* Effect.forEach(Object.keys(response.content ?? {}), (mediaType) =>
+    alternativeOf(resolution, home, mediaType),
   );
-  const headers = yield* headersOf(resolution, Object.keys(response.headers ?? {}), home, findings);
+  const headers = yield* headersOf(resolution, Object.keys(response.headers ?? {}), home);
   const rows = [
     keyRow(key),
     "RSP-01",
-    ...(headers.length === 0 ? [] : ["RSP-04"]),
+    ...(headers.value.length === 0 ? [] : ["RSP-04"]),
     ...(response.content === undefined ? ["RSP-07"] : ["RSP-05"]),
   ];
 
   return {
-    alternatives,
-    docs: docsOf(response, referenceIn(resolution, site)),
-    headers,
-    key,
-    origin: site,
-    rows,
+    findings: [...alternatives.flatMap((alternative) => alternative.findings), ...headers.findings],
+    value: {
+      alternatives: Arr.getSomes(alternatives.map((alternative) => alternative.value)),
+      docs: docsOf(response, referenceIn(resolution, site)),
+      headers: headers.value,
+      key,
+      origin: site,
+      rows,
+    },
   };
 });
 
@@ -359,6 +376,28 @@ const responseKeys = (
     Effect.orElseSucceed((): readonly string[] => []),
   );
 
+// One member of a Responses Object: a case, a refused key, or an `x-` key left to NZ-5.
+const entryOf = Effect.fnUntraced(function* entryOf(
+  resolution: Resolution,
+  responses: CanonicalKey,
+  text: string,
+): Effect.fn.Return<Built<Option.Option<PlainCase>>> {
+  const key = classifyKey(text);
+  if (key === "invalid" || key === "out-of-range") {
+    const code = key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range";
+
+    return { findings: [{ at: childKey(responses, text), code }], value: Option.none() };
+  }
+
+  if (key === "extension") {
+    return { findings: [], value: Option.none() };
+  }
+
+  const built = yield* caseOf(resolution, responses, text, key);
+
+  return { findings: built.findings, value: Option.some(built.value) };
+});
+
 /**
  * Builds the `ResponseCase` list of the Responses Object at `pointer` in the entry document, in
  * member order (design 2.2, 6.6, 7.3; JavaScript lists integer-like keys such as `200` first,
@@ -376,20 +415,13 @@ export const normalizeResponses = Effect.fnUntraced(function* normalizeResponses
   resolution: Resolution,
   pointer: string,
 ): Effect.fn.Return<NormalizedResponses> {
-  const findings: Finding[] = [];
-  const cases: PlainCase[] = [];
   const responses = { document: resolution.document, pointer };
-  for (const text of yield* responseKeys(resolution, responses)) {
-    const key = classifyKey(text);
-    if (key === "invalid" || key === "out-of-range") {
-      findings.push({
-        at: childKey(responses, text),
-        code: key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range",
-      });
-    } else if (key !== "extension") {
-      cases.push(yield* caseOf(resolution, responses, text, key, findings));
-    }
-  }
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const entries = yield* Effect.forEach(yield* responseKeys(resolution, responses), (text) =>
+    entryOf(resolution, responses, text),
+  );
+  const findings = entries.flatMap((entry) => entry.findings);
+  const cases = Arr.getSomes(entries.map((entry) => entry.value));
 
   return {
     // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method

@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Predicate, Record, Result, Schema } from "effect";
 import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
@@ -430,42 +430,54 @@ const withFormRules = Effect.fnUntraced(function* withFormRules(
   };
 });
 
+// One merged entry's outcome, read through the shared cache: a path item parameter is the item's
+// element, not one operation's, so it is read once.
+const parameterOutcome = Effect.fnUntraced(function* parameterOutcome(
+  shared: Shared,
+  raw: RawOperation,
+  entry: ParameterEntry,
+): Effect.fn.Return<ParameterOutcome, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> {
+  const site: ParameterSite =
+    entry.level === "operation"
+      ? {
+          nonStandard: shared.context.config.nonStandard,
+          openapi: shared.context.openapi,
+          operation: operationInfo(raw),
+          pointer: entry.pointer,
+        }
+      : {
+          nonStandard: shared.context.config.nonStandard,
+          openapi: shared.context.openapi,
+          pointer: entry.pointer,
+        };
+  const outcome =
+    shared.cache.get(entry.pointer) ??
+    (yield* withFormRules(shared, site, yield* normalizeParameter(shared.resolution, site)));
+  shared.cache.set(entry.pointer, outcome);
+
+  return outcome;
+});
+
 const assembleParameters = Effect.fnUntraced(function* assembleParameters(
   shared: Shared,
   raw: RawOperation,
   merged: Merged,
 ): Effect.fn.Return<Assembled, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> {
-  const parameters: Parameter[] = [];
-  const diagnostics: Diagnostic[] = [];
-  const refusedRequired: string[] = [];
-  for (const entry of merged.entries) {
-    // A path item parameter is the item's element, not one operation's: it is read once.
-    const site: ParameterSite =
-      entry.level === "operation"
-        ? {
-            nonStandard: shared.context.config.nonStandard,
-            openapi: shared.context.openapi,
-            operation: operationInfo(raw),
-            pointer: entry.pointer,
-          }
-        : {
-            nonStandard: shared.context.config.nonStandard,
-            openapi: shared.context.openapi,
-            pointer: entry.pointer,
-          };
-    const outcome =
-      shared.cache.get(entry.pointer) ??
-      (yield* withFormRules(shared, site, yield* normalizeParameter(shared.resolution, site)));
-    shared.cache.set(entry.pointer, outcome);
-    diagnostics.push(...outcome.diagnostics);
-    if (outcome._tag === "Implemented") {
-      parameters.push(outcome.parameter);
-    } else if (outcome._tag === "Refused" && outcome.required) {
-      refusedRequired.push(entry.pointer);
-    }
-  }
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const outcomes = yield* Effect.forEach(merged.entries, (entry) =>
+    parameterOutcome(shared, raw, entry),
+  );
+  const read = Arr.zip(merged.entries, outcomes);
 
-  return { diagnostics, parameters, refusedRequired };
+  return {
+    diagnostics: outcomes.flatMap((outcome) => outcome.diagnostics),
+    parameters: outcomes.flatMap((outcome) =>
+      outcome._tag === "Implemented" ? [outcome.parameter] : [],
+    ),
+    refusedRequired: read.flatMap(([entry, outcome]) =>
+      outcome._tag === "Refused" && outcome.required ? [entry.pointer] : [],
+    ),
+  };
 });
 
 interface BodyResult {
@@ -841,25 +853,24 @@ const assembleOne = Effect.fnUntraced(function* assembleOne(
     return { diagnostics: withoutAuthorChoiceNotices(diagnostics) };
   }
 
-  const fields: Types.Mutable<typeof Operation.Encoded> = {
-    deprecated: raw.fields.deprecated ?? false,
-    docs: docsOf(raw.fields),
-    key: { method: raw.method, path: raw.path },
-    origin: { document: resolution.document, pointer: raw.pointer },
-    parameters: parameters.parameters,
-    responses: responses.responses,
-    rows: rowsOf(shared, raw, merged, { body: body.body, declared: policy.policy.declared }),
-    security: policy.policy,
-    servers: servers.servers,
-    tags: (raw.fields.tags ?? []).map(sanitizeProse),
-  };
-  if (body.body !== undefined) {
-    fields.body = body.body;
-  }
-
-  if (naming.value !== undefined) {
-    fields.naming = naming.value;
-  }
+  const fields: Record<string, unknown> = Record.filter(
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+    {
+      body: body.body,
+      deprecated: raw.fields.deprecated ?? false,
+      docs: docsOf(raw.fields),
+      key: { method: raw.method, path: raw.path },
+      naming: naming.value,
+      origin: { document: resolution.document, pointer: raw.pointer },
+      parameters: parameters.parameters,
+      responses: responses.responses,
+      rows: rowsOf(shared, raw, merged, { body: body.body, declared: policy.policy.declared }),
+      security: policy.policy,
+      servers: servers.servers,
+      tags: (raw.fields.tags ?? []).map(sanitizeProse),
+    },
+    Predicate.isNotUndefined,
+  );
 
   // An empty operationId is not a name; naming reports it (OPR-06).
   if (raw.fields.operationId !== undefined && raw.fields.operationId !== "") {
