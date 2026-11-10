@@ -7,7 +7,7 @@ import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { methodMembers } from "../model/path-item.ts";
 import { expressionsOf, locate, operationOf, pathItems, site } from "./path-items.ts";
 import type { Operation, PathItem, Place } from "./path-items.ts";
-import { childPointer } from "../model/pointer.ts";
+import { childPointer, isPointerWithin } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
@@ -1121,8 +1121,7 @@ const operationFindingsOf = (resolution: Resolution): readonly Finding[] => {
 };
 
 const underItem = (operation: Operation, pointer: string): boolean =>
-  operation.item.use !== operation.item.pointer &&
-  (pointer === operation.item.pointer || pointer.startsWith(`${operation.item.pointer}/`));
+  operation.item.use !== operation.item.pointer && isPointerWithin(operation.item.pointer, pointer);
 
 const toDiagnostic = (resolution: Resolution, finding: Finding) => {
   const rule: Rule = rules[finding.code];
