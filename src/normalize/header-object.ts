@@ -11,13 +11,13 @@ export interface HeaderMarks {
   readonly required: boolean;
 }
 
-// A mark that is not a boolean reads as false without discarding its sibling.
-const Mark = Schema.Boolean.pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(false))));
+// A mark that is absent or not a boolean reads as false without discarding its sibling.
+const Mark = Schema.Boolean.pipe(
+  Schema.catchDecoding(() => Effect.succeed(Option.some(false))),
+  Schema.withDecodingDefaultKey(Effect.succeed(false)),
+);
 
-const HeaderObject = Schema.Struct({
-  deprecated: Schema.optionalKey(Mark),
-  required: Schema.optionalKey(Mark),
-});
+const HeaderObject = Schema.Struct({ deprecated: Mark, required: Mark });
 
 const unmarked: HeaderMarks = { deprecated: false, required: false };
 
@@ -32,9 +32,5 @@ export const headerMarks = (
 ): Effect.Effect<HeaderMarks> =>
   nodeIn(resolution, follow(resolution, site)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(HeaderObject)),
-    Effect.map((header) => ({
-      deprecated: header.deprecated ?? false,
-      required: header.required ?? false,
-    })),
     Effect.orElseSucceed(() => unmarked),
   );
