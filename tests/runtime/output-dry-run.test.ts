@@ -65,6 +65,10 @@ const jsonPost = HttpClientRequest.post("/items").pipe(
   HttpClientRequest.bodyText('{"name":"a"}', "application/json"),
 );
 
+// The first printed line that starts with `prefix`.
+const printed = (stdout: string, prefix: string): string =>
+  stdout.split("\n").find((text) => text.startsWith(prefix)) ?? "";
+
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 const key = (name: string, input: Option.Option<string>): Terminal.UserInput => ({
@@ -523,6 +527,62 @@ describe("Output.send --dry-run", () => {
     expect(result.stdout).not.toContain(canary);
     expect(result.stdout).toContain("cookie: a=<redacted:bearerAuth>; session=<redacted>\n");
     expect(result.stdout).toContain("authorization: Bearer <redacted:bearerAuth>\n");
+  });
+
+  test("--dry-run prints a Redacted query parameter as a bare <redacted>", async () => {
+    const result = await run({
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items").pipe(
+        HttpClientRequest.setUrlParam("note", Redacted.make("canary-REDACTED-PARAM")),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(printed(result.stdout, "GET ")).toBe(
+      "GET https://api.example.com/v1/items?note=<redacted> HTTP/1.1",
+    );
+    expect(result.stdout).not.toContain("canary-REDACTED-PARAM");
+  });
+
+  test("--dry-run prints a query value under a redacted name as a bare <redacted>", async () => {
+    const result = await run({
+      operation: meta("GET"),
+      request: HttpClientRequest.get("/items").pipe(
+        HttpClientRequest.setUrlParam("sig", "canary-SIG-VALUE"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(printed(result.stdout, "GET ")).toBe(
+      "GET https://api.example.com/v1/items?sig=<redacted> HTTP/1.1",
+    );
+    expect(result.stdout).not.toContain("canary-SIG-VALUE");
+  });
+
+  test("--dry-run prints a redacted header value that is not a placeholder as a bare <redacted>", async () => {
+    const result = await run({
+      operation: meta("GET", []),
+      request: HttpClientRequest.get("/items").pipe(
+        HttpClientRequest.setHeader("x-api-key", "canary-HEADER-VALUE"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(printed(result.stdout, "x-api-key: ")).toBe("x-api-key: <redacted>");
+    expect(result.stdout).not.toContain("canary-HEADER-VALUE");
+  });
+
+  test("--dry-run prints a Cookie pair with no = as a bare <redacted>", async () => {
+    const result = await run({
+      operation: meta("GET", []),
+      request: HttpClientRequest.get("/items").pipe(
+        HttpClientRequest.setHeader("cookie", "canary-BARE-PAIR"),
+      ),
+    });
+
+    expect(Exit.isSuccess(result.exit)).toBe(true);
+    expect(printed(result.stdout, "cookie: ")).toBe("cookie: <redacted>");
+    expect(result.stdout).not.toContain("canary-BARE-PAIR");
   });
 
   test("a configured bearer credential holding CR LF is refused as the real run refuses it", async () => {

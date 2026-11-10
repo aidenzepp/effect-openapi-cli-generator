@@ -1,6 +1,8 @@
+import type { Stdio } from "effect";
 import {
   Clock,
   Config,
+  Context,
   Duration,
   Effect,
   Exit,
@@ -9,13 +11,15 @@ import {
   Pipeable,
   Pull,
   Redacted,
+  Ref,
   Result,
   Schedule,
+  Schema,
+  SchemaTransformation,
   Scope,
-  Stdio,
   Stream,
 } from "effect";
-import { CliError, Flag, GlobalFlag } from "effect/cli";
+import { Flag, GlobalFlag } from "effect/cli";
 import {
   FetchHttpClient,
   Headers,
@@ -33,7 +37,8 @@ import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
-import { queryWireForm } from "./redact.ts";
+import { asCliError, printStderr } from "./input.ts";
+import { queryWireForm, redactedPlaceholder } from "./redact.ts";
 import { mapClientError } from "./response.ts";
 
 /**
@@ -48,7 +53,15 @@ export const maxRedirects = 10;
  */
 export const defaultTimeoutSeconds = 30;
 
-const wholeSeconds = /^\d+$/u;
+/**
+ * A whole number the operator typed: ASCII digits only, decoded to a safe integer. Each caller
+ * adds its own bounds and maps a failure to its own `UsageError`, which never carries the text.
+ */
+export const wholeNumber = Schema.String.check(Schema.isPattern(/^\d+$/u)).pipe(
+  Schema.decodeTo(Schema.Int, SchemaTransformation.numberFromString),
+);
+
+export const decodeWholeNumber = Schema.decodeEffect(wholeNumber);
 
 const invalidTimeout = (): UsageError =>
   new UsageError({
@@ -57,17 +70,8 @@ const invalidTimeout = (): UsageError =>
   });
 
 // Whole seconds, 0 or more. The failure names `--timeout` only, never the value.
-const parseTimeout = (raw: string): Effect.Effect<number, UsageError> => {
-  const seconds = Number(raw);
-
-  return wholeSeconds.test(raw) && Number.isSafeInteger(seconds)
-    ? Effect.succeed(seconds)
-    : Effect.fail(invalidTimeout());
-};
-
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
-const asCliError = (error: UsageError): CliError.CliError =>
-  new CliError.UserError({ cause: error, userMessage: error.message });
+const parseTimeout = (raw: string): Effect.Effect<number, UsageError> =>
+  decodeWholeNumber(raw).pipe(Effect.mapError(invalidTimeout));
 
 /**
  * `--timeout <seconds>` bounds each attempt's wait for response headers; 0 disables it (design
@@ -279,12 +283,11 @@ const nextHop = (
   }
 
   const hash = target.hash === "" ? Option.none() : Option.some(target.hash.slice(1));
-  target.hash = "";
 
   return Effect.succeedSome(
     HttpClientRequest.makeWith(
       next.method,
-      target.href,
+      Url.setHash(target, "").href,
       UrlParams.empty,
       hash,
       target.origin === from.origin
@@ -392,7 +395,7 @@ const assertMethod = (
         new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
       );
 
-const querySeparator = (url: string): string => {
+export const querySeparator = (url: string): string => {
   if (/[?&]$/u.test(url)) {
     return "";
   }
@@ -606,13 +609,11 @@ const invalidRetries = (): UsageError =>
   });
 
 // A whole number from 0 to `maxRetries`. The failure names `--retries` only, never the value.
-const parseRetries = (raw: string): Effect.Effect<number, UsageError> => {
-  const retries = Number(raw);
-
-  return wholeSeconds.test(raw) && retries <= maxRetries
-    ? Effect.succeed(retries)
-    : Effect.fail(invalidRetries());
-};
+const parseRetries = (raw: string): Effect.Effect<number, UsageError> =>
+  decodeWholeNumber(raw).pipe(
+    Effect.mapError(invalidRetries),
+    Effect.filterOrFail((retries) => retries <= maxRetries, invalidRetries),
+  );
 
 /**
  * `--retries <n>`: how many times a transient failure is retried (design D-AD7). The flag holds
@@ -664,30 +665,16 @@ export const effectiveRetries = (envPrefix: string): Effect.Effect<number, Usage
 const backoff = Schedule.jittered(Schedule.exponential("500 millis"));
 
 /**
- * The final response of a request whose retrying stopped at the `Retry-After` cap (design D-AD7):
- * the server asked for a longer wait than the effective `--timeout`, so that wait was not taken.
- * `retryAfterSeconds` is the server's delay in whole seconds, rounded up; `send` passes it to
- * `ApiResponseError.retryAfterSeconds` (m3 P14). The response itself is the last one, unchanged.
+ * The run's record of a `Retry-After` cap (design D-AD7): when retrying stops because the server
+ * asked for a longer wait than the effective `--timeout`, `retryTransform` writes the server's
+ * delay here, in whole seconds rounded up, and `send` passes it to
+ * `ApiResponseError.retryAfterSeconds` (m3 P14). `send` creates the `Ref` and provides it around
+ * the request. `retryTransform` reads it with `Effect.serviceOption`, so it has no requirement
+ * and a caller that provides none simply records nothing.
  */
-export class CappedResponse extends OwnedResponse {
-  readonly retryAfterSeconds: number;
-
-  constructor(response: HttpClientResponse.HttpClientResponse, retryAfterSeconds: number) {
-    super(response, Effect.void);
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-/**
- * The server's `Retry-After` delay in seconds when retrying stopped at the cap; `None` for every
- * other response, including one whose retries ran out or ended for another reason. The match is by
- * class, so it holds only while no transform outside `retryTransform` wraps the response (a tagged
- * field would be lost to such a wrapper too).
- */
-export const retryAfterCapSeconds = (
-  response: HttpClientResponse.HttpClientResponse,
-): Option.Option<number> =>
-  response instanceof CappedResponse ? Option.some(response.retryAfterSeconds) : Option.none();
+export class RetryAfterCap extends Context.Service<RetryAfterCap, Ref.Ref<Option.Option<number>>>()(
+  "openapi-cli/runtime/client/RetryAfterCap",
+) {}
 
 /**
  * The response's `Retry-After` as a delay from `nowMillis`: whole seconds, or an HTTP date (a past
@@ -743,13 +730,6 @@ const retryCause = <E>(
   );
 };
 
-const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
-  Effect.gen(function* printRetryNote() {
-    const stdio = yield* Stdio.Stdio;
-
-    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
-  }).pipe(Effect.ignore);
-
 /**
  * The retry policy (design D-AD7, 5 Retries row), an `HttpClient.transform` applied outside the
  * redirect loop, so one attempt is one run of the loop with its hops, and the loop's replay rule
@@ -765,10 +745,9 @@ const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
  * passes), the cause, the attempt and the delay: the response's `Retry-After` (seconds or an HTTP
  * date) when it carries one that parses, else exponential from 500 ms, jittered. A `Retry-After`
  * longer than the effective `--timeout` is not waited (design D-AD7): retrying stops and the last
- * response is returned as a `CappedResponse` carrying the server's delay, which
- * `retryAfterCapSeconds` reads. Every other last outcome is returned or failed unchanged. An
- * invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT` fails with a `UsageError` before anything is
- * sent.
+ * response is returned unchanged and the server's delay is recorded in `RetryAfterCap`. Every other
+ * last outcome is returned or failed unchanged. An invalid `<PREFIX>_RETRIES` or `<PREFIX>_TIMEOUT`
+ * fails with a `UsageError` before anything is sent.
  */
 export const retryTransform =
   (scrub: (text: string) => string) =>
@@ -814,7 +793,15 @@ export const retryTransform =
                 Option.isSome(server) &&
                 exceedsCap(server.value, timeout)
               ) {
-                return new CappedResponse(exit.value, Math.ceil(Duration.toSeconds(server.value)));
+                const record = yield* Effect.serviceOption(RetryAfterCap);
+                if (Option.isSome(record)) {
+                  yield* Ref.set(
+                    record.value,
+                    Option.some(Math.ceil(Duration.toSeconds(server.value))),
+                  );
+                }
+
+                return exit.value;
               }
 
               yield* Scope.close(scope, Exit.void);
@@ -825,7 +812,7 @@ export const retryTransform =
                     Effect.map(([, next]) => next),
                     Pull.catchDone((leftover) => Effect.succeed(leftover)),
                   );
-              yield* printNote(
+              yield* printStderr(
                 `Notice: retrying ${label} after ${cause.value} ` +
                   `(attempt ${made + 1} of ${total}) in ${Math.round(Duration.toMillis(delay))} ms`,
               );
@@ -833,7 +820,7 @@ export const retryTransform =
               continue;
             }
 
-            yield* printNote(
+            yield* printStderr(
               `Notice: not retrying ${label} after ${cause.value}: unreplayableBody, ` +
                 "the request body was read once and cannot be sent again",
             );
@@ -860,10 +847,10 @@ export const verboseSetting = GlobalFlag.Setting("verbose")({
 });
 
 // A name-redacted value, from `Headers.CurrentRedactedNames` or `UrlParams.CurrentRedactedNames`.
-const redactedValue = "<redacted>";
+const redactedValue = redactedPlaceholder();
 
 // A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
-const decodedName = (raw: string): string =>
+export const decodedQueryName = (raw: string): string =>
   new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
 
 /**
@@ -886,7 +873,8 @@ const redactUriText = (text: string, names: readonly (string | RegExp)[]): strin
     .map((part) => {
       const equals = part.indexOf("=");
 
-      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+      return equals !== -1 &&
+        UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names)
         ? `${part.slice(0, equals + 1)}${redactedValue}`
         : part;
     });
@@ -902,11 +890,11 @@ const verboseUrl = (
   names: readonly (string | RegExp)[],
 ): string => {
   const url = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash));
-  if (Result.isSuccess(url)) {
-    url.success.hash = "";
-  }
 
-  return redactUriText(Result.isSuccess(url) ? url.success.href : request.url, names);
+  return redactUriText(
+    Result.isSuccess(url) ? Url.setHash(url.success, "").href : request.url,
+    names,
+  );
 };
 
 // Each `<URI-reference>` of a `Link` value (RFC 8288).
@@ -978,7 +966,7 @@ const headerLines = (
 
 // One block on stderr, each whole line through the RT-6 value scrubber.
 const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =>
-  printNote(lines.map(scrub).join("\n"));
+  printStderr(lines.map(scrub).join("\n"));
 
 /**
  * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it

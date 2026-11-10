@@ -53,6 +53,7 @@ describe("deprecated scheme notice", () => {
     const result = await run([["legacyKey"]], { EXAMPLE_LEGACY_KEY: canary });
 
     expect(result.credentials).toEqual([canary]);
+    expect(result.stderr).toBe("Notice: the security scheme legacyKey is deprecated\n");
     expect(result.stderr.match(/legacyKey/gu)?.length).toBe(1);
     expect(result.stderr.split("\n").filter((text) => text !== "")).toHaveLength(1);
     expect(result.stdout).toBe("");

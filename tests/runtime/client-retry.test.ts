@@ -197,6 +197,15 @@ describe("idempotency-aware retries", () => {
     expect(notes[0]).toContain("503");
   });
 
+  test("the retry note is one exact line", async () => {
+    const { notes } = await run(get(), statuses(503, 200));
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(
+      /^Notice: retrying GET http:\/\/127\.0\.0\.1:1\/r\?key=<redacted:key> after 503 \(attempt 2 of 3\) in \d+ ms$/u,
+    );
+  });
+
   test("the note's URL passes through the scrubber", async () => {
     const { notes } = await run(get(), statuses(503, 200));
     expect(notes.join("\n")).not.toContain(SECRET);

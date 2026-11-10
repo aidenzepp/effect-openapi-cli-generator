@@ -240,6 +240,30 @@ describe("I2 header and cookie values are refused before any connection", () => 
     ).toEqual(refused);
   }, 60_000);
 
+  // The two rules drift (audit A5-63): a credential refuses any edge `trim` removes, while a header
+  // parameter refuses only a tab or space edge. Both behaviors stay as they are.
+  test("a credential with an NBSP, VT or FF edge is refused while a header parameter with that edge is sent", async () => {
+    const edges = ["\u00A0", "\u000B", "\u000C"];
+    const observed: (readonly [unknown, number | null, number])[] = [];
+
+    for (const edge of edges) {
+      const path = credentialFile(
+        `header-edge-${edge.codePointAt(0)}`,
+        Buffer.from(`ts9-a${edge}`),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- the connection counts are the capture server's, shared by every run
+      const credential = await refusedBeforeConnecting(
+        ["--header-key-file", path, "values", "simple", "ok"],
+        {},
+      );
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const parameter = await exchange(["values", "simple", "ok", "--x-trace", `ts9-a${edge}`]);
+      observed.push([credential, parameter.cli.exitCode, parameter.requests.length]);
+    }
+
+    expect(observed).toEqual(edges.map(() => [refused, 0, 1]));
+  }, 90_000);
+
   for (const [label, bytes] of Object.entries(hostileCredentials)) {
     test(`an apiKey header credential with ${label} exits 2 with zero connections`, async () => {
       const path = credentialFile(`header-${label.replace(" ", "-")}`, bytes);

@@ -1,22 +1,32 @@
+import type { FileSystem, Stdio, Stream } from "effect";
 import {
+  Array as Arr,
   Config,
   Context,
   Effect,
-  FileSystem,
   Layer,
   Option,
   Path,
+  Record as Rec,
   Redacted,
-  Stdio,
-  Stream,
+  Result,
   Terminal,
 } from "effect";
 import { Flag, GlobalFlag, Prompt, TerminalCapabilities } from "effect/cli";
 import type { FetchHttpClient } from "effect/http";
-import { Headers, HttpClientRequest, UrlParams } from "effect/http";
+import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
-import { StdinClaim, stripLineEnd } from "./input.ts";
+import {
+  StdinClaim,
+  decodeUtf8,
+  printStderr,
+  readBounded,
+  stdinOrFile,
+  stripLineEnd,
+} from "./input.ts";
+import { loneSurrogate, redactedPlaceholder } from "./redact.ts";
+import { cookieOctets, headerValueBreaks } from "./serialize.ts";
 
 /**
  * A scheme's security requirement list: alternatives in document order, each the scheme names that
@@ -146,13 +156,18 @@ export const schemeSlug = (scheme: string): string =>
     .toLowerCase();
 
 /**
+ * An identifier in `SCREAMING_SNAKE` form: upper case, with `-` as `_`.
+ */
+export const screamingSnake = (name: string): string => name.toUpperCase().replaceAll("-", "_");
+
+/**
  * The environment name of a token scheme's credential: the scheme's own `env`, else
  * `<PREFIX>_<SCHEME>`. A `mutualTLS` scheme has no single credential name: the runtime reads its
  * `certEnv`, `keyEnv` and `caEnv` instead and never calls this for one.
  */
 export const envName = (envPrefix: string, scheme: string, definition: SecurityScheme): string =>
   ("env" in definition ? definition.env : undefined) ??
-  `${envPrefix}_${schemeSlug(scheme).toUpperCase().replaceAll("-", "_")}`;
+  `${envPrefix}_${screamingSnake(schemeSlug(scheme))}`;
 
 type FileSetting = GlobalFlag.Setting<string, Option.Option<string>>;
 
@@ -177,56 +192,24 @@ export const credentialFileSetting = (scheme: string): FileSetting => {
   return created;
 };
 
-class OverLimit {
-  readonly _tag = "OverLimit";
-}
-
-class ReadFailed {
-  readonly _tag = "ReadFailed";
-}
-
 const usage = (scheme: string, message: string): UsageError =>
   new UsageError({ flag: `${schemeSlug(scheme)}-file`, message });
 
-const decodeUtf8 = (scheme: string, bytes: Uint8Array): Effect.Effect<string, UsageError> =>
-  Effect.try({
-    catch: () => usage(scheme, `the credential for ${scheme} is not valid UTF-8`),
-    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-  });
-
-const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
-  let size = 0;
-  for (const chunk of chunks) {
-    size += chunk.length;
-  }
-
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return joined;
-};
-
-const readBounded = (
+const credentialFromSource = (
   scheme: string,
   source: Stream.Stream<Uint8Array, unknown>,
 ): Effect.Effect<string, UsageError> =>
-  source.pipe(
-    Stream.mapError((): OverLimit | ReadFailed => new ReadFailed()),
-    Stream.limitBytes(maxCredentialBytes, (): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
-      Stream.fail(new OverLimit()),
+  readBounded(source, maxCredentialBytes).pipe(
+    Effect.catchTags({
+      OverLimit: () =>
+        Effect.fail(
+          usage(scheme, `the credential for ${scheme} is over ${maxCredentialBytes} bytes`),
+        ),
+      ReadFailed: () => Effect.fail(usage(scheme, `cannot read the credential for ${scheme}`)),
+    }),
+    Effect.flatMap((joined) =>
+      decodeUtf8(joined, usage(scheme, `the credential for ${scheme} is not valid UTF-8`)),
     ),
-    Stream.runCollect,
-    Effect.mapError((cause) =>
-      cause instanceof OverLimit
-        ? usage(scheme, `the credential for ${scheme} is over ${maxCredentialBytes} bytes`)
-        : usage(scheme, `cannot read the credential for ${scheme}`),
-    ),
-    Effect.map(concat),
-    Effect.flatMap((joined) => decodeUtf8(scheme, joined)),
     Effect.map(stripLineEnd),
   );
 
@@ -234,20 +217,16 @@ const fromFile = (
   scheme: string,
   path: string,
 ): Effect.Effect<string, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(`${schemeSlug(scheme)}-file`)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => readBounded(scheme, stdio.stdin)),
-      )
-    : Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
-        readBounded(scheme, fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
-      );
+  stdinOrFile(`${schemeSlug(scheme)}-file`, path, (fs) =>
+    Effect.succeed(fs.stream(path, { bytesToRead: maxCredentialBytes + 1 })),
+  ).pipe(Effect.flatMap((source) => credentialFromSource(scheme, source)));
 
-const fromEnv = (scheme: string, name: string): Effect.Effect<Option.Option<string>, UsageError> =>
+const fromEnv = (
+  scheme: string,
+  name: string,
+): Effect.Effect<Option.Option<Redacted.Redacted>, UsageError> =>
   Config.option(Config.Redacted(name)).pipe(
-    Effect.map(Option.map(Redacted.value)),
-    Effect.map(Option.filter((value) => value !== "")),
+    Effect.map(Option.filter((value) => Redacted.value(value) !== "")),
     Effect.mapError(() => usage(scheme, `cannot read ${name} for ${scheme}`)),
   );
 
@@ -319,15 +298,15 @@ const credentialOf = (
             (text) => text !== "",
             () => usage(scheme, `the credential for ${scheme} is empty`),
           ),
-          Effect.map(Option.some),
+          Effect.map((text) => Option.some(Redacted.make(text))),
         )
       : yield* fromEnv(scheme, envName(envPrefix, scheme, definition));
 
     return value.pipe(
-      Option.map((text) => ({
+      Option.map((credential) => ({
         definition,
         scheme,
-        value: Redacted.make(text),
+        value: credential,
       })),
     );
   });
@@ -342,17 +321,13 @@ const noticeDeprecated = (
   credentials: readonly Credential[],
 ): Effect.Effect<void, never, Stdio.Stdio> =>
   Effect.gen(function* notify() {
-    const stdio = yield* Stdio.Stdio;
     for (const { definition, scheme } of credentials) {
       if (definition.deprecated === true) {
         const name = scheme.replaceAll(unsafeName, "");
-        yield* Stream.run(
-          Stream.make(`Notice: the security scheme ${name} is deprecated\n`),
-          stdio.stderr(),
-        );
+        yield* printStderr(`Notice: the security scheme ${name} is deprecated`);
       }
     }
-  }).pipe(Effect.ignore);
+  });
 
 interface PromptServices {
   readonly path: Path.Path;
@@ -428,7 +403,7 @@ const promptTarget = <R>(
 ): Effect.Effect<Option.Option<readonly string[]>, UsageError, R> =>
   Effect.gen(function* findPromptTarget() {
     for (const alternative of requirement) {
-      if (alternative.every((scheme) => Object.hasOwn(table.schemes, scheme))) {
+      if (alternative.every((scheme) => Rec.has(table.schemes, scheme))) {
         const certificates = alternative.filter(
           (scheme) => table.schemes[scheme]?.kind === "mutualTLS",
         );
@@ -655,15 +630,11 @@ export interface CredentialGate {
   readonly provenance: Provenance;
 }
 
-const originOf = (raw: string): Option.Option<string> => {
-  if (!URL.canParse(raw)) {
-    return Option.none();
-  }
-
-  const { origin } = new URL(raw);
-
-  return origin === "null" ? Option.none() : Option.some(origin);
-};
+const originOf = (raw: string): Option.Option<string> =>
+  Result.match(Url.fromString(raw), {
+    onFailure: () => Option.none(),
+    onSuccess: ({ origin }) => (origin === "null" ? Option.none() : Option.some(origin)),
+  });
 
 /**
  * The origins that may carry credentials for one run (design 6.5, D-SEC2): the bound origin set,
@@ -675,9 +646,9 @@ const originOf = (raw: string): Option.Option<string> => {
 export const credentialOrigins = (gate: CredentialGate): readonly string[] => {
   const base = gate.provenance === "operator" && gate.allowUnboundBase ? [gate.baseOrigin] : [];
 
-  return [
-    ...new Set([...gate.boundOrigins, ...base].flatMap((raw) => Option.toArray(originOf(raw)))),
-  ];
+  return Arr.dedupe(
+    [...gate.boundOrigins, ...base].flatMap((raw) => Option.toArray(originOf(raw))),
+  );
 };
 
 // Whether a URL's origin is one of `origins`. An unparsable URL or origin is never bound.
@@ -748,11 +719,26 @@ const hasAuthorizationScheme = (table: SecurityTable): boolean =>
     (definition) => definition.kind !== "apiKey" && definition.kind !== "mutualTLS",
   );
 
-const cookiePairs = (cookie: string): readonly string[] =>
+export const cookiePairs = (cookie: string): readonly string[] =>
   cookie
     .split(";")
     .map((pair) => pair.trim())
     .filter((pair) => pair !== "");
+
+// The request with `name=value` appended to its `Cookie` header's existing pairs.
+const appendCookie = (
+  request: HttpClientRequest.HttpClientRequest,
+  name: string,
+  value: string,
+): HttpClientRequest.HttpClientRequest => {
+  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
+
+  return HttpClientRequest.setHeader(
+    request,
+    "cookie",
+    [...cookiePairs(existing), `${name}=${value}`].join("; "),
+  );
+};
 
 const cookieName = (pair: string): string => pair.split("=", 1)[0] ?? "";
 
@@ -786,10 +772,7 @@ const strip = (
     ...apiKeyNames(table, "header"),
     ...(hasAuthorizationScheme(table) ? ["authorization"] : []),
   ];
-  let { headers } = request;
-  for (const name of headerNames) {
-    headers = Headers.remove(headers, name);
-  }
+  const headers = Headers.removeMany(request.headers, headerNames);
 
   const cookies = Option.match(Headers.get(headers, "cookie"), {
     onNone: () => headers,
@@ -814,20 +797,13 @@ const strip = (
   );
 };
 
-// A header field carries one byte per character, so a code point above U+00FF has no form.
-const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
-
+// A credential also refuses any edge `trim` removes; a header parameter refuses only a tab or space
+// edge (serialize.ts `edgeSpace`). The two rules drift and stay as they are.
 const unsafeHeaderValue = (value: string): boolean =>
-  value.includes("\r") ||
-  value.includes("\n") ||
-  value.includes("\u0000") ||
-  value !== value.trim() ||
-  wideCodePoint.test(value);
+  headerValueBreaks(value) || value !== value.trim();
 
 // An RFC 6265 cookie-name is an RFC 9110 token.
 const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
-
-const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 const refuse = (scheme: string, rule: string): Effect.Effect<never, UsageError> =>
   Effect.fail(usage(scheme, `the credential for ${scheme} ${rule}`));
@@ -849,7 +825,7 @@ const basicParts = (
     return refuse(scheme, "must be <user-id>:<password>");
   }
 
-  if (/\p{Cs}/u.test(value)) {
+  if (loneSurrogate.test(value)) {
     return refuse(scheme, "has a lone surrogate");
   }
 
@@ -904,10 +880,7 @@ const attachOne = (
     return refuse(scheme, "is not a valid cookie value");
   }
 
-  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
-  const pairs = [...cookiePairs(existing), `${definition.name}=${secret}`];
-
-  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+  return Effect.succeed(appendCookie(request, definition.name, secret));
 };
 
 // Strip every managed credential, then write each entry with `one` only when the request's origin
@@ -946,7 +919,7 @@ export const attach =
 /**
  * The placeholder `--dry-run` writes for a scheme's credential (design 7.5).
  */
-export const placeholder = (scheme: string): string => `<redacted:${scheme}>`;
+export const placeholder = (scheme: string): string => redactedPlaceholder(scheme);
 
 // Write the placeholder where the credential would go, with the scheme's prefix (`Bearer`,
 // `Basic`); the value, if any, is never written.
@@ -975,10 +948,7 @@ const writePlaceholder = (
     return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, text));
   }
 
-  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
-  const pairs = [...cookiePairs(existing), `${definition.name}=${text}`];
-
-  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+  return Effect.succeed(appendCookie(request, definition.name, text));
 };
 
 // A configured value gets the check `attach` applies (`attachOne`, its request discarded), so the
@@ -1059,15 +1029,17 @@ export const isLoopbackHost = (hostname: string): boolean => {
  * Printing it once per run is the caller's.
  */
 export const plaintextWarning = (baseUrl: string, allowed: boolean): Option.Option<string> => {
-  if (!allowed || !URL.canParse(baseUrl)) {
+  if (!allowed) {
     return Option.none();
   }
 
-  const { host, hostname, protocol } = new URL(baseUrl);
-
-  return protocol === "http:" && !isLoopbackHost(hostname)
-    ? Option.some(
-        `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
-      )
-    : Option.none();
+  return Result.match(Url.fromString(baseUrl), {
+    onFailure: () => Option.none(),
+    onSuccess: ({ host, hostname, protocol }) =>
+      protocol === "http:" && !isLoopbackHost(hostname)
+        ? Option.some(
+            `Warning: --allow-credentials-for-base-url sends credentials to ${host} over plaintext http`,
+          )
+        : Option.none(),
+  });
 };
