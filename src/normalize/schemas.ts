@@ -23,8 +23,10 @@ import { defaultLimits } from "../resolve/index.ts";
 import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
 import { evaluatePointerResult, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { isSpecificationExtension } from "../model/extension.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { nodeIn, nodeOption, referenceIn } from "./document-set.ts";
@@ -623,7 +625,7 @@ const nonAsserting: ReadonlySet<string> = new Set([
 ]);
 
 const asserts = (keyword: string): boolean =>
-  keyword !== "$ref" && !nonAsserting.has(keyword) && !keyword.startsWith("x-");
+  keyword !== "$ref" && !nonAsserting.has(keyword) && !isSpecificationExtension(keyword);
 
 /**
  * The store key of the schema at a use site (design 2.2 key rule, SCH-03). A `$ref` names its
@@ -844,7 +846,7 @@ const inTypes = (types: readonly string[], value: Json): boolean => {
 
 const isAnnotationOnly = (branch: JsonObject): boolean =>
   Object.keys(branch).every(
-    (key) => key === "const" || annotationKeys.has(key) || key.startsWith("x-"),
+    (key) => key === "const" || annotationKeys.has(key) || isSpecificationExtension(key),
   );
 
 // The values of a `oneOf`/`anyOf` whose branches are all primitive `const` values with annotations
@@ -1640,8 +1642,6 @@ const rules = new Map<string, Rule>([
   ],
 ]);
 
-const Declared = Schema.Struct({ openapi: Schema.String });
-
 // The deepest existing node of the source document on the edit's path, as an RFC 6901 pointer.
 const sourcePointer = (value: Json, base: string, path: readonly string[]): string => {
   const tokens = tokensOf(base);
@@ -1678,10 +1678,7 @@ const diagnosticsOf = (
   edits: readonly SchemaEdit[],
   refused: readonly (readonly [code: string, at: CanonicalKey])[],
 ): Effect.Effect<readonly Diagnostic[]> => {
-  const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
+  const openapi = Option.getOrElse(declaredOpenapi(resolution.value), () => "unknown");
   // A diagnostic's identity for deduplication: its code at its document and pointer.
   let seen = HashSet.fromIterable<readonly [code: string, document: string, pointer: string]>(
     resolution.diagnostics.map((diagnostic) => [

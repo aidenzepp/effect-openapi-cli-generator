@@ -7,6 +7,7 @@ import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
 import type { Line } from "../validate/index.ts";
 import { implicitComponent } from "../resolve/index.ts";
 import { childPointer, formatPointer, parsePointerResult } from "../model/pointer.ts";
@@ -98,8 +99,6 @@ const Requirement = Schema.Record(Schema.String, Schema.Array(Schema.String));
 
 const AlternativeList = Schema.Array(Schema.Json);
 
-const Declared = Schema.Struct({ openapi: Schema.String });
-
 const flowRules = new Map([
   [
     "authorizationCode",
@@ -123,10 +122,7 @@ const acquisitionHint = (permanent: boolean): string =>
     : "The generated CLI does not acquire tokens. Supply an access token obtained elsewhere.";
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
-  const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
+  const openapi = Option.getOrElse(declaredOpenapi(resolution.value), () => "unknown");
 
   return makeDiagnostic({
     code: finding.code,

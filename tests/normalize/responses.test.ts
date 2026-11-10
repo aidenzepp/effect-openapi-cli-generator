@@ -58,6 +58,14 @@ const ok: Members = { description: "ok" };
 const described = (...names: readonly string[]): Members =>
   Object.fromEntries(names.map((name) => [name, ok]));
 
+// One key alone: its built case, its refusal code, or skipped (no case and no diagnostic).
+const keyOutcome = (key: string) => {
+  const result = normalize("3.1", { [key]: ok });
+  const [built] = keys(result);
+
+  return built ?? codes(result)[0] ?? "skipped";
+};
+
 describe("response keys", () => {
   test("an explicit code, a range and default become their key kinds in member order", () => {
     // JavaScript lists integer-like keys first and ascending, so 200 precedes 404 here.
@@ -112,6 +120,32 @@ describe("response keys", () => {
     const result = Effect.runSync(normalizeResponses(resolution, responsesPointer));
 
     expect(result).toEqual({ diagnostics: [], responses: [] });
+  });
+
+  test("response keys classify by the exact grammar", () => {
+    const expected = {
+      "": "RSS-06/invalid-key",
+      " 200": "RSS-06/invalid-key",
+      "007": "RSS-10/status-out-of-range",
+      "099": "RSS-10/status-out-of-range",
+      "100": { code: 100 },
+      "1XX": { range: 1 },
+      "1xx": "RSS-06/invalid-key",
+      "200 ": "RSS-06/invalid-key",
+      "2xx": "RSS-06/invalid-key",
+      "599": { code: 599 },
+      "5XX": { range: 5 },
+      "600": "RSS-10/status-out-of-range",
+      "6XX": "RSS-06/invalid-key",
+      "999": "RSS-10/status-out-of-range",
+      DEFAULT: "RSS-06/invalid-key",
+      "X-note": "RSS-06/invalid-key",
+      default: "default",
+      "x-note": "skipped",
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((key) => [key, keyOutcome(key)]));
+
+    expect(actual).toEqual(expected);
   });
 });
 
