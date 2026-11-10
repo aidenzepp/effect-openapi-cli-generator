@@ -1,5 +1,6 @@
 import { Array as Arr, Context, Layer, Order, Redacted, Ref } from "effect";
 import { Base64 } from "effect/encoding";
+import { UrlParams } from "effect/http";
 import type { Credential } from "./auth.ts";
 
 /**
@@ -19,8 +20,15 @@ export type ScrubEntry = Credential | Secret;
 
 const isSecret = (entry: ScrubEntry): entry is Secret => "kind" in entry;
 
+/**
+ * The one placeholder grammar: bare `<redacted>`, or `<redacted:label>` for a scheme or secret
+ * label. Every runtime module writes and matches the placeholder through this builder.
+ */
+export const redactedPlaceholder = (label?: string): string =>
+  `<redacted${label === undefined || label === "" ? "" : `:${label}`}>`;
+
 const placeholderOf = (entry: ScrubEntry): string =>
-  `<redacted:${isSecret(entry) ? entry.label : entry.scheme}>`;
+  redactedPlaceholder(isSecret(entry) ? entry.label : entry.scheme);
 
 /**
  * The values the run recorded, so the final catch scrubs what the command handler chose: the
@@ -47,8 +55,8 @@ export const runCredentialsLayer: Layer.Layer<RunCredentials> = Layer.effect(Run
 export const queryWireForm = (text: string): string =>
   encodeURIComponent(text).replaceAll("'", "%27");
 
-const searchParamsForm = (text: string): string =>
-  new URLSearchParams([["", text]]).toString().slice(1);
+// `UrlParams.toString` writes `URLSearchParams` form, the form `HttpBody.urlParams` puts on the wire.
+const searchParamsForm = (text: string): string => UrlParams.toString([["", text]]).slice(1);
 
 /**
  * A lone surrogate (any \p{Cs} unit), which has no UTF-8 form; the one test every runtime module
@@ -180,7 +188,7 @@ const byStartThenLongest = Order.combine(
  * such as a server echoing `<redacted:` + credential + `>`, is ordinary input.
  */
 const placeholderTokens = (text: string, entries: readonly ScrubEntry[]): readonly Covered[] =>
-  Arr.dedupe(["<redacted>", ...entries.map(placeholderOf)]).flatMap((placeholder) => {
+  Arr.dedupe([redactedPlaceholder(), ...entries.map(placeholderOf)]).flatMap((placeholder) => {
     const found: Covered[] = [];
 
     for (let at = text.indexOf(placeholder); at !== -1; at = text.indexOf(placeholder, at + 1)) {

@@ -20,7 +20,7 @@ import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
 import { StdinClaim, decodeUtf8, readBounded, stdinOrFile, stripLineEnd } from "./input.ts";
-import { loneSurrogate } from "./redact.ts";
+import { loneSurrogate, redactedPlaceholder } from "./redact.ts";
 import { cookieOctets, headerValueBreaks } from "./serialize.ts";
 
 /**
@@ -899,7 +899,7 @@ export const attach =
 /**
  * The placeholder `--dry-run` writes for a scheme's credential (design 7.5).
  */
-export const placeholder = (scheme: string): string => `<redacted:${scheme}>`;
+export const placeholder = (scheme: string): string => redactedPlaceholder(scheme);
 
 // Write the placeholder where the credential would go, with the scheme's prefix (`Bearer`,
 // `Basic`); the value, if any, is never written.

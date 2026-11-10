@@ -35,7 +35,7 @@ import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
-import { queryWireForm } from "./redact.ts";
+import { queryWireForm, redactedPlaceholder } from "./redact.ts";
 import { mapClientError } from "./response.ts";
 
 /**
@@ -854,7 +854,7 @@ export const verboseSetting = GlobalFlag.Setting("verbose")({
 });
 
 // A name-redacted value, from `Headers.CurrentRedactedNames` or `UrlParams.CurrentRedactedNames`.
-const redactedValue = "<redacted>";
+const redactedValue = redactedPlaceholder();
 
 // A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
 const decodedName = (raw: string): string =>
