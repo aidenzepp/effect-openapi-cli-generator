@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
+import type { Digest } from "effect/crypto";
 import { pathToFileURL } from "node:url";
 import { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
@@ -217,7 +218,7 @@ const walkLimit = (path: string) => refusePair("REF-16/walk-limit", { path, uri:
 export const resolveUnderRoot = (
   root: string,
   relative: string,
-): Effect.Effect<string, LoadRefusal, FileSystem.FileSystem> =>
+): Effect.Effect<string, LoadRefusal, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* resolve() {
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
@@ -274,7 +275,7 @@ const preloadRoot = (
 
     const isSpecName = (name: string) => refRootExtensions.has(path.extname(name).toLowerCase());
 
-    type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+    type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Path.Path>;
 
     const walk = (directory: string, depth: number): Step => {
       const enter = (real: string): Step => {
@@ -378,7 +379,7 @@ const preloadRoot = (
 export const makeDocumentSet = (
   pairs: readonly DocumentPair[],
   options: DocumentSetOptions = {},
-): Effect.Effect<DocumentSet, LoadRefusal, FileSystem.FileSystem> =>
+): Effect.Effect<DocumentSet, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest> =>
   Effect.gen(function* load() {
     const loading: Loading = { documents: new Map(), entry: options.entry };
 

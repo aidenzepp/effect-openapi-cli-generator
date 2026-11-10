@@ -1,4 +1,5 @@
 import nodePath from "node:path";
+import { BunCrypto } from "@effect/platform-bun";
 import { Data, Effect, FileSystem, Path, Schema } from "effect";
 import type { PlatformError, Scope } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
@@ -107,7 +108,7 @@ export const generateFixture = (
         strict: false,
       },
       { document: documentFor(fixture.configPath), path: fixture.configPath },
-    );
+    ).pipe(Effect.provide(BunCrypto.layerDigest));
     yield* Effect.forEach(
       fixture.authorFiles ?? [],
       (file) => {

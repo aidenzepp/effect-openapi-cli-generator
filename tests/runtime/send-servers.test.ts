@@ -1,6 +1,6 @@
 /* oxlint-disable unicorn/no-array-for-each -- Sink.forEach is the Effect sink, not Array#forEach */
 import { describe, expect, test } from "bun:test";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
   ConfigProvider,
   Effect,
@@ -102,7 +102,7 @@ const emitted = await Effect.runPromise(
         servers: yield* fs.readFileString(path.join(out, "src/api/servers.ts")),
       };
     }),
-  ).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+  ).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest))),
 );
 
 // The `boundOrigins` strings of the exported const `name` in an emitted module.

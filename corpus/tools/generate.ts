@@ -1,5 +1,5 @@
-import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Array as Arr, Effect, FileSystem, Path, Schema } from "effect";
+import { BunCrypto, BunRuntime, BunServices } from "@effect/platform-bun";
+import { Array as Arr, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
 import { generate } from "../../src/generate.ts";
@@ -130,5 +130,9 @@ const main = (raw: string | undefined) =>
   });
 
 if (import.meta.main) {
-  BunRuntime.runMain(main(process.argv[2]).pipe(Effect.provide(BunServices.layer)));
+  BunRuntime.runMain(
+    main(process.argv[2]).pipe(
+      Effect.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layerDigest)),
+    ),
+  );
 }

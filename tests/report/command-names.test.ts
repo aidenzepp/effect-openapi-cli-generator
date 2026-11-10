@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
@@ -17,7 +17,7 @@ const generator = {
   tsconfig: Schema.decodeUnknownSync(Schema.Json)(generatorTsconfig),
 };
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const decodeReport = Schema.decodeUnknownSync(Schema.fromJsonString(GenerationReport));
 

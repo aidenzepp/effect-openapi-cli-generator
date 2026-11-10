@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, FileSystem, Layer, Path, Predicate, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
@@ -156,7 +156,9 @@ const run = (strict: boolean): Promise<Observed> =>
         report: yield* read("generation-report.json"),
         written: yield* fs.exists(out),
       };
-    }).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest)),
+    ),
   );
 
 const RunFailure = Schema.Struct({

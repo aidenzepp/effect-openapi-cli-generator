@@ -1,5 +1,6 @@
 import { Array as Arr, Data, Effect, FileSystem, Option, Order, Schema } from "effect";
 import type { Path, PlatformError, Stream, Types } from "effect";
+import type { Digest } from "effect/crypto";
 import { stringLiteral } from "./emit/escape.ts";
 import { emitApi } from "./emit/api.ts";
 import type { ApiEmitError } from "./emit/api.ts";
@@ -535,7 +536,11 @@ const analyze = (
 export const generate = (
   input: GenerateInput,
   config: GenerateConfig,
-): Effect.Effect<GenerateResult, GenerateError, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<
+  GenerateResult,
+  GenerateError,
+  FileSystem.FileSystem | Path.Path | Digest.Digest
+> =>
   Effect.gen(function* generateGen() {
     const { document } = input;
     const configDocument = config.document;

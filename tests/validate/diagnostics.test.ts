@@ -1,5 +1,6 @@
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Array as Arr, Effect, Order, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import { rewriteDialect } from "../../src/validate/dialect.ts";
 import { groupErrors } from "../../src/validate/locations.ts";
@@ -10,7 +11,10 @@ const uri = Schema.decodeUnknownSync(DocumentUri)("https://example.com/openapi.j
 
 const dialectBase = "https://spec.openapis.org/oas/3.1/dialect/base";
 
-const diagnose = (document: Json) => Effect.runPromise(diagnoseDocument(document, uri));
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
+
+const diagnose = (document: Json) =>
+  Effect.runPromise(diagnoseDocument(document, uri).pipe(Effect.provide(layer)));
 
 const ok = { "200": { description: "ok" } };
 

@@ -1,5 +1,6 @@
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { EncodingRule } from "../../src/model/entities.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -10,6 +11,8 @@ import { diagnoseDocument } from "../../src/validate/index.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
+
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const openapi: Record<Line, string> = { "3.0": "3.0.3", "3.1": "3.1.1", "3.2": "3.2.0" };
 
@@ -225,7 +228,9 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
 describe("ENC-41: 3.1 keywords in a 3.0 multipart schema", () => {
   test("ENC-41: contentEncoding in a 3.0 part schema stays refused by 3.0 schema validation", async () => {
     const body = multipart({ file: { contentEncoding: "identity", type: "string" } });
-    const diagnosis = await Effect.runPromise(diagnoseDocument(documentOf("3.0", body), entry));
+    const diagnosis = await Effect.runPromise(
+      diagnoseDocument(documentOf("3.0", body), entry).pipe(Effect.provide(layer)),
+    );
 
     expect(
       diagnosis.refusals.map(({ diagnostic }) => ({
