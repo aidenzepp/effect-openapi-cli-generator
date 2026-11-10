@@ -1,4 +1,5 @@
-import { Array as Arr, Data, Effect, Order, Schema } from "effect";
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
+import { Array as Arr, Effect, Order, Schema } from "effect";
 import { JsonPointer } from "../model/brands.ts";
 
 type Pointer = typeof JsonPointer.Type;
@@ -24,9 +25,10 @@ export interface ErrorGroup {
 /**
  * An `instanceLocation` is not `#` followed by a percent-encoded JSON Pointer.
  */
-export class InvalidInstanceLocation extends Data.TaggedError("InvalidInstanceLocation")<{
-  readonly location: string;
-}> {}
+export class InvalidInstanceLocation extends Schema.TaggedError<InvalidInstanceLocation>()(
+  "InvalidInstanceLocation",
+  { location: Schema.String },
+) {}
 
 const decodePointer = Schema.decodeUnknownEffect(JsonPointer);
 
@@ -62,6 +64,36 @@ const isWithin = (ancestor: string, descendant: string): boolean =>
 
 const byPointer = Order.mapInput(Order.String, (located: Located) => located.pointer);
 
+const samePointer = (self: Located, that: Located): boolean => self.pointer === that.pointer;
+
+// The first deepest location in pointer order that lies within a context error owns it.
+const groupLocated = (located: readonly Located[]): readonly ErrorGroup[] => {
+  const deepestItems = new Set(
+    located.filter(
+      (item) =>
+        !located.some(
+          (other) => other.pointer !== item.pointer && isWithin(item.pointer, other.pointer),
+        ),
+    ),
+  );
+  const leaves = Arr.sort(Arr.dedupeWith(deepestItems, samePointer), byPointer);
+  const unitsAt = Arr.groupBy(located, (item) => item.pointer);
+  const contextOf = (leaf: Located): readonly ErrorUnit[] =>
+    located
+      .filter(
+        (item) =>
+          !deepestItems.has(item) &&
+          leaves.find((other) => isWithin(item.pointer, other.pointer)) === leaf,
+      )
+      .map((item) => item.unit);
+
+  return leaves.map((leaf): ErrorGroup => ({
+    context: contextOf(leaf),
+    deepest: (unitsAt[leaf.pointer] ?? []).map((item) => item.unit),
+    pointer: leaf.pointer,
+  }));
+};
+
 /**
  * Groups errors under their deepest decoded location, in pointer order. An error at a location
  * with a deeper error beneath it is context of the first such deepest location.
@@ -69,39 +101,10 @@ const byPointer = Order.mapInput(Order.String, (located: Located) => located.poi
 export const groupErrors = (
   errors: readonly ErrorUnit[],
 ): Effect.Effect<readonly ErrorGroup[], InvalidInstanceLocation> =>
-  Effect.all(
-    errors.map((unit) =>
-      decodeLocation(unit.instanceLocation).pipe(
-        Effect.map((pointer): Located => ({ pointer, unit })),
-      ),
+  // Effect.forEach takes (items, f); it is not an array method with a thisArg.
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument
+  Effect.forEach(errors, (unit) =>
+    decodeLocation(unit.instanceLocation).pipe(
+      Effect.map((pointer): Located => ({ pointer, unit })),
     ),
-  ).pipe(
-    Effect.map((located) => {
-      const isDeepest = (item: Located): boolean =>
-        !located.some(
-          (other) => other.pointer !== item.pointer && isWithin(item.pointer, other.pointer),
-        );
-      const deepestItems = located.filter(isDeepest);
-      const leaves = Arr.sort(
-        deepestItems.filter(
-          (item, index) =>
-            deepestItems.findIndex((other) => other.pointer === item.pointer) === index,
-        ),
-        byPointer,
-      );
-      const contextOf = (leaf: Located): readonly ErrorUnit[] =>
-        located
-          .filter(
-            (item) =>
-              !isDeepest(item) &&
-              leaves.find((other) => isWithin(item.pointer, other.pointer)) === leaf,
-          )
-          .map((item) => item.unit);
-
-      return leaves.map((leaf): ErrorGroup => ({
-        context: contextOf(leaf),
-        deepest: located.filter((item) => item.pointer === leaf.pointer).map((item) => item.unit),
-        pointer: leaf.pointer,
-      }));
-    }),
-  );
+  ).pipe(Effect.map(groupLocated));

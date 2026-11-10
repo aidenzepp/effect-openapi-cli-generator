@@ -1,6 +1,7 @@
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import type { Schema } from "effect";
 import { diagnosticOf } from "../model/diagnostic.ts";
+import { parsePointerResult } from "../model/pointer.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Line } from "./dispatch.ts";
@@ -106,7 +107,7 @@ export const knownDisagreements: readonly Disagreement[] = [
  * Finds the entry that explains every deepest error of a group, or none.
  */
 export const matchDisagreement = (line: Line, group: ErrorGroup): Disagreement | undefined => {
-  const tokens = group.pointer.split("/").slice(1);
+  const tokens = Result.getOrElse(parsePointerResult(group.pointer), () => []);
 
   return knownDisagreements.find(
     ({ lines, match }) =>
