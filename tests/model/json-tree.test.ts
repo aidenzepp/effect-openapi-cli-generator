@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { isObject, stringMember } from "../../src/model/json-tree.ts";
+import { Schema } from "effect";
+import { foldJson, isObject, stringMember } from "../../src/model/json-tree.ts";
+import type { JsonFold } from "../../src/model/json-tree.ts";
 import type { Json } from "../../src/model/pointer.ts";
 
 describe("isObject", () => {
@@ -41,5 +43,57 @@ describe("stringMember", () => {
     for (const value of values) {
       expect(stringMember(value, "name")).toBeUndefined();
     }
+  });
+});
+
+describe("foldJson", () => {
+  // Records every node as "<kind> <tokens joined by />" in the order the fold returns them.
+  const visits: JsonFold<readonly string[]> = {
+    array: (items, tokens) => [...items.flat(), `array /${tokens.join("/")}`],
+    leaf: (value, tokens) => [`leaf /${tokens.join("/")} ${JSON.stringify(value)}`],
+    object: (members, tokens) => [
+      ...members.flatMap(({ folded, key }) => [`key ${key}`, ...folded]),
+      `object /${tokens.join("/")}`,
+    ],
+  };
+
+  test("foldJson visits members in document order", () => {
+    // Parsed from text so the keys keep an unsorted document order.
+    const value = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
+      '{"z": 1, "a": [true, {"y": null, "b": "x"}], "m": []}',
+    );
+
+    expect(foldJson(value, visits)).toEqual([
+      "key z",
+      "leaf /z 1",
+      "key a",
+      "leaf /a/0 true",
+      "key y",
+      "leaf /a/1/y null",
+      "key b",
+      'leaf /a/1/b "x"',
+      "object /a/1",
+      "array /a",
+      "key m",
+      "array /m",
+      "object /",
+    ]);
+  });
+
+  test("starts from the given tokens and passes a member's own value", () => {
+    const keys: JsonFold<readonly string[]> = {
+      array: (items) => items.flat(),
+      leaf: () => [],
+      object: (members, tokens) =>
+        members.flatMap(({ folded, key, value }) => [
+          `/${[...tokens, key].join("/")}=${JSON.stringify(value)}`,
+          ...folded,
+        ]),
+    };
+
+    expect(foldJson({ a: { b: 2 } }, keys, ["root", "0"])).toEqual([
+      '/root/0/a={"b":2}',
+      "/root/0/a/b=2",
+    ]);
   });
 });
