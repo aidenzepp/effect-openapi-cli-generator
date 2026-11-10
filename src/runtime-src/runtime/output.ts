@@ -1,6 +1,7 @@
 import type { PlatformError } from "effect";
 import {
   Array as Arr,
+  Bytes,
   Cause,
   Config,
   Console,
@@ -549,18 +550,6 @@ const takeBytes = <E, R>(
     Stream.takeWhile((chunk) => chunk.length > 0),
   );
 
-const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
-  const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
-  let at = 0;
-
-  for (const chunk of chunks) {
-    joined.set(chunk, at);
-    at += chunk.length;
-  }
-
-  return joined;
-};
-
 /**
  * Read the excerpt of an error response body for `ApiResponseError.bodyExcerpt`, bounded by
  * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
@@ -580,7 +569,7 @@ export const readExcerpt = <E, R>(
     }
 
     const budget = maxBytes + longestFormBytes(credentials);
-    const read = concatBytes(yield* Stream.runCollect(takeBytes(body, budget)));
+    const read = yield* Stream.mkUint8Array(takeBytes(body, budget));
     const text =
       read.length < budget
         ? new TextDecoder().decode(read)
@@ -1689,7 +1678,7 @@ class MultipartSummary {
   }
 
   push(chunk: Uint8Array): readonly Uint8Array[] {
-    this.pending = concatBytes([this.pending, chunk]);
+    this.pending = Bytes.concat([this.pending, chunk]);
 
     return this.drain(false);
   }
@@ -2130,7 +2119,9 @@ export const send =
 
       const { table: security } = yield* Schemes;
       // The base URL was validated when it was selected, so it parses.
-      const { origin: baseOrigin } = yield* Effect.orDie(Effect.fromResult(Url.fromString(baseUrl)));
+      const { origin: baseOrigin } = yield* Effect.orDie(
+        Effect.fromResult(Url.fromString(baseUrl)),
+      );
       const gate = {
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
         baseOrigin,
