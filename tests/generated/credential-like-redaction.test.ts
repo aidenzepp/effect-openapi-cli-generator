@@ -133,6 +133,18 @@ const redactedParameters = [
     rule: "x-sensitive: true behind a two-hop alias",
     value: "als-c6f2849e",
   },
+  {
+    flag: "--x-any",
+    name: "x-any",
+    rule: "x-sensitive: true behind an anyOf branch",
+    value: "any-4d8b2e61",
+  },
+  {
+    flag: "--x-one",
+    name: "x-one",
+    rule: "x-sensitive: true behind a oneOf branch",
+    value: "one-b07c95f3",
+  },
 ] as const;
 
 const ordinary = { flag: "--x-request-id", name: "x-request-id", value: "req-2e6d8f15" };
@@ -225,6 +237,18 @@ const redactedPartHeaders = [
     name: "X-Part-Alias",
     rule: "x-sensitive: true behind a two-hop alias",
     value: "pals-0e9b63d5",
+  },
+  {
+    flag: "--note-x-part-any",
+    name: "X-Part-Any",
+    rule: "x-sensitive: true behind an anyOf branch",
+    value: "pany-6a13f0c8",
+  },
+  {
+    flag: "--note-x-part-one",
+    name: "X-Part-One",
+    rule: "x-sensitive: true behind a oneOf branch",
+    value: "pone-e92d47b1",
   },
 ] as const;
 
