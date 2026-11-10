@@ -1,12 +1,20 @@
-import { Array as Arr, Effect, Option, Order, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Option,
+  Order,
+  pipe,
+  Predicate,
+  Record,
+  Schema,
+  UndefinedOr,
+} from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { Diagnostic, diagnosticOf, makeDiagnostic } from "../model/diagnostic.ts";
 import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body, EncodingRule } from "../model/entities.ts";
 import type { DiscriminatorHint } from "../model/entities.ts";
-import { nodeAt as jsonAt } from "../model/json-tree.ts";
 import { childPointer, formatPointer, isPointerWithin } from "../model/pointer.ts";
-import type { Json } from "../model/pointer.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
@@ -14,7 +22,7 @@ import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/in
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { docsOf, sanitize } from "./docs.ts";
-import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { childKey, follow, nodeIn, nodeOption, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
 import {
   authorChoiceCodes,
@@ -1050,7 +1058,7 @@ const nestedEntries = (
     byName === undefined
       ? []
       : members.properties.map(([name, schema]): NestedEntry => {
-          const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+          const explicit = Option.getOrUndefined(Record.get(byName, name));
 
           return {
             actual: explicit === undefined ? schema : childKey(actual, "encoding", name),
@@ -1259,7 +1267,10 @@ const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResul
   const label = targetLabel(input.target);
   const found =
     declaredTransfer(ctx.line, label, facts) ??
-    (facts.items === undefined ? undefined : declaredTransfer(ctx.line, label, facts.items)) ??
+    pipe(
+      facts.items,
+      UndefinedOr.map((items) => declaredTransfer(ctx.line, label, items)),
+    ) ??
     noTransfer;
   if (input.depth === 0 || found.encoding === undefined) {
     return found;
@@ -1307,23 +1318,29 @@ const transferConflict = Effect.fnUntraced(function* transferConflict(
   );
   const isString = Schema.is(Schema.String);
   const declared = {
-    const: schema.const === undefined ? undefined : [schema.const].filter(isString),
+    const: pipe(
+      schema.const,
+      UndefinedOr.map((value) => [value].filter(isString)),
+    ),
     enum: schema.enum?.filter(isString),
   };
   const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
 
-  return keyword === undefined
-    ? undefined
-    : dropping(
+  return pipe(
+    keyword,
+    UndefinedOr.map((field) =>
+      dropping(
         refusal(
           "ENC-39/conflicting-transfer-encoding",
           transferAnchor(ctx.line),
           "Encoding header Content-Transfer-Encoding",
           `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
-          childKey(at, keyword),
+          childKey(at, field),
           "Remove the header, or let its schema admit base64",
         ),
-      );
+      ),
+    ),
+  );
 });
 
 // A nesting part's rules on its rule: `nested` is present whenever the part nests, so an item rule
@@ -1683,7 +1700,7 @@ const propertyInputs = (
   const byName = media.node.encoding ?? {};
 
   return members.properties.map(([name, schema]): RuleInput => {
-    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+    const explicit = Option.getOrUndefined(Record.get(byName, name));
 
     return {
       actual: explicit === undefined ? schema : childKey(media.home, "encoding", name),
@@ -2499,12 +2516,6 @@ type Hint = typeof DiscriminatorHint.Encoded;
 
 type Branch = Hint["branches"][number];
 
-const jsonIn = (resolution: Resolution, key: CanonicalKey): Json | undefined => {
-  const document = resolution.documents.get(key.document);
-
-  return document === undefined ? undefined : jsonAt(document, key.pointer);
-};
-
 // Whether an element-scope refusal of check names the Discriminator Object of `root`: DSC-03,
 // 04, 05, 09 and 10 all sit at or below it, so none is listed by code.
 const discriminatorRefused = (findings: readonly Diagnostic[], root: CanonicalKey): boolean => {
@@ -2572,7 +2583,7 @@ const hintAt = (
 ): Hint | undefined => {
   const root = settle(resolution, site);
   const node = Option.getOrUndefined(
-    Schema.decodeUnknownOption(Discriminated)(jsonIn(resolution, root)),
+    Schema.decodeUnknownOption(Discriminated)(Option.getOrUndefined(nodeOption(resolution, root))),
   );
   if (node === undefined || discriminatorRefused(checkFindings, root)) {
     return undefined;
@@ -2690,8 +2701,8 @@ export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
     toDiagnostics(ctx, result.findings, childKey(target, "content", keys[index] ?? "")),
   );
   const diagnostics = placed.flat();
-  const alternatives = results.flatMap((result) =>
-    result.alternative === undefined ? [] : [result.alternative],
+  const alternatives = Arr.getSomes(
+    results.map((result) => Option.fromUndefinedOr(result.alternative)),
   );
   if (alternatives.length === 0) {
     return { _tag: "Refused", diagnostics, required };

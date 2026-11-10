@@ -8,9 +8,11 @@ import {
   Order,
   pipe,
   Predicate,
+  Record,
   Result,
   Schema,
   SchemaRepresentation,
+  UndefinedOr,
 } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { makeDiagnostic, sortDiagnostics } from "../model/diagnostic.ts";
@@ -25,7 +27,7 @@ import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
-import { nodeIn, referenceIn } from "./document-set.ts";
+import { nodeIn, nodeOption, referenceIn } from "./document-set.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -138,8 +140,8 @@ const within = <A>(budget: Budget, value: A): Effect.Effect<A, SchemaBudgetExcee
     ? Effect.fail(new SchemaBudgetExceeded({ limit: budget.limit }))
     : Effect.succeed(value);
 
-const member = (node: JsonObject, key: string): Json | undefined =>
-  Object.hasOwn(node, key) ? node[key] : undefined;
+const member = (node: Record.ReadonlyRecord<string, Json>, key: string): Json | undefined =>
+  Option.getOrUndefined(Record.get(node, key));
 
 const strings = (value: Json | undefined): readonly string[] =>
   isArray(value) ? value.filter(Predicate.isString) : [];
@@ -152,7 +154,7 @@ const sortedKeys = (map: ReadonlyMap<string, unknown>): readonly string[] =>
   Arr.sort([...map.keys()], byString);
 
 const tokensOf = (pointer: string): readonly string[] | undefined =>
-  Result.getSuccess(parsePointerResult(pointer)).pipe(Option.getOrUndefined);
+  Result.getOrUndefined(parsePointerResult(pointer));
 
 const childAt = (node: Json | undefined, token: string): Json | undefined => {
   if (isObject(node)) {
@@ -526,7 +528,7 @@ const factsOf = (node: Json): SchemaFacts => {
     format: format === "binary" || format === "byte" ? format : undefined,
     items: member(object, "items") !== undefined || member(object, "prefixItems") !== undefined,
     properties: isObject(properties) ? Object.keys(properties) : [],
-    reference: ref === undefined ? undefined : referenceKey(ref),
+    reference: pipe(ref, UndefinedOr.map(referenceKey)),
     required: strings(member(object, "required")),
     types: typesOf(object),
   };
@@ -636,8 +638,7 @@ export const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string 
     return target ?? own;
   }
 
-  const value = resolution.documents.get(site.document);
-  const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+  const node = Option.getOrUndefined(nodeOption(resolution, site));
 
   return isObject(node) && Object.keys(node).some(asserts) ? own : target;
 };
@@ -722,9 +723,8 @@ const refusedInSource = (
   const found: [string, CanonicalKey][] = [];
   for (const key of sortedKeys(sites)) {
     const site = sites.get(key) ?? { document: resolution.document, pointer: "" };
-    const value = resolution.documents.get(site.document);
     const tokens = tokensOf(site.pointer);
-    const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+    const node = Option.getOrUndefined(nodeOption(resolution, site));
     if (tokens !== undefined && node !== undefined) {
       const visit = (current: JsonObject, path: readonly string[]): void => {
         for (const keyword of Object.keys(current)) {
@@ -753,9 +753,8 @@ const holdsDynamicKeyword = (
   resolution: Resolution,
   at: CanonicalKey,
 ): DynamicScan => {
-  const value = resolution.documents.get(at.document);
   const tokens = tokensOf(at.pointer);
-  const node = value === undefined ? undefined : nodeAt(value, at.pointer);
+  const node = Option.getOrUndefined(nodeOption(resolution, at));
   if (tokens === undefined || node === undefined) {
     return { found: false, targets: [] };
   }
@@ -940,8 +939,11 @@ const isReadOnly = (definitions: ReadonlyMap<string, Json>, schema: Json | undef
   }
 
   const ref = stringMember(schema, "$ref");
-  const key = ref === undefined ? undefined : referenceKey(ref);
-  const target = key === undefined ? undefined : definitions.get(key);
+  const key = pipe(ref, UndefinedOr.map(referenceKey));
+  const target = pipe(
+    key,
+    UndefinedOr.map((name) => definitions.get(name)),
+  );
 
   return (
     member(schema, "readOnly") === true || (isObject(target) && member(target, "readOnly") === true)
@@ -1095,7 +1097,7 @@ const edgesOf = (budget: Budget, definitions: ReadonlyMap<string, Json>): readon
   for (const key of sortedKeys(definitions)) {
     forEachSchema(budget, definitions.get(key) ?? {}, inPlace, (node, path) => {
       const ref = stringMember(node, "$ref");
-      const to = ref === undefined ? undefined : referenceKey(ref);
+      const to = pipe(ref, UndefinedOr.map(referenceKey));
       if (to !== undefined && definitions.has(to)) {
         edges.push({ from: key, path, to });
       }
@@ -1647,7 +1649,7 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
     return "";
   }
 
-  let current = Result.getSuccess(evaluatePointerResult(value, base)).pipe(Option.getOrUndefined);
+  let current = Result.getOrUndefined(evaluatePointerResult(value, base));
   let consumed = 0;
   for (const token of path) {
     current = childAt(current, token);
@@ -1796,7 +1798,7 @@ const referencedKeys = (budget: Budget, node: Json): readonly string[] => {
   const keys: string[] = [];
   forEachSchema(budget, node, copyPositions, (current) => {
     const ref = stringMember(current, "$ref");
-    const key = ref === undefined ? undefined : referenceKey(ref);
+    const key = pipe(ref, UndefinedOr.map(referenceKey));
     if (key !== undefined) {
       keys.push(key);
     }

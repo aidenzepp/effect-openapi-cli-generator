@@ -495,7 +495,7 @@ const normalizeLevel = (
 
     return {
       diagnostics: built.diagnostics,
-      servers: built.server === undefined ? [] : [built.server],
+      servers: Arr.fromNullishOr(built.server),
     };
   }
 
@@ -526,7 +526,7 @@ const normalizeLevel = (
 
   return {
     diagnostics: built.flatMap((b) => b.diagnostics),
-    servers: built.flatMap((b) => (b.server === undefined ? [] : [b.server])),
+    servers: Arr.getSomes(built.map((b) => Option.fromUndefinedOr(b.server))),
   };
 };
 
@@ -580,7 +580,7 @@ export const boundOrigins = (servers: readonly Server[], context: ServersContext
     diagnostics: listed.flatMap((entry) => entry.diagnostics),
     origins: sortOrigins([
       ...servers.flatMap((server) => (server.accepted ? server.origins : [])),
-      ...listed.flatMap((entry) => (entry.origin === undefined ? [] : [entry.origin])),
+      ...Arr.getSomes(listed.map((entry) => Option.fromUndefinedOr(entry.origin))),
     ]),
   };
 };
