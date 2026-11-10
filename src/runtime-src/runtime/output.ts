@@ -1,3 +1,4 @@
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 import type { PlatformError } from "effect";
 import {
   Array as Arr,

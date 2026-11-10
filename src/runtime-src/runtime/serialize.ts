@@ -78,7 +78,6 @@ type Refusal = Effect.Effect<never, UsageError>;
  */
 const refuse = (message: string): Refusal => Effect.fail(new UsageError({ message }));
 
-
 const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefined, UsageError> => {
   if (value instanceof JsonNumber) {
     return isJsonNumberText(value.text)
@@ -2019,12 +2018,11 @@ export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
 const refusedNamesOf = (
   mediaType: string,
   refused: MediaDeclaration["refused"],
-): readonly string[] => {
-  return Option.fromNullishOr(refused).pipe(
+): readonly string[] =>
+  Option.fromNullishOr(refused).pipe(
     Option.flatMap((names) => Rec.get(names, mediaType)),
     Option.getOrElse((): readonly string[] => []),
   );
-};
 
 /**
  * Whether a sent pair name carries `field`: the name itself, or a bracketed or dotted name under
