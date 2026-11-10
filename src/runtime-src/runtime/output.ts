@@ -79,6 +79,7 @@ import {
   dropTrailingFragment,
   longestFormBytes,
   queryWireForm,
+  redactedPlaceholder,
   RunCredentials,
   scrub as scrubValues,
   scrubAround,
@@ -1952,7 +1953,7 @@ const dryRunUrl = (
   // A `Redacted` param is a value the runtime holds secret; it prints as `<redacted>`.
   const wire = (value: string | Redacted.Redacted): string => {
     if (Redacted.isRedacted(value)) {
-      return "<redacted>";
+      return redactedPlaceholder();
     }
 
     return placeholders.has(value) ? value : queryWireForm(value);
@@ -1979,7 +1980,7 @@ const dryRunUrl = (
         !placeholders.has(part.slice(equals + 1)) &&
         UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names);
 
-      return redacted ? `${part.slice(0, equals + 1)}<redacted>` : part;
+      return redacted ? `${part.slice(0, equals + 1)}${redactedPlaceholder()}` : part;
     });
 
   return `${url.slice(0, at + 1)}${query.join("&")}`;
@@ -2013,7 +2014,7 @@ const printDryRun = (
       }
 
       if (name.toLowerCase() !== "cookie") {
-        return exact.has(value) ? value : "<redacted>";
+        return exact.has(value) ? value : redactedPlaceholder();
       }
 
       return value
@@ -2023,10 +2024,10 @@ const printDryRun = (
         .map((pair) => {
           const equals = pair.indexOf("=");
           if (equals === -1) {
-            return "<redacted>";
+            return redactedPlaceholder();
           }
 
-          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=<redacted>`;
+          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=${redactedPlaceholder()}`;
         })
         .join("; ");
     };
