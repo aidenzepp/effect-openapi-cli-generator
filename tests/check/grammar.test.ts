@@ -472,8 +472,8 @@ describe("DSC discriminator rules", () => {
   test("a property every oneOf branch requires counts as required", () => {
     const members = pet({ propertyName: "kind" });
 
-    expect(check("3.1", members)).toEqual([
-      expect.objectContaining({ code: "DSC-09/property-not-required" }),
+    expect(check("3.1", members).map((diagnostic) => diagnostic.code)).toEqual([
+      "DSC-09/property-not-required",
     ]);
     expect(
       check("3.1", {
