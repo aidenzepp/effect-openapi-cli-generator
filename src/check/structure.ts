@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Predicate, Schema } from "effect";
 import { ComponentName, componentNamePattern, MethodToken, PathTemplate } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
@@ -307,6 +307,8 @@ const duplicateIdFindings = (operations: readonly Operation[]): readonly Finding
 
 const isMethodToken = Schema.is(MethodToken);
 
+const isPathTemplate = Schema.is(PathTemplate);
+
 const additionalKeyFindings = (operation: Operation): readonly Finding[] => {
   if (!operation.additional) {
     return [];
@@ -335,7 +337,7 @@ const templateFindings = (
   });
   const found = twins.map((twin) => at("PTH-04/template-identical", operation.pointer, [twin]));
   const names = expressionsOf(key);
-  if (Option.isNone(Schema.decodeUnknownOption(PathTemplate)(key))) {
+  if (!isPathTemplate(key)) {
     return [...found, at("PTH-07/invalid-path-key", operation.pointer)];
   }
 
@@ -463,5 +465,10 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
  * The spec-text checks on document, path and operation structure (design 3.4 rows 1 to 9): the
  * rules no schema expresses. Pure over the resolved document; every finding is a refusal.
  */
-export const checkStructure = (resolution: Resolution): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.all(findingsOf(resolution).map((finding) => toDiagnostic(resolution, finding)));
+export const checkStructure = Effect.fnUntraced(function* checkStructure(
+  resolution: Resolution,
+): Effect.fn.Return<readonly Diagnostic[]> {
+  return yield* Effect.forEach(findingsOf(resolution), (finding) =>
+    toDiagnostic(resolution, finding),
+  );
+});
