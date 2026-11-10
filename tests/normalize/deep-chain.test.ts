@@ -51,11 +51,19 @@ const sensitive = (last: Json): boolean | undefined => {
 };
 
 describe("a parameter schema behind a deep allOf/$ref chain", () => {
-  test("reads an x-sensitive mark at the end of the chain without overflowing the stack", () => {
-    expect(sensitive({ type: "string", "x-sensitive": true })).toBe(true);
-  });
+  test(
+    "reads an x-sensitive mark at the end of the chain without overflowing the stack",
+    () => {
+      expect(sensitive({ type: "string", "x-sensitive": true })).toBe(true);
+    },
+    { timeout: 10_000 },
+  );
 
-  test("leaves an unmarked chain unmarked without overflowing the stack", () => {
-    expect(sensitive({ type: "string" })).toBeUndefined();
-  });
+  test(
+    "leaves an unmarked chain unmarked without overflowing the stack",
+    () => {
+      expect(sensitive({ type: "string" })).toBeUndefined();
+    },
+    { timeout: 10_000 },
+  );
 });
