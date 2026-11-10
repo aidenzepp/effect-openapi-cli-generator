@@ -1,5 +1,6 @@
 import { Array as Arr, Data, Effect, FileSystem, Option, Order, Schema } from "effect";
 import type { Path, PlatformError, Stream, Types } from "effect";
+import type { Digest } from "effect/crypto";
 import { stringLiteral } from "./emit/escape.ts";
 import { emitApi } from "./emit/api.ts";
 import type { ApiEmitError } from "./emit/api.ts";
@@ -221,7 +222,7 @@ const realPathOf = (path: string) =>
 export const setMembers = (
   entry: { readonly document: Document; readonly source: SpecSource },
   documents: DocumentSet | undefined,
-): Effect.Effect<readonly ResolveMember[], LoadRefusal, FileSystem.FileSystem> =>
+): Effect.Effect<readonly ResolveMember[], LoadRefusal, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* members() {
     const found: ResolveMember[] = [];
 
@@ -535,7 +536,11 @@ const analyze = (
 export const generate = (
   input: GenerateInput,
   config: GenerateConfig,
-): Effect.Effect<GenerateResult, GenerateError, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<
+  GenerateResult,
+  GenerateError,
+  FileSystem.FileSystem | Path.Path | Digest.Digest
+> =>
   Effect.gen(function* generateGen() {
     const { document } = input;
     const configDocument = config.document;
@@ -606,14 +611,16 @@ export const generate = (
     const { version } = yield* Schema.decodeUnknownEffect(GeneratorVersion)(
       input.generator.packageJson,
     ).pipe(Effect.mapError(() => new PackageEmitError({ reason: "invalid-generator-source" })));
+    const documentSha256 = yield* sha256Hex(bytes);
+    const configSha256 = yield* sha256Hex(author.bytes);
     const report = makeGenerationReport({
       acceptedServers: acceptedServers(api),
       commandNames: commandNames(commands, cli.refusals),
       diagnostics,
       inputs: [
-        { document, sha256: sha256Hex(bytes) },
+        { document, sha256: documentSha256 },
         ...memberInputs(document, input.documents),
-        { document: configDocument, sha256: sha256Hex(author.bytes) },
+        { document: configDocument, sha256: configSha256 },
       ],
       nonStandard: nonStandardEntries(api, order),
       // The names plan reports renames as notices only; it carries no from/to pairs yet.

@@ -3,8 +3,11 @@ import { Effect, Exit, Schema } from "effect";
 import { AuthorConfig, decodeAuthorConfig } from "../../src/model/author-config.ts";
 import type { AuthorConfigContext } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///work/author.json");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const context: AuthorConfigContext = { document, foldedTitle: "example-api" };
 
@@ -75,7 +78,7 @@ describe("decodeAuthorConfig", () => {
     const [only, ...rest] = refusals(without("binName"));
     expect(rest).toEqual([]);
     expect(only?.code).toBe("CFG-1/missing-bin-name");
-    expect(only?.row).toBe("CFG-1");
+    expect(only?.row).toBe(rowId("CFG-1"));
     expect(only?.scope).toBe("document");
     expect(only?.severity).toBe("refusal");
     expect(only?.document).toBe(document);

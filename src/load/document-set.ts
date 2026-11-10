@@ -1,5 +1,5 @@
 import { Array as Arr, Effect, FileSystem, Option, Order, Path, Schema } from "effect";
-import { pathToFileURL } from "node:url";
+import type { Digest } from "effect/crypto";
 import { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
 import { retrievalBase } from "../resolve/base-uri.ts";
@@ -68,6 +68,8 @@ const messages = {
 
 const decodeUri = Schema.decodeUnknownOption(DocumentUri);
 
+const isDocumentUri = Schema.is(DocumentUri);
+
 /**
  * Splits `<uri>=<path>` at the first `=`. A value with no `=` yields a pair with an empty path,
  * which the loader then refuses as unreadable.
@@ -80,10 +82,21 @@ export const parseDocumentPair = (value: string): DocumentPair => {
     : { path: value.slice(split + 1), uri: value.slice(0, split) };
 };
 
-const refusePair = (code: keyof typeof messages, pair: DocumentPair) =>
-  makeDiagnostic({
+/**
+ * Refuses `pair` with `code`. The diagnostic's document is the pair's URI when it is absolute, and
+ * otherwise the `file:` URL of its path; a path `toFileUrl` rejects is a defect, as before.
+ */
+const refusePair = Effect.fnUntraced(function* refusePair(
+  code: keyof typeof messages,
+  pair: DocumentPair,
+): Effect.fn.Return<never, LoadRefusal, Path.Path> {
+  const path = yield* Path.Path;
+  const document = isDocumentUri(pair.uri)
+    ? pair.uri
+    : (yield* path.toFileUrl(pair.path).pipe(Effect.orDie)).href;
+  const diagnostic = yield* makeDiagnostic({
     code,
-    document: decodeUri(pair.uri)._tag === "Some" ? pair.uri : pathToFileURL(pair.path).href,
+    document,
     element: "document",
     hint: pair.path,
     message: messages[code],
@@ -92,7 +105,10 @@ const refusePair = (code: keyof typeof messages, pair: DocumentPair) =>
     scope: "document",
     severity: "refusal",
     specSection: "https://spec.openapis.org/oas/v3.2.1.html#establishing-the-base-uri",
-  }).pipe(Effect.flatMap((diagnostic) => Effect.fail(new LoadRefusal({ diagnostic }))));
+  });
+
+  return yield* new LoadRefusal({ diagnostic });
+});
 
 /**
  * The `REF-16/duplicate-uri` refusal for `pair`, whose `uri` is the retrieval URI already in use.
@@ -146,47 +162,56 @@ const overflows = ({ documents, entry }: Loading, uri: string): boolean => {
   return uri !== entry && documents.size + entrySlot >= maxDocuments;
 };
 
-const loadPair = (
+/**
+ * Reads, parses and hashes the file of `pair` under `document`; a refusal names the pair's path.
+ */
+const readMember = Effect.fnUntraced(
+  function* readMember(
+    pair: DocumentPair,
+    document: Document,
+    verify?: VerifyOpened,
+  ): Effect.fn.Return<SetMember, LoadRefusal, FileSystem.FileSystem | Digest.Digest> {
+    const bytes = yield* verify === undefined
+      ? readFileBounded(pair.path, defaultLimits, document)
+      : readMemberBounded(pair.path, defaultLimits, document, verify);
+    const loaded = yield* loadBytes(bytes, { document });
+    const sha256 = yield* sha256Hex(bytes);
+
+    return { ...loaded, path: pair.path, sha256 };
+  },
+  (effect, pair) => effect.pipe(Effect.catchTag("LoadRefusal", withPathOf(pair.path))),
+);
+
+/**
+ * Adds `pair` to `loading`. The duplicate and budget checks read `loading` when the Effect runs,
+ * and the caller runs pairs in order, so each check sees every member loaded before it; no `Ref`
+ * or `Effect.reduce` is needed.
+ */
+const loadPair = Effect.fnUntraced(function* loadPair(
   loading: Loading,
   pair: DocumentPair,
   verify?: VerifyOpened,
-): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> => {
+): Effect.fn.Return<void, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest> {
   const uri = decodeUri(pair.uri);
 
-  if (uri._tag === "None") {
-    return refusePair("REF-16/relative-uri", pair);
+  if (Option.isNone(uri)) {
+    return yield* refusePair("REF-16/relative-uri", pair);
   }
 
   if (isDuplicate(loading, uri.value)) {
-    return duplicateUri(pair);
+    return yield* duplicateUri(pair);
   }
 
   if (overflows(loading, uri.value)) {
-    return refusePair("REF-16/document-limit", pair);
+    return yield* refusePair("REF-16/document-limit", pair);
   }
 
-  const read =
-    verify === undefined
-      ? readFileBounded(pair.path, defaultLimits, uri.value)
-      : readMemberBounded(pair.path, defaultLimits, uri.value, verify);
+  const member = yield* readMember(pair, uri.value, verify);
 
-  return read.pipe(
-    Effect.flatMap((bytes) =>
-      loadBytes(bytes, { document: uri.value }).pipe(
-        Effect.flatMap((loaded) =>
-          Effect.sync(() => {
-            loading.documents.set(uri.value, {
-              ...loaded,
-              path: pair.path,
-              sha256: sha256Hex(bytes),
-            });
-          }),
-        ),
-      ),
-    ),
-    Effect.catchTag("LoadRefusal", withPathOf(pair.path)),
-  );
-};
+  loading.documents.set(uri.value, member);
+
+  return undefined;
+});
 
 export interface DocumentSetOptions {
   /**
@@ -214,27 +239,26 @@ const walkLimit = (path: string) => refusePair("REF-16/walk-limit", { path, uri:
  * `Path.resolveWithin` check refuses `..` escapes and absolute inputs; the `realPath` re-check
  * refuses a symlink whose target lies outside the real root.
  */
-export const resolveUnderRoot = (
+export const resolveUnderRoot = Effect.fnUntraced(function* resolveUnderRoot(
   root: string,
   relative: string,
-): Effect.Effect<string, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* resolve() {
-    const path = yield* Path.Path;
-    const fs = yield* FileSystem.FileSystem;
-    const lexical = path.resolve(root, relative);
-    const within = path.resolveWithin(root, relative);
+): Effect.fn.Return<string, LoadRefusal, FileSystem.FileSystem | Path.Path> {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const lexical = path.resolve(root, relative);
+  const within = path.resolveWithin(root, relative);
 
-    if (Option.isNone(within)) {
-      return yield* outsideRoot(lexical);
-    }
+  if (Option.isNone(within)) {
+    return yield* outsideRoot(lexical);
+  }
 
-    const real = yield* fs.realPath(within.value).pipe(Effect.catch(() => unreadable(lexical)));
-    const realRoot = yield* fs.realPath(root).pipe(Effect.catch(() => unreadable(root)));
+  const real = yield* fs.realPath(within.value).pipe(Effect.catch(() => unreadable(lexical)));
+  const realRoot = yield* fs.realPath(root).pipe(Effect.catch(() => unreadable(root)));
 
-    return Option.isSome(path.resolveWithin(realRoot, path.relative(realRoot, real)))
-      ? real
-      : yield* outsideRoot(lexical);
-  }).pipe(Effect.provide(Path.layer));
+  return Option.isSome(path.resolveWithin(realRoot, path.relative(realRoot, real)))
+    ? real
+    : yield* outsideRoot(lexical);
+});
 
 /**
  * The opened handle must be the file at `real`, still inside the real root: after the open the
@@ -244,128 +268,148 @@ export const resolveUnderRoot = (
  * post-open check is path-based, so a parent directory swapped between `realPath` and `stat`
  * remains possible (accepted risk, see design).
  */
+const verify = Effect.fnUntraced(function* verify(
+  realRoot: string,
+  real: string,
+  opened: FileSystem.File.Info,
+): Effect.fn.Return<void, LoadRefusal, FileSystem.FileSystem | Path.Path> {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const checked = yield* resolveUnderRoot(realRoot, path.relative(realRoot, real));
+  const info = yield* fs.stat(checked).pipe(Effect.catch(() => unreadable(real)));
+  const same = checked === real && info.type === "File" && sameFile(info, opened);
+
+  return yield* same ? Effect.void : outsideRoot(real);
+});
+
+/**
+ * `verify` as the loader's `VerifyOpened`, which admits only a `FileSystem` requirement, so the
+ * caller's `path` service is provided to it here.
+ */
 const sameCheckedFile =
-  (realRoot: string, real: string): VerifyOpened =>
+  (path: Path.Path, realRoot: string, real: string): VerifyOpened =>
   (opened) =>
-    Effect.gen(function* verify() {
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      const checked = yield* resolveUnderRoot(realRoot, path.relative(realRoot, real));
-      const info = yield* fs.stat(checked).pipe(Effect.catch(() => unreadable(real)));
-      const same = checked === real && info.type === "File" && sameFile(info, opened);
+    verify(realRoot, real, opened).pipe(Effect.provideService(Path.Path, path));
 
-      return yield* same ? Effect.void : outsideRoot(real);
-    }).pipe(Effect.provide(Path.layer));
+const preloadFile = Effect.fnUntraced(function* preloadFile(
+  loading: Loading,
+  realRoot: string,
+  real: string,
+): Effect.fn.Return<void, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest> {
+  const path = yield* Path.Path;
+  const uri = (yield* path.toFileUrl(real).pipe(Effect.orDie)).href;
 
-const preloadFile = (loading: Loading, realRoot: string, real: string) =>
-  loadPair(loading, { path: real, uri: pathToFileURL(real).href }, sameCheckedFile(realRoot, real));
+  yield* loadPair(loading, { path: real, uri }, sameCheckedFile(path, realRoot, real));
+});
 
-const preloadRoot = (
+const preloadRoot = Effect.fnUntraced(function* preloadRoot(
   loading: Loading,
   root: string,
-): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* preload() {
-    const path = yield* Path.Path;
-    const fs = yield* FileSystem.FileSystem;
-    const realRoot = yield* resolveUnderRoot(root, ".");
-    const seenDirectories = new Set<string>([realRoot]);
-    const seenFiles = new Set<string>();
-    let visited = 0;
+): Effect.fn.Return<void, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest> {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const realRoot = yield* resolveUnderRoot(root, ".");
+  const seenDirectories = new Set<string>([realRoot]);
+  const seenFiles = new Set<string>();
+  let visited = 0;
 
-    const isSpecName = (name: string) => refRootExtensions.has(path.extname(name).toLowerCase());
+  const isSpecName = (name: string) => refRootExtensions.has(path.extname(name).toLowerCase());
 
-    type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem>;
+  type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest>;
 
-    const walk = (directory: string, depth: number): Step => {
-      const enter = (real: string): Step => {
-        if (seenDirectories.has(real)) {
-          return Effect.void;
-        }
+  const walk = (directory: string, depth: number): Step => {
+    const enter = (real: string): Step => {
+      if (seenDirectories.has(real)) {
+        return Effect.void;
+      }
 
-        if (depth + 1 > maxWalkDepth) {
-          return walkLimit(real);
-        }
+      if (depth + 1 > maxWalkDepth) {
+        return walkLimit(real);
+      }
 
-        seenDirectories.add(real);
+      seenDirectories.add(real);
 
-        return walk(real, depth + 1);
-      };
+      return walk(real, depth + 1);
+    };
 
-      const settle = (real: string, info: FileSystem.File.Info, specNamed: boolean): Step => {
-        if (info.type === "Directory") {
-          return enter(real);
-        }
+    const settle = (real: string, info: FileSystem.File.Info, specNamed: boolean): Step => {
+      if (info.type === "Directory") {
+        return enter(real);
+      }
 
-        if (!specNamed || !isSpecName(real) || seenFiles.has(real)) {
-          return Effect.void;
-        }
+      if (!specNamed || !isSpecName(real) || seenFiles.has(real)) {
+        return Effect.void;
+      }
 
-        if (info.type !== "File") {
-          return unreadable(real);
-        }
+      if (info.type !== "File") {
+        return unreadable(real);
+      }
 
-        seenFiles.add(real);
+      seenFiles.add(real);
 
-        return preloadFile(loading, realRoot, real);
-      };
+      return preloadFile(loading, realRoot, real);
+    };
 
-      /**
-       * A name not like a spec file is considered only if it is a directory, found by a `stat`
-       * that never resolves or opens it; anything else under that name is skipped, including a
-       * directory link that leaves the real root (a `node_modules`-style link). A spec-named
-       * escape is still refused.
-       */
-      const visitEntry = (name: string): Step => {
-        const entry = path.join(directory, name);
-        const specNamed = isSpecName(name);
-        const considered = specNamed
-          ? Effect.succeed(true)
-          : fs.stat(entry).pipe(
-              Effect.map((info) => info.type === "Directory"),
-              Effect.orElseSucceed(() => false),
-            );
+    /**
+     * A name not like a spec file is considered only if it is a directory, found by a `stat`
+     * that never resolves or opens it; anything else under that name is skipped, including a
+     * directory link that leaves the real root (a `node_modules`-style link). A spec-named
+     * escape is still refused.
+     */
+    const visitEntry = (name: string): Step => {
+      const entry = path.join(directory, name);
+      const specNamed = isSpecName(name);
+      const considered = specNamed
+        ? Effect.succeed(true)
+        : fs.stat(entry).pipe(
+            Effect.map((info) => info.type === "Directory"),
+            Effect.orElseSucceed(() => false),
+          );
 
-        return considered.pipe(
-          Effect.flatMap((consider) =>
-            consider
-              ? resolveUnderRoot(realRoot, path.relative(realRoot, entry)).pipe(
-                  Effect.catchIf(
-                    (refusal) => !specNamed && refusal.diagnostic.code === "REF-16/outside-root",
-                    () => Effect.succeed(null),
-                  ),
-                  Effect.flatMap((real) =>
-                    real === null
-                      ? Effect.void
-                      : fs.stat(real).pipe(
-                          Effect.catchTag("PlatformError", () => unreadable(real)),
-                          Effect.flatMap((info) => settle(real, info, specNamed)),
-                        ),
-                  ),
-                )
-              : Effect.void,
-          ),
-        );
-      };
-
-      return fs.readDirectory(directory).pipe(
-        Effect.catchTag("PlatformError", () => unreadable(directory)),
-        Effect.flatMap((names) =>
-          Effect.forEach(
-            Arr.sort(names, Order.String),
-            (name) =>
-              Effect.suspend(() => {
-                visited += 1;
-
-                return visited > maxWalkEntries ? walkLimit(directory) : visitEntry(name);
-              }),
-            { discard: true },
-          ),
+      return considered.pipe(
+        Effect.flatMap((consider) =>
+          consider
+            ? resolveUnderRoot(realRoot, path.relative(realRoot, entry)).pipe(
+                Effect.map(Option.some),
+                Effect.catchIf(
+                  (refusal) => !specNamed && refusal.diagnostic.code === "REF-16/outside-root",
+                  () => Effect.succeedNone,
+                ),
+                Effect.flatMap((resolved: Option.Option<string>) =>
+                  Option.match(resolved, {
+                    onNone: () => Effect.void,
+                    onSome: (real) =>
+                      fs.stat(real).pipe(
+                        Effect.catchTag("PlatformError", () => unreadable(real)),
+                        Effect.flatMap((info) => settle(real, info, specNamed)),
+                      ),
+                  }),
+                ),
+              )
+            : Effect.void,
         ),
       );
     };
 
-    yield* walk(realRoot, 0);
-  }).pipe(Effect.provide(Path.layer));
+    return fs.readDirectory(directory).pipe(
+      Effect.catchTag("PlatformError", () => unreadable(directory)),
+      Effect.flatMap((names) =>
+        Effect.forEach(
+          Arr.sort(names, Order.String),
+          (name) =>
+            Effect.suspend(() => {
+              visited += 1;
+
+              return visited > maxWalkEntries ? walkLimit(directory) : visitEntry(name);
+            }),
+          { discard: true },
+        ),
+      ),
+    );
+  };
+
+  yield* walk(realRoot, 0);
+});
 
 /**
  * Loads every pair through the bounded loader, in order, then the files under `options.refRoot`
@@ -375,20 +419,19 @@ const preloadRoot = (
  * refusal is a document-scope diagnostic whose `hint` is the offending pair's path, never the
  * file's content.
  */
-export const makeDocumentSet = (
+export const makeDocumentSet = Effect.fnUntraced(function* makeDocumentSet(
   pairs: readonly DocumentPair[],
   options: DocumentSetOptions = {},
-): Effect.Effect<DocumentSet, LoadRefusal, FileSystem.FileSystem> =>
-  Effect.gen(function* load() {
-    const loading: Loading = { documents: new Map(), entry: options.entry };
+): Effect.fn.Return<DocumentSet, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest> {
+  const loading: Loading = { documents: new Map(), entry: options.entry };
 
-    for (const pair of pairs) {
-      yield* loadPair(loading, pair);
-    }
+  for (const pair of pairs) {
+    yield* loadPair(loading, pair);
+  }
 
-    if (options.refRoot !== undefined) {
-      yield* preloadRoot(loading, options.refRoot);
-    }
+  if (options.refRoot !== undefined) {
+    yield* preloadRoot(loading, options.refRoot);
+  }
 
-    return { documents: loading.documents };
-  });
+  return { documents: loading.documents };
+});

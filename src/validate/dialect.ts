@@ -1,7 +1,9 @@
 import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
-import { Effect, Predicate, Record } from "effect";
+import { Effect, Record } from "effect";
+import { foldJson } from "../model/json-tree.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { lineOf } from "./dispatch.ts";
+import type { JsonFold } from "../model/json-tree.ts";
 import type { Json } from "../model/pointer.ts";
 import type { UnsupportedOpenApiVersion } from "./dispatch.ts";
 
@@ -20,43 +22,30 @@ const textBase = "https://spec.openapis.org/oas/3.1/dialect/base";
 
 const schemaBase = "https://spec.openapis.org/oas/3.1/dialect/2024-11-10";
 
-// Array.isArray narrows a readonly array only to any[], which loses the element type.
-const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
-
 const isDialectId = (tokens: readonly string[], key: string, member: Json): boolean =>
   member === textBase &&
   (key === "$schema" || (tokens.length === 0 && key === "jsonSchemaDialect"));
 
-const sitesOf = (value: Json, tokens: readonly string[]): readonly string[] => {
-  if (isList(value)) {
-    return value.flatMap((item, index) => sitesOf(item, [...tokens, String(index)]));
-  }
-
-  return Predicate.isObject(value)
-    ? Record.toEntries(value).flatMap(([key, member]) =>
-        isDialectId(tokens, key, member)
-          ? [formatPointer([...tokens, key])]
-          : sitesOf(member, [...tokens, key]),
-      )
-    : [];
+const sites: JsonFold<readonly string[]> = {
+  array: (items) => items.flat(),
+  leaf: () => [],
+  object: (members, tokens) =>
+    members.flatMap(({ folded, key, value }) =>
+      isDialectId(tokens, key, value) ? [formatPointer([...tokens, key])] : folded,
+    ),
 };
 
-const rewriteValue = (value: Json, tokens: readonly string[], rewrite: boolean): ValidatorInput => {
-  if (isList(value)) {
-    return value.map((item, index) => rewriteValue(item, [...tokens, String(index)], rewrite));
-  }
-
-  return Predicate.isObject(value)
-    ? Object.fromEntries(
-        Record.toEntries(value).map(([key, member]) => [
-          key,
-          rewrite && isDialectId(tokens, key, member)
-            ? schemaBase
-            : rewriteValue(member, [...tokens, key], rewrite),
-        ]),
-      )
-    : value;
-};
+const rewriting = (rewrite: boolean): JsonFold<ValidatorInput> => ({
+  array: (items) => [...items],
+  leaf: (value) => value,
+  object: (members, tokens) =>
+    Record.fromEntries(
+      members.map(({ folded, key, value }) => [
+        key,
+        rewrite && isDialectId(tokens, key, value) ? schemaBase : folded,
+      ]),
+    ),
+});
 
 /**
  * Rewrites `jsonSchemaDialect` and Schema Object `$schema` values equal to the 3.1.2 text's own
@@ -71,8 +60,8 @@ export const rewriteDialect = (
 ): Effect.Effect<DialectRewrite, UnsupportedOpenApiVersion> =>
   lineOf(document).pipe(
     Effect.map((line): DialectRewrite => {
-      const occurrences = line === "3.1" ? sitesOf(document, []) : [];
+      const occurrences = line === "3.1" ? foldJson(document, sites) : [];
 
-      return { copy: rewriteValue(document, [], line === "3.1"), occurrences };
+      return { copy: foldJson(document, rewriting(line === "3.1")), occurrences };
     }),
   );

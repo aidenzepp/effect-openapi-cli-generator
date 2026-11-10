@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, FileSystem, Layer, Order, Path, Schema } from "effect";
 import { Corpus } from "../corpus/tools/fetch.ts";
 import generatorPackage from "../package.json" with { type: "json" };
@@ -87,7 +87,10 @@ const sorted = (values: readonly string[]): readonly string[] => Arr.sort(values
 
 const decoder = new TextDecoder();
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
+
+const hex = (content: string | Uint8Array) =>
+  Effect.runSync(sha256Hex(content).pipe(Effect.provide(BunCrypto.layerDigest)));
 
 const generator = {
   packageJson: Schema.decodeUnknownSync(Schema.Json)(generatorPackage),
@@ -177,8 +180,8 @@ describe("Resend witness", () => {
   test("the pins agree: fixture, corpus manifest and the cached JSON and YAML bytes", () => {
     expect(resend).toBeDefined();
     expect(fixture.specSha256).toBe(resend?.sha256 ?? "");
-    expect(sha256Hex(nodeFs.readFileSync(specPath))).toBe(fixture.specSha256);
-    expect(sha256Hex(nodeFs.readFileSync(twinPath))).toBe(resend?.twin?.sha256 ?? "");
+    expect(hex(nodeFs.readFileSync(specPath))).toBe(fixture.specSha256);
+    expect(hex(nodeFs.readFileSync(twinPath))).toBe(resend?.twin?.sha256 ?? "");
     // A pin move changes the spec's operations and fails here until the fixture follows (E13).
     expect(sorted(specOperations.map((operation) => operation.operationId))).toEqual(
       fixture.operationIds,
@@ -228,7 +231,7 @@ describe("Resend witness", () => {
               Effect.all([
                 fs.readFile(nodePath.join(json.dir, file)),
                 fs.readFile(nodePath.join(yaml.dir, file)),
-              ]).pipe(Effect.map(([a, b]) => (sha256Hex(a) === sha256Hex(b) ? [] : [file]))),
+              ]).pipe(Effect.map(([a, b]) => (hex(a) === hex(b) ? [] : [file]))),
             ),
           ).pipe(Effect.map((lists) => lists.flat()));
 

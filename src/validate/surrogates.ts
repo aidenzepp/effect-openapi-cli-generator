@@ -1,8 +1,10 @@
-import { Effect, Predicate, Record } from "effect";
+import { Effect } from "effect";
 import type { Schema } from "effect";
 import { diagnosticOf } from "../model/diagnostic.ts";
+import { foldJson } from "../model/json-tree.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
+import type { JsonFold } from "../model/json-tree.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Refusal } from "./disagreements.ts";
 import type { Line } from "./dispatch.ts";
@@ -10,9 +12,7 @@ import type { Line } from "./dispatch.ts";
 // A high surrogate not followed by a low one, or a low surrogate not preceded by a high one.
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
 
-const loneSurrogates = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu;
-
-const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
+const loneSurrogates = new RegExp(loneSurrogate.source, "gu");
 
 const printable = (text: string): string =>
   text.replace(
@@ -22,22 +22,22 @@ const printable = (text: string): string =>
 
 const pointerOf = (tokens: readonly string[]): string => formatPointer(tokens.map(printable));
 
+const sites: JsonFold<readonly string[]> = {
+  array: (items) => items.flat(),
+  leaf: () => [],
+  object: (members, tokens) =>
+    members.flatMap(({ folded, key }) => [
+      ...(loneSurrogate.test(key) ? [pointerOf([...tokens, key])] : []),
+      ...folded,
+    ]),
+};
+
 /**
  * The pointers of every property name that holds a lone surrogate, in document order, with the
  * surrogate shown as `\uXXXX`. The validator library percent-encodes names, which throws on one.
  */
-export const surrogateSites = (value: Json, tokens: readonly string[] = []): readonly string[] => {
-  if (isList(value)) {
-    return value.flatMap((item, index) => surrogateSites(item, [...tokens, String(index)]));
-  }
-
-  return Predicate.isObject(value)
-    ? Record.toEntries(value).flatMap(([key, member]) => [
-        ...(loneSurrogate.test(key) ? [pointerOf([...tokens, key])] : []),
-        ...surrogateSites(member, [...tokens, key]),
-      ])
-    : [];
-};
+export const surrogateSites = (value: Json, tokens: readonly string[] = []): readonly string[] =>
+  foldJson(value, sites, tokens);
 
 interface Where {
   readonly document: typeof DocumentUri.Type;

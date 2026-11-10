@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
   Array as Arr,
   Deferred,
@@ -11,15 +11,19 @@ import {
   Path,
   Stream,
 } from "effect";
+import type { Digest } from "effect/crypto";
 import * as PlatformError from "effect/PlatformError";
 import { writeFiles } from "../../src/write/index.ts";
 import type { GeneratedFile } from "../../src/write/index.ts";
 import { runLockFileName } from "../../src/write/lock.ts";
 import { decodeManifest, manifestFileName, sha256Hex } from "../../src/write/manifest.ts";
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
-type Env = FileSystem.FileSystem | Path.Path;
+type Env = FileSystem.FileSystem | Path.Path | Digest.Digest;
+
+const hex = (content: string | Uint8Array) =>
+  Effect.runSync(sha256Hex(content).pipe(Effect.provide(BunCrypto.layerDigest)));
 
 const inTempDir = <A, E>(
   body: (dir: string, fs: FileSystem.FileSystem, path: Path.Path) => Effect.Effect<A, E, Env>,
@@ -114,7 +118,7 @@ describe("writer: happy paths", () => {
       }),
     );
     expect(out.content).toBe("hello");
-    expect(out.manifest).toEqual([{ path: "src/main.ts", sha256: sha256Hex("hello") }]);
+    expect(out.manifest).toEqual([{ path: "src/main.ts", sha256: hex("hello") }]);
     expect(out.notices).toEqual([]);
     expect(out.tree).toEqual([manifestFileName, "src", "src/main.ts"]);
   });
@@ -509,7 +513,7 @@ describe("writer: previous manifest", () => {
         yield* fs.writeFileString(path.join(dir, "outside.ts"), "outside");
         yield* fs.writeFileString(
           path.join(output, manifestFileName),
-          `{"files": [{"path": "../outside.ts", "sha256": "${sha256Hex("outside")}"}, {"path": "/etc/hosts", "sha256": "${sha256Hex("outside")}"}]}\n`,
+          `{"files": [{"path": "../outside.ts", "sha256": "${hex("outside")}"}, {"path": "/etc/hosts", "sha256": "${hex("outside")}"}]}\n`,
         );
 
         const notices = yield* writeFiles(output, [file("a.ts")]);

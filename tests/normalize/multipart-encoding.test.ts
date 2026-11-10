@@ -1,6 +1,8 @@
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 import type { EncodingRule } from "../../src/model/entities.ts";
 import type { Json } from "../../src/model/pointer.ts";
 import { normalizeBody } from "../../src/normalize/bodies.ts";
@@ -10,6 +12,10 @@ import { diagnoseDocument } from "../../src/validate/index.ts";
 import type { Line } from "../../src/validate/index.ts";
 
 const entry = Schema.decodeUnknownSync(DocumentUri)("file:///spec/openapi.json");
+
+const rowId = Schema.decodeUnknownSync(RowId);
+
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const openapi: Record<Line, string> = { "3.0": "3.0.3", "3.1": "3.1.1", "3.2": "3.2.0" };
 
@@ -143,7 +149,7 @@ describe("ENC-37: contentEncoding on a 3.1 or 3.2 multipart part", () => {
           code: "ENC-37/unsupported-content-encoding",
           pointer: media,
           related: [`${media}/schema/properties/file/contentEncoding`],
-          row: "ENC-37",
+          row: rowId("ENC-37"),
           scope: "element",
         },
       ]);
@@ -164,7 +170,7 @@ describe("ENC-37: a nested part has no place for a transfer encoding", () => {
         code: "ENC-37/nested-transfer-encoding",
         pointer: media,
         related: [`${media}/encoding/meta/encoding/blob`],
-        row: "ENC-37",
+        row: rowId("ENC-37"),
         scope: "element",
       },
     ]);
@@ -190,7 +196,7 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
         code: "ENC-39/conflicting-transfer-encoding",
         pointer: media,
         related: [`${media}/encoding/file/headers/Content-Transfer-Encoding/schema/enum`],
-        row: "ENC-39",
+        row: rowId("ENC-39"),
         scope: "element",
       },
     ]);
@@ -204,7 +210,7 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
         code: "ENC-39/conflicting-transfer-encoding",
         pointer: media,
         related: [`${media}/encoding/file/headers/Content-Transfer-Encoding/schema/const`],
-        row: "ENC-39",
+        row: rowId("ENC-39"),
         scope: "element",
       },
     ]);
@@ -225,7 +231,9 @@ describe("ENC-39: a Content-Transfer-Encoding header schema against the part's e
 describe("ENC-41: 3.1 keywords in a 3.0 multipart schema", () => {
   test("ENC-41: contentEncoding in a 3.0 part schema stays refused by 3.0 schema validation", async () => {
     const body = multipart({ file: { contentEncoding: "identity", type: "string" } });
-    const diagnosis = await Effect.runPromise(diagnoseDocument(documentOf("3.0", body), entry));
+    const diagnosis = await Effect.runPromise(
+      diagnoseDocument(documentOf("3.0", body), entry).pipe(Effect.provide(layer)),
+    );
 
     expect(
       diagnosis.refusals.map(({ diagnostic }) => ({
@@ -299,7 +307,7 @@ describe("ENC-40: a part style the writer cannot send", () => {
           code: "ENC-40/unsupported-part-style",
           pointer: media,
           related: [`${media}/encoding/tags`],
-          row: "ENC-40",
+          row: rowId("ENC-40"),
           scope: "element",
         },
       ]);

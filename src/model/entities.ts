@@ -15,7 +15,10 @@ import {
 } from "./brands.ts";
 import { SpecLine } from "./spec-section.ts";
 
-const rowIdPattern = /^[A-Z][A-Z0-9]*-[0-9]+$/u;
+/**
+ * The text of an inventory row id: an uppercase prefix that may hold digits, a hyphen, a number.
+ */
+export const rowIdPattern = /^[A-Z][A-Z0-9]*-[0-9]+$/u;
 
 /**
  * An inventory row id such as `PRM-27`.
@@ -403,7 +406,7 @@ export const NamingHint = Schema.Struct({
 export const NamingAlias = Schema.Struct({
   fern: Schema.optionalKey(NamingHint),
   forge: Schema.optionalKey(NamingHint),
-  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  index: Schema.Natural,
   operationId: Schema.optionalKey(Schema.NonEmptyString),
 });
 

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, Exit, FileSystem, Layer, Order, Path, Schema } from "effect";
+import type { Digest } from "effect/crypto";
 import generatorPackage from "../package.json" with { type: "json" };
 import generatorTsconfig from "../tsconfig.json" with { type: "json" };
 import { generate } from "../src/generate.ts";
@@ -39,7 +40,7 @@ const generator = {
   tsconfig: Schema.decodeUnknownSync(Schema.Json)(generatorTsconfig),
 };
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const decodeReport = Schema.decodeUnknownSync(GenerationReport);
 
@@ -68,7 +69,7 @@ const run = <A>(
   inspect: (
     exit: Exit.Exit<GenerateResult, unknown>,
     at: Run,
-  ) => Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path>,
+  ) => Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path | Digest.Digest>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(

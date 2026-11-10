@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath, BunServices } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
 import { Command } from "effect/cli";
 import type { Flag } from "effect/cli";
@@ -34,7 +34,7 @@ afterAll(() => {
   nodeFs.rmSync(work, { force: true, recursive: true });
 });
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const decodeUri = Schema.decodeUnknownSync(DocumentUri);
 

@@ -4,12 +4,15 @@ import { Effect, Schema } from "effect";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { DocumentUri } from "../../src/model/brands.ts";
+import { RowId } from "../../src/model/entities.ts";
 import { loadBytes, loadFile } from "../../src/load/index.ts";
 import type { LoadOptions, LoadRefusal } from "../../src/load/index.ts";
 
 const fixture = (name: string) => path.join(import.meta.dir, "..", "fixtures", "yaml", name);
 
 const document = Schema.decodeUnknownSync(DocumentUri)("file:///spec.yaml");
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const options = (limits?: LoadOptions["limits"]): LoadOptions =>
   limits === undefined ? { document } : { document, limits };
@@ -52,7 +55,7 @@ describe("load: strict YAML hazards", () => {
     const error = await refusal(file(name));
     expect(error._tag).toBe("LoadRefusal");
     expect(error.diagnostic.code).toBe(code);
-    expect(error.diagnostic.row).toBe("DOC-14");
+    expect(error.diagnostic.row).toBe(rowId("DOC-14"));
   });
 
   test("the merge key stays an ordinary key", async () => {
@@ -103,6 +106,22 @@ describe("load: strict YAML positions", () => {
     expect(error.diagnostic.code).toBe("DOC-14/duplicate-key");
     expect(error.diagnostic.line).toBe(2);
     expect(error.offset).toBe(3 + 6);
+  });
+
+  test("offset counts UTF-8 bytes", async () => {
+    const source = "€: 1\nx: {é: 1, é: 2}\n";
+    const plain = await refusal(text(source));
+    expect(plain.diagnostic.code).toBe("DOC-14/duplicate-key");
+    expect(plain.offset).toBe(18);
+    expect(plain.diagnostic.line).toBe(2);
+    expect(plain.diagnostic.column).toBe(11);
+
+    const withBom = await refusal(
+      loadBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...encode(source)]), options()),
+    );
+    expect(withBom.offset).toBe(3 + 18);
+    expect(withBom.diagnostic.line).toBe(2);
+    expect(withBom.diagnostic.column).toBe(11);
   });
 });
 

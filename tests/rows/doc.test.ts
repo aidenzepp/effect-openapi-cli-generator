@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
 import { pathToFileURL } from "node:url";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, Exit, Layer, Order, Scope, Schema } from "effect";
 import { stringify as yamlStringify } from "yaml";
 import generatorPackage from "../../package.json" with { type: "json" };
@@ -31,7 +31,7 @@ type Line = "3.0.4" | "3.1.2" | "3.2.1";
 
 const lines: readonly Line[] = ["3.0.4", "3.1.2", "3.2.1"];
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const work = nodePath.resolve(import.meta.dir, "../../work/wt-doc");
 

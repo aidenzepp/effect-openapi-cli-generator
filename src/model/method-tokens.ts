@@ -2,7 +2,7 @@
  * The HTTP method tokens Bun sends verbatim (design 6.7, probe SP11 on Bun 1.4.3). The one
  * generator copy: a token outside this set is refused at generation and at run time.
  */
-export const methodTokens: readonly string[] = [
+export const methodTokens = [
   "ACL",
   "BIND",
   "CHECKOUT",
@@ -38,4 +38,4 @@ export const methodTokens: readonly string[] = [
   "UNLINK",
   "UNLOCK",
   "UNSUBSCRIBE",
-];
+] as const;

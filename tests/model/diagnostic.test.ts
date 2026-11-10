@@ -6,9 +6,13 @@ import {
   isDocumentRefusal,
   isRefusal,
   makeDiagnostic,
+  Site,
   sortDiagnostics,
 } from "../../src/model/diagnostic.ts";
+import { Origin, RowId } from "../../src/model/entities.ts";
 import { Verdict } from "../../src/model/verdict.ts";
+
+const rowId = Schema.decodeUnknownSync(RowId);
 
 const base: typeof Diagnostic.Encoded = {
   code: "PRM-27/compound-nested",
@@ -206,7 +210,7 @@ describe("diagnosticOf and makeDiagnostic", () => {
   test("row equals the code prefix", async () => {
     const diagnostic = await Effect.runPromise(makeDiagnostic(input));
 
-    expect(diagnostic.row).toBe("PRM-27");
+    expect(diagnostic.row).toBe(rowId("PRM-27"));
   });
 
   test("an invalid code dies through makeDiagnostic and fails with SchemaError through diagnosticOf", async () => {
@@ -239,5 +243,17 @@ describe("diagnosticOf and makeDiagnostic", () => {
     expect(isDocumentRefusal(at("refusal", "document"))).toBe(true);
     expect(isDocumentRefusal(at("refusal", "element"))).toBe(false);
     expect(isDocumentRefusal(at("notice", "document"))).toBe(false);
+  });
+});
+
+describe("Site", () => {
+  test("Site is the entity Origin: one value decodes the same and encodes document then pointer", () => {
+    const value = { document: "file:///spec.json", pointer: "/paths/~1x/get" };
+    const site = Schema.decodeUnknownSync(Site)(value);
+    const origin = Schema.decodeUnknownSync(Origin)(value);
+
+    expect(site).toEqual(origin);
+    expect(Object.keys(Schema.encodeSync(Site)(site))).toEqual(["document", "pointer"]);
+    expect(Object.keys(Schema.encodeSync(Origin)(origin))).toEqual(["document", "pointer"]);
   });
 });

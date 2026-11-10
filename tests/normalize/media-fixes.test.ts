@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, Layer, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
@@ -221,7 +221,9 @@ describe("MED-24 an invalid media type key is reported once", () => {
           strict: false,
         },
         { document: decode("file:///fixture/author-config.json"), path: config },
-      ).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+      ).pipe(
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest)),
+      ),
     );
     const diagnostics = Exit.isSuccess(exit)
       ? exit.value.diagnostics

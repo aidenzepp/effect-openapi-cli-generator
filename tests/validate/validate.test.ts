@@ -1,9 +1,16 @@
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect, Predicate, Schema } from "effect";
+import { Effect, Layer, Option, PlatformError, Predicate, Schema } from "effect";
+import type { FileSystem, Path } from "effect";
+import type { Digest } from "effect/crypto";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
-import { UnsupportedOpenApiVersion, versionRefusal } from "../../src/validate/dispatch.ts";
+import {
+  declaredOpenapi,
+  UnsupportedOpenApiVersion,
+  versionRefusal,
+} from "../../src/validate/dispatch.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { ReadSchema } from "../../src/validate/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -35,7 +42,7 @@ const deepFreeze = (value: Json): Json => {
 const vendored: ReadSchema = (file) =>
   manifest.some((entry) => entry.file === file)
     ? Effect.succeed(readFileSync(new URL(`../../src/validate/schemas/${file}`, import.meta.url)))
-    : Effect.fail("not vendored");
+    : Effect.fail(new PlatformError.BadArgument({ method: "read", module: "test" }));
 
 const tampered: ReadSchema = (file) =>
   file === "schema-base-3.1-2026-08-03.json"
@@ -45,13 +52,18 @@ const tampered: ReadSchema = (file) =>
     : vendored(file);
 
 const missing: ReadSchema = (file) =>
-  file === "meta-3.2-2026-02-26.json" ? Effect.fail("gone") : vendored(file);
+  file === "meta-3.2-2026-02-26.json"
+    ? Effect.fail(new PlatformError.BadArgument({ method: "read", module: "test" }))
+    : vendored(file);
+
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const failureTag = <A, E extends { readonly _tag: string }>(
-  effect: Effect.Effect<A, E>,
+  effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Digest.Digest>,
 ): Promise<string> =>
   Effect.runPromise(
     effect.pipe(
+      Effect.provide(layer),
       Effect.flip,
       Effect.map((error) => error._tag),
     ),
@@ -64,8 +76,12 @@ describe("validateDocument", () => {
       const frozenValid = deepFreeze(structuredClone(valid));
       const frozenInvalid = deepFreeze(structuredClone(invalid));
 
-      const validResult = await Effect.runPromise(validateDocument(frozenValid));
-      const invalidResult = await Effect.runPromise(validateDocument(frozenInvalid));
+      const validResult = await Effect.runPromise(
+        validateDocument(frozenValid).pipe(Effect.provide(layer)),
+      );
+      const invalidResult = await Effect.runPromise(
+        validateDocument(frozenInvalid).pipe(Effect.provide(layer)),
+      );
 
       expect(validResult.valid).toBe(true);
       expect(invalidResult.valid).toBe(false);
@@ -87,8 +103,12 @@ describe("validateDocument", () => {
   ] as const)(
     "line %s: valid document passes and negative control fails",
     async (line, schema, pointer) => {
-      const valid = await Effect.runPromise(validateDocument(fixtures[line].valid));
-      const invalid = await Effect.runPromise(validateDocument(fixtures[line].invalid));
+      const valid = await Effect.runPromise(
+        validateDocument(fixtures[line].valid).pipe(Effect.provide(layer)),
+      );
+      const invalid = await Effect.runPromise(
+        validateDocument(fixtures[line].invalid).pipe(Effect.provide(layer)),
+      );
 
       expect(valid).toEqual({ errors: [], line, schema, valid: true });
       expect(invalid.line).toBe(line);
@@ -110,7 +130,7 @@ describe("validateDocument", () => {
       },
       { preconnect: original.preconnect },
     );
-    await Effect.runPromise(validateDocument(valid31));
+    await Effect.runPromise(validateDocument(valid31).pipe(Effect.provide(layer)));
     globalThis.fetch = original;
 
     expect(attempts).toEqual([]);
@@ -126,6 +146,17 @@ describe("validateDocument", () => {
     expect(await failureTag(validateDocument({ swagger: "2.0" }))).toBe(
       "UnsupportedOpenApiVersion",
     );
+  });
+});
+
+describe("declaredOpenapi", () => {
+  test("a string openapi value is Some; a missing or non-string one is None", () => {
+    expect(declaredOpenapi({ openapi: "3.1.0" })).toEqual(Option.some("3.1.0"));
+    expect(declaredOpenapi({ openapi: "2.0" })).toEqual(Option.some("2.0"));
+    expect(declaredOpenapi({ swagger: "2.0" })).toEqual(Option.none());
+    expect(declaredOpenapi({ openapi: 3.1 })).toEqual(Option.none());
+    expect(declaredOpenapi({ openapi: null })).toEqual(Option.none());
+    expect(declaredOpenapi("3.1.0")).toEqual(Option.none());
   });
 });
 
@@ -190,7 +221,7 @@ describe("versionRefusal", () => {
 
 describe("checkManifest", () => {
   test("accepts the vendored bytes", async () => {
-    const files = await Effect.runPromise(checkManifest(vendored));
+    const files = await Effect.runPromise(checkManifest(vendored).pipe(Effect.provide(layer)));
 
     expect(files).toHaveLength(manifest.length);
   });
@@ -201,5 +232,15 @@ describe("checkManifest", () => {
 
   test("a missing vendored schema fails the check", async () => {
     expect(await failureTag(checkManifest(missing))).toBe("SchemaManifestError");
+  });
+
+  test("an unreadable vendored file keeps its cause", async () => {
+    const error = await Effect.runPromise(
+      checkManifest(missing).pipe(Effect.provide(layer), Effect.flip),
+    );
+
+    expect(error.file).toBe("meta-3.2-2026-02-26.json");
+    expect(error.reason).toBe("unreadable");
+    expect(error.cause).toBeInstanceOf(PlatformError.BadArgument);
   });
 });
