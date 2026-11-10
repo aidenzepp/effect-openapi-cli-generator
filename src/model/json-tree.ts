@@ -1,4 +1,4 @@
-import { Predicate, Result } from "effect";
+import { Option, Predicate, Record, Result } from "effect";
 import type { Schema } from "effect";
 import { evaluatePointerResult } from "./pointer.ts";
 import type { Json } from "./pointer.ts";
@@ -11,8 +11,7 @@ export type JsonObject = Schema.JsonObject;
 /**
  * Whether a JSON value is an object (not an array, not null).
  */
-export const isObject = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+export const isObject = (value: Json | undefined): value is JsonObject => Predicate.isObject(value);
 
 /**
  * Whether a JSON value is an array.
@@ -26,10 +25,9 @@ export const nodeAt = (root: Json, pointer: string): Json | undefined =>
   Result.getOrUndefined(evaluatePointerResult(root, pointer));
 
 /**
- * The own member `name` of an object when it is a string.
+ * The own member `name` of a value when the value is an object and the member is a string.
  */
-export const stringMember = (node: JsonObject, name: string): string | undefined => {
-  const value = Object.hasOwn(node, name) ? node[name] : undefined;
-
-  return Predicate.isString(value) ? value : undefined;
-};
+export const stringMember = (value: Json, name: string): string | undefined =>
+  isObject(value)
+    ? Option.getOrUndefined(Option.filter(Record.get(value, name), Predicate.isString))
+    : undefined;
