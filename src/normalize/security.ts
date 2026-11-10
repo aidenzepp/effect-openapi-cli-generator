@@ -1,4 +1,5 @@
-import { Effect, Option, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, Result, Schema } from "effect";
+import { memoize } from "effect/Function";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
 import type { DocumentUri } from "../model/brands.ts";
@@ -528,7 +529,7 @@ export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSec
       : { document: author.configDocument, requirement };
 
   return {
-    added: new Set(extra.names.filter((name) => !names.includes(name))),
+    added: new Set(Arr.difference(extra.names, names)),
     checkRefused: new Set(
       checkFindings
         .filter(
@@ -561,33 +562,22 @@ interface Lookup {
   readonly spec: Scope;
 }
 
-// Built once per SchemeNormalization, so a requirement entry costs one map probe.
-const lookups = new WeakMap<SchemeNormalization, Lookup>();
-
-const lookupOf = (schemes: SchemeNormalization): Lookup => {
-  const cached = lookups.get(schemes);
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  const built = {
-    author: {
-      declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
-      unusable: new Set(schemes.unusable),
-    },
-    spec: {
-      declared: new Map(
-        schemes.schemes
-          .filter((scheme) => scheme.source === "spec")
-          .map((scheme) => [scheme.name, scheme]),
-      ),
-      unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
-    },
-  };
-  lookups.set(schemes, built);
-
-  return built;
-};
+// Built once per SchemeNormalization (memoized by identity), so a requirement entry costs one map
+// probe.
+const lookupOf = memoize((schemes: SchemeNormalization): Lookup => ({
+  author: {
+    declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
+    unusable: new Set(schemes.unusable),
+  },
+  spec: {
+    declared: new Map(
+      schemes.schemes
+        .filter((scheme) => scheme.source === "spec")
+        .map((scheme) => [scheme.name, scheme]),
+    ),
+    unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
+  },
+}));
 
 // A 3.2 requirement name that is not a component name resolves as a URI inside the set. The result
 // is the component name it reaches, or undefined when it reaches nothing that is a component.
@@ -654,33 +644,33 @@ interface Named {
   readonly unusable: ReadonlySet<string>;
 }
 
-// The refusal of a requirement name that names no usable scheme, or `checked` when check already
-// raised the one diagnostic for it; either way its alternative is dropped.
-const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
+// The refusal of a requirement name that names no usable scheme, or None when check already raised
+// the one diagnostic for it; either way its alternative is dropped.
+const nameRefusal = (resolution: Resolution, named: Named): Option.Option<Finding> => {
   const { name, resolved } = named;
   const pointer = childPointer(named.pointer, name);
   if (named.unusable.has(resolved)) {
-    return {
+    return Option.some({
       anchor: "security-requirements-name",
       code: "SEC-02/unusable-scheme",
       element: "Security Requirement Object",
       message: "The requirement names a security scheme that is refused.",
       pointer,
       related: [{ pointer: formatPointer(["components", "securitySchemes", resolved]) }],
-    };
+    });
   }
 
   if (!named.supplied && named.checkRefused.has(pointer)) {
-    return "checked";
+    return Option.none();
   }
 
-  return {
+  return Option.some({
     anchor: "security-requirements-name",
     code: `${resolution.line === "3.2" ? "SEC-10" : "SEC-09"}/undeclared-scheme`,
     element: "Security Requirement Object",
     message: "The requirement names a security scheme that is not declared.",
     pointer,
-  };
+  });
 };
 
 // Whether a scheme writes the one `Authorization` header (design 6.5 Conflicting Authorization
@@ -750,10 +740,10 @@ const judge = (
         supplied,
         unusable,
       });
-      if (refusal === "checked") {
+      if (Option.isNone(refusal)) {
         refused = true;
       } else {
-        findings.push(refusal);
+        findings.push(refusal.value);
       }
     }
   }
