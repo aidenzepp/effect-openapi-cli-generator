@@ -26,6 +26,7 @@ import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.
 import { evaluatePointerResult, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { declaredOpenapi } from "../validate/dispatch.ts";
+import { methodMembers } from "../model/path-item.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { isSpecificationExtension } from "../model/extension.ts";
@@ -293,7 +294,7 @@ type Arity = "list" | "map" | "one";
 
 type Field = readonly [name: string, kind: Kind | "schema", arity: Arity];
 
-const methods = ["delete", "get", "head", "options", "patch", "post", "put", "query", "trace"];
+const methods = Arr.sort(methodMembers("3.2"), Order.String);
 
 const content: Field = ["content", "mediaType", "map"];
 

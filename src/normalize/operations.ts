@@ -49,6 +49,7 @@ import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
+import { methodMembers } from "../model/path-item.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { follow, nodeOption } from "./document-set.ts";
 
@@ -172,17 +173,6 @@ const OperationFields = Schema.Struct({
 
 const ParameterIdentity = Schema.Struct({ in: Schema.String, name: Schema.String });
 
-const fixedMethods: ReadonlySet<string> = new Set([
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-]);
-
 const methodRows: ReadonlyMap<string, string> = new Map([
   ["DELETE", "PTH-17"],
   ["GET", "PTH-14"],
@@ -242,7 +232,7 @@ const operationsOfItem = (
   itemFields: typeof ItemFields.Type,
   itemNode: Record<string, Json>,
 ): readonly RawOperation[] => {
-  const members = resolution.line === "3.2" ? new Set([...fixedMethods, "query"]) : fixedMethods;
+  const members = new Set(methodMembers(resolution.line));
   const fixed = Object.keys(itemNode)
     .filter((name) => members.has(name))
     .map((name) => ({ additional: false, name, token: name.toUpperCase() }));
