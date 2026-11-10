@@ -1,6 +1,7 @@
 import { Effect, Predicate, Record } from "effect";
 import type { Schema } from "effect";
 import { diagnosticOf } from "../model/diagnostic.ts";
+import { isArray } from "../model/json-tree.ts";
 import { formatPointer } from "../model/pointer.ts";
 import type { DocumentUri } from "../model/brands.ts";
 import type { Json } from "../model/pointer.ts";
@@ -11,8 +12,6 @@ import type { Line } from "./dispatch.ts";
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
 
 const loneSurrogates = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu;
-
-const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
 
 const printable = (text: string): string =>
   text.replace(
@@ -27,7 +26,7 @@ const pointerOf = (tokens: readonly string[]): string => formatPointer(tokens.ma
  * surrogate shown as `\uXXXX`. The validator library percent-encodes names, which throws on one.
  */
 export const surrogateSites = (value: Json, tokens: readonly string[] = []): readonly string[] => {
-  if (isList(value)) {
+  if (isArray(value)) {
     return value.flatMap((item, index) => surrogateSites(item, [...tokens, String(index)]));
   }
 

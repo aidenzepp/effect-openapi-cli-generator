@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isObject, stringMember } from "../../src/model/json-tree.ts";
+import type { Json } from "../../src/model/pointer.ts";
 
 describe("isObject", () => {
   test("new pin: rejects null", () => {
@@ -33,5 +34,12 @@ describe("stringMember", () => {
     expect(stringMember({ list: ["a"], name: 7, nested: { a: "b" } }, "name")).toBeUndefined();
     expect(stringMember({ list: ["a"] }, "list")).toBeUndefined();
     expect(stringMember({ nested: { a: "b" } }, "nested")).toBeUndefined();
+  });
+
+  test("new pin: returns undefined for a non-object value", () => {
+    const values: readonly Json[] = ["name", 1, true, null, ["name"]];
+    for (const value of values) {
+      expect(stringMember(value, "name")).toBeUndefined();
+    }
   });
 });

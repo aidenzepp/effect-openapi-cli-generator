@@ -1,5 +1,6 @@
 import type { Validator } from "@hyperjump/json-schema/draft-2020-12";
 import { Effect, Predicate, Record } from "effect";
+import { isArray } from "../model/json-tree.ts";
 import { formatPointer } from "../model/pointer.ts";
 import { lineOf } from "./dispatch.ts";
 import type { Json } from "../model/pointer.ts";
@@ -20,15 +21,12 @@ const textBase = "https://spec.openapis.org/oas/3.1/dialect/base";
 
 const schemaBase = "https://spec.openapis.org/oas/3.1/dialect/2024-11-10";
 
-// Array.isArray narrows a readonly array only to any[], which loses the element type.
-const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
-
 const isDialectId = (tokens: readonly string[], key: string, member: Json): boolean =>
   member === textBase &&
   (key === "$schema" || (tokens.length === 0 && key === "jsonSchemaDialect"));
 
 const sitesOf = (value: Json, tokens: readonly string[]): readonly string[] => {
-  if (isList(value)) {
+  if (isArray(value)) {
     return value.flatMap((item, index) => sitesOf(item, [...tokens, String(index)]));
   }
 
@@ -42,7 +40,7 @@ const sitesOf = (value: Json, tokens: readonly string[]): readonly string[] => {
 };
 
 const rewriteValue = (value: Json, tokens: readonly string[], rewrite: boolean): ValidatorInput => {
-  if (isList(value)) {
+  if (isArray(value)) {
     return value.map((item, index) => rewriteValue(item, [...tokens, String(index)], rewrite));
   }
 
