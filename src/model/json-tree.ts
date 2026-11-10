@@ -1,13 +1,12 @@
-import { Effect, Exit, Predicate } from "effect";
-import { evaluatePointer } from "./pointer.ts";
+import { Predicate, Result } from "effect";
+import type { Schema } from "effect";
+import { evaluatePointerResult } from "./pointer.ts";
 import type { Json } from "./pointer.ts";
 
 /**
  * A JSON object value.
  */
-export interface JsonObject {
-  readonly [key: string]: Json;
-}
+export type JsonObject = Schema.JsonObject;
 
 /**
  * Whether a JSON value is an object (not an array, not null).
@@ -23,11 +22,8 @@ export const isArray = (value: Json | undefined): value is readonly Json[] => Ar
 /**
  * The node at `pointer`, or undefined when the pointer is malformed or names no node.
  */
-export const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const exit = Effect.runSyncExit(evaluatePointer(root, pointer));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
+export const nodeAt = (root: Json, pointer: string): Json | undefined =>
+  Result.getOrUndefined(evaluatePointerResult(root, pointer));
 
 /**
  * The own member `name` of an object when it is a string.

@@ -6,21 +6,24 @@ import {
   JsonSchema,
   Option,
   Order,
+  pipe,
   Predicate,
+  Result,
   Schema,
   SchemaRepresentation,
 } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
+import { makeDiagnostic, sortDiagnostics } from "../model/diagnostic.ts";
+import type { Diagnostic, DiagnosticInput } from "../model/diagnostic.ts";
 import { defsKey, keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
-import { defaultLimits, nodeAt } from "../resolve/index.ts";
+import { defaultLimits } from "../resolve/index.ts";
 import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
-import { evaluatePointer, formatPointer, parsePointer } from "../model/pointer.ts";
+import { evaluatePointerResult, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { isObject, isArray, stringMember } from "../model/json-tree.ts";
+import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { nodeIn, referenceIn } from "./document-set.ts";
 
@@ -146,11 +149,7 @@ const sortedKeys = (map: ReadonlyMap<string, unknown>): readonly string[] =>
   Arr.sort([...map.keys()], byString);
 
 const tokensOf = (pointer: string): readonly string[] | undefined =>
-  Effect.runSync(
-    parsePointer(pointer).pipe(
-      Effect.orElseSucceed((): readonly string[] | undefined => undefined),
-    ),
-  );
+  Result.getSuccess(parsePointerResult(pointer)).pipe(Option.getOrUndefined);
 
 const childAt = (node: Json | undefined, token: string): Json | undefined => {
   if (isObject(node)) {
@@ -1632,9 +1631,7 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
     return "";
   }
 
-  let current = Effect.runSync(Effect.option(evaluatePointer(value, base))).pipe(
-    Option.getOrUndefined,
-  );
+  let current = Result.getSuccess(evaluatePointerResult(value, base)).pipe(Option.getOrUndefined);
   let consumed = 0;
   for (const token of path) {
     current = childAt(current, token);
@@ -1674,19 +1671,19 @@ const diagnosticsOf = (
   const seen = new Set(
     resolution.diagnostics.map((diagnostic) => identityOf(diagnostic.code, diagnostic)),
   );
-  const pending: Effect.Effect<Diagnostic>[] = [];
+  const records: DiagnosticInput[] = [];
   const report = (
     code: string,
     at: CanonicalKey,
     rule: Rule | undefined,
     keyword?: string,
   ): void => {
-    const [row = "", name = ""] = code.split("/");
+    const [, name = ""] = code.split("/");
     const identity = identityOf(code, at);
     if (rule !== undefined && !seen.has(identity)) {
       seen.add(identity);
 
-      const decoded = Schema.decodeUnknownEffect(Diagnostic)({
+      records.push({
         code,
         document: at.document,
         element:
@@ -1694,12 +1691,10 @@ const diagnosticsOf = (
         message: rule.message,
         openapi,
         pointer: at.pointer,
-        row,
         scope: "element",
         severity: rule.severity,
         specSection: specSectionUrl(resolution.line, rule.anchor),
       });
-      pending.push(Effect.orDie(decoded));
     }
   };
   for (const edit of edits) {
@@ -1727,7 +1722,9 @@ const diagnosticsOf = (
     }
   }
 
-  return Effect.all(pending).pipe(
+  return pipe(
+    records,
+    Effect.forEach(makeDiagnostic),
     Effect.map((diagnostics) => sortDiagnostics([...resolution.documents.keys()], diagnostics)),
   );
 };

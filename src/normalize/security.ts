@@ -1,18 +1,19 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { implicitComponent } from "../resolve/index.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
-import { escapeToken, unescapeToken, formatPointer } from "../model/pointer.ts";
+import { childPointer, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { sanitize } from "./docs.ts";
-import { follow, nodeIn } from "./document-set.ts";
+import { follow, nodeInResult } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -122,40 +123,31 @@ const acquisitionHint = (permanent: boolean): string =>
     : "The generated CLI does not acquire tokens. Supply an access token obtained elsewhere.";
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
-  const [row] = finding.code.split("/");
   const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  const base = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: finding.document ?? resolution.document,
     element: finding.element,
+    hint: finding.hint,
     message: finding.message,
     openapi,
     pointer: finding.pointer,
-    row,
+    related: finding.related?.map((site) => ({
+      document: site.document ?? resolution.document,
+      pointer: site.pointer,
+    })),
     scope: finding.scope ?? "element",
     severity: "refusal",
     specSection: specSectionUrl(resolution.line, finding.anchor),
-  };
-  const withHint = finding.hint === undefined ? base : { ...base, hint: finding.hint };
-  const related = finding.related?.map((site) => ({
-    document: site.document ?? resolution.document,
-    pointer: site.pointer,
-  }));
-  const fields = related === undefined ? withHint : { ...withHint, related };
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
-  Effect.runSync(
-    nodeIn(resolution, at).pipe(
-      Effect.map(Option.some),
-      Effect.orElseSucceed(() => Option.none<Json>()),
-    ),
-  );
+  Result.getSuccess(nodeInResult(resolution, at));
 
 const invalidScheme = (pointer: string): Built => ({
   findings: [
@@ -195,7 +187,7 @@ const acquisitionFindings = (fields: SchemeFields, pointer: string): readonly Fi
             element: "OAuth Flow Object",
             hint: acquisitionHint(rule.permanent),
             message: "Token acquisition through this OAuth flow is refused.",
-            pointer: `${pointer}/flows/${escapeToken(flow)}`,
+            pointer: childPointer(childPointer(pointer, "flows"), flow),
           },
         ];
   });
@@ -597,8 +589,6 @@ const lookupOf = (schemes: SchemeNormalization): Lookup => {
   return built;
 };
 
-const componentPrefix = "/components/securitySchemes/";
-
 // A 3.2 requirement name that is not a component name resolves as a URI inside the set. The result
 // is the component name it reaches, or undefined when it reaches nothing that is a component.
 const uriComponentName = (resolution: Resolution, name: string): string | undefined => {
@@ -607,15 +597,17 @@ const uriComponentName = (resolution: Resolution, name: string): string | undefi
   }
 
   const key = implicitComponent(resolution, "securitySchemes", name);
-  if (Option.isNone(key) || !key.value.pointer.startsWith(componentPrefix)) {
+  if (Option.isNone(key)) {
     return undefined;
   }
 
-  const token = key.value.pointer.slice(componentPrefix.length);
+  const tokens = Result.getSuccess(parsePointerResult(key.value.pointer)).pipe(
+    Option.getOrUndefined,
+  );
 
-  return token.includes("/")
-    ? undefined
-    : Option.getOrUndefined(Effect.runSync(Effect.option(unescapeToken(token))));
+  return tokens?.length === 3 && tokens[0] === "components" && tokens[1] === "securitySchemes"
+    ? tokens[2]
+    : undefined;
 };
 
 interface Source {
@@ -631,7 +623,7 @@ const effectiveList = (
   const candidates: readonly Source[] = [
     ...(operation === undefined
       ? []
-      : [{ pointer: `${operation}/security`, rows: ["SEC-01", "SEC-04"] }]),
+      : [{ pointer: childPointer(operation, "security"), rows: ["SEC-01", "SEC-04"] }]),
     { pointer: "/security", rows: ["SEC-01", "SEC-03"] },
   ];
   for (const source of candidates) {
@@ -666,7 +658,7 @@ interface Named {
 // raised the one diagnostic for it; either way its alternative is dropped.
 const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
   const { name, resolved } = named;
-  const pointer = `${named.pointer}/${escapeToken(name)}`;
+  const pointer = childPointer(named.pointer, name);
   if (named.unusable.has(resolved)) {
     return {
       anchor: "security-requirements-name",
@@ -803,7 +795,7 @@ export const normalizeSecurityPolicy = (
       supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
     const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
     const judged = (effective?.list ?? []).map((json, index) => {
-      const pointer = `${source.pointer}/${index}`;
+      const pointer = childPointer(source.pointer, String(index));
       const entries = Schema.decodeUnknownOption(Requirement)(json).pipe(
         Option.map((requirement) => Object.entries(requirement)),
       );

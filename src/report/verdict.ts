@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { printJson } from "../emit/printer.ts";
 import { JsonLiteral } from "../model/brands.ts";
+import { isRefusal } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import type { CommandNameSource as CommandNameSourceSchema } from "./index.ts";
 import { Verdict } from "../model/verdict.ts";
@@ -52,8 +53,6 @@ const countSources = (names: VerdictInput["commandNames"]): CommandSources => {
 
   return counts;
 };
-
-const isRefusal = (diagnostic: Diagnostic): boolean => diagnostic.severity === "refusal";
 
 const refusalsOfScope = (diagnostics: readonly Diagnostic[], scope: Diagnostic["scope"]): number =>
   diagnostics.filter((diagnostic) => isRefusal(diagnostic) && diagnostic.scope === scope).length;

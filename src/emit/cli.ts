@@ -1,4 +1,14 @@
-import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  JsonPointer,
+  Option,
+  Order,
+  Predicate,
+  Result,
+  Schema,
+} from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { Api, MediaAlternative, Operation, Parameter } from "../model/entities.ts";
 import { formatPointer } from "../model/pointer.ts";
@@ -210,8 +220,6 @@ const own = (record: JsonObject, key: string): Schema.Json | undefined =>
 const isJsonObject = (json: Schema.Json | undefined): json is JsonObject =>
   Predicate.isObject(json) && !Array.isArray(json);
 
-const unescapeToken = (token: string): string => token.replaceAll("~1", "/").replaceAll("~0", "~");
-
 // A bound outside the safe-integer range makes an integer field a digit string (design 4.5).
 const boundKeywords: readonly string[] = [
   "exclusiveMaximum",
@@ -382,7 +390,7 @@ const fieldSchema = (
       }
 
       current = ref.startsWith(refPrefix)
-        ? own(defs, unescapeToken(ref.slice(refPrefix.length)))
+        ? own(defs, JsonPointer.unescapeToken(ref.slice(refPrefix.length)))
         : undefined;
     }
 
@@ -420,7 +428,7 @@ const fieldSchema = (
     return undefined;
   };
   let target = own(defs, rootKey);
-  for (const token of pointer.split("/").slice(1).map(unescapeToken)) {
+  for (const token of pointer.split("/").slice(1).map(JsonPointer.unescapeToken)) {
     target = target === undefined ? undefined : property(target, token);
   }
 

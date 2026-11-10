@@ -1,6 +1,7 @@
-import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } from "effect";
+import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Line } from "../validate/index.ts";
 import {
   documentBase,
@@ -13,15 +14,14 @@ import {
 import { defsKey, keyOf } from "./canonical.ts";
 import type { CanonicalKey } from "./canonical.ts";
 import {
-  evaluateTokens,
-  parseFragment,
-  parsePointer,
+  parseFragmentResult,
+  parsePointerResult,
   formatPointer,
   childPointer,
 } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { isObject, isArray } from "../model/json-tree.ts";
+import { isObject, isArray, nodeAt } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 
 export type { CanonicalKey } from "./canonical.ts";
@@ -429,27 +429,13 @@ const remoteUri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/u;
 
 const uriSyntax = /[:/?#]/u;
 
-const tokensOf = (pointer: string): readonly string[] | undefined => {
-  const exit = Effect.runSyncExit(parsePointer(pointer));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
-
-export const nodeAt = (root: Json, pointer: string): Json | undefined => {
-  const tokens = tokensOf(pointer);
-  if (tokens === undefined) {
-    return undefined;
-  }
-
-  const exit = Effect.runSyncExit(evaluateTokens(root, tokens));
-
-  return Exit.isSuccess(exit) ? exit.value : undefined;
-};
+const tokensOf = (pointer: string): readonly string[] | undefined =>
+  Result.getOrUndefined(parsePointerResult(pointer));
 
 const fragmentPointer = (fragment: string): string | undefined => {
-  const exit = Effect.runSyncExit(parseFragment(`#${fragment}`));
+  const tokens = Result.getOrUndefined(parseFragmentResult(`#${fragment}`));
 
-  return Exit.isSuccess(exit) ? formatPointer(exit.value) : undefined;
+  return tokens === undefined ? undefined : formatPointer(tokens);
 };
 
 const memberOf = (node: Json, token: string): Json | undefined => {
@@ -1387,32 +1373,25 @@ const Declared = Schema.Struct({ openapi: Schema.String });
 
 const toDiagnostic = (member: Member, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule = rules[finding.code];
-  const [row] = finding.code.split("/");
   const openapi = Schema.decodeUnknownOption(Declared)(member.value).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  let scope = "document";
-  if (notices.has(finding.code) || elementRefusals.has(finding.code)) {
-    scope = "element";
-  }
+  const scope =
+    notices.has(finding.code) || elementRefusals.has(finding.code) ? "element" : "document";
 
-  const fields = {
+  return makeDiagnostic({
     code: finding.code,
     document: finding.document,
     element: rule.element,
     message: rule.message,
     openapi,
     pointer: finding.pointer,
-    row,
+    related: finding.related === undefined ? undefined : [finding.related],
     scope,
     severity: notices.has(finding.code) ? "notice" : "refusal",
     specSection: specSectionUrl(member.line, anchorOn(finding.code, member.line)),
-  };
-
-  return Schema.decodeUnknownEffect(Diagnostic)(
-    finding.related === undefined ? fields : { ...fields, related: [finding.related] },
-  ).pipe(Effect.orDie);
+  });
 };
 
 interface Prepared {

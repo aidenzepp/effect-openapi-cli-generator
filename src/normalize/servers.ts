@@ -4,7 +4,7 @@ import { DocumentUri as DocumentUriSchema, SafeText, ServerTemplate } from "../m
 import type { JsonPointer as JsonPointerSchema } from "../model/brands.ts";
 import { Diagnostic } from "../model/diagnostic.ts";
 import { Server } from "../model/entities.ts";
-import { escapeToken } from "../model/pointer.ts";
+import { childPointer, formatPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 
 /**
@@ -469,7 +469,13 @@ const build = (
     diagnostics:
       code === undefined
         ? []
-        : [diagnose(context, code, configSite(context, `/servers/accepted/${index}`))],
+        : [
+            diagnose(
+              context,
+              code,
+              configSite(context, formatPointer(["servers", "accepted", String(index)])),
+            ),
+          ],
     server,
   };
 };
@@ -507,7 +513,7 @@ const normalizeLevel = (
   }
 
   const built = value.map((entry, index) => {
-    const itemPointer = `${pointer}/${escapeToken(String(index))}`;
+    const itemPointer = childPointer(pointer, String(index));
     const raw = parseRaw(entry);
 
     return Option.isSome(raw)
@@ -546,7 +552,7 @@ interface AcceptedOrigin {
 }
 
 const acceptedOrigin = (entry: string, index: number, context: ServersContext): AcceptedOrigin => {
-  const site = configSite(context, `/acceptedOrigins/${index}`);
+  const site = configSite(context, formatPointer(["acceptedOrigins", String(index)]));
   const verdict = judge(entry, undefined, context.config.allowInsecure === true);
 
   if (verdict._tag === "Refused") {

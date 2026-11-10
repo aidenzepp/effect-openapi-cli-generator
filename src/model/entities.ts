@@ -13,6 +13,7 @@ import {
   ServerTemplate,
   WireName,
 } from "./brands.ts";
+import { SpecLine } from "./spec-section.ts";
 
 const rowIdPattern = /^[A-Z][A-Z0-9]*-[0-9]+$/u;
 
@@ -452,7 +453,7 @@ export class Api extends Schema.Class<Api>("Api")({
   entry: DocumentUri,
   info: Docs,
   informational: Schema.Array(Informational),
-  line: Schema.Literals(["3.0", "3.1", "3.2"]),
+  line: SpecLine,
   openapi: Schema.NonEmptyString,
   operations: Schema.Array(Operation),
   origin: Origin,

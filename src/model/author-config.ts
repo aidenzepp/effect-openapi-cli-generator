@@ -1,18 +1,15 @@
-import { Array as Arr, Data, Effect, Schema } from "effect";
+import { Array as Arr, Data, Effect, Match, Schema } from "effect";
 import type { SchemaIssue } from "effect";
 import { DocumentUri, JsonPointer } from "./brands.ts";
-import { Diagnostic, sortDiagnostics } from "./diagnostic.ts";
-import { formatPointer } from "./pointer.ts";
+import { makeDiagnostic, sortDiagnostics } from "./diagnostic.ts";
+import type { Diagnostic, DiagnosticInput } from "./diagnostic.ts";
+import { formatPointer, nonEmptyPointerPattern } from "./pointer.ts";
 
 const binNamePattern = /^[a-z][a-z0-9-]*$/u;
 
 const environmentNamePattern = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/u;
 
 const parameterKeyPattern = /^(?:cookie|header|path|query):.+$/u;
-
-// A body field's RFC 6901 pointer relative to the body root, as its flag carries it (`/meta/name`):
-// one or more `/`-led tokens, `~` only as `~0` or `~1`. The whole body (`""`) is not a field.
-const fieldPointerPattern = /^(?:\/(?:[^/~]|~[01])*)+$/u;
 
 // A flag name as the kebab fold writes one: dot-separated kebab segments, each led by a letter.
 const flagNamePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/u;
@@ -107,7 +104,7 @@ const OperationOverride = Schema.Struct({
   // Renames a body field's flag, keyed by the field's pointer relative to the body root.
   fields: Schema.optionalKey(
     Schema.Record(
-      Schema.String.pipe(Schema.check(Schema.isPattern(fieldPointerPattern))),
+      Schema.String.pipe(Schema.check(Schema.isPattern(nonEmptyPointerPattern))),
       FieldOverride,
     ),
   ),
@@ -208,27 +205,21 @@ interface Finding {
   readonly path: readonly string[];
 }
 
-const findings = (issue: SchemaIssue.Issue, path: readonly string[]): readonly Finding[] => {
-  if (issue._tag === "Pointer") {
-    return findings(issue.issue, [...path, ...issue.path.map(String)]);
-  }
-
-  if (issue._tag === "Composite" || issue._tag === "AnyOf") {
-    return issue.issues.length === 0
-      ? [{ kind: "invalid", path }]
-      : issue.issues.flatMap((inner) => findings(inner, path));
-  }
-
-  if (issue._tag === "Filter" || issue._tag === "Encoding") {
-    return findings(issue.issue, path);
-  }
-
-  if (issue._tag === "MissingKey") {
-    return [{ kind: "missing", path }];
-  }
-
-  return [{ kind: issue._tag === "UnexpectedKey" ? "unknown" : "invalid", path }];
-};
+const findings = (issue: SchemaIssue.Issue, path: readonly string[]): readonly Finding[] =>
+  Match.value(issue).pipe(
+    Match.tag("Pointer", (pointer): readonly Finding[] =>
+      findings(pointer.issue, [...path, ...pointer.path.map(String)]),
+    ),
+    Match.tag("Composite", "AnyOf", (group): readonly Finding[] =>
+      group.issues.length === 0
+        ? [{ kind: "invalid", path }]
+        : group.issues.flatMap((inner) => findings(inner, path)),
+    ),
+    Match.tag("Filter", "Encoding", (wrapper): readonly Finding[] => findings(wrapper.issue, path)),
+    Match.tag("MissingKey", (): readonly Finding[] => [{ kind: "missing", path }]),
+    Match.tag("UnexpectedKey", (): readonly Finding[] => [{ kind: "unknown", path }]),
+    Match.orElse((): readonly Finding[] => [{ kind: "invalid", path }]),
+  );
 
 const isVersion = (path: readonly string[]): boolean =>
   path.length === 2 && path[0] === "package" && path[1] === "version";
@@ -296,36 +287,46 @@ const hintOf = (rule: Rule, context: AuthorConfigContext): string | undefined =>
     ? `The folded info.title is "${context.foldedTitle}"; add "binName": "${context.foldedTitle}" if that is the name you want.`
     : undefined;
 
-const diagnose = (finding: Finding, context: AuthorConfigContext): Diagnostic => {
+const diagnose = (finding: Finding, context: AuthorConfigContext): Effect.Effect<Diagnostic> => {
   const rule = ruleOf(finding);
-  const hint = hintOf(rule, context);
 
-  const fields = {
+  const input: DiagnosticInput = {
     code: `${rowId}/${rule}`,
     document: context.document,
     element: "Author config",
+    hint: hintOf(rule, context),
     message: messages[rule],
     openapi: "",
     pointer: formatPointer(finding.path),
-    row: rowId,
     scope: "document",
     severity: "refusal",
     specSection: context.document,
   };
 
-  return Schema.decodeUnknownSync(Diagnostic)(hint === undefined ? fields : { ...fields, hint });
+  return makeDiagnostic(input);
 };
 
-const refuse = (issue: SchemaIssue.Issue, context: AuthorConfigContext): AuthorConfigRefused => {
-  const unique = Arr.dedupeWith(
-    findings(issue, []).map((finding) => diagnose(finding, context)),
-    (left, right) => left.pointer === right.pointer && left.code === right.code,
+const refuse = (
+  issue: SchemaIssue.Issue,
+  context: AuthorConfigContext,
+): Effect.Effect<AuthorConfigRefused> =>
+  Effect.forEach(findings(issue, []), (finding) => diagnose(finding, context)).pipe(
+    Effect.map(
+      (diagnostics) =>
+        new AuthorConfigRefused({
+          diagnostics: sortDiagnostics(
+            [context.document],
+            Arr.dedupeWith(
+              diagnostics,
+              (left, right) => left.pointer === right.pointer && left.code === right.code,
+            ),
+          ),
+        }),
+    ),
   );
 
-  return new AuthorConfigRefused({
-    diagnostics: sortDiagnostics([context.document], unique),
-  });
-};
+const refuseIssueOf = (context: AuthorConfigContext) => (error: Schema.SchemaError) =>
+  Effect.flatMap(refuse(error.issue, context), Effect.fail);
 
 /**
  * Decodes untrusted author config JSON into an `AuthorConfig` or the refusals that explain why not.
@@ -338,7 +339,7 @@ export const decodeAuthorConfig = (
   Schema.decodeUnknownEffect(AuthorConfig)(input, {
     errors: "all",
     onExcessProperty: "error",
-  }).pipe(Effect.mapError((failure) => refuse(failure.issue, context)));
+  }).pipe(Effect.catchTag("SchemaError", refuseIssueOf(context)));
 
 /**
  * The runtime settings a generated CLI starts from, every field resolved.

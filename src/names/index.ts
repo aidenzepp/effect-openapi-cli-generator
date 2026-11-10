@@ -1,7 +1,8 @@
 import { Array as Arr, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic, sortDiagnostics } from "../model/diagnostic.ts";
+import { makeDiagnostic, sortDiagnostics } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Api, NamingHint, Operation, SecurityScheme } from "../model/entities.ts";
 import { domainIdentifiers, fixedNamespaces, rootModuleNames } from "./domain.ts";
 import { SafeIdentifier, foldFileSegment, foldIdentifier, foldKebab } from "./fold.ts";
@@ -173,49 +174,23 @@ const operationOf = (operation: Operation) =>
         path: operation.key.path,
       };
 
-interface DiagnosticFields {
-  code: string;
-  document: string;
-  element: string;
-  hint?: string;
-  message: string;
-  openapi: string;
-  operation?: ReturnType<typeof operationOf>;
-  pointer: string;
-  related?: Finding["related"];
-  row: string;
-  scope: Finding["scope"];
-  severity: Finding["severity"];
-  specSection: string;
-}
-
 const toDiagnostic = (api: Api, finding: Finding): Effect.Effect<Diagnostic> => {
   const { anchor } = finding;
-  const fields: DiagnosticFields = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: finding.document,
     element: finding.element,
+    hint: finding.hint,
     message: finding.message,
     openapi: anchor === undefined ? "" : api.openapi,
+    operation: finding.operation === undefined ? undefined : operationOf(finding.operation),
     pointer: finding.pointer,
-    row: finding.code.slice(0, finding.code.indexOf("/")),
+    related: finding.related,
     scope: finding.scope,
     severity: finding.severity,
     specSection: anchor === undefined ? finding.document : specSectionUrl(api.line, anchor),
-  };
-  if (finding.hint !== undefined) {
-    fields.hint = finding.hint;
-  }
-
-  if (finding.operation !== undefined) {
-    fields.operation = operationOf(finding.operation);
-  }
-
-  if (finding.related !== undefined) {
-    fields.related = finding.related;
-  }
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 // Author-config entries: each operation's site, and every entry that names nothing (R16).

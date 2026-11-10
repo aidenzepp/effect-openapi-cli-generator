@@ -1,6 +1,7 @@
 import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
 import { PathTemplate } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { methodTokens } from "../model/method-tokens.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
@@ -520,32 +521,26 @@ const operationOf = (operation: Operation) =>
 
 const toDiagnostic = (resolution: Resolution, finding: Finding) => {
   const rule: Rule = rules[finding.code];
-  const [row = ""] = finding.code.split("/");
   const { operation } = finding;
   // Under a Reference Object the use site is the pointer and the target is related (design 3.3).
   const viaReference = operation !== undefined && operation.item.use !== operation.item.pointer;
   const related = [...(viaReference ? [finding.pointer] : []), ...(finding.related ?? [])];
   const declared = isObject(resolution.value) ? resolution.value.openapi : undefined;
-  const base = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: resolution.document,
     element: rule.element,
     hint: rule.hint,
     message: rule.message,
     openapi: Predicate.isString(declared) ? declared : patchVersion[resolution.line],
+    operation: operation === undefined ? undefined : operationOf(operation),
     pointer: viaReference ? operation.item.use : finding.pointer,
-    row,
+    related: related.length === 0 ? undefined : related.map((pointer) => site(resolution, pointer)),
     scope: rule.scope,
     severity: "refusal",
     specSection: specSectionUrl(resolution.line, rule.anchor),
-  };
-  const located = operation === undefined ? base : { ...base, operation: operationOf(operation) };
-  const fields =
-    related.length === 0
-      ? located
-      : { ...located, related: related.map((pointer) => site(resolution, pointer)) };
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 /**
