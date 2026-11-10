@@ -1,4 +1,15 @@
-import { Array as Arr, Effect, Option, Order, Predicate, Record, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Equal,
+  Equivalence,
+  Option,
+  Order,
+  Predicate,
+  Record,
+  Result,
+  Schema,
+} from "effect";
 import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
@@ -304,14 +315,20 @@ const rawOperations = (resolution: Resolution): readonly RawOperation[] => {
   ).map((entry) => entry.raw);
 };
 
+// A parameter's identity: its `in` and name (a header name lowercased), or, for an entry that
+// cannot be read, its own pointer. Compared structurally with `Equal.equals`.
+type ParameterKey =
+  | { readonly in: string; readonly name: string }
+  | { readonly unreadable: string };
+
 interface ParameterEntry {
-  readonly key: string;
+  readonly key: ParameterKey;
   readonly level: Level;
   readonly pointer: string;
 }
 
 // A parameter's identity, read from the document of the set its reference chain ends in.
-const parameterKey = (resolution: Resolution, pointer: string): string => {
+const parameterKey = (resolution: Resolution, pointer: string): ParameterKey => {
   const target = follow(resolution, { document: resolution.document, pointer });
   const identity = Result.getSuccess(nodeInResult(resolution, target)).pipe(
     Option.flatMap((node) => decodeOption(ParameterIdentity, node)),
@@ -319,9 +336,11 @@ const parameterKey = (resolution: Resolution, pointer: string): string => {
 
   // An unreadable entry gets a key of its own so `normalizeParameter` reports it.
   return Option.match(identity, {
-    onNone: () => `\u0000unreadable\u0000${pointer}`,
-    onSome: (found) =>
-      `${found.in}\u0000${found.in === "header" ? found.name.toLowerCase() : found.name}`,
+    onNone: () => ({ unreadable: pointer }),
+    onSome: (found) => ({
+      in: found.in,
+      name: found.in === "header" ? found.name.toLowerCase() : found.name,
+    }),
   });
 };
 
@@ -351,7 +370,7 @@ const mergeEntries = (
   const merged = [...itemEntries];
   let overridden = false;
   for (const entry of operationEntries) {
-    const index = merged.findIndex((existing) => existing.key === entry.key);
+    const index = merged.findIndex((existing) => Equal.equals(existing.key, entry.key));
     if (index === -1) {
       merged.push(entry);
     } else {
@@ -882,15 +901,15 @@ const assembleOne = Effect.fnUntraced(function* assembleOne(
   return { diagnostics, operation };
 });
 
-const diagnosticKey = (diagnostic: Diagnostic): string =>
-  JSON.stringify([
-    diagnostic.code,
-    diagnostic.document,
-    diagnostic.pointer,
-    diagnostic.operation?.method,
-    diagnostic.operation?.path,
-    (diagnostic.related ?? []).map((site) => [site.document, site.pointer]),
-  ]);
+// A diagnostic's identity for `distinctDiagnostics`: a fresh array, compared element by element.
+const identityKey = (diagnostic: Diagnostic) => [
+  diagnostic.code,
+  diagnostic.document,
+  diagnostic.pointer,
+  diagnostic.operation?.method,
+  diagnostic.operation?.path,
+  (diagnostic.related ?? []).map((site) => [site.document, site.pointer]),
+];
 
 /**
  * Drops repeated diagnostics (same code, document, pointer, operation and related sites), keeping
@@ -898,7 +917,7 @@ const diagnosticKey = (diagnostic: Diagnostic): string =>
  * per operation that inherits them, and report once.
  */
 export const distinctDiagnostics = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
-  Arr.dedupeWith(diagnostics, (left, right) => diagnosticKey(left) === diagnosticKey(right));
+  Arr.dedupeWith(diagnostics, Equivalence.mapInput(Equal.asEquivalence(), identityKey));
 
 /**
  * Assembles the operations of the entry document in canonical order (design 2.2, 2.4, 3.7, 6.3).

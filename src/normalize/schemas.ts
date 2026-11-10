@@ -1,6 +1,7 @@
 import {
   Array as Arr,
   Effect,
+  HashSet,
   JsonPointer,
   JsonSchema,
   Option,
@@ -124,10 +125,10 @@ export const budgetOf = (limits: SchemaLimits): Budget => ({
 });
 
 /**
- * Charges one visit; false once the budget is spent.
+ * Charges `cost` visits, one by default; false once the budget is spent.
  */
-export const charge = (budget: Budget): boolean => {
-  budget.spent += 1;
+export const charge = (budget: Budget, cost = 1): boolean => {
+  budget.spent += cost;
 
   return budget.spent <= budget.limit;
 };
@@ -1419,7 +1420,7 @@ const importCopy = Effect.fnUntraced(function* importCopy(
 ): Effect.fn.Return<EditedCopy, SchemaBudgetExceeded | SchemaImportDefect> {
   const definitions = new Map(initial);
   const edits: SchemaEdit[] = [];
-  budget.spent += definitions.size;
+  charge(budget, definitions.size);
   yield* within(budget, definitions);
   let failure = yield* importOnce(definitions);
   while (Option.isSome(failure)) {
@@ -1430,7 +1431,7 @@ const importCopy = Effect.fnUntraced(function* importCopy(
 
     edits.push(edit);
     definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
-    budget.spent += definitions.size;
+    charge(budget, definitions.size);
     yield* within(budget, definitions);
     failure = yield* importOnce(definitions);
   }
@@ -1669,10 +1670,6 @@ const reportedPath = (edit: SchemaEdit, rule: Rule): readonly string[] => {
   return removedRefusal || droppedRequired ? edit.path.slice(0, -1) : edit.path;
 };
 
-// A diagnostic's identity for deduplication: its code at its document and pointer.
-const identityOf = (code: string, at: { readonly document: string; readonly pointer: string }) =>
-  `${code} ${at.document}#${at.pointer}`;
-
 const diagnosticsOf = (
   resolution: Resolution,
   sites: ReadonlyMap<string, CanonicalKey>,
@@ -1683,8 +1680,13 @@ const diagnosticsOf = (
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  const seen = new Set(
-    resolution.diagnostics.map((diagnostic) => identityOf(diagnostic.code, diagnostic)),
+  // A diagnostic's identity for deduplication: its code at its document and pointer.
+  let seen = HashSet.fromIterable<readonly [code: string, document: string, pointer: string]>(
+    resolution.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.document,
+      diagnostic.pointer,
+    ]),
   );
   const records: DiagnosticInput[] = [];
   const report = (
@@ -1694,9 +1696,9 @@ const diagnosticsOf = (
     keyword?: string,
   ): void => {
     const [, name = ""] = code.split("/");
-    const identity = identityOf(code, at);
-    if (rule !== undefined && !seen.has(identity)) {
-      seen.add(identity);
+    const identity = [code, at.document, at.pointer] as const;
+    if (rule !== undefined && !HashSet.has(seen, identity)) {
+      seen = HashSet.add(seen, identity);
 
       records.push({
         code,
