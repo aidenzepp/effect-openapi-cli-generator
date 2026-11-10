@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Effect, Option, Order, Predicate, Result, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import type { Line } from "../validate/index.ts";
 import {
   documentBase,
@@ -1372,32 +1373,25 @@ const Declared = Schema.Struct({ openapi: Schema.String });
 
 const toDiagnostic = (member: Member, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule = rules[finding.code];
-  const [row] = finding.code.split("/");
   const openapi = Schema.decodeUnknownOption(Declared)(member.value).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  let scope = "document";
-  if (notices.has(finding.code) || elementRefusals.has(finding.code)) {
-    scope = "element";
-  }
+  const scope =
+    notices.has(finding.code) || elementRefusals.has(finding.code) ? "element" : "document";
 
-  const fields = {
+  return makeDiagnostic({
     code: finding.code,
     document: finding.document,
     element: rule.element,
     message: rule.message,
     openapi,
     pointer: finding.pointer,
-    row,
+    related: finding.related === undefined ? undefined : [finding.related],
     scope,
     severity: notices.has(finding.code) ? "notice" : "refusal",
     specSection: specSectionUrl(member.line, anchorOn(finding.code, member.line)),
-  };
-
-  return Schema.decodeUnknownEffect(Diagnostic)(
-    finding.related === undefined ? fields : { ...fields, related: [finding.related] },
-  ).pipe(Effect.orDie);
+  });
 };
 
 interface Prepared {
