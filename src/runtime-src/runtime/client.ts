@@ -393,7 +393,7 @@ const assertMethod = (
         new Error(`request method ${JSON.stringify(request.method)} is not in the allowlist`),
       );
 
-const querySeparator = (url: string): string => {
+export const querySeparator = (url: string): string => {
   if (/[?&]$/u.test(url)) {
     return "";
   }
@@ -857,7 +857,7 @@ export const verboseSetting = GlobalFlag.Setting("verbose")({
 const redactedValue = redactedPlaceholder();
 
 // A query name as a server decodes it. `URLSearchParams` decodes leniently and never throws.
-const decodedName = (raw: string): string =>
+export const decodedQueryName = (raw: string): string =>
   new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
 
 /**
@@ -880,7 +880,8 @@ const redactUriText = (text: string, names: readonly (string | RegExp)[]): strin
     .map((part) => {
       const equals = part.indexOf("=");
 
-      return equals !== -1 && UrlParams.isRedactedName(decodedName(part.slice(0, equals)), names)
+      return equals !== -1 &&
+        UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names)
         ? `${part.slice(0, equals + 1)}${redactedValue}`
         : part;
     });
