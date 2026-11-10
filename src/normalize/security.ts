@@ -2,7 +2,8 @@ import { Effect, Option, Result, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
 import type { DocumentUri } from "../model/brands.ts";
-import { Diagnostic } from "../model/diagnostic.ts";
+import { makeDiagnostic } from "../model/diagnostic.ts";
+import type { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
@@ -122,31 +123,27 @@ const acquisitionHint = (permanent: boolean): string =>
     : "The generated CLI does not acquire tokens. Supply an access token obtained elsewhere.";
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
-  const [row] = finding.code.split("/");
   const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
     Option.map((declared) => declared.openapi),
     Option.getOrElse(() => "unknown"),
   );
-  const base = {
+
+  return makeDiagnostic({
     code: finding.code,
     document: finding.document ?? resolution.document,
     element: finding.element,
+    hint: finding.hint,
     message: finding.message,
     openapi,
     pointer: finding.pointer,
-    row,
+    related: finding.related?.map((site) => ({
+      document: site.document ?? resolution.document,
+      pointer: site.pointer,
+    })),
     scope: finding.scope ?? "element",
     severity: "refusal",
     specSection: specSectionUrl(resolution.line, finding.anchor),
-  };
-  const withHint = finding.hint === undefined ? base : { ...base, hint: finding.hint };
-  const related = finding.related?.map((site) => ({
-    document: site.document ?? resolution.document,
-    pointer: site.pointer,
-  }));
-  const fields = related === undefined ? withHint : { ...withHint, related };
-
-  return Schema.decodeUnknownEffect(Diagnostic)(fields).pipe(Effect.orDie);
+  });
 };
 
 const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
