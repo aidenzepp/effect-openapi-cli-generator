@@ -984,6 +984,47 @@ export const attachPlaceholders =
 export const credentialHeaders = ["authorization", "proxy-authorization", "cookie"] as const;
 
 /**
+ * A request header name that reads as a credential, by operator policy: it contains, in any case,
+ * one of these words. Output redacts such a header beside `credentialHeaders`; the wire never
+ * changes.
+ */
+export const credentialLikeName =
+  /token|secret|password|passwd|api-key|apikey|api_key|auth|session|credential|signature/iu;
+
+/**
+ * The response headers `--verbose` prints though their names are credential-like, by operator
+ * policy: the `WWW-Authenticate` and `Proxy-Authenticate` challenges, which carry no secret and
+ * are the main clue when authentication fails, and `Access-Control-Allow-Credentials`, which is
+ * only ever `true`. `Authentication-Info` and `Proxy-Authentication-Info` carry digest values and
+ * are not exempt.
+ */
+export const credentialLikeExemptions = [
+  "www-authenticate",
+  "proxy-authenticate",
+  "access-control-allow-credentials",
+] as const;
+
+/**
+ * A response header name `--verbose` redacts by operator policy: a credential-like name
+ * (`credentialLikeName`) that `credentialLikeExemptions` does not list.
+ */
+export const credentialLikeResponseName = new RegExp(
+  `^(?!(?:${credentialLikeExemptions.join("|")})$).*(?:${credentialLikeName.source})`,
+  "iu",
+);
+
+/**
+ * The request header names `--dry-run` and `--verbose` redact on top of `redactedNames`: every
+ * credential-like name (`credentialLikeName`) and each header the operation declares sensitive
+ * (`format: password`, an array of password strings, or `x-sensitive: true`, which the generator
+ * writes as `sensitiveHeaders`). They apply to the request's headers and its multipart part
+ * headers; a response's headers get `credentialLikeResponseName`.
+ */
+export const sensitiveHeaderNames = (
+  sensitive: readonly string[] | undefined,
+): readonly (string | RegExp)[] => [credentialLikeName, ...(sensitive ?? [])];
+
+/**
  * Extend `Headers.CurrentRedactedNames` with every credential header name and every `apiKey`
  * header name, and `UrlParams.CurrentRedactedNames` with every `apiKey` query name, keeping
  * Effect's defaults (design 7.5). A cookie name needs no entry: the whole `Cookie` header is

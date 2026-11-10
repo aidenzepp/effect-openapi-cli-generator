@@ -84,6 +84,8 @@ const ParameterObject = Schema.Struct({
   required: Schema.optionalKey(Schema.Boolean),
   schema: Schema.optionalKey(Schema.Unknown),
   style: Schema.optionalKey(Schema.Literals(styleNames)),
+  // Any value decodes; only `true` marks the value sensitive, so a malformed mark never refuses.
+  "x-sensitive": Schema.optionalKey(Schema.Unknown),
 });
 
 type ParameterNode = typeof ParameterObject.Type;
@@ -1418,6 +1420,7 @@ const build = (
   source: Source,
   plan: ContentPlan | StylePlan,
   limits: SchemaLimits,
+  mark: SensitiveMark,
 ) =>
   Effect.gen(function* built() {
     const { node, reference, target } = source;
@@ -1436,6 +1439,7 @@ const build = (
       required: node.required ?? false,
       rows: sorted(parameterRows(node, plan)),
       schema: { key: schemaKey },
+      ...mark,
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
       wireName: node.name,
     }).pipe(Effect.orDie);
@@ -1454,6 +1458,92 @@ const schemaSitesOf = (resolution: Resolution, source: Source): readonly Canonic
     ? []
     : [childKey(follow(resolution, childKey(target, "content", mediaType)), "schema")];
 };
+
+const MarkedSchema = Schema.Struct({
+  allOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  "x-sensitive": Schema.optionalKey(Schema.Unknown),
+});
+
+const branchKeys = ["allOf", "anyOf", "oneOf"] as const;
+
+// Whether the schema at `key` carries `x-sensitive: true` on any node the password reading walks
+// (names `isPassword`): each node of its `$ref` chain with its sibling keywords, each `allOf`
+// member and each `anyOf` or `oneOf` branch. A node already on the walk is not read twice, so a
+// cycle ends; past the node budget the answer is yes, so a secret never prints by exhaustion. An
+// unreadable node is not marked.
+const schemaMarked = (
+  resolution: Resolution,
+  key: CanonicalKey,
+  budget: Budget,
+  seen: Set<string>,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* marked() {
+    const id = keyOf(key);
+    if (seen.has(id)) {
+      return false;
+    }
+
+    seen.add(id);
+    if (!charge(budget)) {
+      return true;
+    }
+
+    const decoded = yield* nodeIn(resolution, key).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(MarkedSchema)),
+      Effect.option,
+    );
+    if (Option.isNone(decoded)) {
+      return false;
+    }
+
+    const node = decoded.value;
+    if (node["x-sensitive"] === true) {
+      return true;
+    }
+
+    const next = [
+      follow(resolution, key),
+      ...branchKeys.flatMap((branch) =>
+        (node[branch] ?? []).map((_, index) => childKey(key, branch, String(index))),
+      ),
+    ];
+    for (const at of next) {
+      if (yield* schemaMarked(resolution, at, budget, seen)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+interface SensitiveMark {
+  readonly sensitive?: true;
+}
+
+// The `sensitive` mark of a Parameter or Header Object: present when `x-sensitive: true` sits on
+// the object itself or anywhere `schemaMarked` walks its schema. `limits.maxNodes` bounds the walk.
+const sensitiveOf = (
+  resolution: Resolution,
+  source: Source,
+  limits: SchemaLimits,
+): Effect.Effect<SensitiveMark> =>
+  Effect.gen(function* sensitive() {
+    if (source.node["x-sensitive"] === true) {
+      return { sensitive: true };
+    }
+
+    const budget = budgetOf(limits);
+    const seen = new Set<string>();
+    for (const at of schemaSitesOf(resolution, source)) {
+      if (yield* schemaMarked(resolution, at, budget, seen)) {
+        return { sensitive: true };
+      }
+    }
+
+    return {};
+  });
 
 /**
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
@@ -1508,7 +1598,14 @@ export const normalizeParameter = (
     return {
       _tag: "Implemented",
       diagnostics: yield* diagnostics(decision.findings),
-      parameter: yield* build(resolution, site, source, decision.plan, limits),
+      parameter: yield* build(
+        resolution,
+        site,
+        source,
+        decision.plan,
+        limits,
+        yield* sensitiveOf(resolution, source, limits),
+      ),
     };
   });
 
@@ -1525,6 +1622,7 @@ export type PartHeaderOutcome =
   | {
       readonly _tag: "Typed";
       readonly schema: { readonly key: string };
+      readonly sensitive?: true;
       readonly serialization: ReturnType<typeof serializationOf>;
     }
   | { readonly _tag: "Unsupported"; readonly reason: string };
@@ -1601,6 +1699,7 @@ export const partHeader = (
             ? plan.schemaKey
             : schemaKeyAt(resolution, childKey(target, "schema")),
       },
+      ...(yield* sensitiveOf(resolution, source, limits)),
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
     };
   });

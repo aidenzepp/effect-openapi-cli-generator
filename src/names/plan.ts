@@ -1029,6 +1029,19 @@ const hasPasswordItems = (
   );
 };
 
+/**
+ * Whether the schema at store key `key` is a `format: password` schema or an array of password
+ * strings, by the readings that make a body property a secret-file flag (`isPassword`) or give it
+ * no flag (`hasPasswordItems`); output redacts a header whose schema it is. Both fail closed: past
+ * the hop or visit budget the answer is yes.
+ */
+export const isPasswordSchema = (defs: DraftContext["defs"], key: string): boolean => {
+  const budget = { visits: 0 };
+  const schema = own(defs, key);
+
+  return isPassword(defs, schema, budget) || hasPasswordItems(defs, schema, budget);
+};
+
 // A `format: password` property of a JSON or form body is read from a file or stdin: its flag is
 // --<name>-file of kind `secret-file` instead of --<name> (design 13.1 R4). That holds for a
 // string flag and for a JSON flag whose own schema is a composition with a password branch; a
