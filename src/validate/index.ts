@@ -13,6 +13,8 @@ import "@hyperjump/json-schema/draft-04";
 import "@hyperjump/json-schema/openapi-3-1";
 import "@hyperjump/json-schema/openapi-3-2";
 import { Data, Effect, Option, Schema } from "effect";
+import type { FileSystem, Path } from "effect";
+import type { Digest } from "effect/crypto";
 import { rewriteDialect } from "./dialect.ts";
 import { matchDisagreement, noticeFor, refusalFor, knownDisagreements } from "./disagreements.ts";
 import type { Refusal } from "./disagreements.ts";
@@ -82,7 +84,11 @@ const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes)
  */
 export const checkManifest = (
   read: ReadSchema,
-): Effect.Effect<readonly Uint8Array[], SchemaManifestError> =>
+): Effect.Effect<
+  readonly Uint8Array[],
+  SchemaManifestError,
+  FileSystem.FileSystem | Path.Path | Digest.Digest
+> =>
   Effect.all(
     manifest.map((entry) =>
       read(entry.file).pipe(
@@ -123,7 +129,8 @@ export const validateDocument = (
   document: Json,
 ): Effect.Effect<
   ValidationResult,
-  SchemaManifestError | UnsupportedOpenApiVersion | ValidatorError
+  SchemaManifestError | UnsupportedOpenApiVersion | ValidatorError,
+  FileSystem.FileSystem | Path.Path | Digest.Digest
 > =>
   Effect.gen(function* validateDocumentGen() {
     const line = yield* lineOf(document);
@@ -188,7 +195,8 @@ export const diagnoseDocument = (
   | Schema.SchemaError
   | SchemaManifestError
   | UnsupportedOpenApiVersion
-  | ValidatorError
+  | ValidatorError,
+  FileSystem.FileSystem | Path.Path | Digest.Digest
 > =>
   Effect.gen(function* diagnoseDocumentGen() {
     const line = yield* lineOf(document);

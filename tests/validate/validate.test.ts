@@ -1,6 +1,9 @@
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { Effect, Predicate, Schema } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
+import type { FileSystem, Path } from "effect";
+import type { Digest } from "effect/crypto";
 import { manifest } from "../../src/validate/schemas/manifest.ts";
 import { checkManifest, validateDocument } from "../../src/validate/index.ts";
 import { UnsupportedOpenApiVersion, versionRefusal } from "../../src/validate/dispatch.ts";
@@ -47,11 +50,14 @@ const tampered: ReadSchema = (file) =>
 const missing: ReadSchema = (file) =>
   file === "meta-3.2-2026-02-26.json" ? Effect.fail("gone") : vendored(file);
 
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
+
 const failureTag = <A, E extends { readonly _tag: string }>(
-  effect: Effect.Effect<A, E>,
+  effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Digest.Digest>,
 ): Promise<string> =>
   Effect.runPromise(
     effect.pipe(
+      Effect.provide(layer),
       Effect.flip,
       Effect.map((error) => error._tag),
     ),
@@ -64,8 +70,12 @@ describe("validateDocument", () => {
       const frozenValid = deepFreeze(structuredClone(valid));
       const frozenInvalid = deepFreeze(structuredClone(invalid));
 
-      const validResult = await Effect.runPromise(validateDocument(frozenValid));
-      const invalidResult = await Effect.runPromise(validateDocument(frozenInvalid));
+      const validResult = await Effect.runPromise(
+        validateDocument(frozenValid).pipe(Effect.provide(layer)),
+      );
+      const invalidResult = await Effect.runPromise(
+        validateDocument(frozenInvalid).pipe(Effect.provide(layer)),
+      );
 
       expect(validResult.valid).toBe(true);
       expect(invalidResult.valid).toBe(false);
@@ -87,8 +97,12 @@ describe("validateDocument", () => {
   ] as const)(
     "line %s: valid document passes and negative control fails",
     async (line, schema, pointer) => {
-      const valid = await Effect.runPromise(validateDocument(fixtures[line].valid));
-      const invalid = await Effect.runPromise(validateDocument(fixtures[line].invalid));
+      const valid = await Effect.runPromise(
+        validateDocument(fixtures[line].valid).pipe(Effect.provide(layer)),
+      );
+      const invalid = await Effect.runPromise(
+        validateDocument(fixtures[line].invalid).pipe(Effect.provide(layer)),
+      );
 
       expect(valid).toEqual({ errors: [], line, schema, valid: true });
       expect(invalid.line).toBe(line);
@@ -110,7 +124,7 @@ describe("validateDocument", () => {
       },
       { preconnect: original.preconnect },
     );
-    await Effect.runPromise(validateDocument(valid31));
+    await Effect.runPromise(validateDocument(valid31).pipe(Effect.provide(layer)));
     globalThis.fetch = original;
 
     expect(attempts).toEqual([]);
@@ -190,7 +204,7 @@ describe("versionRefusal", () => {
 
 describe("checkManifest", () => {
   test("accepts the vendored bytes", async () => {
-    const files = await Effect.runPromise(checkManifest(vendored));
+    const files = await Effect.runPromise(checkManifest(vendored).pipe(Effect.provide(layer)));
 
     expect(files).toHaveLength(manifest.length);
   });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Array as Arr, Effect, FileSystem, Layer, Order, Path, Schema } from "effect";
 import { Corpus } from "../corpus/tools/fetch.ts";
 import generatorPackage from "../package.json" with { type: "json" };
@@ -87,7 +87,7 @@ const sorted = (values: readonly string[]): readonly string[] => Arr.sort(values
 
 const decoder = new TextDecoder();
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 const generator = {
   packageJson: Schema.decodeUnknownSync(Schema.Json)(generatorPackage),

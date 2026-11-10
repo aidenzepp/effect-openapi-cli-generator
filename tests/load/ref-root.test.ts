@@ -1,6 +1,6 @@
-import { BunFileSystem } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { afterEach, describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Schema } from "effect";
+import { Effect, FileSystem, Layer, Schema } from "effect";
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
@@ -56,11 +56,13 @@ afterEach(() => {
   }
 });
 
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
+
 const run = (
   pairs: readonly DocumentPair[],
   refRoot: string,
   options: Omit<DocumentSetOptions, "refRoot"> = {},
-) => makeDocumentSet(pairs, { ...options, refRoot }).pipe(Effect.provide(BunFileSystem.layer));
+) => makeDocumentSet(pairs, { ...options, refRoot }).pipe(Effect.provide(layer));
 
 const refusal = (
   pairs: readonly DocumentPair[],
@@ -131,7 +133,7 @@ const runSwapped = (
           makeDocumentSet([], { refRoot }).pipe(Effect.provideService(FileSystem.FileSystem, fs)),
         ),
       ),
-    ).pipe(Effect.provide(BunFileSystem.layer)),
+    ).pipe(Effect.provide(layer)),
   );
 
 /**
@@ -202,9 +204,7 @@ describe("document set: --ref-root", () => {
   test("a ../ path is refused at document scope", async () => {
     const { root } = workspace();
     const error = await Effect.runPromise(
-      Effect.flip(resolveUnderRoot(root, "../outside.json")).pipe(
-        Effect.provide(BunFileSystem.layer),
-      ),
+      Effect.flip(resolveUnderRoot(root, "../outside.json")).pipe(Effect.provide(layer)),
     );
 
     expect(error.diagnostic.code).toBe("REF-16/outside-root");
@@ -278,7 +278,7 @@ describe("document set: --ref-root", () => {
           Effect.flip(
             makeDocumentSet([pair]).pipe(
               Effect.flatMap((set) => setMembers(entry, set)),
-              Effect.provide(BunFileSystem.layer),
+              Effect.provide(layer),
             ),
           ),
         ),

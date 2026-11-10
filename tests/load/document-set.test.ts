@@ -1,6 +1,6 @@
-import { BunFileSystem } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
@@ -19,8 +19,10 @@ const owner = fixture("owner.yaml");
 
 const hash = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
+
 const run = (pairs: readonly DocumentPair[], options: DocumentSetOptions = {}) =>
-  makeDocumentSet(pairs, options).pipe(Effect.provide(BunFileSystem.layer));
+  makeDocumentSet(pairs, options).pipe(Effect.provide(layer));
 
 const refusal = (pairs: readonly DocumentPair[], options: DocumentSetOptions = {}) =>
   Effect.runPromise(Effect.flip(run(pairs, options)));

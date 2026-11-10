@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
@@ -33,7 +33,7 @@ const lines: readonly Line[] = ["3.1.2", "3.2.1"];
 
 const resolverLine = { "3.1.2": "3.1", "3.2.1": "3.2" } as const;
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 // Generated packages live under the worktree's git-ignored `work/`, never the system temp
 // directory.

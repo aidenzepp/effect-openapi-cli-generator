@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
 import generatorPackage from "../../package.json" with { type: "json" };
 import generatorTsconfig from "../../tsconfig.json" with { type: "json" };
@@ -18,7 +18,7 @@ import type { Json } from "../../src/model/pointer.ts";
 
 const repoRoot = nodePath.resolve(import.meta.dir, "../..");
 
-const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const layer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest);
 
 // The generated files live under the worktree's git-ignored `work/`, never the system temp
 // directory.

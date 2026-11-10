@@ -2,7 +2,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import nodeFs from "node:fs";
 import nodePath from "node:path";
-import { BunFileSystem, BunPath, BunServices } from "@effect/platform-bun";
+import { BunCrypto, BunFileSystem, BunPath, BunServices } from "@effect/platform-bun";
 import { Console, Effect, FileSystem, Layer, Path, Predicate, Schema, Sink, Stdio } from "effect";
 import { Command } from "effect/cli";
 import generatorPackage from "../../package.json" with { type: "json" };
@@ -105,7 +105,9 @@ const run = (): Promise<Observed> =>
       yield* fs.writeFileString(path.join(out, "custom/commands.ts"), authorCommands);
 
       return { cliItems: yield* fs.readFileString(path.join(out, "src/cli/items.ts")), out };
-    }).pipe(Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCrypto.layerDigest)),
+    ),
   );
 
 let observed: Promise<Observed> | undefined;
