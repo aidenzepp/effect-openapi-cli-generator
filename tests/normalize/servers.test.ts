@@ -338,6 +338,20 @@ describe("server variables and the bound origin set", () => {
     ]);
   });
 
+  test("the first refusing assignment names the reported code", () => {
+    // Template order, not key order: scheme varies slowest, so https+userinfo refuses before
+    // http+api.example.com would.
+    const template = "{scheme}://{host}";
+    const server = url(template, {
+      variables: {
+        host: { default: "api.example.com", enum: ["api.example.com", "a@evil.example"] },
+        scheme: { default: "https", enum: ["https", "http"] },
+      },
+    });
+    const result = normalize([server], context(accepting(template)));
+    see(codes(result.diagnostics)).toEqual(["SRV-02/userinfo"]);
+  });
+
   test("a path variable default or enum member carrying ? or # is refused without echoing it", () => {
     const template = "https://api.example.com/{v}";
     const withDefault = (fallback: string) =>
