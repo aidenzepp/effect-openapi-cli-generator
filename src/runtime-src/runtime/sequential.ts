@@ -144,7 +144,7 @@ interface SeqState {
 /**
  * Compute the UTF-8 byte length of one code point.
  */
-const utf8Bytes = (char: string): number => {
+export const utf8Bytes = (char: string): number => {
   const point = char.codePointAt(0) ?? 0;
 
   if (point < 0x80) {

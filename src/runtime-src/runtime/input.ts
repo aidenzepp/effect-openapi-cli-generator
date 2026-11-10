@@ -18,7 +18,7 @@ import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
 import type { Secret } from "./redact.ts";
-import { RunCredentials } from "./redact.ts";
+import { RunCredentials, encoder } from "./redact.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import * as Negotiate from "./negotiate.ts";
 
@@ -47,8 +47,6 @@ export const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdi
   }).pipe(Effect.ignore);
 
 const bodyFileName = "body-file";
-
-const encoder = new TextEncoder();
 
 /**
  * Whole request body as text; field flags override it.

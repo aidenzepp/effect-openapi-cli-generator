@@ -82,6 +82,7 @@ import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import type { ScrubEntry } from "./redact.ts";
 import {
   dropTrailingFragment,
+  encoder,
   longestFormBytes,
   queryWireForm,
   redactedPlaceholder,
@@ -96,7 +97,13 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
-import { jsonSeqRecords, ndjsonRecords, sequentialCodecOf, sseRecords } from "./sequential.ts";
+import {
+  jsonSeqRecords,
+  ndjsonRecords,
+  sequentialCodecOf,
+  sseRecords,
+  utf8Bytes,
+} from "./sequential.ts";
 import type { SequentialCodec } from "./sequential.ts";
 
 /**
@@ -490,27 +497,6 @@ export const sanitize = (text: string): string => text.replaceAll(unsafeText, ""
 const scrubbedAndSanitized = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubAround(text, credentials, sanitize);
 
-// The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
-const oneByteLimit = 128;
-
-const twoByteLimit = 2048;
-
-const threeByteLimit = 65_536;
-
-const utf8Width = (character: string): number => {
-  const point = character.codePointAt(0) ?? 0;
-
-  if (point < oneByteLimit) {
-    return 1;
-  }
-
-  if (point < twoByteLimit) {
-    return 2;
-  }
-
-  return point < threeByteLimit ? 3 : 4;
-};
-
 /**
  * The longest prefix of `text` that fits `maxBytes` of UTF-8, never splitting a character.
  */
@@ -519,7 +505,7 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
   let end = 0;
 
   for (const character of text) {
-    used += utf8Width(character);
+    used += utf8Bytes(character);
 
     if (used > maxBytes) {
       break;
@@ -1555,8 +1541,6 @@ const undeclaredMediaNotice = (
       ),
     );
   });
-
-const encoder = new TextEncoder();
 
 const crlf = encoder.encode("\r\n");
 
