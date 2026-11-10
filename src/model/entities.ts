@@ -120,7 +120,7 @@ export const Serialization = Schema.Union([StyleSerialization, ContentSerializat
 
 // A part header of an Encoding Object: a Header Object by name, typed and serialized as a header
 // parameter is (HDR-01, ENC-03), with its `required` and `deprecated` marks and, when the Header
-// Object carries `x-sensitive: true`, `sensitive`.
+// Object or its schema carries `x-sensitive: true`, `sensitive`.
 const partHeaders = Schema.Array(
   Schema.Struct({
     deprecated: Schema.Boolean,
@@ -238,8 +238,8 @@ export class Body extends Schema.Class<Body>("Body")({
 
 /**
  * An operation parameter after path-item merge. `sensitive` is present when the Parameter Object
- * carries `x-sensitive: true`; output redacts such a header's value (`format: password` is read
- * from its schema, not here).
+ * or its schema carries `x-sensitive: true`; output redacts such a header's value (`format:
+ * password` is read from its schema, not here).
  */
 export class Parameter extends Schema.Class<Parameter>("Parameter")({
   deprecated: Schema.Boolean,

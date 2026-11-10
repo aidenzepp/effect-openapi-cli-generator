@@ -1694,9 +1694,9 @@ interface Markable {
 }
 
 /**
- * The header parameters and multipart part headers the document marks sensitive, by
- * `x-sensitive: true` or a `format: password` schema, each name once in document order: the
- * runtime's `--dry-run` and `--verbose` redact their values (`Auth.sensitiveHeaderNames`).
+ * The header parameters and multipart part headers the document marks sensitive, by `x-sensitive:
+ * true` or a password schema (`isPasswordSchema`), each name once in document order: the runtime's
+ * `--dry-run` and `--verbose` redact their values (`Auth.sensitiveHeaderNames`).
  */
 const sensitiveHeadersOf = (operation: Operation, defs: Defs): readonly string[] => {
   const marked = (header: Markable): boolean =>

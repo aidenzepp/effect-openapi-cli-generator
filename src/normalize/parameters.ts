@@ -90,10 +90,6 @@ const ParameterObject = Schema.Struct({
 
 type ParameterNode = typeof ParameterObject.Type;
 
-// The `sensitive` mark of a Parameter or Header Object: present only for `x-sensitive: true`.
-const sensitiveOf = (node: ParameterNode): { readonly sensitive?: true } =>
-  node["x-sensitive"] === true ? { sensitive: true } : {};
-
 const MediaTypeObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknown) });
 
 const rules: Record<Line, string> = { "3.0": "oas-3.0", "3.1": "oas-3.1", "3.2": "oas-3.2" };
@@ -1424,6 +1420,7 @@ const build = (
   source: Source,
   plan: ContentPlan | StylePlan,
   limits: SchemaLimits,
+  mark: SensitiveMark,
 ) =>
   Effect.gen(function* built() {
     const { node, reference, target } = source;
@@ -1442,7 +1439,7 @@ const build = (
       required: node.required ?? false,
       rows: sorted(parameterRows(node, plan)),
       schema: { key: schemaKey },
-      ...sensitiveOf(node),
+      ...mark,
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
       wireName: node.name,
     }).pipe(Effect.orDie);
@@ -1461,6 +1458,40 @@ const schemaSitesOf = (resolution: Resolution, source: Source): readonly Canonic
     ? []
     : [childKey(follow(resolution, childKey(target, "content", mediaType)), "schema")];
 };
+
+const SchemaMark = Schema.Struct({ "x-sensitive": Schema.optionalKey(Schema.Unknown) });
+
+// Whether the node at `key` carries `x-sensitive: true`; an unreadable node does not.
+const markedAt = (resolution: Resolution, key: CanonicalKey): Effect.Effect<boolean> =>
+  nodeIn(resolution, key).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(SchemaMark)),
+    Effect.map((node) => node["x-sensitive"] === true),
+    Effect.orElseSucceed(() => false),
+  );
+
+interface SensitiveMark {
+  readonly sensitive?: true;
+}
+
+// The `sensitive` mark of a Parameter or Header Object: present when `x-sensitive: true` sits on
+// the object itself or on its schema, at the schema's own node or where its `$ref` leads.
+const sensitiveOf = (resolution: Resolution, source: Source): Effect.Effect<SensitiveMark> =>
+  Effect.gen(function* sensitive() {
+    if (source.node["x-sensitive"] === true) {
+      return { sensitive: true };
+    }
+
+    for (const at of schemaSitesOf(resolution, source)) {
+      if (
+        (yield* markedAt(resolution, at)) ||
+        (yield* markedAt(resolution, follow(resolution, at)))
+      ) {
+        return { sensitive: true };
+      }
+    }
+
+    return {};
+  });
 
 /**
  * Normalizes one Parameter Object into a `Parameter`, a notice-only ignore, or an element-scope
@@ -1515,7 +1546,14 @@ export const normalizeParameter = (
     return {
       _tag: "Implemented",
       diagnostics: yield* diagnostics(decision.findings),
-      parameter: yield* build(resolution, site, source, decision.plan, limits),
+      parameter: yield* build(
+        resolution,
+        site,
+        source,
+        decision.plan,
+        limits,
+        yield* sensitiveOf(resolution, source),
+      ),
     };
   });
 
@@ -1609,7 +1647,7 @@ export const partHeader = (
             ? plan.schemaKey
             : schemaKeyAt(resolution, childKey(target, "schema")),
       },
-      ...sensitiveOf(node),
+      ...(yield* sensitiveOf(resolution, source)),
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
     };
   });
