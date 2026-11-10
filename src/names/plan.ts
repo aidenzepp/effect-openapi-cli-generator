@@ -998,6 +998,14 @@ const isPassword = (
   );
 };
 
+/**
+ * Whether the schema at store key `key` is a `format: password` schema, by the reading that makes
+ * a body property a secret-file flag (`isPassword`); output redacts a header whose schema it is.
+ * Like `isPassword` it fails closed: past the hop or visit budget the answer is yes.
+ */
+export const isPasswordSchema = (defs: DraftContext["defs"], key: string): boolean =>
+  isPassword(defs, own(defs, key), { visits: 0 });
+
 // Whether an array schema's `items` is a password string on any node the flattener reads: each
 // node of a `$ref` chain with its sibling keywords, each `allOf` member, and any `anyOf` or `oneOf`
 // branch. Like `isPassword`, it fails closed past the hop or visit budget.

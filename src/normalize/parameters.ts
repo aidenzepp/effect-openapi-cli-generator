@@ -84,9 +84,15 @@ const ParameterObject = Schema.Struct({
   required: Schema.optionalKey(Schema.Boolean),
   schema: Schema.optionalKey(Schema.Unknown),
   style: Schema.optionalKey(Schema.Literals(styleNames)),
+  // Any value decodes; only `true` marks the value sensitive, so a malformed mark never refuses.
+  "x-sensitive": Schema.optionalKey(Schema.Unknown),
 });
 
 type ParameterNode = typeof ParameterObject.Type;
+
+// The `sensitive` mark of a Parameter or Header Object: present only for `x-sensitive: true`.
+const sensitiveOf = (node: ParameterNode): { readonly sensitive?: true } =>
+  node["x-sensitive"] === true ? { sensitive: true } : {};
 
 const MediaTypeObject = Schema.Struct({ schema: Schema.optionalKey(Schema.Unknown) });
 
@@ -1436,6 +1442,7 @@ const build = (
       required: node.required ?? false,
       rows: sorted(parameterRows(node, plan)),
       schema: { key: schemaKey },
+      ...sensitiveOf(node),
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
       wireName: node.name,
     }).pipe(Effect.orDie);
@@ -1525,6 +1532,7 @@ export type PartHeaderOutcome =
   | {
       readonly _tag: "Typed";
       readonly schema: { readonly key: string };
+      readonly sensitive?: true;
       readonly serialization: ReturnType<typeof serializationOf>;
     }
   | { readonly _tag: "Unsupported"; readonly reason: string };
@@ -1601,6 +1609,7 @@ export const partHeader = (
             ? plan.schemaKey
             : schemaKeyAt(resolution, childKey(target, "schema")),
       },
+      ...sensitiveOf(node),
       serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
     };
   });

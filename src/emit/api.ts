@@ -30,7 +30,7 @@ import type {
   PlannedGroup,
 } from "../names/index.ts";
 import { isPositionalBody } from "../names/flatten.ts";
-import { isBooleanSchema, suffixed } from "../names/plan.ts";
+import { isBooleanSchema, isPasswordSchema, suffixed } from "../names/plan.ts";
 import type { FlagSource, PartOptionKind } from "../names/plan.ts";
 import { sendsFormPairs } from "../normalize/bodies.ts";
 import { isJsonMedia } from "../runtime-src/runtime/serialize.ts";
@@ -1688,6 +1688,37 @@ const requiredHeadersOf = (responses: Operation["responses"]): (readonly [string
     return names.length === 0 ? [] : [[responseKey(response.key), strings(names)] as const];
   });
 
+interface Markable {
+  readonly schema: { readonly key: string };
+  readonly sensitive?: true | undefined;
+}
+
+/**
+ * The header parameters and multipart part headers the document marks sensitive, by
+ * `x-sensitive: true` or a `format: password` schema, each name once in document order: the
+ * runtime's `--dry-run` and `--verbose` redact their values (`Auth.sensitiveHeaderNames`).
+ */
+const sensitiveHeadersOf = (operation: Operation, defs: Defs): readonly string[] => {
+  const marked = (header: Markable): boolean =>
+    header.sensitive === true || isPasswordSchema(defs, header.schema.key);
+  const parameters = operation.parameters
+    .filter((parameter) => parameter.location === "header" && marked(parameter))
+    .map((parameter) => parameter.wireName);
+  const parts = (operation.body?.alternatives ?? [])
+    .filter((alternative) => alternative.codec === "multipart")
+    .flatMap((alternative) => alternative.encoding)
+    .flatMap((rule) => [
+      rule,
+      ...(rule.nested ?? []),
+      ...(rule.nestedItem ? [rule.nestedItem] : []),
+    ])
+    .flatMap((rule) => rule.headers)
+    .filter(marked)
+    .map((header) => header.name);
+
+  return Arr.dedupe([...parameters, ...parts]);
+};
+
 const requirementOf = (operation: Operation, schemes: ReadonlySet<string>) =>
   Effect.gen(function* requirement() {
     const alternatives = operation.security.alternatives.map((alternative) =>
@@ -1798,6 +1829,12 @@ const commandStatements = (
     const requiredHeaders = requiredHeadersOf(operation.responses);
     if (requiredHeaders.length > 0) {
       meta.push(["requiredHeaders", obj(requiredHeaders)]);
+    }
+
+    // Only an operation with a header the document marks sensitive names the list.
+    const sensitiveHeaders = sensitiveHeadersOf(operation, context.defs);
+    if (sensitiveHeaders.length > 0) {
+      meta.push(["sensitiveHeaders", strings(sensitiveHeaders)]);
     }
 
     if (operation.servers.some((server) => server.level !== "root")) {
