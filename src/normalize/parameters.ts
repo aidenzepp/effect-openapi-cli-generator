@@ -1456,35 +1456,83 @@ const schemaSitesOf = (resolution: Resolution, source: Source): readonly Canonic
     : [childKey(follow(resolution, childKey(target, "content", mediaType)), "schema")];
 };
 
-const SchemaMark = Schema.Struct({ "x-sensitive": Schema.optionalKey(Schema.Unknown) });
+const MarkedSchema = Schema.Struct({
+  allOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  anyOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  oneOf: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  "x-sensitive": Schema.optionalKey(Schema.Unknown),
+});
 
-// Whether the node at `key` carries `x-sensitive: true`; an unreadable node does not.
-const markedAt = (resolution: Resolution, key: CanonicalKey): Effect.Effect<boolean> =>
-  nodeIn(resolution, key).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(SchemaMark)),
-    Effect.map((node) => node["x-sensitive"] === true),
-    Effect.orElseSucceed(() => false),
+const branchKeys = ["allOf", "anyOf", "oneOf"] as const;
+
+// Whether the schema at `key` carries `x-sensitive: true` on any node the password reading walks
+// (names `isPassword`): each node of its `$ref` chain with its sibling keywords, each `allOf`
+// member and each `anyOf` or `oneOf` branch. A node already on the walk is not read twice, so a
+// cycle ends; past the node budget the answer is yes, so a secret never prints by exhaustion. An
+// unreadable node is not marked.
+const schemaMarked = Effect.fnUntraced(function* schemaMarked(
+  resolution: Resolution,
+  key: CanonicalKey,
+  budget: Budget,
+  seen: Set<string>,
+): Effect.fn.Return<boolean> {
+  const id = keyOf(key);
+  if (seen.has(id)) {
+    return false;
+  }
+
+  seen.add(id);
+  if (!charge(budget)) {
+    return true;
+  }
+
+  const decoded = yield* nodeIn(resolution, key).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(MarkedSchema)),
+    Effect.option,
   );
+  if (Option.isNone(decoded)) {
+    return false;
+  }
+
+  const node = decoded.value;
+  if (node["x-sensitive"] === true) {
+    return true;
+  }
+
+  const next = [
+    follow(resolution, key),
+    ...branchKeys.flatMap((branch) =>
+      (node[branch] ?? []).map((_, index) => childKey(key, branch, String(index))),
+    ),
+  ];
+  for (const at of next) {
+    if (yield* schemaMarked(resolution, at, budget, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+});
 
 interface SensitiveMark {
   readonly sensitive?: true;
 }
 
 // The `sensitive` mark of a Parameter or Header Object: present when `x-sensitive: true` sits on
-// the object itself or on its schema, at the schema's own node or where its `$ref` leads.
+// the object itself or anywhere `schemaMarked` walks its schema. `limits.maxNodes` bounds the walk.
 const sensitiveOf = Effect.fnUntraced(function* sensitiveOf(
   resolution: Resolution,
   source: Source,
+  limits: SchemaLimits,
 ): Effect.fn.Return<SensitiveMark> {
   if (source.node["x-sensitive"] === true) {
     return { sensitive: true };
   }
 
+  const budget = budgetOf(limits);
+  const seen = new Set<string>();
   for (const at of schemaSitesOf(resolution, source)) {
-    if (
-      (yield* markedAt(resolution, at)) ||
-      (yield* markedAt(resolution, follow(resolution, at)))
-    ) {
+    if (yield* schemaMarked(resolution, at, budget, seen)) {
       return { sensitive: true };
     }
   }
@@ -1550,7 +1598,7 @@ export const normalizeParameter = Effect.fnUntraced(function* normalizeParameter
       source,
       decision.plan,
       limits,
-      yield* sensitiveOf(resolution, source),
+      yield* sensitiveOf(resolution, source, limits),
     ),
   };
 });
@@ -1644,7 +1692,7 @@ export const partHeader = Effect.fnUntraced(function* partHeader(
           ? plan.schemaKey
           : schemaKeyAt(resolution, childKey(target, "schema")),
     },
-    ...(yield* sensitiveOf(resolution, source)),
+    ...(yield* sensitiveOf(resolution, source, limits)),
     serialization: serializationOf(node, plan, resolution.line, origin, objectValue),
   };
 });
