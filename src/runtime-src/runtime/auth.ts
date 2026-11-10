@@ -1,4 +1,4 @@
-import type { FileSystem } from "effect";
+import type { FileSystem, Stdio, Stream } from "effect";
 import {
   Array as Arr,
   Config,
@@ -10,8 +10,6 @@ import {
   Record as Rec,
   Redacted,
   Result,
-  Stdio,
-  Stream,
   Terminal,
 } from "effect";
 import { Flag, GlobalFlag, Prompt, TerminalCapabilities } from "effect/cli";
@@ -19,7 +17,14 @@ import type { FetchHttpClient } from "effect/http";
 import { Headers, HttpClientRequest, Url, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../domain/errors.ts";
 import type { Provenance } from "./base-url.ts";
-import { StdinClaim, decodeUtf8, readBounded, stdinOrFile, stripLineEnd } from "./input.ts";
+import {
+  StdinClaim,
+  decodeUtf8,
+  printStderr,
+  readBounded,
+  stdinOrFile,
+  stripLineEnd,
+} from "./input.ts";
 import { loneSurrogate, redactedPlaceholder } from "./redact.ts";
 import { cookieOctets, headerValueBreaks } from "./serialize.ts";
 
@@ -309,17 +314,13 @@ const noticeDeprecated = (
   credentials: readonly Credential[],
 ): Effect.Effect<void, never, Stdio.Stdio> =>
   Effect.gen(function* notify() {
-    const stdio = yield* Stdio.Stdio;
     for (const { definition, scheme } of credentials) {
       if (definition.deprecated === true) {
         const name = scheme.replaceAll(unsafeName, "");
-        yield* Stream.run(
-          Stream.make(`Notice: the security scheme ${name} is deprecated\n`),
-          stdio.stderr(),
-        );
+        yield* printStderr(`Notice: the security scheme ${name} is deprecated`);
       }
     }
-  }).pipe(Effect.ignore);
+  });
 
 interface PromptServices {
   readonly path: Path.Path;
