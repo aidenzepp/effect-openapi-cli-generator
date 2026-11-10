@@ -8,6 +8,7 @@ import {
   Predicate,
   Record,
   Schema,
+  SchemaGetter,
 } from "effect";
 import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
@@ -663,11 +664,18 @@ const namingKeys = {
 
 const aliasesKey = "x-forge-aliases";
 
+// A dotted group, split at `.`; the empty string splits to no segments.
+const DottedGroup = Schema.String.pipe(
+  Schema.decodeTo(Schema.Array(Schema.String), {
+    decode: SchemaGetter.split({ separator: "." }),
+    encode: SchemaGetter.forbiddenEncoding,
+  }),
+);
+
 // A group is a dotted string, split at `.`, or an array whose elements are kept whole; no segment
 // may be empty. Any other shape is unusable.
 const groupSegments = (value: Json): Option.Option<Arr.NonEmptyReadonlyArray<string>> =>
-  decodeOption(Schema.String, value).pipe(
-    Option.map((text): readonly string[] => text.split(".")),
+  decodeOption(DottedGroup, value).pipe(
     Option.orElse(() => decodeOption(Schema.Array(Schema.String), value)),
     Option.filter(Arr.isReadonlyArrayNonEmpty),
     Option.filter((segments) => segments.every((segment) => segment !== "")),

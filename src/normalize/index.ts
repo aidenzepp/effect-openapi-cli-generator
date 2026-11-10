@@ -61,6 +61,10 @@ const Root = Schema.Struct({
   tags: Schema.optionalKey(Schema.Array(Schema.Json)),
 });
 
+const decodeTag = Schema.decodeUnknownOption(Tag);
+
+const decodeRoot = Schema.decodeUnknownOption(Root);
+
 const docsOf = (
   fields: typeof Described.Type | undefined,
 ): Types.Mutable<typeof Api.Encoded.info> => {
@@ -79,7 +83,7 @@ const docsOf = (
 type PlainTag = Types.Mutable<(typeof Api.Encoded.tags)[number]>;
 
 const tagOf = (entry: Json): readonly PlainTag[] => {
-  const found = Schema.decodeUnknownOption(Tag)(entry);
+  const found = decodeTag(entry);
   if (Option.isNone(found)) {
     return [];
   }
@@ -126,7 +130,7 @@ export const normalize = Effect.fn("normalize.normalize")(function* normalize(
   context: NormalizeContext,
   limits: ResolveLimits = defaultLimits,
 ): Effect.fn.Return<Normalization, NormalizeError> {
-  const root = Schema.decodeUnknownOption(Root)(resolution.value);
+  const root = decodeRoot(resolution.value);
   const openapi = Option.match(root, { onNone: () => resolution.line, onSome: (r) => r.openapi });
   const fields = Option.getOrUndefined(root);
   const servers: ServersContext = {
