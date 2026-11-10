@@ -1,5 +1,5 @@
 /* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
-import { Array as Arr, Effect, Option, Order, Predicate, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Predicate, Record, Result, Schema } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
 import { declaredOpenapi } from "../validate/dispatch.ts";
@@ -281,7 +281,7 @@ const rules = {
     scope: "element",
     severity: "refusal",
   },
-} as const satisfies Record<string, Rule>;
+} as const satisfies Record.ReadonlyRecord<string, Rule>;
 
 type Code = keyof typeof rules;
 
@@ -431,7 +431,7 @@ const table = (fields: readonly Field[]): ReadonlyMap<string, Field> =>
 
 const grammar = new Map(objectFields.map(([kind, fields]) => [kind, table(fields)]));
 
-const schemaGrammar: Record<Line, ReadonlyMap<string, Field>> = {
+const schemaGrammar: Record.ReadonlyRecord<Line, ReadonlyMap<string, Field>> = {
   "3.0": table(schema30),
   "3.1": table(schema31),
   "3.2": table(schema31),
@@ -477,12 +477,14 @@ const fragmentPointer = (fragment: string): string | undefined => {
   return tokens === undefined ? undefined : formatPointer(tokens);
 };
 
+// The array branch keeps the index read: `Arr.get` floors its index (`Math.floor`, Array.ts:1921),
+// so a token "1.5" from a `$ref` pointer would reach element 1 instead of no member.
 const memberOf = (node: Json, token: string): Json | undefined => {
   if (isArray(node)) {
     return node[Number(token)];
   }
 
-  return isObject(node) && Object.hasOwn(node, token) ? node[token] : undefined;
+  return isObject(node) ? Option.getOrUndefined(Record.get(node, token)) : undefined;
 };
 
 type Step = { readonly kind: Kind | undefined } | { readonly container: Kind };
@@ -1264,28 +1266,26 @@ class Resolver {
       ]),
     );
     const names = new Set(targets.keys());
-    const edges = new Map<string, Edge[]>();
-    const add = (owner: string, edge: Edge): void => {
-      const list = edges.get(owner) ?? [];
-      list.push(edge);
-      edges.set(owner, list);
-    };
-
-    for (const reference of references) {
-      add(ownerOf(reference.site, names), {
-        site: reference.site,
-        target: reference.target,
-        to: keyOf(reference.target),
-      });
-    }
-
+    const referenceEdges = references.map((reference) => ({
+      edge: { site: reference.site, target: reference.target, to: keyOf(reference.target) },
+      owner: ownerOf(reference.site, names),
+    }));
     // A target also reaches every target nested inside it, so a cycle through nested content shows.
-    for (const [name, target] of targets) {
+    const nestedEdges = [...targets].flatMap(([name, target]) => {
       const owner = ownerOf(target, names);
-      if (target.pointer !== "" && owner !== rootKey(target.document)) {
-        add(owner, { site: target, target, to: name });
-      }
-    }
+
+      return target.pointer !== "" && owner !== rootKey(target.document)
+        ? [{ edge: { site: target, target, to: name }, owner }]
+        : [];
+    });
+    // Owner keys hold `#`, never an integer-like key, so the record keeps insertion order.
+    const grouped = Arr.groupBy([...referenceEdges, ...nestedEdges], ({ owner }) => owner);
+    const edges = new Map(
+      Object.entries(grouped).map(([owner, list]): [string, readonly Edge[]] => [
+        owner,
+        list.map(({ edge }) => edge),
+      ]),
+    );
 
     const done = new Set<string>();
     for (const start of [rootKey(this.entry.document), ...names]) {
@@ -1341,6 +1341,9 @@ class Resolver {
       pointer: "",
     });
 
+    // Not `Arr.groupBy`: the keys come from side-effecting site outcomes evaluated in order with an
+    // early return, and the map persists across iterations, pruned by `waiting.delete`. groupBy
+    // takes a finished iterable, so it would run outcomes the failure path skips today.
     const waiting = new Map<string, Waiting[]>();
     let order = 0;
     for (;;) {
@@ -1457,20 +1460,18 @@ const isAllOfMember = (site: CanonicalKey): boolean => {
 const referrersOf = (
   references: ReadonlyMap<string, ResolvedReference>,
 ): ReadonlyMap<string, readonly CanonicalKey[]> => {
-  const referrers = new Map<string, CanonicalKey[]>();
-  for (const reference of references.values()) {
-    if (isAllOfMember(reference.site)) {
-      const key = keyOf(reference.target);
-      const sites = referrers.get(key);
-      if (sites === undefined) {
-        referrers.set(key, [reference.site]);
-      } else {
-        sites.push(reference.site);
-      }
-    }
-  }
+  // Target keys hold `#`, never an integer-like key, so the record keeps insertion order.
+  const grouped = Arr.groupBy(
+    [...references.values()].filter((reference) => isAllOfMember(reference.site)),
+    (reference) => keyOf(reference.target),
+  );
 
-  return referrers;
+  return new Map(
+    Object.entries(grouped).map(([key, list]): [string, readonly CanonicalKey[]] => [
+      key,
+      list.map((reference) => reference.site),
+    ]),
+  );
 };
 
 /**
