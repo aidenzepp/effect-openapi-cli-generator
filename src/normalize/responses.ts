@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
@@ -111,11 +112,9 @@ const rules = {
 
 type Code = keyof typeof rules;
 
-type Plain<T> = { -readonly [K in keyof T]: T[K] };
+type PlainAlternative = Types.Mutable<typeof MediaAlternative.Encoded>;
 
-type PlainAlternative = Plain<typeof MediaAlternative.Encoded>;
-
-type PlainCase = Plain<typeof ResponseCase.Encoded>;
+type PlainCase = Types.Mutable<typeof ResponseCase.Encoded>;
 
 // A finding at its own location, in whichever document of the set holds it.
 interface Finding {
@@ -193,53 +192,52 @@ const keyRow = (key: ResponseCase["key"]): string => {
   return "code" in key ? "RSS-03" : "RSS-06";
 };
 
-const alternativeOf = (
+const alternativeOf = Effect.fnUntraced(function* alternativeOf(
   resolution: Resolution,
   response: CanonicalKey,
   mediaType: string,
   findings: Finding[],
-): Effect.Effect<Option.Option<PlainAlternative>> =>
-  Effect.gen(function* alternative() {
-    const site = childKey(response, "content", mediaType);
-    if (!isMediaRange(mediaType)) {
-      findings.push({ at: site, code: "RSP-05/invalid-media-type" });
+): Effect.fn.Return<Option.Option<PlainAlternative>> {
+  const site = childKey(response, "content", mediaType);
+  if (!isMediaRange(mediaType)) {
+    findings.push({ at: site, code: "RSP-05/invalid-media-type" });
 
-      return Option.none();
-    }
+    return Option.none();
+  }
 
-    const home = follow(resolution, site);
-    const media = yield* nodeIn(resolution, home).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(MediaObject)),
-      Effect.orDie,
-    );
-    // Encoding applies to request bodies only (MED-10, 3.0 and 3.1); a 3.2 Media Type description
-    // is ignored (MED-09, D-OC5).
-    if (media.encoding !== undefined && resolution.line !== "3.2") {
-      findings.push({ at: home, code: "MED-10/encoding-ignored" });
-    }
+  const home = follow(resolution, site);
+  const media = yield* nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(MediaObject)),
+    Effect.orDie,
+  );
+  // Encoding applies to request bodies only (MED-10, 3.0 and 3.1); a 3.2 Media Type description
+  // is ignored (MED-09, D-OC5).
+  if (media.encoding !== undefined && resolution.line !== "3.2") {
+    findings.push({ at: home, code: "MED-10/encoding-ignored" });
+  }
 
-    if (media.description !== undefined && resolution.line === "3.2") {
-      findings.push({ at: home, code: "MED-09/description-ignored" });
-    }
+  if (media.description !== undefined && resolution.line === "3.2") {
+    findings.push({ at: home, code: "MED-09/description-ignored" });
+  }
 
-    const plain: PlainAlternative = {
-      codec: codecOf(mediaType),
-      encoding: [],
-      mediaType,
-      origin: home,
-      prefixEncoding: [],
-      rows: ["RSP-05"],
-    };
-    if (media.itemSchema !== undefined) {
-      plain.itemSchema = schemaRefAt(resolution, childKey(home, "itemSchema"));
-    }
+  const plain: PlainAlternative = {
+    codec: codecOf(mediaType),
+    encoding: [],
+    mediaType,
+    origin: home,
+    prefixEncoding: [],
+    rows: ["RSP-05"],
+  };
+  if (media.itemSchema !== undefined) {
+    plain.itemSchema = schemaRefAt(resolution, childKey(home, "itemSchema"));
+  }
 
-    if (media.schema !== undefined) {
-      plain.schema = schemaRefAt(resolution, childKey(home, "schema"));
-    }
+  if (media.schema !== undefined) {
+    plain.schema = schemaRefAt(resolution, childKey(home, "schema"));
+  }
 
-    return Option.some(plain);
-  });
+  return Option.some(plain);
+});
 
 // A 3.0 schema-serialized header carries the D-OC9 notice; a content-based one never was
 // percent-encoded.
@@ -250,30 +248,29 @@ const serializedBySchema = (resolution: Resolution, at: CanonicalKey): Effect.Ef
     Effect.orDie,
   );
 
-const headersOf = (
+const headersOf = Effect.fnUntraced(function* headersOf(
   resolution: Resolution,
   headers: readonly string[],
   response: CanonicalKey,
   findings: Finding[],
-): Effect.Effect<PlainCase["headers"]> =>
-  Effect.gen(function* responseHeaders() {
-    const kept: PlainCase["headers"][number][] = [];
-    for (const name of headers) {
-      const at = childKey(response, "headers", name);
-      if (name.toLowerCase() === "content-type") {
-        findings.push({ at, code: "RSP-09/ignored-content-type" });
-      } else if (isHeaderName(name)) {
-        kept.push({ name, ...(yield* headerMarks(resolution, at)) });
-        if (resolution.line === "3.0" && (yield* serializedBySchema(resolution, at))) {
-          findings.push({ at, code: "HDR-15/header-percent-encoding" });
-        }
-      } else {
-        findings.push({ at, code: "RSP-09/invalid-header-name" });
+): Effect.fn.Return<PlainCase["headers"]> {
+  const kept: PlainCase["headers"][number][] = [];
+  for (const name of headers) {
+    const at = childKey(response, "headers", name);
+    if (name.toLowerCase() === "content-type") {
+      findings.push({ at, code: "RSP-09/ignored-content-type" });
+    } else if (isHeaderName(name)) {
+      kept.push({ name, ...(yield* headerMarks(resolution, at)) });
+      if (resolution.line === "3.0" && (yield* serializedBySchema(resolution, at))) {
+        findings.push({ at, code: "HDR-15/header-percent-encoding" });
       }
+    } else {
+      findings.push({ at, code: "RSP-09/invalid-header-name" });
     }
+  }
 
-    return kept;
-  });
+  return kept;
+});
 
 const docsOf = (
   response: typeof ResponseObject.Type,
@@ -281,7 +278,7 @@ const docsOf = (
 ): PlainCase["docs"] => {
   const description = site?.description ?? response.description;
   const summary = site?.summary ?? response.summary;
-  const docs: Plain<PlainCase["docs"]> = {};
+  const docs: Types.Mutable<PlainCase["docs"]> = {};
   if (description !== undefined) {
     docs.description = sanitizeProse(description);
   }
@@ -293,49 +290,41 @@ const docsOf = (
   return docs;
 };
 
-const caseOf = (
+const caseOf = Effect.fnUntraced(function* caseOf(
   resolution: Resolution,
   responses: CanonicalKey,
   text: string,
   key: ResponseCase["key"],
   findings: Finding[],
-): Effect.Effect<PlainCase> =>
-  Effect.gen(function* responseCase() {
-    const site = childKey(responses, text);
-    const home = follow(resolution, site);
-    const response = yield* nodeIn(resolution, home).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(ResponseObject)),
-      Effect.orDie,
-    );
-    const alternatives = Arr.getSomes(
-      yield* Effect.all(
-        Object.keys(response.content ?? {}).map((mediaType) =>
-          alternativeOf(resolution, home, mediaType, findings),
-        ),
-      ),
-    );
-    const headers = yield* headersOf(
-      resolution,
-      Object.keys(response.headers ?? {}),
-      home,
-      findings,
-    );
-    const rows = [
-      keyRow(key),
-      "RSP-01",
-      ...(headers.length === 0 ? [] : ["RSP-04"]),
-      ...(response.content === undefined ? ["RSP-07"] : ["RSP-05"]),
-    ];
+): Effect.fn.Return<PlainCase> {
+  const site = childKey(responses, text);
+  const home = follow(resolution, site);
+  const response = yield* nodeIn(resolution, home).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(ResponseObject)),
+    Effect.orDie,
+  );
+  const alternatives = Arr.getSomes(
+    yield* Effect.forEach(Object.keys(response.content ?? {}), (mediaType) =>
+      alternativeOf(resolution, home, mediaType, findings),
+    ),
+  );
+  const headers = yield* headersOf(resolution, Object.keys(response.headers ?? {}), home, findings);
+  const rows = [
+    keyRow(key),
+    "RSP-01",
+    ...(headers.length === 0 ? [] : ["RSP-04"]),
+    ...(response.content === undefined ? ["RSP-07"] : ["RSP-05"]),
+  ];
 
-    return {
-      alternatives,
-      docs: docsOf(response, referenceIn(resolution, site)),
-      headers,
-      key,
-      origin: site,
-      rows,
-    };
-  });
+  return {
+    alternatives,
+    docs: docsOf(response, referenceIn(resolution, site)),
+    headers,
+    key,
+    origin: site,
+    rows,
+  };
+});
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule: Rule = rules[finding.code];
@@ -383,33 +372,34 @@ const responseKeys = (
  * one by `defsKey` of its canonical pointer. A response or media type a reference takes into
  * another document of the set is read there, and its findings name that document.
  */
-export const normalizeResponses = (
+export const normalizeResponses = Effect.fnUntraced(function* normalizeResponses(
   resolution: Resolution,
   pointer: string,
-): Effect.Effect<NormalizedResponses> =>
-  Effect.gen(function* normalize() {
-    const findings: Finding[] = [];
-    const cases: PlainCase[] = [];
-    const responses = { document: resolution.document, pointer };
-    for (const text of yield* responseKeys(resolution, responses)) {
-      const key = classifyKey(text);
-      if (key === "invalid" || key === "out-of-range") {
-        findings.push({
-          at: childKey(responses, text),
-          code: key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range",
-        });
-      } else if (key !== "extension") {
-        cases.push(yield* caseOf(resolution, responses, text, key, findings));
-      }
+): Effect.fn.Return<NormalizedResponses> {
+  const findings: Finding[] = [];
+  const cases: PlainCase[] = [];
+  const responses = { document: resolution.document, pointer };
+  for (const text of yield* responseKeys(resolution, responses)) {
+    const key = classifyKey(text);
+    if (key === "invalid" || key === "out-of-range") {
+      findings.push({
+        at: childKey(responses, text),
+        code: key === "invalid" ? "RSS-06/invalid-key" : "RSS-10/status-out-of-range",
+      });
+    } else if (key !== "extension") {
+      cases.push(yield* caseOf(resolution, responses, text, key, findings));
     }
+  }
 
-    return {
-      diagnostics: yield* Effect.all(findings.map((finding) => toDiagnostic(resolution, finding))),
-      responses: yield* Effect.all(
-        cases.map((plain) => Schema.decodeUnknownEffect(ResponseCase)(plain).pipe(Effect.orDie)),
-      ),
-    };
-  });
+  return {
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+    diagnostics: yield* Effect.forEach(findings, (finding) => toDiagnostic(resolution, finding)),
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+    responses: yield* Effect.forEach(cases, (plain) =>
+      Schema.decodeUnknownEffect(ResponseCase)(plain).pipe(Effect.orDie),
+    ),
+  };
+});
 
 const keyRank = (key: ResponseCase["key"]): number => {
   if (key === "default") {
