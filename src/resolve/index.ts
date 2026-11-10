@@ -1,5 +1,15 @@
 /* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
-import { Array as Arr, Effect, Option, Order, Predicate, Record, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Graph,
+  Option,
+  Order,
+  Predicate,
+  Record,
+  Result,
+  Schema,
+} from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { Diagnostic, makeDiagnostic } from "../model/diagnostic.ts";
 import { declaredOpenapi } from "../validate/dispatch.ts";
@@ -539,37 +549,6 @@ const ownerOf = (key: CanonicalKey, targets: ReadonlySet<string>): string => {
   }
 
   return rootKey(key.document);
-};
-
-// Iterative depth-first search from `start`; returns the edge that closes a cycle.
-const cycleFrom = (
-  start: string,
-  edges: ReadonlyMap<string, readonly Edge[]>,
-  done: Set<string>,
-): Edge | undefined => {
-  const active = new Set<string>([start]);
-  const frames: { readonly node: string; next: number }[] = [{ next: 0, node: start }];
-  let frame = done.has(start) ? undefined : frames.at(-1);
-  while (frame !== undefined) {
-    const edge = edges.get(frame.node)?.[frame.next];
-    if (edge === undefined) {
-      active.delete(frame.node);
-      done.add(frame.node);
-      frames.pop();
-    } else if (active.has(edge.to)) {
-      return edge;
-    } else {
-      frame.next += 1;
-      if (!done.has(edge.to)) {
-        active.add(edge.to);
-        frames.push({ next: 0, node: edge.to });
-      }
-    }
-
-    frame = frames.at(-1);
-  }
-
-  return undefined;
 };
 
 /**
@@ -1280,22 +1259,41 @@ class Resolver {
     });
     // Owner keys hold `#`, never an integer-like key, so the record keeps insertion order.
     const grouped = Arr.groupBy([...referenceEdges, ...nestedEdges], ({ owner }) => owner);
-    const edges = new Map(
-      Object.entries(grouped).map(([owner, list]): [string, readonly Edge[]] => [
-        owner,
-        list.map(({ edge }) => edge),
-      ]),
+
+    const graph = Graph.directed<string, Edge>((mutable) => {
+      const nodes = new Map<string, Graph.NodeIndex>();
+      const node = (name: string): Graph.NodeIndex => {
+        const known = nodes.get(name);
+        if (known !== undefined) {
+          return known;
+        }
+
+        const index = Graph.addNode(mutable, name);
+        nodes.set(name, index);
+
+        return index;
+      };
+
+      for (const start of [rootKey(this.entry.document), ...names]) {
+        node(start);
+      }
+
+      for (const [owner, list] of Object.entries(grouped)) {
+        for (const { edge } of list) {
+          Graph.addEdge(mutable, node(owner), node(edge.to), edge);
+        }
+      }
+    });
+
+    const closing = Graph.findCycle(graph).pipe(
+      Option.flatMap((cycle) => Option.fromNullishOr(cycle.edges.at(-1))),
+      Option.flatMap((index) => Graph.getEdge(graph, index)),
+      Option.map((edge) => edge.data),
     );
 
-    const done = new Set<string>();
-    for (const start of [rootKey(this.entry.document), ...names]) {
-      const closing = cycleFrom(start, edges, done);
-      if (closing !== undefined) {
-        return failure("DOC-23/non-schema-cycle", closing.site, closing.target);
-      }
-    }
-
-    return undefined;
+    return Option.isSome(closing)
+      ? failure("DOC-23/non-schema-cycle", closing.value.site, closing.value.target)
+      : undefined;
   }
 
   // Makes a member reachable by its retrieval URI and its base; two members may not share one.
