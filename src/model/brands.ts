@@ -122,3 +122,8 @@ export const JsonPointer = Schema.String.pipe(
  * A finite JSON value. Resource bounds belong to the stage budgets, not the brand.
  */
 export const JsonLiteral = Schema.Json.pipe(Schema.brand("JsonLiteral"));
+
+/**
+ * A SHA-256 digest as 64 lowercase hexadecimal digits.
+ */
+export const Sha256Hex = pattern(/^[0-9a-f]{64}$/u);
