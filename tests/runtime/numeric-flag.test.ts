@@ -1,8 +1,24 @@
 /* oxlint-disable unicorn/no-array-for-each -- Sink.forEach is the Effect sink, not Array#forEach */
 import { describe, expect, test } from "bun:test";
 import { BunServices } from "@effect/platform-bun";
-import { Cause, Console, Effect, Exit, Layer, Option, Runtime, Sink, Stdio } from "effect";
+import {
+  Cause,
+  ConfigProvider,
+  Console,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Runtime,
+  Sink,
+  Stdio,
+  Terminal,
+} from "effect";
 import { CliOutput, Command, Flag } from "effect/cli";
+import { ChildProcessSpawner } from "effect/process";
+import * as Client from "../../src/runtime-src/runtime/client.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Output from "../../src/runtime-src/runtime/output.ts";
 import { runCredentialsLayer } from "../../src/runtime-src/runtime/redact.ts";
@@ -210,5 +226,96 @@ describe("numeric help labels", () => {
     expect(text).toMatch(/--limit integer\b/u);
     expect(text).toMatch(/--total integer\b/u);
     expect(text).not.toMatch(/\bstring\b/u);
+  });
+});
+
+// The whole-number flags and variables (A5-17, A5-35 neutral part): the exact usage text for a
+// non-digit and an out-of-range value, from the flag and from the environment.
+const flagEnvironment = Layer.mergeAll(
+  FileSystem.layerNoop({}),
+  Path.layer,
+  Stdio.layerTest({}),
+  Layer.succeed(
+    Terminal.Terminal,
+    Terminal.make({
+      columns: Effect.succeed(80),
+      display: () => Effect.void,
+      readInput: Effect.die("unused"),
+      readLine: Effect.die("unused"),
+      rows: Effect.succeed(24),
+      size: Effect.die("unused"),
+    }),
+  ),
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() => Effect.die("unused")),
+  ),
+);
+
+const envProvider = (env: Record<string, string>) =>
+  Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env }));
+
+type MessageKey = "message" | "userMessage";
+
+const expectFailure = (exit: Exit.Exit<unknown, unknown>, key: MessageKey, text: string): void => {
+  if (Exit.isSuccess(exit)) {
+    throw new Error("expected a failure");
+  }
+
+  expect(Cause.squash(exit.cause)).toMatchObject({ [key]: text });
+};
+
+const flagRefused = async (
+  setting: typeof Client.timeoutSetting | typeof Client.retriesSetting,
+  name: string,
+  raw: string,
+  userMessage: string,
+): Promise<void> => {
+  expectFailure(
+    await Effect.runPromiseExit(
+      setting.flag
+        .parse({ arguments: [], flags: { [name]: [raw] } })
+        .pipe(Effect.provide(flagEnvironment)),
+    ),
+    "userMessage",
+    userMessage,
+  );
+};
+
+const envRefused = async (
+  read: Effect.Effect<number, unknown, ConfigProvider.ConfigProvider>,
+  env: Record<string, string>,
+  message: string,
+): Promise<void> => {
+  expectFailure(
+    await Effect.runPromiseExit(read.pipe(Effect.provide(envProvider(env)))),
+    "message",
+    message,
+  );
+};
+
+describe("whole-number flag and variable messages", () => {
+  const timeout = "--timeout must be a whole number of seconds, 0 or more";
+  const retries = "--retries must be a whole number from 0 to 10";
+  const idle = "ACME_IDLE_TIMEOUT must be a whole number of seconds, 1 or more";
+
+  test.each(["abc", "1.5", "-1", "99999999999999999999"])("--timeout %p", async (raw) => {
+    await flagRefused(Client.timeoutSetting, "timeout", raw, timeout);
+  });
+
+  test.each(["abc", "-1", "11"])("--retries %p", async (raw) => {
+    await flagRefused(Client.retriesSetting, "retries", raw, retries);
+  });
+
+  test.each(["abc", "-1", "99999999999999999999"])("ACME_TIMEOUT %p", async (raw) => {
+    await envRefused(Client.effectiveTimeoutSeconds("ACME"), { ACME_TIMEOUT: raw }, timeout);
+  });
+
+  test.each(["abc", "-1", "11"])("ACME_RETRIES %p", async (raw) => {
+    await envRefused(Client.effectiveRetries("ACME"), { ACME_RETRIES: raw }, retries);
+  });
+
+  test.each(["abc", "0", "-1", "99999999999999999999"])("ACME_IDLE_TIMEOUT %p", async (raw) => {
+    await envRefused(Output.effectiveIdleTimeoutSeconds("ACME"), { ACME_IDLE_TIMEOUT: raw }, idle);
   });
 });
