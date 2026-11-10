@@ -663,6 +663,39 @@ describe("DOC-23 reference cycles", () => {
     expect(refusal("3.1", value).code).toBe("DOC-23/non-schema-cycle");
   });
 
+  test("DOC-23 names the edge that closes the first cycle", () => {
+    // Path items A and B each reach themselves through a callback. Only B is reachable from the
+    // root, the first start; A is reachable only from its own start, though its edges come first.
+    const value = spec("3.1", {
+      components: {
+        pathItems: {
+          A: {
+            get: {
+              callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/A" } } },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+          B: {
+            get: {
+              callbacks: { cb: { "{$u}": { $ref: "#/components/pathItems/B" } } },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      },
+      paths: { "/b": { $ref: "#/components/pathItems/B" } },
+    });
+    const diagnostic = refusal("3.1", value);
+
+    expect([diagnostic.code, diagnostic.pointer]).toEqual([
+      "DOC-23/non-schema-cycle",
+      "/components/pathItems/B/get/callbacks/cb/{$u}",
+    ]);
+    expect<readonly { document: string; pointer: string }[] | undefined>(
+      diagnostic.related,
+    ).toEqual([{ document: entry, pointer: "/components/pathItems/B" }]);
+  });
+
   test("schema cycles are allowed", () => {
     const value = spec("3.1", {
       components: {
