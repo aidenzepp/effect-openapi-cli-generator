@@ -1,12 +1,13 @@
-import { Effect, Exit, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Exit, Option, Predicate, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
-import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
 import { methodMembers } from "../model/path-item.ts";
+import { expressionsOf, locate, operationOf, pathItems, site } from "./path-items.ts";
+import type { Operation, PathItem, Place } from "./path-items.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
@@ -232,31 +233,7 @@ interface Finding {
   readonly severity?: Rule["severity"];
 }
 
-interface PathItem {
-  readonly node: JsonObject;
-  readonly pointer: string;
-  readonly use: string;
-  readonly key: string;
-}
-
-interface Operation {
-  readonly id: string | undefined;
-  readonly item: PathItem;
-  readonly method: string;
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
-// An object and where it sits: the document of the set that holds it, and its pointer there.
-interface Place {
-  readonly document: CanonicalKey["document"];
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
 const statusKey = /^(?:[1-5][0-9]{2}|[1-5]XX|default)$/u;
-
-const expression = /\{(?<name>[^{}]+)\}/gu;
 
 const schemaMembers = [
   "additionalProperties",
@@ -288,29 +265,6 @@ const entriesOf = (value: Json | undefined): readonly (readonly [string, Json])[
 const listOf = (value: Json | undefined): readonly Json[] => (isArray(value) ? value : []);
 
 const isReference = (node: JsonObject): boolean => Predicate.isString(node.$ref);
-
-// An object at a use site, followed through its Reference Object to the end of the chain, which
-// is read from the document of the set that holds it.
-const locate = (
-  resolution: Resolution,
-  site: CanonicalKey,
-  node: Json | undefined,
-): Place | undefined => {
-  const at = resolution.references.get(keyOf(site))?.target ?? site;
-  const document = resolution.documents.get(at.document);
-  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
-  const target = at === site ? node : read;
-
-  return isObject(target)
-    ? { document: at.document, node: target, pointer: at.pointer }
-    : undefined;
-};
-
-// The site at `pointer` in the entry document.
-const entrySite = (resolution: Resolution, pointer: string): CanonicalKey => ({
-  document: resolution.document,
-  pointer,
-});
 
 const isToken = (name: string): boolean =>
   Option.isSome(Schema.decodeUnknownOption(HeaderName)(name));
@@ -851,19 +805,6 @@ const elementFindings = (resolution: Resolution): readonly Finding[] => {
   ];
 };
 
-const pathItems = (resolution: Resolution): readonly PathItem[] =>
-  entriesOf(isObject(resolution.value) ? resolution.value.paths : undefined).flatMap(
-    ([key, value]) => {
-      const use = childPointer("/paths", key);
-      const located = locate(resolution, entrySite(resolution, use), value);
-
-      // A path item in another document of the set is not walked: the checks read entry sites.
-      return located === undefined || located.document !== resolution.document
-        ? []
-        : [{ key, node: located.node, pointer: located.pointer, use }];
-    },
-  );
-
 const operationsOf = (resolution: Resolution, item: PathItem): readonly Operation[] => {
   const fixed = methodMembers(resolution.line).filter((name) => isObject(item.node[name]));
   const extra =
@@ -871,22 +812,22 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
       ? entriesOf(item.node.additionalOperations).map(([name]) => name)
       : [];
   const entries = [
-    ...fixed.map((name) => [name, name.toUpperCase(), childPointer(item.pointer, name)] as const),
+    ...fixed.map((name) => [name.toUpperCase(), childPointer(item.pointer, name), false] as const),
     ...extra.map(
       (name) =>
         [
           name,
-          name,
           childPointer(childPointer(item.pointer, "additionalOperations"), name),
+          true,
         ] as const,
     ),
   ];
 
-  return entries.flatMap(([, method, pointer]) => {
+  return entries.flatMap(([method, pointer, additional]) => {
     const node = nodeAt(resolution.value, pointer);
 
     return isObject(node)
-      ? [{ id: stringMember(node, "operationId"), item, method, node, pointer }]
+      ? [{ additional, id: stringMember(node, "operationId"), item, method, node, pointer }]
       : [];
   });
 };
@@ -901,11 +842,8 @@ const serverFindings = (
   }
 
   const url = stringMember(server, "url");
-  const names =
-    url === undefined
-      ? []
-      : Array.from(url.matchAll(expression), (match) => match.groups?.name ?? "");
-  const repeated = new Set(names).size !== names.length;
+  const names = url === undefined ? [] : expressionsOf(url);
+  const repeated = Arr.dedupe(names).length !== names.length;
   const defaultSeverity = resolution.line === "3.0" ? "notice" : "refusal";
   const variables = entriesOf(server.variables).flatMap(([name, variable]) => {
     const fallback = isObject(variable) ? stringMember(variable, "default") : undefined;
@@ -1133,16 +1071,6 @@ const operationFindingsOf = (resolution: Resolution): readonly Finding[] => {
     ...securityFindings(resolution, operations),
   ];
 };
-
-const site = (resolution: Resolution, pointer: string) => ({
-  document: resolution.document,
-  pointer,
-});
-
-const operationOf = (operation: Operation) =>
-  operation.id === undefined
-    ? { method: operation.method, path: operation.item.key }
-    : { method: operation.method, operationId: operation.id, path: operation.item.key };
 
 const underItem = (operation: Operation, pointer: string): boolean =>
   operation.item.use !== operation.item.pointer &&

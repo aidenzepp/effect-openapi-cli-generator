@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { ComponentName } from "../model/brands.ts";
 import type { DocumentUri } from "../model/brands.ts";
 
 type Document = typeof DocumentUri.Type;
@@ -16,7 +18,10 @@ export interface CanonicalKey {
  */
 export const keyOf = (key: CanonicalKey): string => `${key.document}#${key.pointer}`;
 
-const componentName = /^[a-zA-Z0-9.\-_]+$/u;
+/**
+ * Test whether a `$defs` candidate name matches the component-name pattern.
+ */
+const isComponentName = Schema.is(ComponentName);
 
 /**
  * The `$defs` key a schema target is lifted under (design 2.2 SchemaStore key rule). A target at
@@ -36,7 +41,7 @@ export const defsKey = (entry: Document, key: CanonicalKey): string => {
     schemas === "schemas" &&
     name !== undefined &&
     rest.length === 0 &&
-    componentName.test(name);
+    isComponentName(name);
 
   return isComponent ? name : key.pointer;
 };
