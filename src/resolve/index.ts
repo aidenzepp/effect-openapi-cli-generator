@@ -19,6 +19,7 @@ import {
   formatPointer,
   childPointer,
 } from "../model/pointer.ts";
+import { fixedMethods, queryMethod } from "../model/path-item.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt } from "../model/json-tree.ts";
@@ -298,7 +299,7 @@ const encodings: readonly Field[] = [
   ["prefixEncoding", "encoding", "list"],
 ];
 
-const methods = ["delete", "get", "head", "options", "patch", "post", "put", "query", "trace"];
+const methods = [...fixedMethods, queryMethod];
 
 const schema30: readonly Field[] = [
   ["additionalProperties", "schema", "one"],

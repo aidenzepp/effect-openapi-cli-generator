@@ -6,6 +6,7 @@ import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
+import { methodMembers } from "../model/path-item.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
@@ -256,17 +257,6 @@ interface Place {
 const statusKey = /^(?:[1-5][0-9]{2}|[1-5]XX|default)$/u;
 
 const expression = /\{(?<name>[^{}]+)\}/gu;
-
-const fixedMethods: readonly string[] = [
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-];
 
 const schemaMembers = [
   "additionalProperties",
@@ -740,9 +730,6 @@ const requestBodyFindings = (
   isObject(node) && !isReference(node)
     ? media.content(resolution, node.content, childPointer(pointer, "content"))
     : [];
-
-const methodMembers = (line: Resolution["line"]): readonly string[] =>
-  line === "3.2" ? [...fixedMethods, "query"] : fixedMethods;
 
 // Path Item, Operation and Callback objects refer to each other through callbacks.
 interface Items {
