@@ -5,7 +5,7 @@ import nodePath from "node:path";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { startCaptureServer } from "../fixtures/capture-server.ts";
-import type { RecordedRequest } from "../fixtures/capture-server.ts";
+import type { RecordedRequest, ScriptedResponse } from "../fixtures/capture-server.ts";
 import { generateFixture, preparePackage, runBin } from "../support/generated-cli.ts";
 import type { GeneratedPackage } from "../support/generated-cli.ts";
 
@@ -365,42 +365,52 @@ describe("every policy word redacts a header parameter that contains it", () => 
   }
 });
 
-// Response headers under --verbose (operator rulings 57f4ca85): a credential-like name is redacted,
-// the WWW-Authenticate and Proxy-Authenticate challenges still print, Set-Cookie stays redacted.
-const sessionToken = "rsp-4c19e7a2";
+// Response headers under --verbose (operator rulings 57f4ca85 and the Access-Control ruling): a
+// credential-like name is redacted, Authentication-Info and Proxy-Authentication-Info included;
+// each `Auth.credentialLikeExemptions` header still prints; Set-Cookie stays redacted.
+const redactedResponse = [
+  { name: "X-Session-Token", value: "rsp-4c19e7a2" },
+  { name: "Authentication-Info", value: 'nextnonce="ai-7b20e95c"' },
+  { name: "Proxy-Authentication-Info", value: 'rspauth="pai-d31f6a08"' },
+] as const;
 
-const challenges = [
-  { name: "www-authenticate", value: 'Bearer realm="wwwx-81d3"' },
-  { name: "proxy-authenticate", value: 'Basic realm="prxx-5e60"' },
+const exempt = [
+  { name: "WWW-Authenticate", value: 'Bearer realm="wwwx-81d3"' },
+  { name: "Proxy-Authenticate", value: 'Basic realm="prxx-5e60"' },
+  { name: "Access-Control-Allow-Credentials", value: "true" },
 ] as const;
 
 const cookie = "ck-0a9f37d5";
 
-const challenged = {
+const challenged: ScriptedResponse = {
   ...ok,
   headers: [
     ["Content-Type", "application/json"],
-    ["X-Session-Token", sessionToken],
-    ["WWW-Authenticate", challenges[0].value],
-    ["Proxy-Authenticate", challenges[1].value],
+    ...[...redactedResponse, ...exempt].map(({ name, value }) => [name, value] as const),
     ["Set-Cookie", `sid=${cookie}`],
-  ] as const,
+  ],
 };
 
 describe("response headers under --verbose", () => {
-  test("a credential-like response header prints < x-session-token: <redacted> and its value appears in neither stream", async () => {
-    capture.script("/params", challenged);
+  for (const { name, value } of redactedResponse) {
+    const header = name.toLowerCase();
 
-    const cli = await run([...parameterArgs, "--verbose"]);
+    test(`a credential-like response header prints < ${header}: <redacted> and its value appears in neither stream`, async () => {
+      capture.script("/params", challenged);
 
-    expect(cli.exitCode).toBe(0);
-    expect(lines(cli.stderr)).toContain("< x-session-token: <redacted>");
-    expect(`${cli.stdout}${cli.stderr}`).not.toContain(sessionToken);
-    expect(`${cli.stdout}${cli.stderr}`).not.toContain(cookie);
-  }, 30_000);
+      const cli = await run([...parameterArgs, "--verbose"]);
 
-  for (const { name, value } of challenges) {
-    test(`the ${name} challenge still prints its value`, async () => {
+      expect(cli.exitCode).toBe(0);
+      expect(lines(cli.stderr)).toContain(`< ${header}: <redacted>`);
+      expect(`${cli.stdout}${cli.stderr}`).not.toContain(value);
+      expect(`${cli.stdout}${cli.stderr}`).not.toContain(cookie);
+    }, 30_000);
+  }
+
+  for (const { name: declared, value } of exempt) {
+    const name = declared.toLowerCase();
+
+    test(`the exempt ${name} header still prints its value`, async () => {
       capture.script("/params", challenged);
 
       const cli = await run([...parameterArgs, "--verbose"]);

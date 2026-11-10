@@ -992,12 +992,24 @@ export const credentialLikeName =
   /token|secret|password|passwd|api-key|apikey|api_key|auth|session|credential|signature/iu;
 
 /**
+ * The response headers `--verbose` prints though their names are credential-like, by operator
+ * policy: the `WWW-Authenticate` and `Proxy-Authenticate` challenges, which carry no secret and
+ * are the main clue when authentication fails, and `Access-Control-Allow-Credentials`, which is
+ * only ever `true`. `Authentication-Info` and `Proxy-Authentication-Info` carry digest values and
+ * are not exempt.
+ */
+export const credentialLikeExemptions = [
+  "www-authenticate",
+  "proxy-authenticate",
+  "access-control-allow-credentials",
+] as const;
+
+/**
  * A response header name `--verbose` redacts by operator policy: a credential-like name
- * (`credentialLikeName`), except the `WWW-Authenticate` and `Proxy-Authenticate` challenges,
- * which carry no secret and are the main clue when authentication fails.
+ * (`credentialLikeName`) that `credentialLikeExemptions` does not list.
  */
 export const credentialLikeResponseName = new RegExp(
-  `^(?!(?:www|proxy)-authenticate$).*(?:${credentialLikeName.source})`,
+  `^(?!(?:${credentialLikeExemptions.join("|")})$).*(?:${credentialLikeName.source})`,
   "iu",
 );
 
