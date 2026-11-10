@@ -1,12 +1,14 @@
-import { Effect, Exit, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Option, Predicate, Result, Schema } from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { keyOf } from "../resolve/canonical.ts";
-import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { Resolution, ResolveLimits } from "../resolve/index.ts";
-import { childPointer } from "../model/pointer.ts";
+import { methodMembers } from "../model/path-item.ts";
+import { expressionsOf, locate, operationOf, pathItems, site } from "./path-items.ts";
+import type { Operation, PathItem, Place } from "./path-items.ts";
+import { childPointer, isPointerWithin } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl, patchVersion } from "../model/spec-section.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
@@ -231,42 +233,7 @@ interface Finding {
   readonly severity?: Rule["severity"];
 }
 
-interface PathItem {
-  readonly node: JsonObject;
-  readonly pointer: string;
-  readonly use: string;
-  readonly key: string;
-}
-
-interface Operation {
-  readonly id: string | undefined;
-  readonly item: PathItem;
-  readonly method: string;
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
-// An object and where it sits: the document of the set that holds it, and its pointer there.
-interface Place {
-  readonly document: CanonicalKey["document"];
-  readonly node: JsonObject;
-  readonly pointer: string;
-}
-
 const statusKey = /^(?:[1-5][0-9]{2}|[1-5]XX|default)$/u;
-
-const expression = /\{(?<name>[^{}]+)\}/gu;
-
-const fixedMethods: readonly string[] = [
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-];
 
 const schemaMembers = [
   "additionalProperties",
@@ -299,37 +266,12 @@ const listOf = (value: Json | undefined): readonly Json[] => (isArray(value) ? v
 
 const isReference = (node: JsonObject): boolean => Predicate.isString(node.$ref);
 
-// An object at a use site, followed through its Reference Object to the end of the chain, which
-// is read from the document of the set that holds it.
-const locate = (
-  resolution: Resolution,
-  site: CanonicalKey,
-  node: Json | undefined,
-): Place | undefined => {
-  const at = resolution.references.get(keyOf(site))?.target ?? site;
-  const document = resolution.documents.get(at.document);
-  const read = document === undefined ? undefined : nodeAt(document, at.pointer);
-  const target = at === site ? node : read;
+const isToken = Schema.is(HeaderName);
 
-  return isObject(target)
-    ? { document: at.document, node: target, pointer: at.pointer }
-    : undefined;
-};
-
-// The site at `pointer` in the entry document.
-const entrySite = (resolution: Resolution, pointer: string): CanonicalKey => ({
-  document: resolution.document,
-  pointer,
-});
-
-const isToken = (name: string): boolean =>
-  Option.isSome(Schema.decodeUnknownOption(HeaderName)(name));
-
-const isMediaRange = (name: string): boolean =>
-  Option.isSome(Schema.decodeUnknownOption(MediaRange)(name));
+const isMediaRange = Schema.is(MediaRange);
 
 const compilesWithU = (source: string): boolean =>
-  Exit.isSuccess(Effect.runSyncExit(Effect.try(() => new RegExp(source, "u"))));
+  Result.isSuccess(Result.try(() => new RegExp(source, "u")));
 
 const at =
   (code: Code, pointer: string) =>
@@ -354,17 +296,13 @@ interface Search {
   steps: number;
 }
 
-const searches = new WeakMap<Resolution, Search>();
-
-const startSearch = (resolution: Resolution, budget: number): Search => {
-  const fresh: Search = { active: new Map(), budget, exhausted: false, memo: new Map(), steps: 0 };
-  searches.set(resolution, fresh);
-
-  return fresh;
-};
-
-const searchOf = (resolution: Resolution): Search =>
-  searches.get(resolution) ?? startSearch(resolution, defaultLimits.maxNodes);
+const startSearch = (budget: number): Search => ({
+  active: new Map(),
+  budget,
+  exhausted: false,
+  memo: new Map(),
+  steps: 0,
+});
 
 interface Answer {
   readonly found: boolean;
@@ -464,14 +402,15 @@ const requiresAt = (
   return answer;
 };
 
-const requires = (resolution: Resolution, place: Place, name: string): boolean =>
-  requiresAt(resolution, searchOf(resolution), place, name, 0).found;
+const requires = (resolution: Resolution, search: Search, place: Place, name: string): boolean =>
+  requiresAt(resolution, search, place, name, 0).found;
 
 const composes = (node: JsonObject): boolean =>
   ["allOf", "anyOf", "oneOf"].some((keyword) => listOf(node[keyword]).length > 0);
 
 const discriminatorFindings = (
   resolution: Resolution,
+  search: Search,
   place: Place,
   discriminator: JsonObject,
 ): readonly Finding[] => {
@@ -483,7 +422,7 @@ const discriminatorFindings = (
   }
 
   const name = stringMember(discriminator, "propertyName");
-  const required = name !== undefined && requires(resolution, place, name);
+  const required = name !== undefined && requires(resolution, search, place, name);
   const defaultMapping = stringMember(discriminator, "defaultMapping");
   const property =
     name === undefined || required || resolution.line === "3.2"
@@ -508,7 +447,11 @@ const discriminatorFindings = (
   return [...property, ...optional, ...mapped, ...fallback];
 };
 
-const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Finding[] => {
+const ownSchemaFindings = (
+  resolution: Resolution,
+  search: Search,
+  place: Place,
+): readonly Finding[] => {
   const { node, pointer } = place;
   const pattern = Predicate.isString(node.pattern) ? node.pattern : undefined;
   const legacy = resolution.line === "3.0";
@@ -525,7 +468,7 @@ const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Findi
       ? [at("S30-30/read-and-write-only", pointer)()]
       : []),
     ...(isObject(node.discriminator)
-      ? discriminatorFindings(resolution, place, node.discriminator)
+      ? discriminatorFindings(resolution, search, place, node.discriminator)
       : []),
   ];
 };
@@ -533,6 +476,7 @@ const ownSchemaFindings = (resolution: Resolution, place: Place): readonly Findi
 // A 3.0 Reference Object ignores its siblings (design 3.3); later lines keep them as keywords.
 const schemaFindings = (
   resolution: Resolution,
+  search: Search,
   node: Json | undefined,
   pointer: string,
 ): readonly Finding[] => {
@@ -541,15 +485,16 @@ const schemaFindings = (
   }
 
   const below = (token: string, value: Json | undefined): readonly Finding[] =>
-    schemaFindings(resolution, value, childPointer(pointer, token));
+    schemaFindings(resolution, search, value, childPointer(pointer, token));
 
   return [
-    ...ownSchemaFindings(resolution, { document: resolution.document, node, pointer }),
+    ...ownSchemaFindings(resolution, search, { document: resolution.document, node, pointer }),
     ...schemaMembers.flatMap((keyword) => below(keyword, node[keyword])),
     ...schemaLists.flatMap((keyword) =>
       listOf(node[keyword]).flatMap((member, index) =>
         schemaFindings(
           resolution,
+          search,
           member,
           childPointer(childPointer(pointer, keyword), String(index)),
         ),
@@ -557,7 +502,12 @@ const schemaFindings = (
     ),
     ...schemaMaps.flatMap((keyword) =>
       entriesOf(node[keyword]).flatMap(([name, member]) =>
-        schemaFindings(resolution, member, childPointer(childPointer(pointer, keyword), name)),
+        schemaFindings(
+          resolution,
+          search,
+          member,
+          childPointer(childPointer(pointer, keyword), name),
+        ),
       ),
     ),
   ];
@@ -581,77 +531,94 @@ const headerFieldFindings = (
 interface Media {
   readonly encoding: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
   readonly content: (
     resolution: Resolution,
+    search: Search,
     content: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
   readonly header: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
   readonly headers: (
     resolution: Resolution,
+    search: Search,
     headers: Json | undefined,
     pointer: string,
     code: HeaderCode,
   ) => readonly Finding[];
   readonly mediaType: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
 }
 
 const media: Media = {
-  content: (resolution, content, pointer) =>
+  content: (resolution, search, content, pointer) =>
     entriesOf(content).flatMap(([name, mediaType]) => [
       ...(isMediaRange(name)
         ? []
         : [at("MED-24/invalid-media-type", childPointer(pointer, name))()]),
-      ...media.mediaType(resolution, mediaType, childPointer(pointer, name)),
+      ...media.mediaType(resolution, search, mediaType, childPointer(pointer, name)),
     ]),
-  encoding: (resolution, node, pointer) =>
+  encoding: (resolution, search, node, pointer) =>
     isObject(node) && !isReference(node)
       ? media.headers(
           resolution,
+          search,
           node.headers,
           childPointer(pointer, "headers"),
           "HDR-01/invalid-header-name",
         )
       : [],
-  header: (resolution, node, pointer) =>
+  header: (resolution, search, node, pointer) =>
     isObject(node) && !isReference(node)
       ? [
-          ...schemaFindings(resolution, node.schema, childPointer(pointer, "schema")),
-          ...media.content(resolution, node.content, childPointer(pointer, "content")),
+          ...schemaFindings(resolution, search, node.schema, childPointer(pointer, "schema")),
+          ...media.content(resolution, search, node.content, childPointer(pointer, "content")),
         ]
       : [],
-  headers: (resolution, headers, pointer, code) =>
+  headers: (resolution, search, headers, pointer, code) =>
     entriesOf(headers).flatMap(([name, header]) => [
       ...(isToken(name) ? [] : [at(code, childPointer(pointer, name))()]),
       ...headerFieldFindings(resolution, header, childPointer(pointer, name)),
-      ...media.header(resolution, header, childPointer(pointer, name)),
+      ...media.header(resolution, search, header, childPointer(pointer, name)),
     ]),
-  mediaType: (resolution, node, pointer) => {
+  mediaType: (resolution, search, node, pointer) => {
     if (!isObject(node) || isReference(node)) {
       return [];
     }
 
     return [
-      ...schemaFindings(resolution, node.schema, childPointer(pointer, "schema")),
-      ...schemaFindings(resolution, node.itemSchema, childPointer(pointer, "itemSchema")),
+      ...schemaFindings(resolution, search, node.schema, childPointer(pointer, "schema")),
+      ...schemaFindings(resolution, search, node.itemSchema, childPointer(pointer, "itemSchema")),
       ...entriesOf(node.encoding).flatMap(([name, encoding]) =>
-        media.encoding(resolution, encoding, childPointer(childPointer(pointer, "encoding"), name)),
+        media.encoding(
+          resolution,
+          search,
+          encoding,
+          childPointer(childPointer(pointer, "encoding"), name),
+        ),
       ),
-      ...media.encoding(resolution, node.itemEncoding, childPointer(pointer, "itemEncoding")),
+      ...media.encoding(
+        resolution,
+        search,
+        node.itemEncoding,
+        childPointer(pointer, "itemEncoding"),
+      ),
       ...listOf(node.prefixEncoding).flatMap((encoding, index) =>
         media.encoding(
           resolution,
+          search,
           encoding,
           childPointer(childPointer(pointer, "prefixEncoding"), String(index)),
         ),
@@ -662,6 +629,7 @@ const media: Media = {
 
 const parameterFindings = (
   resolution: Resolution,
+  search: Search,
   node: Json | undefined,
   pointer: string,
 ): readonly Finding[] => {
@@ -675,20 +643,22 @@ const parameterFindings = (
       ? [at("PRM-20/invalid-header-name", childPointer(pointer, "name"))()]
       : [];
 
-  return [...badName, ...media.header(resolution, node, pointer)];
+  return [...badName, ...media.header(resolution, search, node, pointer)];
 };
 
 const parameterListFindings = (
   resolution: Resolution,
+  search: Search,
   list: Json | undefined,
   pointer: string,
 ): readonly Finding[] =>
   listOf(list).flatMap((parameter, index) =>
-    parameterFindings(resolution, parameter, childPointer(pointer, String(index))),
+    parameterFindings(resolution, search, parameter, childPointer(pointer, String(index))),
   );
 
 const responseFindings = (
   resolution: Resolution,
+  search: Search,
   node: Json | undefined,
   pointer: string,
 ): readonly Finding[] =>
@@ -696,11 +666,12 @@ const responseFindings = (
     ? [
         ...media.headers(
           resolution,
+          search,
           node.headers,
           childPointer(pointer, "headers"),
           "RSP-09/invalid-header-name",
         ),
-        ...media.content(resolution, node.content, childPointer(pointer, "content")),
+        ...media.content(resolution, search, node.content, childPointer(pointer, "content")),
       ]
     : [];
 
@@ -716,6 +687,7 @@ const extensionsOnly = (resolution: Resolution, responses: Json | undefined): bo
 
 const responsesFindings = (
   resolution: Resolution,
+  search: Search,
   responses: Json | undefined,
   pointer: string,
 ): readonly Finding[] => [
@@ -727,73 +699,84 @@ const responsesFindings = (
           ...(statusKey.test(code)
             ? []
             : [at("RSS-10/invalid-status", childPointer(pointer, code))()]),
-          ...responseFindings(resolution, response, childPointer(pointer, code)),
+          ...responseFindings(resolution, search, response, childPointer(pointer, code)),
         ],
   ),
 ];
 
 const requestBodyFindings = (
   resolution: Resolution,
+  search: Search,
   node: Json | undefined,
   pointer: string,
 ): readonly Finding[] =>
   isObject(node) && !isReference(node)
-    ? media.content(resolution, node.content, childPointer(pointer, "content"))
+    ? media.content(resolution, search, node.content, childPointer(pointer, "content"))
     : [];
-
-const methodMembers = (line: Resolution["line"]): readonly string[] =>
-  line === "3.2" ? [...fixedMethods, "query"] : fixedMethods;
 
 // Path Item, Operation and Callback objects refer to each other through callbacks.
 interface Items {
   readonly callback: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
   readonly operation: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
   readonly pathItem: (
     resolution: Resolution,
+    search: Search,
     node: Json | undefined,
     pointer: string,
   ) => readonly Finding[];
 }
 
 const items: Items = {
-  callback: (resolution, node, pointer) =>
+  callback: (resolution, search, node, pointer) =>
     isObject(node) && !isReference(node)
       ? entriesOf(node).flatMap(([key, item]) =>
-          key.startsWith("x-") ? [] : items.pathItem(resolution, item, childPointer(pointer, key)),
+          key.startsWith("x-")
+            ? []
+            : items.pathItem(resolution, search, item, childPointer(pointer, key)),
         )
       : [],
-  operation: (resolution, node, pointer) =>
+  operation: (resolution, search, node, pointer) =>
     isObject(node)
       ? [
           ...parameterListFindings(
             resolution,
+            search,
             node.parameters,
             childPointer(pointer, "parameters"),
           ),
           ...requestBodyFindings(
             resolution,
+            search,
             node.requestBody,
             childPointer(pointer, "requestBody"),
           ),
-          ...responsesFindings(resolution, node.responses, childPointer(pointer, "responses")),
+          ...responsesFindings(
+            resolution,
+            search,
+            node.responses,
+            childPointer(pointer, "responses"),
+          ),
           ...entriesOf(node.callbacks).flatMap(([name, callback]) =>
             items.callback(
               resolution,
+              search,
               callback,
               childPointer(childPointer(pointer, "callbacks"), name),
             ),
           ),
         ]
       : [],
-  pathItem: (resolution, node, pointer) => {
+  pathItem: (resolution, search, node, pointer) => {
     if (!isObject(node) || isReference(node)) {
       return [];
     }
@@ -813,15 +796,20 @@ const items: Items = {
         : [];
 
     return [
-      ...parameterListFindings(resolution, node.parameters, childPointer(pointer, "parameters")),
+      ...parameterListFindings(
+        resolution,
+        search,
+        node.parameters,
+        childPointer(pointer, "parameters"),
+      ),
       ...[...fixed, ...extra].flatMap(([place, operation]) =>
-        items.operation(resolution, operation, place),
+        items.operation(resolution, search, operation, place),
       ),
     ];
   },
 };
 
-const componentFindings = (resolution: Resolution): readonly Finding[] => {
+const componentFindings = (resolution: Resolution, search: Search): readonly Finding[] => {
   const components = isObject(resolution.value) ? resolution.value.components : undefined;
   if (!isObject(components)) {
     return [];
@@ -836,46 +824,35 @@ const componentFindings = (resolution: Resolution): readonly Finding[] => {
     );
 
   return [
-    ...each("schemas", (node, pointer) => schemaFindings(resolution, node, pointer)),
-    ...each("responses", (node, pointer) => responseFindings(resolution, node, pointer)),
-    ...each("parameters", (node, pointer) => parameterFindings(resolution, node, pointer)),
-    ...each("requestBodies", (node, pointer) => requestBodyFindings(resolution, node, pointer)),
+    ...each("schemas", (node, pointer) => schemaFindings(resolution, search, node, pointer)),
+    ...each("responses", (node, pointer) => responseFindings(resolution, search, node, pointer)),
+    ...each("parameters", (node, pointer) => parameterFindings(resolution, search, node, pointer)),
+    ...each("requestBodies", (node, pointer) =>
+      requestBodyFindings(resolution, search, node, pointer),
+    ),
     ...each("headers", (node, pointer) => [
       ...headerFieldFindings(resolution, node, pointer),
-      ...media.header(resolution, node, pointer),
+      ...media.header(resolution, search, node, pointer),
     ]),
-    ...each("pathItems", (node, pointer) => items.pathItem(resolution, node, pointer)),
-    ...each("callbacks", (node, pointer) => items.callback(resolution, node, pointer)),
-    ...each("mediaTypes", (node, pointer) => media.mediaType(resolution, node, pointer)),
+    ...each("pathItems", (node, pointer) => items.pathItem(resolution, search, node, pointer)),
+    ...each("callbacks", (node, pointer) => items.callback(resolution, search, node, pointer)),
+    ...each("mediaTypes", (node, pointer) => media.mediaType(resolution, search, node, pointer)),
   ];
 };
 
-const elementFindings = (resolution: Resolution): readonly Finding[] => {
+const elementFindings = (resolution: Resolution, search: Search): readonly Finding[] => {
   const root = isObject(resolution.value) ? resolution.value : {};
   const under = (member: string): readonly Finding[] =>
     entriesOf(root[member]).flatMap(([key, item]) =>
-      items.pathItem(resolution, item, childPointer(childPointer("", member), key)),
+      items.pathItem(resolution, search, item, childPointer(childPointer("", member), key)),
     );
 
   return [
     ...under("paths"),
     ...(resolution.line === "3.0" ? [] : under("webhooks")),
-    ...componentFindings(resolution),
+    ...componentFindings(resolution, search),
   ];
 };
-
-const pathItems = (resolution: Resolution): readonly PathItem[] =>
-  entriesOf(isObject(resolution.value) ? resolution.value.paths : undefined).flatMap(
-    ([key, value]) => {
-      const use = childPointer("/paths", key);
-      const located = locate(resolution, entrySite(resolution, use), value);
-
-      // A path item in another document of the set is not walked: the checks read entry sites.
-      return located === undefined || located.document !== resolution.document
-        ? []
-        : [{ key, node: located.node, pointer: located.pointer, use }];
-    },
-  );
 
 const operationsOf = (resolution: Resolution, item: PathItem): readonly Operation[] => {
   const fixed = methodMembers(resolution.line).filter((name) => isObject(item.node[name]));
@@ -884,22 +861,22 @@ const operationsOf = (resolution: Resolution, item: PathItem): readonly Operatio
       ? entriesOf(item.node.additionalOperations).map(([name]) => name)
       : [];
   const entries = [
-    ...fixed.map((name) => [name, name.toUpperCase(), childPointer(item.pointer, name)] as const),
+    ...fixed.map((name) => [name.toUpperCase(), childPointer(item.pointer, name), false] as const),
     ...extra.map(
       (name) =>
         [
           name,
-          name,
           childPointer(childPointer(item.pointer, "additionalOperations"), name),
+          true,
         ] as const,
     ),
   ];
 
-  return entries.flatMap(([, method, pointer]) => {
+  return entries.flatMap(([method, pointer, additional]) => {
     const node = nodeAt(resolution.value, pointer);
 
     return isObject(node)
-      ? [{ id: stringMember(node, "operationId"), item, method, node, pointer }]
+      ? [{ additional, id: stringMember(node, "operationId"), item, method, node, pointer }]
       : [];
   });
 };
@@ -914,11 +891,8 @@ const serverFindings = (
   }
 
   const url = stringMember(server, "url");
-  const names =
-    url === undefined
-      ? []
-      : Array.from(url.matchAll(expression), (match) => match.groups?.name ?? "");
-  const repeated = new Set(names).size !== names.length;
+  const names = url === undefined ? [] : expressionsOf(url);
+  const repeated = Arr.dedupe(names).length !== names.length;
   const defaultSeverity = resolution.line === "3.0" ? "notice" : "refusal";
   const variables = entriesOf(server.variables).flatMap(([name, variable]) => {
     const fallback = isObject(variable) ? stringMember(variable, "default") : undefined;
@@ -1147,19 +1121,8 @@ const operationFindingsOf = (resolution: Resolution): readonly Finding[] => {
   ];
 };
 
-const site = (resolution: Resolution, pointer: string) => ({
-  document: resolution.document,
-  pointer,
-});
-
-const operationOf = (operation: Operation) =>
-  operation.id === undefined
-    ? { method: operation.method, path: operation.item.key }
-    : { method: operation.method, operationId: operation.id, path: operation.item.key };
-
 const underItem = (operation: Operation, pointer: string): boolean =>
-  operation.item.use !== operation.item.pointer &&
-  (pointer === operation.item.pointer || pointer.startsWith(`${operation.item.pointer}/`));
+  operation.item.use !== operation.item.pointer && isPointerWithin(operation.item.pointer, pointer);
 
 const toDiagnostic = (resolution: Resolution, finding: Finding) => {
   const rule: Rule = rules[finding.code];
@@ -1194,17 +1157,15 @@ const toDiagnostic = (resolution: Resolution, finding: Finding) => {
  * Walking allOf, oneOf and anyOf is bounded by `limits.maxNodes` steps; past it the only finding
  * is a document-scope refusal (design 9 I5).
  */
-export const checkGrammar = (
+export const checkGrammar = Effect.fnUntraced(function* checkGrammar(
   resolution: Resolution,
   limits: Pick<ResolveLimits, "maxNodes"> = defaultLimits,
-): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.suspend(() => {
-    const search = startSearch(resolution, limits.maxNodes);
-    const findings = [...elementFindings(resolution), ...operationFindingsOf(resolution)];
+): Effect.fn.Return<readonly Diagnostic[]> {
+  const search = startSearch(limits.maxNodes);
+  const findings = [...elementFindings(resolution, search), ...operationFindingsOf(resolution)];
+  const reported = search.exhausted ? [at("REF-18/node-budget", "")()] : findings;
 
-    return Effect.all(
-      (search.exhausted ? [at("REF-18/node-budget", "")()] : findings).map((finding) =>
-        toDiagnostic(resolution, finding),
-      ),
-    );
-  });
+  // Effect.forEach takes (items, f); it is not an array method with a thisArg.
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument
+  return yield* Effect.forEach(reported, (finding) => toDiagnostic(resolution, finding));
+});

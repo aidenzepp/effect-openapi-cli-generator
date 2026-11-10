@@ -1,6 +1,7 @@
 /* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 import { Array as Arr, Effect, Order, Schema } from "effect";
 import { JsonPointer } from "../model/brands.ts";
+import { isPointerWithin } from "../model/pointer.ts";
 
 type Pointer = typeof JsonPointer.Type;
 
@@ -59,9 +60,6 @@ interface Located {
   readonly unit: ErrorUnit;
 }
 
-const isWithin = (ancestor: string, descendant: string): boolean =>
-  descendant === ancestor || descendant.startsWith(`${ancestor}/`);
-
 const byPointer = Order.mapInput(Order.String, (located: Located) => located.pointer);
 
 const samePointer = (self: Located, that: Located): boolean => self.pointer === that.pointer;
@@ -72,7 +70,7 @@ const groupLocated = (located: readonly Located[]): readonly ErrorGroup[] => {
     located.filter(
       (item) =>
         !located.some(
-          (other) => other.pointer !== item.pointer && isWithin(item.pointer, other.pointer),
+          (other) => other.pointer !== item.pointer && isPointerWithin(item.pointer, other.pointer),
         ),
     ),
   );
@@ -83,7 +81,7 @@ const groupLocated = (located: readonly Located[]): readonly ErrorGroup[] => {
       .filter(
         (item) =>
           !deepestItems.has(item) &&
-          leaves.find((other) => isWithin(item.pointer, other.pointer)) === leaf,
+          leaves.find((other) => isPointerWithin(item.pointer, other.pointer)) === leaf,
       )
       .map((item) => item.unit);
 
