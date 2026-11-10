@@ -1,8 +1,9 @@
-import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Schema, SchemaGetter } from "effect";
 import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { HeaderName, MediaRange } from "../model/brands.ts";
 import { makeDiagnostic } from "../model/diagnostic.ts";
+import { isSpecificationExtension } from "../model/extension.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { ResponseCase } from "../model/entities.ts";
 import type { MediaAlternative } from "../model/entities.ts";
@@ -10,6 +11,7 @@ import { defsKey } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
 import { sequentialCodecOf } from "../runtime-src/runtime/sequential.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
@@ -140,23 +142,54 @@ const schemaRefAt = (resolution: Resolution, site: CanonicalKey) => {
 
 type Key = ResponseCase["key"] | "extension" | "invalid" | "out-of-range";
 
+const [CodeKey, RangeKey, DefaultKey] = ResponseCase.fields.key.members;
+
+/**
+ * A three-digit Responses Object key, whatever its value. A key of this form outside 100 to 599 is
+ * out of range (RSS-10) rather than outside the grammar (RSS-06).
+ */
+const StatusDigits = Schema.String.check(Schema.isPattern(/^[0-9]{3}$/u));
+
+const isStatusDigits = Schema.is(StatusDigits);
+
+/**
+ * The response key grammar: `default`, a range `1XX` to `5XX`, or a code from 100 to 599. Each
+ * branch decodes into its {@link ResponseCase} key, whose own checks bound the code and the range.
+ * It only classifies member names, so it forbids encoding.
+ */
+const ResponseKey = Schema.Union([
+  DefaultKey,
+  Schema.TemplateLiteralParser([Schema.Literals(["1", "2", "3", "4", "5"]), "XX"]).pipe(
+    Schema.decodeTo(RangeKey, {
+      decode: SchemaGetter.transform(([digit]) => ({ range: Number(digit) })),
+      encode: SchemaGetter.forbiddenEncoding,
+    }),
+  ),
+  StatusDigits.pipe(
+    Schema.decodeTo(CodeKey, {
+      decode: SchemaGetter.transform((digits) => ({ code: Number(digits) })),
+      encode: SchemaGetter.forbiddenEncoding,
+    }),
+  ),
+]);
+
+const decodeResponseKey = Schema.decodeUnknownOption(ResponseKey);
+
+/**
+ * Classify one Responses Object member name: a response key, an extension to skip, a three-digit
+ * code out of range, or a name outside the grammar.
+ */
 const classifyKey = (text: string): Key => {
-  const range = /^(?<digit>[1-5])XX$/u.exec(text)?.groups?.digit;
-  if (range !== undefined) {
-    return { range: Number(range) };
+  const key = decodeResponseKey(text);
+  if (Option.isSome(key)) {
+    return key.value;
   }
 
-  if (/^[0-9]{3}$/u.test(text)) {
-    const code = Number(text);
-
-    return code >= 100 && code <= 599 ? { code } : "out-of-range";
+  if (isStatusDigits(text)) {
+    return "out-of-range";
   }
 
-  if (text === "default") {
-    return "default";
-  }
-
-  return text.startsWith("x-") ? "extension" : "invalid";
+  return isSpecificationExtension(text) ? "extension" : "invalid";
 };
 
 type Codec = (typeof MediaAlternative.Type)["codec"];
@@ -345,12 +378,7 @@ const caseOf = Effect.fnUntraced(function* caseOf(
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
   const rule: Rule = rules[finding.code];
-  const openapi = Schema.decodeUnknownOption(Schema.Struct({ openapi: Schema.String }))(
-    resolution.value,
-  ).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
+  const openapi = Option.getOrElse(declaredOpenapi(resolution.value), () => "unknown");
 
   return makeDiagnostic({
     code: finding.code,

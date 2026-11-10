@@ -3,6 +3,7 @@ import { Informational } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { isSpecificationExtension } from "../model/extension.ts";
 import { isObject, isArray } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 
@@ -144,8 +145,6 @@ const componentSections = {
   securitySchemes: "securityScheme",
 } as const satisfies Record<string, Informative | Walked>;
 
-const isExtension = (key: string): boolean => key.startsWith("x-");
-
 const reservedExtension = /^x-o(?:ai|as)-/u;
 
 const isInformative = (kind: string): kind is Informative => kind in informativeRow;
@@ -158,7 +157,7 @@ class Walk {
   }
 
   extensions(node: JsonObject, pointer: string): void {
-    for (const key of Object.keys(node).filter(isExtension)) {
+    for (const key of Object.keys(node).filter(isSpecificationExtension)) {
       this.add(reservedExtension.test(key) ? "EXT-02" : "EXT-01", childPointer(pointer, key));
     }
   }
@@ -217,7 +216,7 @@ class Walk {
 
     const { rest } = held;
     for (const [key, entry] of Object.entries(value)) {
-      if (rest !== undefined && !isExtension(key)) {
+      if (rest !== undefined && !isSpecificationExtension(key)) {
         this.visit(rest, entry, childPointer(pointer, key));
       }
     }
@@ -259,7 +258,7 @@ class Walk {
     }
 
     for (const [key, item] of Object.entries(value)) {
-      if (!isExtension(key)) {
+      if (!isSpecificationExtension(key)) {
         this.visit("pathItem", item, childPointer("/paths", key));
       }
     }
