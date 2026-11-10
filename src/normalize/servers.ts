@@ -1,4 +1,5 @@
-import { Array as Arr, Option, Order, Schema } from "effect";
+import { Array as Arr, Option, Order, Result, Schema } from "effect";
+import { Url } from "effect/http";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { DocumentUri as DocumentUriSchema, SafeText, ServerTemplate } from "../model/brands.ts";
 import type { JsonPointer as JsonPointerSchema } from "../model/brands.ts";
@@ -246,11 +247,13 @@ const judge = (text: string, base: string | undefined, allowInsecure: boolean): 
     return refused("SRV-18/query-or-fragment");
   }
 
-  if (!URL.canParse(text, base)) {
+  const url = Url.fromString(text, base);
+
+  if (Result.isFailure(url)) {
     return refused("SRV-02/unparseable");
   }
 
-  const parsed = new URL(text, base);
+  const parsed = url.success;
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     return refused("SRV-02/unsupported-scheme");
@@ -283,18 +286,14 @@ interface Expansion {
 const assignments = (
   names: readonly string[],
   variables: Readonly<Record<string, Variable>>,
-): readonly ReadonlyMap<string, string>[] => {
-  let acc: readonly ReadonlyMap<string, string>[] = [new Map()];
-
-  for (const name of names) {
+): readonly ReadonlyMap<string, string>[] =>
+  Arr.reduce(names, [new Map()], (acc: readonly ReadonlyMap<string, string>[], name) => {
     const values = domainOf(variables[name] ?? { default: "" });
-    acc = acc.flatMap((assignment) =>
+
+    return acc.flatMap((assignment) =>
       values.map((value) => new Map<string, string>([...assignment, [name, value]])),
     );
-  }
-
-  return acc;
-};
+  });
 
 /**
  * Judges the values of the variables outside the origin span, one value at a time with the other
@@ -320,11 +319,13 @@ const judgePathValues = (
         each === name ? value : defaults(each),
       );
 
-      if (!URL.canParse(full, base)) {
+      const url = Url.fromString(full, base);
+
+      if (Result.isFailure(url)) {
         return "SRV-02/unparseable";
       }
 
-      const { origin } = new URL(full, base);
+      const { origin } = url.success;
 
       if (!origins.some((accepted) => accepted === origin)) {
         return "SRV-02/value-leaves-authority";
@@ -357,11 +358,11 @@ const expandOrigins = (
     return { code: "SRV-05/variable-needs-enum", origins: [] };
   }
 
-  let count = 1;
-
-  for (const name of names) {
-    count *= domainOf(variables[name] ?? { default: "" }).length;
-  }
+  const count = Arr.reduce(
+    names,
+    1,
+    (product, name) => product * domainOf(variables[name] ?? { default: "" }).length,
+  );
 
   if (count > maxExpansions) {
     return { code: "SRV-05/too-many-origins", origins: [] };
