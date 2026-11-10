@@ -15,7 +15,7 @@ import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
-import { loneSurrogate } from "./redact.ts";
+import { encoder as utf8, loneSurrogate } from "./redact.ts";
 import { isJsonFamily, mediaEssence } from "./sequential.ts";
 
 /**
@@ -1253,8 +1253,6 @@ const formText = (value: Exclude<LeafValue, FormFile>) => {
 
   return Effect.succeed(String(value));
 };
-
-const utf8 = new TextEncoder();
 
 // What one part entry sends: a declared type with the fields' values under the part's name, a
 // chosen part as given, or nothing for a chosen part not sent.

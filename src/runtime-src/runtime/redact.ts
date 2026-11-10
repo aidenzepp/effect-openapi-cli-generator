@@ -287,7 +287,10 @@ export const scrubAround = (
   strip: (text: string) => string,
 ): string => scrubForms(strip(scrub(text, credentials)), credentials, formsAround(strip));
 
-const encoder = new TextEncoder();
+/**
+ * The one UTF-8 encoder every runtime module shares.
+ */
+export const encoder = new TextEncoder();
 
 export const longestFormBytes = (credentials: readonly ScrubEntry[]): number =>
   Math.max(0, ...credentials.flatMap(wireForms).map((form) => encoder.encode(form).length));

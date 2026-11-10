@@ -5,6 +5,7 @@ import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import type { StdinClaim } from "./input.ts";
 import { stdinOrFile } from "./input.ts";
+import { encoder } from "./redact.ts";
 
 /**
  * Per-part encoding facts from an OpenAPI Encoding Object, already resolved by the caller.
@@ -46,8 +47,6 @@ export interface WriterOptions {
 }
 
 type Kind = NestedPart["kind"];
-
-const encoder = new TextEncoder();
 
 const crlf = encoder.encode("\r\n");
 
