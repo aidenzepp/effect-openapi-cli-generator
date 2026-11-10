@@ -711,11 +711,26 @@ const hasAuthorizationScheme = (table: SecurityTable): boolean =>
     (definition) => definition.kind !== "apiKey" && definition.kind !== "mutualTLS",
   );
 
-const cookiePairs = (cookie: string): readonly string[] =>
+export const cookiePairs = (cookie: string): readonly string[] =>
   cookie
     .split(";")
     .map((pair) => pair.trim())
     .filter((pair) => pair !== "");
+
+// The request with `name=value` appended to its `Cookie` header's existing pairs.
+const appendCookie = (
+  request: HttpClientRequest.HttpClientRequest,
+  name: string,
+  value: string,
+): HttpClientRequest.HttpClientRequest => {
+  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
+
+  return HttpClientRequest.setHeader(
+    request,
+    "cookie",
+    [...cookiePairs(existing), `${name}=${value}`].join("; "),
+  );
+};
 
 const cookieName = (pair: string): string => pair.split("=", 1)[0] ?? "";
 
@@ -857,10 +872,7 @@ const attachOne = (
     return refuse(scheme, "is not a valid cookie value");
   }
 
-  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
-  const pairs = [...cookiePairs(existing), `${definition.name}=${secret}`];
-
-  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+  return Effect.succeed(appendCookie(request, definition.name, secret));
 };
 
 // Strip every managed credential, then write each entry with `one` only when the request's origin
@@ -928,10 +940,7 @@ const writePlaceholder = (
     return Effect.succeed(HttpClientRequest.setUrlParam(request, definition.name, text));
   }
 
-  const existing = Option.getOrElse(Headers.get(request.headers, "cookie"), () => "");
-  const pairs = [...cookiePairs(existing), `${definition.name}=${text}`];
-
-  return Effect.succeed(HttpClientRequest.setHeader(request, "cookie", pairs.join("; ")));
+  return Effect.succeed(appendCookie(request, definition.name, text));
 };
 
 // A configured value gets the check `attach` applies (`attachOne`, its request discarded), so the

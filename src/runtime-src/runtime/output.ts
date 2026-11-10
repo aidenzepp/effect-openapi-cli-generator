@@ -41,6 +41,7 @@ import {
   attach,
   attachPlaceholders,
   certificateInitFor,
+  cookiePairs,
   credentialOrigins,
   evaluate,
   placeholder,
@@ -62,6 +63,8 @@ import {
 import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import {
+  decodedQueryName,
+  querySeparator,
   redirectLoop,
   RetryAfterCap,
   retryTransform,
@@ -1928,18 +1931,6 @@ const dryRunBody = (
     : line(`<binary body, ${body.contentLength} bytes>`);
 };
 
-const querySeparator = (url: string): string => {
-  if (/[?&]$/u.test(url)) {
-    return "";
-  }
-
-  return url.includes("?") ? "&" : "?";
-};
-
-// A query name as a server decodes it.
-const decodedQueryName = (raw: string): string =>
-  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
-
 /**
  * The request target as the redirect loop sends it: `urlParams` folded in their `queryWireForm`,
  * a placeholder written as itself, no fragment. A query value whose decoded name
@@ -2017,17 +2008,16 @@ const printDryRun = (
         return exact.has(value) ? value : redactedPlaceholder();
       }
 
-      return value
-        .split(";")
-        .map((pair) => pair.trim())
-        .filter((pair) => pair !== "")
+      return cookiePairs(value)
         .map((pair) => {
           const equals = pair.indexOf("=");
           if (equals === -1) {
             return redactedPlaceholder();
           }
 
-          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=${redactedPlaceholder()}`;
+          return written.has(pair.slice(equals + 1))
+            ? pair
+            : `${pair.slice(0, equals)}=${redactedPlaceholder()}`;
         })
         .join("; ");
     };
