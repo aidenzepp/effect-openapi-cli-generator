@@ -75,6 +75,7 @@ import {
   withUserAgent,
   wouldRetry,
 } from "./client.ts";
+import { printStderr } from "./input.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import type { ScrubEntry } from "./redact.ts";
@@ -725,13 +726,6 @@ const isDescribed = Schema.is(Described);
 
 const defectMessage = (defect: typeof Described.Type): string =>
   isString(defect) ? defect : defect.message;
-
-const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
-  Effect.gen(function* step6() {
-    const stdio = yield* Stdio.Stdio;
-
-    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
-  }).pipe(Effect.ignore);
 
 const rawMessage = (error: CliError.CliError): string =>
   error._tag === "InvalidValue" ? invalidValueMessage(error) : error.message;

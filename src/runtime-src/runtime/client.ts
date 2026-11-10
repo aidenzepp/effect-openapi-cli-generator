@@ -1,3 +1,4 @@
+import type { Stdio } from "effect";
 import {
   Clock,
   Config,
@@ -14,7 +15,6 @@ import {
   Result,
   Schedule,
   Scope,
-  Stdio,
   Stream,
 } from "effect";
 import { CliError, Flag, GlobalFlag } from "effect/cli";
@@ -35,6 +35,7 @@ import type { TransportError } from "../domain/errors.ts";
 import type { CertificateInit } from "./auth.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { Servers } from "./base-url.ts";
+import { printStderr } from "./input.ts";
 import { queryWireForm, redactedPlaceholder } from "./redact.ts";
 import { mapClientError } from "./response.ts";
 
@@ -730,13 +731,6 @@ const retryCause = <E>(
   );
 };
 
-const printNote = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
-  Effect.gen(function* printRetryNote() {
-    const stdio = yield* Stdio.Stdio;
-
-    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
-  }).pipe(Effect.ignore);
-
 /**
  * The retry policy (design D-AD7, 5 Retries row), an `HttpClient.transform` applied outside the
  * redirect loop, so one attempt is one run of the loop with its hops, and the loop's replay rule
@@ -819,7 +813,7 @@ export const retryTransform =
                     Effect.map(([, next]) => next),
                     Pull.catchDone((leftover) => Effect.succeed(leftover)),
                   );
-              yield* printNote(
+              yield* printStderr(
                 `Notice: retrying ${label} after ${cause.value} ` +
                   `(attempt ${made + 1} of ${total}) in ${Math.round(Duration.toMillis(delay))} ms`,
               );
@@ -827,7 +821,7 @@ export const retryTransform =
               continue;
             }
 
-            yield* printNote(
+            yield* printStderr(
               `Notice: not retrying ${label} after ${cause.value}: unreplayableBody, ` +
                 "the request body was read once and cannot be sent again",
             );
@@ -973,7 +967,7 @@ const headerLines = (
 
 // One block on stderr, each whole line through the RT-6 value scrubber.
 const printBlock = (scrub: (text: string) => string, lines: readonly string[]) =>
-  printNote(lines.map(scrub).join("\n"));
+  printStderr(lines.map(scrub).join("\n"));
 
 /**
  * The `--verbose` transform (design 4.6, DM3-8; 7.5). With `verboseSetting` on, each request it

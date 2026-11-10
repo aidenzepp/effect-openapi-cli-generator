@@ -35,6 +35,17 @@ export const maxBodyBytes = 67_108_864;
  */
 export const maxSecretBytes = 65_536;
 
+/**
+ * Writes one line to stderr and ignores a failure to write it: a diagnostic never fails the run.
+ * The one stderr writer of the runtime.
+ */
+export const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* printLine() {
+    const stdio = yield* Stdio.Stdio;
+
+    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
+  }).pipe(Effect.ignore);
+
 const bodyFileName = "body-file";
 
 const encoder = new TextEncoder();
@@ -641,13 +652,7 @@ const noticeDeprecated =
 
     return absent
       ? Effect.succeed(value)
-      : Effect.gen(function* notify() {
-          const stdio = yield* Stdio.Stdio;
-          yield* Stream.run(
-            Stream.make(`Notice: the parameter ${label} is deprecated\n`),
-            stdio.stderr(),
-          );
-        }).pipe(Effect.ignore, Effect.as(value));
+      : printStderr(`Notice: the parameter ${label} is deprecated`).pipe(Effect.as(value));
   };
 
 /**
