@@ -329,6 +329,34 @@ describe.each(lines)("naming extensions (%s)", (line, openapi) => {
     },
   );
 
+  const groupOf = (value: Json) => {
+    const { api, diagnostics } = run(
+      line,
+      openapi,
+      get("/a", { "x-forge-group-name": value, "x-forge-method-name": "list" }),
+    );
+
+    return {
+      group: at(api.operations, "/a")?.naming?.forge?.group,
+      notices: notices(diagnostics),
+    };
+  };
+
+  test("group segments refuse an empty segment", () => {
+    const unusable = {
+      group: undefined,
+      notices: [notice("EXT-01/naming-invalid", pointerOf("/a", "x-forge-group-name"))],
+    };
+
+    for (const value of ["", "a..b", "a.", ".a", ["a", ""]]) {
+      see(groupOf(value)).toEqual(unusable);
+    }
+
+    for (const value of ["a.b", ["a", "b"]]) {
+      see(groupOf(value)).toEqual({ group: ["a", "b"], notices: [] });
+    }
+  });
+
   const malformedMethods: readonly (readonly [string, Json])[] = [
     ["a number", 7],
     ["an object", { name: "list" }],

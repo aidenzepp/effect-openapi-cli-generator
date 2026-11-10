@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Effect, HashMap, Option, Order, Record, Schema, Struct } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
-import { MediaType, WireName } from "../model/brands.ts";
+import { CookieName, MediaType, WireName } from "../model/brands.ts";
 import { diagnosticOf } from "../model/diagnostic.ts";
 import type { Diagnostic, DiagnosticOperation } from "../model/diagnostic.ts";
 import { Parameter } from "../model/entities.ts";
@@ -443,7 +443,7 @@ const querystringSchemaFields = refusal(
 );
 
 // An RFC 6265 cookie-name is an RFC 9110 token.
-const cookieNameToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+const isCookieName = Schema.is(CookieName);
 
 // The rows a content-based parameter's serialization rests on, by location.
 const contentRows = (location: Location): readonly string[] => {
@@ -474,9 +474,11 @@ const explodeNotApplicableFinding = (row: string): Finding =>
     "The style table defines no value type for this style with explode true.",
   );
 
+const decodeMediaType = Schema.decodeUnknownOption(MediaType);
+
 const decideContent = (node: ParameterNode, content: Content): Decision => {
   const { mediaType, schemaKey } = content;
-  if (Option.isNone(Schema.decodeUnknownOption(MediaType)(mediaType))) {
+  if (Option.isNone(decodeMediaType(mediaType))) {
     return refuse(
       refusal(
         "PRM-15/invalid-media-type",
@@ -688,6 +690,8 @@ const decideStyle = (node: ParameterNode, line: Line, traits: Traits): Decision 
   });
 };
 
+const decodeWireName = Schema.decodeUnknownOption(WireName);
+
 const decideName = (node: ParameterNode): Decision | undefined => {
   const name = node.name.toLowerCase();
   if (node.in === "header" && ignoredHeaders.has(name)) {
@@ -715,7 +719,7 @@ const decideName = (node: ParameterNode): Decision | undefined => {
     );
   }
 
-  if (Option.isNone(Schema.decodeUnknownOption(WireName)(node.name))) {
+  if (Option.isNone(decodeWireName(node.name))) {
     return refuse(
       refusal(
         "PRM-02/invalid-name",
@@ -726,7 +730,7 @@ const decideName = (node: ParameterNode): Decision | undefined => {
     );
   }
 
-  return node.in === "cookie" && !cookieNameToken.test(node.name) ? refuse(cookieName) : undefined;
+  return node.in === "cookie" && !isCookieName(node.name) ? refuse(cookieName) : undefined;
 };
 
 // A parameter's one content entry: its media type and the schema key of its media type object.
@@ -1108,6 +1112,8 @@ const ScalarValues = Schema.NonEmptyArray(
   Schema.Union([Schema.String, Schema.Number, Schema.Boolean]),
 );
 
+const decodeScalarValues = Schema.decodeUnknownOption(ScalarValues);
+
 const scalarTypes: ReadonlySet<string> = new Set(["boolean", "integer", "number", "string"]);
 
 // What one resolved schema declares on its own, before any member is walked: the branches it
@@ -1200,7 +1206,7 @@ const ownBranches = Effect.fnUntraced(function* ownBranches(
 
   if (constant || declared.enum !== undefined) {
     const values = constant ? [declared.const] : declared.enum;
-    const scalar = Option.isSome(Schema.decodeUnknownOption(ScalarValues)(values));
+    const scalar = Option.isSome(decodeScalarValues(values));
 
     return settled([scalar ? "scalar" : "other"]);
   }

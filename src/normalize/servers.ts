@@ -409,8 +409,12 @@ interface Built {
   readonly server?: Server;
 }
 
+const isSafeText = Schema.is(SafeText);
+
+const isServerTemplate = Schema.is(ServerTemplate);
+
 const nameOf = (raw: RawServer, line32: boolean): string | undefined =>
-  line32 && raw.name !== undefined && Schema.is(SafeText)(raw.name) ? raw.name : undefined;
+  line32 && raw.name !== undefined && isSafeText(raw.name) ? raw.name : undefined;
 
 const build = (
   raw: RawServer,
@@ -421,7 +425,7 @@ const build = (
 ): Built => {
   const site = specSite(context, pointer);
 
-  if (!Schema.is(ServerTemplate)(raw.url)) {
+  if (!isServerTemplate(raw.url)) {
     return { diagnostics: [diagnose(context, "SRV-19/invalid-template", site)] };
   }
 

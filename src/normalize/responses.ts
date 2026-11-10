@@ -12,7 +12,7 @@ import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { declaredOpenapi } from "../validate/dispatch.ts";
-import { sequentialCodecOf } from "../runtime-src/runtime/sequential.ts";
+import { mediaEssence, sequentialCodecOf } from "../runtime-src/runtime/sequential.ts";
 import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
 import { headerPercentEncoding } from "./parameters.ts";
@@ -196,13 +196,14 @@ type Codec = (typeof MediaAlternative.Type)["codec"];
 
 // The codec follows the media type alone, never the schema (design 2.2). A range, or a type no
 // other family claims, is bytes.
+// Differs from bodies.ts codecOf on `text/*` and `+json-seq` by design; want 546a83f5 unifies.
 const codecOf = (mediaType: string): Codec => {
   const sequential = sequentialCodecOf(mediaType);
   if (sequential !== undefined) {
     return sequential;
   }
 
-  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
+  const essence = mediaEssence(mediaType);
 
   if (essence === "application/json" || essence.endsWith("+json")) {
     return "json";
@@ -489,7 +490,7 @@ export const precedenceOrder = (cases: readonly ResponseCase[]): readonly Respon
   Arr.sort(cases, precedence);
 
 const specificity = (alternative: MediaAlternative): number => {
-  const essence = (alternative.mediaType.split(";")[0] ?? "").trim();
+  const essence = mediaEssence(alternative.mediaType);
   if (essence === "*/*") {
     return 2;
   }

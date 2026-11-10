@@ -24,6 +24,7 @@ import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/ind
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { mediaEssence } from "../runtime-src/runtime/sequential.ts";
 import { docsOf, sanitize } from "./docs.ts";
 import { childKey, follow, nodeIn, nodeOption, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
@@ -96,6 +97,12 @@ export class BodyNodeBudget extends Schema.TaggedError<BodyNodeBudget>()("BodyNo
 
 const ObjectValue = Schema.Record(Schema.String, Schema.Unknown);
 
+const isObjectValue = Schema.is(ObjectValue);
+
+const decodeMediaRange = Schema.decodeUnknownOption(MediaRange);
+
+const decodeHeaderName = Schema.decodeUnknownOption(HeaderName);
+
 const HeaderObject = Schema.Struct({ required: Schema.optionalKey(Schema.Boolean) });
 
 interface EncodingNode {
@@ -167,6 +174,8 @@ const SchemaNode = Schema.Struct({
   type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 });
 
+const decodeSchemaNode = Schema.decodeUnknownOption(SchemaNode);
+
 type SchemaNodeValue = typeof SchemaNode.Type;
 
 const formUrlencoded = "application/x-www-form-urlencoded";
@@ -192,14 +201,9 @@ const ndjsonTypes: ReadonlySet<string> = new Set([
   "application/x-ndjson",
 ]);
 
-const baseType = (mediaType: string): string => {
-  const [base = ""] = mediaType.split(";");
-
-  return base.trim().toLowerCase();
-};
-
 // The codec follows the media type alone (design 2.2); a range such as `*/*` is raw bytes until the
 // operator names a concrete type.
+// Differs from responses.ts codecOf on `text/*` and `+json-seq` by design; want 546a83f5 unifies.
 const codecOf = (base: string): Codec => {
   if (base === formUrlencoded) {
     return "form";
@@ -327,7 +331,7 @@ const settle = (resolution: Resolution, start: CanonicalKey): CanonicalKey => {
 
 const nodeAt = (resolution: Resolution, at: CanonicalKey): Effect.Effect<SchemaNodeValue> =>
   nodeIn(resolution, at).pipe(
-    Effect.map((json) => Schema.decodeUnknownOption(SchemaNode)(json)),
+    Effect.map((json) => decodeSchemaNode(json)),
     Effect.map(Option.getOrElse((): SchemaNodeValue => ({}))),
     Effect.orElseSucceed((): SchemaNodeValue => ({})),
   );
@@ -692,12 +696,15 @@ interface Context {
   readonly walk: Walk;
 }
 
+// A label as a message quotes it: sanitized, then written as a JSON string.
+const quoted = (text: string): string => pipe(text, sanitize, JSON.stringify);
+
 const targetLabel = (target: Target): string =>
   target.kind === "property" ? target.name : `position ${target.index}`;
 
 const contentTypes = (text: string): Option.Option<readonly string[]> => {
   const parts = text.split(",").map((part) => part.trim());
-  const decoded = parts.map((part) => Schema.decodeUnknownOption(MediaRange)(part));
+  const decoded = parts.map((part) => decodeMediaRange(part));
 
   return decoded.every((part) => Option.isSome(part)) ? Option.some(parts) : Option.none();
 };
@@ -749,7 +756,7 @@ const unsupportedPartStyle = (input: RuleInput): Finding =>
     unsupportedPartStyleCode,
     "appendix-c-using-rfc6570-based-serialization",
     "Encoding style, explode or allowReserved",
-    `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
+    `The multipart part ${quoted(targetLabel(input.target))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
     input.actual,
     "Use style form with explode true, or remove the style fields",
   );
@@ -778,7 +785,7 @@ const invalidContentType = (input: RuleInput): Finding =>
       "ENC-02/invalid-content-type",
       "encoding-content-type",
       "Encoding contentType",
-      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
+      `The contentType of ${quoted(targetLabel(input.target))} is not a list of media ranges.`,
       childKey(input.actual, "contentType"),
     ),
   );
@@ -791,13 +798,13 @@ const schemaDrivenXml = (input: RuleInput): Finding =>
       "XML-01/schema-driven",
       "xml-object",
       "Multipart part contentType",
-      `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
+      `The multipart part ${quoted(targetLabel(input.target))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
       childKey(input.actual, "contentType"),
       "Type the part application/json, or make the whole body an XML media type sent from --body-file",
     ),
   );
 
-const isXmlType = (range: string): boolean => codecOf(baseType(range)) === "xml";
+const isXmlType = (range: string): boolean => codecOf(mediaEssence(range)) === "xml";
 
 // Whether the part's schema is an object: typed `object`, or untyped with declared properties,
 // found through `$ref` and `allOf`.
@@ -954,14 +961,14 @@ const headersOf = Effect.fnUntraced(function* headersOf(
     }
 
     declares = true;
-    if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
+    if (Option.isNone(decodeHeaderName(name))) {
       findings.push(
         dropping(
           refusal(
             "ENC-03/invalid-header-name",
             "encoding-headers",
             "Encoding header name",
-            `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
+            `The header name ${quoted(name)} is not an HTTP field name.`,
             at,
           ),
         ),
@@ -1237,7 +1244,7 @@ const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResu
             "ENC-37/unsupported-content-encoding",
             transferAnchor(line),
             "Multipart part contentEncoding",
-            `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
+            `The contentEncoding ${quoted(declared.value)} of ${quoted(label)} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
             childKey(declared.at, "contentEncoding"),
             "Use contentEncoding base64 or binary, or remove it to send the part as is",
           ),
@@ -1267,7 +1274,7 @@ const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResul
         `${found.row}/nested-transfer-encoding`,
         transferAnchor(ctx.line),
         "Transfer encoding of a nested part",
-        `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
+        `The nested part ${quoted(label)} declares a base64 transfer encoding, which a nested part cannot carry.`,
         input.actual,
       ),
     ),
@@ -1300,13 +1307,12 @@ const transferConflict = Effect.fnUntraced(function* transferConflict(
     Effect.flatMap(Schema.decodeUnknownEffect(TransferHeaderSchema)),
     Effect.orElseSucceed((): typeof TransferHeaderSchema.Type => ({})),
   );
-  const isString = Schema.is(Schema.String);
   const declared = {
     const: pipe(
       schema.const,
-      UndefinedOr.map((value) => [value].filter(isString)),
+      UndefinedOr.map((value) => [value].filter(Predicate.isString)),
     ),
-    enum: schema.enum?.filter(isString),
+    enum: schema.enum?.filter(Predicate.isString),
   };
   const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
 
@@ -1318,7 +1324,7 @@ const transferConflict = Effect.fnUntraced(function* transferConflict(
           "ENC-39/conflicting-transfer-encoding",
           transferAnchor(ctx.line),
           "Encoding header Content-Transfer-Encoding",
-          `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
+          `The Content-Transfer-Encoding schema of ${quoted(targetLabel(input.target))} does not admit base64, the transfer encoding its schema declares.`,
           childKey(at, field),
           "Remove the header, or let its schema admit base64",
         ),
@@ -1596,7 +1602,7 @@ const extraFields = (
   flatten(ctx.walk, schema).pipe(
     Effect.map((nodes) => {
       const found = firstLocated(nodes, (node) =>
-        Schema.is(ObjectValue)(node.additionalProperties) ? true : undefined,
+        isObjectValue(node.additionalProperties) ? true : undefined,
       );
 
       return found === undefined
@@ -1649,7 +1655,7 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
               "MED-11/unknown-property",
               "media-type-encoding",
               "Media type encoding key",
-              `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
+              `The encoding key ${quoted(name)} is not a property of the schema.`,
               actual,
             ),
           ),
@@ -1664,7 +1670,7 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
           "MED-12/absent-property-ignored",
           "encoding-by-name",
           "Media type encoding key",
-          `The encoding key ${JSON.stringify(sanitize(name))} names no schema property, so it is ignored.`,
+          `The encoding key ${quoted(name)} names no schema property, so it is ignored.`,
           actual,
         ),
       );
@@ -1971,7 +1977,7 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
       "ENC-02/form-content-type",
       "encoding-content-type",
       "Encoding contentType under form-urlencoded",
-      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
+      `The contentType of ${quoted(targetLabel(input.target))} differs from ${expected}, the type a form value is sent as.`,
       childKey(input.actual, "contentType"),
       `Remove contentType, or set it to ${expected}`,
     ),
@@ -1995,9 +2001,7 @@ const isNested = Effect.fnUntraced(function* isNested(
 
   const members = nodes.flatMap(({ at, node }) => [
     ...Object.keys(node.properties ?? {}).map((name) => childKey(at, "properties", name)),
-    ...(Schema.is(ObjectValue)(node.additionalProperties)
-      ? [childKey(at, "additionalProperties")]
-      : []),
+    ...(isObjectValue(node.additionalProperties) ? [childKey(at, "additionalProperties")] : []),
   ]);
   for (const member of members) {
     if (compound(typesOf(yield* flatten(walk, member)))) {
@@ -2014,7 +2018,7 @@ const compoundNested = (input: RuleInput): Finding =>
       "PRM-27/compound-nested",
       "style-values",
       "Encoding style deepObject under form-urlencoded",
-      `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
+      `The deepObject value of ${quoted(targetLabel(input.target))} has nested objects or arrays, which the specification does not define.`,
       input.actual,
       "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
     ),
@@ -2025,7 +2029,7 @@ const bracketChoice = (input: RuleInput): Finding =>
     bracketChoiceCode,
     "style-values",
     "Encoding style deepObject under form-urlencoded",
-    `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
+    `The author config sends the nested deepObject value of ${quoted(targetLabel(input.target))} in the bracket convention, which the specification does not define.`,
     input.actual,
   );
 
@@ -2034,7 +2038,7 @@ const scalarChoice = (input: RuleInput): Finding =>
     scalarChoiceCode,
     "style-values",
     "Encoding style deepObject under form-urlencoded",
-    `The author config sends a scalar deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} as name=value, which the specification does not define.`,
+    `The author config sends a scalar deepObject value of ${quoted(targetLabel(input.target))} as name=value, which the specification does not define.`,
     input.actual,
   );
 
@@ -2335,12 +2339,12 @@ const normalizeAlternative = Effect.fnUntraced(function* normalizeAlternative(
 ): Effect.fn.Return<AlternativeResult, BodyNodeBudget | BodyNotReadable> {
   const { line, resolution } = ctx;
   const mediaSite = childKey(body, "content", key);
-  if (Option.isNone(Schema.decodeUnknownOption(MediaRange)(key))) {
+  if (Option.isNone(decodeMediaRange(key))) {
     // The grammar check refuses the key (MED-24) before normalization, so it is not raised twice.
     return stopAlternative();
   }
 
-  const base = baseType(key);
+  const base = mediaEssence(key);
   const codec = codecOf(base);
   const media = yield* readMedia(resolution, mediaSite);
   const { home, node } = media;
@@ -2492,6 +2496,10 @@ const EntryComponents = Schema.Struct({
   ),
 });
 
+const decodeDiscriminated = Schema.decodeUnknownOption(Discriminated);
+
+const decodeEntryComponents = Schema.decodeUnknownOption(EntryComponents);
+
 type Hint = typeof DiscriminatorHint.Encoded;
 
 type Branch = Hint["branches"][number];
@@ -2517,7 +2525,7 @@ interface Component {
 
 // The entry's component schemas, in document key order.
 const entrySchemas = (resolution: Resolution): readonly Component[] => {
-  const names = Option.match(Schema.decodeUnknownOption(EntryComponents)(resolution.value), {
+  const names = Option.match(decodeEntryComponents(resolution.value), {
     onNone: (): readonly string[] => [],
     onSome: (root) => Object.keys(root.components?.schemas ?? {}),
   });
@@ -2563,7 +2571,7 @@ const hintAt = (
 ): Hint | undefined => {
   const root = settle(resolution, site);
   const node = Option.getOrUndefined(
-    Schema.decodeUnknownOption(Discriminated)(Option.getOrUndefined(nodeOption(resolution, root))),
+    decodeDiscriminated(Option.getOrUndefined(nodeOption(resolution, root))),
   );
   if (node === undefined || discriminatorRefused(checkFindings, root)) {
     return undefined;
@@ -2730,7 +2738,7 @@ export const formContentRules = Effect.fnUntraced(function* formContentRules(
   mediaType: string,
   limits: ResolveLimits = defaultLimits,
 ): Effect.fn.Return<FormContentOutcome, BodyNodeBudget | BodyNotReadable> {
-  if (codecOf(baseType(mediaType)) !== "form") {
+  if (codecOf(mediaEssence(mediaType)) !== "form") {
     return FormContentOutcome.Implemented({ diagnostics: [], encoding: [] });
   }
 

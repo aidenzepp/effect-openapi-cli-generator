@@ -99,6 +99,22 @@ const Requirement = Schema.Record(Schema.String, Schema.Array(Schema.String));
 
 const AlternativeList = Schema.Array(Schema.Json);
 
+const decodeSchemeNode = Schema.decodeUnknownOption(SchemeNode);
+
+const decodeFlowNode = Schema.decodeUnknownOption(FlowNode);
+
+const decodeJsonMap = Schema.decodeUnknownOption(JsonMap);
+
+const decodeRequirement = Schema.decodeUnknownOption(Requirement);
+
+const decodeAlternativeList = Schema.decodeUnknownOption(AlternativeList);
+
+const decodeCookieName = Schema.decodeUnknownOption(CookieName);
+
+const decodeHeaderName = Schema.decodeUnknownOption(HeaderName);
+
+const decodeSecurityScheme = Schema.decodeUnknownOption(SecurityScheme);
+
 const flowRules = new Map([
   [
     "authorizationCode",
@@ -237,7 +253,7 @@ const flowsOf = (fields: SchemeFields): Option.Option<Readonly<Record<string, Fl
       continue;
     }
 
-    const flow = Schema.decodeUnknownOption(FlowNode)(json);
+    const flow = decodeFlowNode(json);
     if (Option.isNone(flow)) {
       return Option.none();
     }
@@ -332,7 +348,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
     node.type === "apiKey" &&
     node.in === "cookie" &&
     node.name !== undefined &&
-    Option.isNone(Schema.decodeUnknownOption(CookieName)(node.name))
+    Option.isNone(decodeCookieName(node.name))
   ) {
     return {
       findings: [
@@ -352,7 +368,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
     node.type === "apiKey" &&
     node.in === "header" &&
     node.name !== undefined &&
-    Option.isNone(Schema.decodeUnknownOption(HeaderName)(node.name))
+    Option.isNone(decodeHeaderName(node.name))
   ) {
     return {
       findings: [
@@ -372,7 +388,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
   const decoded =
     modelled === undefined
       ? Option.none<SecurityScheme>()
-      : Schema.decodeUnknownOption(SecurityScheme)({
+      : decodeSecurityScheme({
           credentialSources: node.type === "mutualTLS" ? ["env"] : ["file", "env", "prompt"],
           deprecated: node.deprecated ?? false,
           kind: modelled.kind,
@@ -406,9 +422,7 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
   return modelScheme(
     name,
     { document: resolution.document, line: resolution.line, pointer, source: "spec" },
-    nodeOption(resolution, target).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
-    ),
+    nodeOption(resolution, target).pipe(Option.flatMap((json) => decodeSchemeNode(json))),
   );
 };
 
@@ -462,7 +476,7 @@ const addedSchemes = (
             pointer: formatPointer(["security", "add", "schemes", name]),
             source: "author-supplied",
           },
-          Schema.decodeUnknownOption(SchemeNode)(node),
+          decodeSchemeNode(node),
         );
   });
 
@@ -493,7 +507,7 @@ export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSec
 ): Effect.fn.Return<SchemeNormalization> {
   const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
   const names = nodeOption(resolution, schemes).pipe(
-    Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
+    Option.flatMap((json) => decodeJsonMap(json)),
     Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
   );
   const refused = new Set<string>(
@@ -610,7 +624,7 @@ const effectiveList = (
     const list = nodeOption(resolution, {
       document: resolution.document,
       pointer: source.pointer,
-    }).pipe(Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)));
+    }).pipe(Option.flatMap((json) => decodeAlternativeList(json)));
     if (Option.isSome(list)) {
       return { list: list.value, source };
     }
@@ -779,7 +793,7 @@ export const normalizeSecurityPolicy = Effect.fnUntraced(function* normalizeSecu
   const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
   const judged = (effective?.list ?? []).map((json, index) => {
     const pointer = childPointer(source.pointer, String(index));
-    const entries = Schema.decodeUnknownOption(Requirement)(json).pipe(
+    const entries = decodeRequirement(json).pipe(
       Option.map((requirement) => Object.entries(requirement)),
     );
 
