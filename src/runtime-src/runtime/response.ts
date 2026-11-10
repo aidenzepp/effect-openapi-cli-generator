@@ -99,7 +99,9 @@ const requestIdOf = (
 
   return header === undefined
     ? undefined
-    : boundRequestId(scrubAround(header, scrubbed, (text) => text.replaceAll(requestIdUnsafeText, "")));
+    : boundRequestId(
+        scrubAround(header, scrubbed, (text) => text.replaceAll(requestIdUnsafeText, "")),
+      );
 };
 
 const locationNote = (response: HttpClientResponse.HttpClientResponse): string => {
