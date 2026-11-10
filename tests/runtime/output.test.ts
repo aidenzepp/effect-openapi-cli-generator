@@ -17,7 +17,7 @@ import {
   Stream,
 } from "effect";
 import { CliError } from "effect/cli";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import type { GlobalFlag } from "effect/cli";
 import { systemError } from "effect/PlatformError";
 import {
@@ -31,6 +31,7 @@ import * as Auth from "../../src/runtime-src/runtime/auth.ts";
 import * as BaseUrl from "../../src/runtime-src/runtime/base-url.ts";
 import * as Input from "../../src/runtime-src/runtime/input.ts";
 import * as Serialize from "../../src/runtime-src/runtime/serialize.ts";
+import { mapClientError } from "../../src/runtime-src/runtime/response.ts";
 import type { Credential } from "../../src/runtime-src/runtime/auth.ts";
 import {
   ClientPolicy,
@@ -723,6 +724,23 @@ describe("finalCatch", () => {
     expect(stderr).toContain("<redacted:bearer>");
     expect(stderr).not.toContain(canary);
     expect(stderr.trimEnd().split("\n")).toHaveLength(2);
+  });
+
+  test("a non-transport HttpClientError reason prints one internal-error line and exits 70", async () => {
+    const encode = new HttpClientError.HttpClientError({
+      reason: new HttpClientError.EncodeError({
+        request: HttpClientRequest.get("https://api.example.test/pets"),
+      }),
+    });
+    const { exit, stderr } = await runCatch(
+      Effect.fail(encode).pipe(Effect.catchTag("HttpClientError", mapClientError)),
+    );
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+
+    expect(Runtime.getErrorExitCode(error)).toBe(70);
+    expect(stderr).toBe(
+      "Error: Encode error (GET https://api.example.test/pets)\ninternal error, please report\n",
+    );
   });
 
   test("an unrecognized typed failure also exits 70", async () => {

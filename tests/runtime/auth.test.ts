@@ -12,6 +12,7 @@ import {
   Stdio,
   Stream,
 } from "effect";
+import { systemError } from "effect/PlatformError";
 import { Headers, HttpClientRequest, UrlParams } from "effect/http";
 import { CredentialMissing, UsageError } from "../../src/runtime-src/domain/errors.ts";
 import * as Auth from "../../src/runtime-src/runtime/auth.ts";
@@ -160,7 +161,43 @@ describe("credential sources", () => {
     const error = failure(result);
 
     expect(error).toMatchObject({ _tag: "UsageError", flag: "bearer-auth-file" });
+    expect(error).toMatchObject({
+      message: `the credential for bearerAuth is over ${Auth.maxCredentialBytes} bytes`,
+    });
     expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
+  test("an unreadable credential file is refused with its scheme named", async () => {
+    const fs = FileSystem.layerNoop({
+      stream: () =>
+        Stream.fail(
+          systemError({
+            _tag: "Unknown",
+            cause: new Error("EIO: device detail"),
+            method: "stream",
+            module: "FileSystem",
+          }),
+        ),
+    });
+    const result = await Effect.runPromise(
+      Auth.evaluate("users-update", [["bearerAuth"]]).pipe(
+        Effect.provideService(Auth.credentialFileSetting("bearerAuth"), Option.some("/bad")),
+        Effect.provide(
+          Layer.mergeAll(
+            Auth.layer(table, "EXAMPLE"),
+            fs,
+            Stdio.layerTest({}),
+            Input.stdinClaimLayer,
+          ),
+        ),
+        Effect.result,
+      ),
+    );
+
+    expect(failure(result)).toMatchObject({
+      _tag: "UsageError",
+      message: "cannot read the credential for bearerAuth",
+    });
   });
 
   test("an empty file is refused, an empty env value is unset", async () => {
@@ -190,7 +227,10 @@ describe("credential sources", () => {
       ),
     );
 
-    expect(failure(result)).toMatchObject({ _tag: "UsageError" });
+    expect(failure(result)).toMatchObject({
+      _tag: "UsageError",
+      message: "the credential for bearerAuth is not valid UTF-8",
+    });
   });
 });
 

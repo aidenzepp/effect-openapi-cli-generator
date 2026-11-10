@@ -1,4 +1,13 @@
-import { Effect, Option, Predicate, Result, Schema, SchemaIssue, SchemaParser } from "effect";
+import {
+  Effect,
+  Option,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+  SchemaIssue,
+  SchemaParser,
+} from "effect";
 import type { Stream } from "effect";
 import { Headers, HttpBody, HttpClientRequest, UrlParams } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
@@ -6,6 +15,8 @@ import { JsonNumber, isJsonNumberText, rawJson } from "./input.ts";
 import type { Chosen, RawJson, SentType } from "./input.ts";
 import * as Multipart from "./multipart.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
+import { encoder as utf8, loneSurrogate } from "./redact.ts";
+import { isJsonFamily, mediaEssence } from "./sequential.ts";
 
 /**
  * A value with a text form. Integers outside the safe range arrive as digit strings and are sent
@@ -67,8 +78,6 @@ type Refusal = Effect.Effect<never, UsageError>;
  */
 const refuse = (message: string): Refusal => Effect.fail(new UsageError({ message }));
 
-const unpairedSurrogate = /\p{Surrogate}/u;
-
 const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefined, UsageError> => {
   if (value instanceof JsonNumber) {
     return isJsonNumberText(value.text)
@@ -77,7 +86,7 @@ const scalarText = (name: string, value: Scalar): Effect.Effect<string | undefin
   }
 
   if (Predicate.isString(value)) {
-    return unpairedSurrogate.test(value)
+    return loneSurrogate.test(value)
       ? refuse(`parameter ${name} holds an unpaired surrogate, which has no UTF-8 form`)
       : Effect.succeed(value);
   }
@@ -339,7 +348,7 @@ const styled =
   (name: string, value: Nested, options: PathOptions): PathParameter => ({
     expand: Effect.gen(function* styleExpansion() {
       // Only a matrix expansion emits the name.
-      if (style === "matrix" && unpairedSurrogate.test(name)) {
+      if (style === "matrix" && loneSurrogate.test(name)) {
         return yield* refuse("a matrix parameter has a name with no UTF-8 form");
       }
 
@@ -692,7 +701,7 @@ const queryStyled =
   (style: QueryStyle) =>
   (name: string, value: Nested, options: QueryOptions): QueryParameter => ({
     expand: Effect.gen(function* queryExpansion() {
-      if (unpairedSurrogate.test(name)) {
+      if (loneSurrogate.test(name)) {
         return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
       }
 
@@ -785,14 +794,18 @@ const edgeSpace = /^[\t ]|[\t ]$/u;
 const wideCodePoint = /[\u{100}-\u{10FFFF}]/u;
 
 /**
- * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
- * 5.5): CR, LF, NUL, leading or trailing whitespace and a code point above U+00FF.
+ * The part of the header-value rule that credentials and parameters share: CR, LF, NUL and a code
+ * point above U+00FF. They differ on edge whitespace, so each caller adds its own edge rule
+ * (`edgeSpace` here, `trim` for a credential).
  */
-const unsafeHeaderText = (text: string) =>
-  headerLineBreak.test(text) ||
-  text.includes("\u0000") ||
-  edgeSpace.test(text) ||
-  wideCodePoint.test(text);
+export const headerValueBreaks = (text: string): boolean =>
+  headerLineBreak.test(text) || text.includes("\u0000") || wideCodePoint.test(text);
+
+/**
+ * A header value, or a media type that becomes one, that no header can carry unchanged (RFC 9110
+ * 5.5): CR, LF, NUL, leading or trailing tab or space and a code point above U+00FF.
+ */
+const unsafeHeaderText = (text: string) => headerValueBreaks(text) || edgeSpace.test(text);
 
 const headerTexts = (text: Text): readonly string[] =>
   text.kind === "primitive" ? [text.text] : parts(text);
@@ -870,7 +883,7 @@ export interface CookieParameter {
 /**
  * RFC 6265 `cookie-octet`: `%x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E`.
  */
-const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
+export const cookieOctets = /^[\u0021\u0023-\u002B\u002D-\u003A\u003C-\u005B\u005D-\u007E]*$/u;
 
 /**
  * Reserved characters a 3.2 `form` cookie value may pass under `allowReserved`: RFC 3986 reserved
@@ -982,11 +995,7 @@ export interface RequestBody {
  * Whether `mediaType` is JSON media: `application/json` or a `+json` suffix, parameters and case
  * ignored. A body or `content` value under it is written as JSON text.
  */
-export const isJsonMedia = (mediaType: string): boolean => {
-  const essence = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
-
-  return essence === "application/json" || essence.endsWith("+json");
-};
+export const isJsonMedia: (mediaType: string) => boolean = isJsonFamily;
 
 /**
  * Whether `value` holds a number `JSON.stringify` cannot write as given: a non-finite number, which
@@ -1023,10 +1032,12 @@ const jsonText = (subject: string, value: Json) => {
   // The walk leaves `JSON.rawJSON` no text to refuse; a SyntaxError from it is a refusal all the same.
   return hasUnwritableNumber(value)
     ? refuse(unwritable)
-    : Effect.sync(() => JSON.stringify(value, rawNumbers)).pipe(
-        Effect.catchDefect((defect) =>
-          defect instanceof SyntaxError ? refuse(unwritable) : Effect.die(defect),
+    : Effect.try({ catch: (error) => error, try: () => JSON.stringify(value, rawNumbers) }).pipe(
+        Effect.catchIf(
+          (error): error is SyntaxError => error instanceof SyntaxError,
+          () => refuse(unwritable),
         ),
+        Effect.orDie,
       );
 };
 
@@ -1048,7 +1059,7 @@ const bodyOf = (mediaType: string, value: Body) =>
       return yield* refuse("a body for a non-JSON media type must be text or a binary stream");
     }
 
-    if (unpairedSurrogate.test(value)) {
+    if (loneSurrogate.test(value)) {
       return yield* refuse("the body holds an unpaired surrogate, which has no UTF-8 form");
     }
 
@@ -1132,6 +1143,15 @@ type LeafValue = Exclude<FormValue, FormNested>;
  * The part values of a `multipart/form-data` body by part name, each name sent once per value.
  */
 export type FormFields = Readonly<Record<string, readonly FormValue[]>>;
+
+/**
+ * The values filed under an own field name; none when the name is absent or holds `undefined`.
+ */
+const fieldValues = (fields: FormFields, name: string): readonly FormValue[] =>
+  Rec.get(fields, name).pipe(
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly FormValue[] => []),
+  );
 
 /**
  * A part that travels whole beside the form's fields: its `Content-Type`, chosen among the types
@@ -1227,14 +1247,12 @@ const formText = (value: Exclude<LeafValue, FormFile>) => {
     return refuse("a multipart part holds a number with no text form");
   }
 
-  if (Predicate.isString(value) && unpairedSurrogate.test(value)) {
+  if (Predicate.isString(value) && loneSurrogate.test(value)) {
     return refuse("a multipart part holds an unpaired surrogate, which has no UTF-8 form");
   }
 
   return Effect.succeed(String(value));
 };
-
-const utf8 = new TextEncoder();
 
 // What one part entry sends: a declared type with the fields' values under the part's name, a
 // chosen part as given, or nothing for a chosen part not sent.
@@ -1297,7 +1315,7 @@ const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
     const leaves: Multipart.LeafPart[] = [];
     for (const entry of nesting.parts) {
       const [member, contentType] = entry;
-      for (const value of Object.hasOwn(fields, member) ? (fields[member] ?? []) : []) {
+      for (const value of fieldValues(fields, member)) {
         if (isFormNested(value)) {
           return yield* Effect.die(new Error("formData: a nested part nests again"));
         }
@@ -1315,7 +1333,7 @@ const nestedPart = (name: string, nesting: NestedForm, fields: FormFields) =>
 // a `UsageError` naming the flag.
 const positionalParts = (fields: FormFields, name: string, nesting: PositionalForm) =>
   Effect.gen(function* positional() {
-    const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+    const values = fieldValues(fields, name);
     if (values.length === 0) {
       return [];
     }
@@ -1359,7 +1377,7 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
       }
 
       if (isNestedForm(rule)) {
-        const values = Object.hasOwn(fields, name) ? (fields[name] ?? []) : [];
+        const values = fieldValues(fields, name);
         for (const value of values) {
           if (!isFormNested(value)) {
             return yield* Effect.die(new Error("formData: a nested part has a plain value"));
@@ -1374,7 +1392,7 @@ const formDataOf = (fields: FormFields, options: FormDataOptions) =>
         continue;
       }
 
-      if (!Predicate.isString(rule) && Object.hasOwn(fields, name)) {
+      if (!Predicate.isString(rule) && Rec.has(fields, name)) {
         return yield* Effect.die(new Error("formData: a chosen part is also a field"));
       }
 
@@ -1637,7 +1655,7 @@ export const chooseParts =
       const named = new Set(Object.values(choices).map(([part]) => part));
       const chosen: (readonly [string, ChosenPart])[] = [];
       for (const [key, [part, contentType, headers]] of Object.entries(choices)) {
-        const values = Object.hasOwn(fields, part) ? (fields[part] ?? []) : [];
+        const values = fieldValues(fields, part);
         if (values.length === 0) {
           continue;
         }
@@ -1782,7 +1800,7 @@ const isJsonScalar = (value: Json): value is Exclude<Json, object> | JsonNumber 
  */
 const hasLoneSurrogate = (value: Json): boolean => {
   if (Predicate.isString(value)) {
-    return unpairedSurrogate.test(value);
+    return loneSurrogate.test(value);
   }
 
   if (Array.isArray(value)) {
@@ -1792,7 +1810,7 @@ const hasLoneSurrogate = (value: Json): boolean => {
   return (
     isJsonObject(value) &&
     Object.entries(value).some(
-      ([member, text]) => unpairedSurrogate.test(member) || hasLoneSurrogate(text),
+      ([member, text]) => loneSurrogate.test(member) || hasLoneSurrogate(text),
     )
   );
 };
@@ -1952,7 +1970,7 @@ export const urlEncode = (
         continue;
       }
 
-      if (unpairedSurrogate.test(name)) {
+      if (loneSurrogate.test(name)) {
         return yield* refuse("a form property has a name with no UTF-8 form");
       }
 
@@ -1998,11 +2016,11 @@ export interface UrlEncodedBodyOptions extends UrlEncodedOptions {
 const refusedNamesOf = (
   mediaType: string,
   refused: MediaDeclaration["refused"],
-): readonly string[] => {
-  const listed = refused !== undefined && Object.hasOwn(refused, mediaType);
-
-  return (listed ? refused[mediaType] : undefined) ?? [];
-};
+): readonly string[] =>
+  Option.fromNullishOr(refused).pipe(
+    Option.flatMap((names) => Rec.get(names, mediaType)),
+    Option.getOrElse((): readonly string[] => []),
+  );
 
 /**
  * Whether a sent pair name carries `field`: the name itself, or a bracketed or dotted name under
@@ -2100,7 +2118,7 @@ export interface ContentOptions {
 export interface QuerystringOptions extends ContentOptions, Partial<UrlEncodedOptions> {}
 
 const isFormMedia = (mediaType: string) =>
-  (mediaType.split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
+  mediaEssence(mediaType) === "application/x-www-form-urlencoded";
 
 /**
  * A content-based parameter with no value: an optional one sends nothing and a required one is
@@ -2123,7 +2141,7 @@ const contentText = (name: string, mediaType: string, value: Json) =>
       return yield* refuse(`parameter ${name} must be text under a non-JSON media type`);
     }
 
-    return unpairedSurrogate.test(value)
+    return loneSurrogate.test(value)
       ? yield* refuse(`parameter ${name} holds an unpaired surrogate, which has no UTF-8 form`)
       : value;
   });
@@ -2169,7 +2187,7 @@ export const queryContent = (
   options: ContentOptions,
 ): QueryParameter => ({
   expand: Effect.gen(function* queryContentExpansion() {
-    if (unpairedSurrogate.test(name)) {
+    if (loneSurrogate.test(name)) {
       return yield* refuse(`parameter ${name} has a name with no UTF-8 form`);
     }
 

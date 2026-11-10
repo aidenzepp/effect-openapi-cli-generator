@@ -1097,6 +1097,31 @@ describe("Input.jsonFlag", () => {
     expect(JSON.stringify(error)).toContain("--value");
   });
 
+  test("a JSON flag value nested deeper than maxJsonDepth fails as not valid JSON", async () => {
+    const depth = Input.maxJsonDepth + 1;
+    const error = await run(
+      parseJson("--value", "[".repeat(depth) + "]".repeat(depth)).pipe(Effect.flip),
+    );
+
+    expect(CliError.isCliError(error)).toBe(true);
+    expect(JSON.stringify(error)).toContain("--value: is not valid JSON");
+  });
+
+  test("a JSON argument that is not valid JSON fails naming the argument", async () => {
+    const command = Command.make("x", { value: Input.jsonArgument("value") }, () => Effect.void);
+    const error = await run(
+      Command.runWith(command, { version: "0" })(["{secret-oops"]).pipe(
+        Effect.flip,
+        Effect.provide(BunServices.layer),
+      ),
+    );
+    const text = JSON.stringify(error);
+
+    expect(CliError.isCliError(error)).toBe(true);
+    expect(text).toContain("<value>: is not valid JSON");
+    expect(text).not.toContain("secret-oops");
+  });
+
   test("nesting at the bound is accepted", async () => {
     const depth = Input.maxJsonDepth;
     const seen = await run(parseJson("--value", "[".repeat(depth) + "]".repeat(depth)));

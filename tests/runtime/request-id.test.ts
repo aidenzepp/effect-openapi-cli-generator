@@ -72,6 +72,12 @@ describe("request id from the declared header (design 7.1, DM2-5)", () => {
     expect(error.requestId).toBe("a[31mbcde");
   });
 
+  test("a request id has LF and TAB stripped", async () => {
+    const error = await fail(scripted(404, { "x-request-id": "a\nb\tc" }));
+
+    expect(error.requestId).toBe("abc");
+  });
+
   test("no designation leaves requestId unset", async () => {
     const error = await fail(scripted(404, { "x-request-id": "req-1" }), [], {
       ...table,

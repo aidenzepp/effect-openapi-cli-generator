@@ -2,6 +2,7 @@ import {
   Context,
   Effect,
   FileSystem,
+  JsonPointer,
   Layer,
   Option,
   Predicate,
@@ -12,11 +13,12 @@ import {
   Stream,
 } from "effect";
 import { Argument, CliError, Flag } from "effect/cli";
+import { Base64, Base64Url } from "effect/encoding";
 import { HttpBody } from "effect/http";
 import { UsageError } from "../domain/errors.ts";
 import { FileBody } from "./file-body.ts";
 import type { Secret } from "./redact.ts";
-import { RunCredentials } from "./redact.ts";
+import { RunCredentials, encoder } from "./redact.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import * as Negotiate from "./negotiate.ts";
 
@@ -33,9 +35,18 @@ export const maxBodyBytes = 67_108_864;
  */
 export const maxSecretBytes = 65_536;
 
-const bodyFileName = "body-file";
+/**
+ * Writes one line to stderr and ignores a failure to write it: a diagnostic never fails the run.
+ * The one stderr writer of the runtime.
+ */
+export const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
+  Effect.gen(function* printLine() {
+    const stdio = yield* Stdio.Stdio;
 
-const encoder = new TextEncoder();
+    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
+  }).pipe(Effect.ignore);
+
+const bodyFileName = "body-file";
 
 /**
  * Whole request body as text; field flags override it.
@@ -110,31 +121,23 @@ const overLimit = (limit: number): UsageError => overLimitIn(bodyFileName, limit
 const notAFile = (): UsageError =>
   usage(bodyFileName, `is not a regular file; for a pipe use --${bodyFileName} -`);
 
-class OverLimit {
-  readonly _tag = "OverLimit";
-}
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 
-class ReadFailed {
-  readonly _tag = "ReadFailed";
-}
+/**
+ * A bounded read stopped at its limit.
+ */
+export class OverLimit extends Schema.TaggedError<OverLimit>()("OverLimit", {}) {}
 
-const concat = (chunks: readonly Uint8Array[]): Uint8Array => {
-  let size = 0;
-  for (const chunk of chunks) {
-    size += chunk.length;
-  }
+/**
+ * A bounded read whose source failed; the cause stays out of the message.
+ */
+export class ReadFailed extends Schema.TaggedError<ReadFailed>()("ReadFailed", {}) {}
 
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return joined;
-};
-
-const bounded = (
+/**
+ * `source` bounded to `limit` bytes: a source failure becomes `ReadFailed`, and the chunk that
+ * crosses the limit becomes `OverLimit`.
+ */
+export const bounded = (
   source: Stream.Stream<Uint8Array, unknown>,
   limit: number = maxBodyBytes,
 ): Stream.Stream<Uint8Array, OverLimit | ReadFailed> =>
@@ -145,13 +148,50 @@ const bounded = (
     ),
   );
 
-const toUsage = (
-  cause: OverLimit | ReadFailed,
-  flag: string = bodyFileName,
-  limit: number = maxBodyBytes,
-  subject?: string,
-): UsageError =>
-  cause instanceof OverLimit ? overLimitIn(flag, limit, subject) : cannotReadIn(flag);
+/**
+ * The bytes of `source` read under `limit`, joined. The caller maps `OverLimit` and `ReadFailed`
+ * to its own messages with `Effect.catchTags`.
+ */
+export const readBounded = (
+  source: Stream.Stream<Uint8Array, unknown>,
+  limit: number,
+): Effect.Effect<Uint8Array, OverLimit | ReadFailed> => Stream.mkUint8Array(bounded(source, limit));
+
+/**
+ * Decodes `bytes` as UTF-8, failing with `invalid` when they are not.
+ */
+export const decodeUtf8 = (
+  bytes: Uint8Array,
+  invalid: UsageError,
+): Effect.Effect<string, UsageError> =>
+  Effect.try({
+    catch: () => invalid,
+    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+  });
+
+/**
+ * The source behind a `--<flag> <path|->` value: stdin for `-`, after claiming it for `flag`, or
+ * whatever `openFile` returns for a path. Callers differ in what a path needs (`multipart.ts`
+ * checks it first, the bounded reads cap the stream) and in what follows (collect or stream).
+ */
+export const stdinOrFile = (
+  flag: string,
+  path: string,
+  openFile: (
+    fs: FileSystem.FileSystem,
+  ) => Effect.Effect<Stream.Stream<Uint8Array, unknown>, UsageError>,
+): Effect.Effect<
+  Stream.Stream<Uint8Array, unknown>,
+  UsageError,
+  FileSystem.FileSystem | Stdio.Stdio | StdinClaim
+> =>
+  path === "-"
+    ? Effect.service(StdinClaim).pipe(
+        Effect.flatMap((claim) => claim.claim(flag)),
+        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
+        Effect.map((stdio) => stdio.stdin),
+      )
+    : Effect.flatMap(Effect.service(FileSystem.FileSystem), openFile);
 
 // What a bounded read of a flag's file refuses past: `limit` bytes, named as `subject`.
 interface ReadBound {
@@ -166,10 +206,11 @@ const collect = (
   flag: string = bodyFileName,
   bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError> =>
-  bounded(source, bound.limit).pipe(
-    Stream.runCollect,
-    Effect.map(concat),
-    Effect.mapError((cause) => toUsage(cause, flag, bound.limit, bound.subject)),
+  readBounded(source, bound.limit).pipe(
+    Effect.catchTags({
+      OverLimit: () => Effect.fail(overLimitIn(flag, bound.limit, bound.subject)),
+      ReadFailed: () => Effect.fail(cannotReadIn(flag)),
+    }),
   );
 
 // A bounded read of a path, or of stdin for `-` under the one stdin claim, failing in `flag`.
@@ -178,17 +219,9 @@ const readFlagFile = (
   flag: string,
   bound: ReadBound = bodyBound,
 ): Effect.Effect<Uint8Array, UsageError, FileSystem.FileSystem | Stdio.Stdio | StdinClaim> =>
-  path === "-"
-    ? Effect.service(StdinClaim).pipe(
-        Effect.flatMap((claim) => claim.claim(flag)),
-        Effect.flatMap(() => Effect.service(Stdio.Stdio)),
-        Effect.flatMap((stdio) => collect(stdio.stdin, flag, bound)),
-      )
-    : Effect.service(FileSystem.FileSystem).pipe(
-        Effect.flatMap((fs) =>
-          collect(fs.stream(path, { bytesToRead: bound.limit + 1 }), flag, bound),
-        ),
-      );
+  stdinOrFile(flag, path, (fs) =>
+    Effect.succeed(fs.stream(path, { bytesToRead: bound.limit + 1 })),
+  ).pipe(Effect.flatMap((source) => collect(source, flag, bound)));
 
 /**
  * Reads `--body-file` into memory, bounded: a file by path, or stdin for `-` (which takes the one
@@ -214,7 +247,10 @@ const limited = (
     : Effect.succeed(
         HttpBody.stream(
           bounded(body.stream, limit).pipe(
-            Stream.mapError((cause) => toUsage(cause, bodyFileName, limit)),
+            Stream.catchTags({
+              OverLimit: () => Stream.fail(overLimit(limit)),
+              ReadFailed: () => Stream.fail(cannotRead()),
+            }),
           ),
           body.contentType,
           body.contentLength,
@@ -476,7 +512,7 @@ type Reviver = (key: string, value: JsonNode, context: { readonly source?: strin
 // oxlint-disable-next-line typescript/no-inferrable-types -- the wide type selects Reflect.get's untyped overload
 const jsonGlobal: string = "JSON";
 
-const bunJson: {
+const jsonEngine: {
   readonly parse: (text: string, reviver?: Reviver) => JsonNode;
   readonly rawJSON: (text: string) => RawJson;
   // oxlint-disable-next-line anti-slop/no-reflect-get, typescript/no-unsafe-assignment -- the one way to type Bun's JSON without a global augmentation
@@ -486,7 +522,7 @@ const bunJson: {
  * `text` as raw JSON for a `JSON.stringify` replacer, written unchanged. Throws `SyntaxError` when
  * `text` is not a JSON primitive.
  */
-export const rawJson = (text: string): RawJson => bunJson.rawJSON(text);
+export const rawJson = (text: string): RawJson => jsonEngine.rawJSON(text);
 
 const int64Digits = /^-?(?:0|[1-9]\d*)$/u;
 
@@ -538,8 +574,11 @@ export const jsonNumber = (digits: string, flag: string): Effect.Effect<JsonNumb
     ? Effect.succeed(new JsonNumber(digits))
     : Effect.fail(usage(flag, "an integer field is not a digit string"));
 
-// A flag's mapEffect fails in CliError; the UsageError rides as the cause with its own message.
-const asCliError = (error: UsageError): CliError.CliError =>
+/**
+ * A flag's `mapEffect` fails in `CliError`; the `UsageError` rides as the cause with its own
+ * message.
+ */
+export const asCliError = (error: UsageError): CliError.CliError =>
   new CliError.UserError({ cause: error, userMessage: error.message });
 
 /**
@@ -614,13 +653,7 @@ const noticeDeprecated =
 
     return absent
       ? Effect.succeed(value)
-      : Effect.gen(function* notify() {
-          const stdio = yield* Stdio.Stdio;
-          yield* Stream.run(
-            Stream.make(`Notice: the parameter ${label} is deprecated\n`),
-            stdio.stderr(),
-          );
-        }).pipe(Effect.ignore, Effect.as(value));
+      : printStderr(`Notice: the parameter ${label} is deprecated`).pipe(Effect.as(value));
   };
 
 /**
@@ -680,16 +713,9 @@ const reviveIntegers: Reviver = (key, value, context) => {
 const parsedJson =
   (failure: () => CliError.CliError) =>
   (raw: string): Effect.Effect<JsonNode, CliError.CliError> =>
-    Effect.try({
-      catch: failure,
-      try: () => {
-        if (nestsTooDeep(raw)) {
-          throw new RangeError("JSON nesting is too deep");
-        }
-
-        return bunJson.parse(raw, reviveIntegers);
-      },
-    });
+    nestsTooDeep(raw)
+      ? Effect.fail(failure())
+      : Effect.try({ catch: failure, try: () => jsonEngine.parse(raw, reviveIntegers) });
 
 /**
  * The flag for a JSON-valued field: its text parsed with the number-preserving parse `mergeBody`
@@ -724,16 +750,11 @@ const replace = (_key: string, value: JsonNode): JsonNode | RawJson => {
     throw new SyntaxError("a JSON number has no JSON text form");
   }
 
-  return bunJson.rawJSON(value.text);
+  return jsonEngine.rawJSON(value.text);
 };
 
 const segmentsOf = (pointer: string): readonly string[] | undefined =>
-  pointer.startsWith("/")
-    ? pointer
-        .slice(1)
-        .split("/")
-        .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
-    : undefined;
+  pointer.startsWith("/") ? pointer.slice(1).split("/").map(JsonPointer.unescapeToken) : undefined;
 
 const setAt = (
   root: JsonObject,
@@ -823,17 +844,8 @@ const toNode = (value: FieldValue): JsonNode => {
   return copy;
 };
 
-const base64Chunk = 0x80_00;
-
-// btoa over binary-string chunks, so a large file never spreads into one call's arguments.
-const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string => {
-  let text = "";
-  for (let offset = 0; offset < bytes.length; offset += base64Chunk) {
-    text += btoa(String.fromCodePoint(...bytes.subarray(offset, offset + base64Chunk)));
-  }
-
-  return encoding === "base64url" ? text.replaceAll("+", "-").replaceAll("/", "_") : text;
-};
+const encodeBytes = (bytes: Uint8Array, encoding: FieldEncoding): string =>
+  encoding === "base64url" ? Base64Url.encodePadded(bytes) : Base64.encode(bytes);
 
 const readEncoded = (
   field: FileField,
@@ -843,10 +855,7 @@ const readEncoded = (
   );
 
 const decodeText = (bytes: Uint8Array, flag: string): Effect.Effect<string, UsageError> =>
-  Effect.try({
-    catch: () => usage(flag, "is not valid UTF-8"),
-    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-  });
+  decodeUtf8(bytes, usage(flag, "is not valid UTF-8"));
 
 // Records `secret` for the run when `RunCredentials` is present. It is optional so `mergeBody` and
 // `structuredBody` keep their requirements for callers that pass no secret field; every emitted
@@ -941,7 +950,7 @@ const mergeSources = (
         ? Effect.fail(usage(flag, `is nested over ${maxJsonDepth} levels`))
         : Effect.try({
             catch: () => usage(flag, "is not valid JSON"),
-            try: () => bunJson.parse(text, reviver),
+            try: () => jsonEngine.parse(text, reviver),
           });
     const settled = (merged: Merged) => ({
       merged,

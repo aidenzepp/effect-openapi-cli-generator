@@ -1,16 +1,19 @@
+/* oxlint-disable unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown */
 import type { PlatformError } from "effect";
 import {
+  Array as Arr,
+  Bytes,
   Cause,
   Config,
   Console,
   Context,
-  Data,
   Duration,
   Effect,
   FileSystem,
   Layer,
   Option,
   Path,
+  Record as Rec,
   Redacted,
   Ref,
   Runtime,
@@ -21,7 +24,7 @@ import {
 } from "effect";
 import type { Command, HelpDoc } from "effect/cli";
 import { CliError, CliOutput, Flag, GlobalFlag } from "effect/cli";
-import { Headers, HttpClient, HttpClientRequest, UrlParams } from "effect/http";
+import { Headers, HttpClient, HttpClientRequest, Url, UrlParams } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
 import {
   ApiResponseError,
@@ -38,6 +41,7 @@ import {
   attach,
   attachPlaceholders,
   certificateInitFor,
+  cookiePairs,
   credentialOrigins,
   evaluate,
   placeholder,
@@ -59,8 +63,11 @@ import {
 import type { ServersTable } from "./base-url.ts";
 import type { DirectRoute } from "./client.ts";
 import {
+  decodedQueryName,
+  decodeWholeNumber,
+  querySeparator,
   redirectLoop,
-  retryAfterCapSeconds,
+  RetryAfterCap,
   retryTransform,
   sendOrder,
   setUserAgent,
@@ -69,13 +76,16 @@ import {
   withUserAgent,
   wouldRetry,
 } from "./client.ts";
+import { printStderr } from "./input.ts";
 import type { MediaDeclaration } from "./negotiate.ts";
 import { accept as acceptValue, dispatchResponse } from "./negotiate.ts";
 import type { ScrubEntry } from "./redact.ts";
 import {
   dropTrailingFragment,
+  encoder,
   longestFormBytes,
   queryWireForm,
+  redactedPlaceholder,
   RunCredentials,
   scrub as scrubValues,
   scrubAround,
@@ -87,7 +97,13 @@ import {
   matchResponse,
   toApiResponseError,
 } from "./response.ts";
-import { jsonSeqRecords, ndjsonRecords, sequentialCodecOf, sseRecords } from "./sequential.ts";
+import {
+  jsonSeqRecords,
+  ndjsonRecords,
+  sequentialCodecOf,
+  sseRecords,
+  utf8Bytes,
+} from "./sequential.ts";
 import type { SequentialCodec } from "./sequential.ts";
 
 /**
@@ -269,7 +285,7 @@ const stdoutPath = "-";
 /**
  * The reader went away: stop streaming, report success (design 13.1 R5).
  */
-class StdoutClosed extends Data.TaggedError("StdoutClosed") {}
+class StdoutClosed extends Schema.TaggedError<StdoutClosed>()("StdoutClosed", {}) {}
 
 const stdoutFailure = (failure: PlatformError.PlatformError): OutputError | StdoutClosed =>
   isBrokenPipe(failure)
@@ -481,27 +497,6 @@ export const sanitize = (text: string): string => text.replaceAll(unsafeText, ""
 const scrubbedAndSanitized = (text: string, credentials: readonly ScrubEntry[]): string =>
   scrubAround(text, credentials, sanitize);
 
-// The first code point each UTF-8 length cannot encode: 0x80, 0x800 and 0x10000.
-const oneByteLimit = 128;
-
-const twoByteLimit = 2048;
-
-const threeByteLimit = 65_536;
-
-const utf8Width = (character: string): number => {
-  const point = character.codePointAt(0) ?? 0;
-
-  if (point < oneByteLimit) {
-    return 1;
-  }
-
-  if (point < twoByteLimit) {
-    return 2;
-  }
-
-  return point < threeByteLimit ? 3 : 4;
-};
-
 /**
  * The longest prefix of `text` that fits `maxBytes` of UTF-8, never splitting a character.
  */
@@ -510,7 +505,7 @@ const truncateUtf8 = (text: string, maxBytes: number): string => {
   let end = 0;
 
   for (const character of text) {
-    used += utf8Width(character);
+    used += utf8Bytes(character);
 
     if (used > maxBytes) {
       break;
@@ -548,18 +543,6 @@ const takeBytes = <E, R>(
     Stream.takeWhile((chunk) => chunk.length > 0),
   );
 
-const concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
-  const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
-  let at = 0;
-
-  for (const chunk of chunks) {
-    joined.set(chunk, at);
-    at += chunk.length;
-  }
-
-  return joined;
-};
-
 /**
  * Read the excerpt of an error response body for `ApiResponseError.bodyExcerpt`, bounded by
  * `--max-error-bytes` (0 reads nothing). It reads that many bytes plus the longest credential
@@ -579,7 +562,7 @@ export const readExcerpt = <E, R>(
     }
 
     const budget = maxBytes + longestFormBytes(credentials);
-    const read = concatBytes(yield* Stream.runCollect(takeBytes(body, budget)));
+    const read = yield* Stream.mkUint8Array(takeBytes(body, budget));
     const text =
       read.length < budget
         ? new TextDecoder().decode(read)
@@ -711,7 +694,7 @@ export const valueFreeFormatter: CliOutput.Formatter = {
 /**
  * Exit 70: a failure no error class names, a defect in the program. It is already printed.
  */
-export class InternalError extends Data.TaggedError("InternalError") {
+export class InternalError extends Schema.TaggedError<InternalError>()("InternalError", {}) {
   readonly [Runtime.errorExitCode] = 70;
 
   readonly [Runtime.errorReported] = false;
@@ -730,13 +713,6 @@ const isDescribed = Schema.is(Described);
 
 const defectMessage = (defect: typeof Described.Type): string =>
   isString(defect) ? defect : defect.message;
-
-const printStderr = (text: string): Effect.Effect<void, never, Stdio.Stdio> =>
-  Effect.gen(function* step6() {
-    const stdio = yield* Stdio.Stdio;
-
-    yield* Stream.run(Stream.make(`${text}\n`), stdio.stderr());
-  }).pipe(Effect.ignore);
 
 const rawMessage = (error: CliError.CliError): string =>
   error._tag === "InvalidValue" ? invalidValueMessage(error) : error.message;
@@ -795,8 +771,6 @@ export const runRecordLayer: Layer.Layer<RunRecord> = Layer.effect(RunRecord)(
 
 const errorFormatName = (envPrefix: string): string => `${envPrefix}_ERROR_FORMAT`;
 
-const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
-
 /**
  * `<envPrefix>_ERROR_FORMAT`, read by that explicit name (memo 6f21e261), then `text`. A value
  * other than `text` or `json` is a `UsageError` naming the variable, never the value.
@@ -804,12 +778,11 @@ const isErrorFormat = Schema.is(Schema.Literals(errorFormats));
 const envErrorFormat = Effect.fnUntraced(function* readErrorFormat(envPrefix: string) {
   const name = errorFormatName(envPrefix);
   const invalid = new UsageError({ flag: name, message: `${name} must be text or json` });
-  const env = yield* Config.option(Config.String(name)).pipe(Effect.mapError(() => invalid));
-  if (Option.isNone(env)) {
-    return "text" as const;
-  }
+  const env = yield* Config.option(Config.Literals(errorFormats, name)).pipe(
+    Effect.mapError(() => invalid),
+  );
 
-  return isErrorFormat(env.value) ? env.value : yield* invalid;
+  return Option.getOrElse(env, () => "text" as const);
 });
 
 // The operator's `--error-format`, if the root registers the setting and the flag was given.
@@ -1426,7 +1399,7 @@ const splitTarget = (target: string): readonly [path: string, query: string] => 
  * does not extend to it (m3.md P19). It never names a value, a path or certificate material.
  */
 const withheldNotice = (headers: readonly Credential[], certificate: boolean): string => {
-  const schemes = [...new Set(headers.map((credential) => credential.scheme))].join(", ");
+  const schemes = Arr.dedupe(headers.map((credential) => credential.scheme)).join(", ");
   const clauses = [
     ...(headers.length > 0
       ? [
@@ -1445,8 +1418,6 @@ const withheldNotice = (headers: readonly Credential[], certificate: boolean): s
  * `<PREFIX>_IDLE_TIMEOUT` nor an author default sets one.
  */
 export const defaultIdleTimeoutSeconds = 300;
-
-const wholeSeconds = /^\d+$/u;
 
 /**
  * The effective stream idle timeout in seconds: `<envPrefix>_IDLE_TIMEOUT` read by that explicit
@@ -1467,11 +1438,9 @@ export const effectiveIdleTimeoutSeconds = (envPrefix: string): Effect.Effect<nu
       return defaultIdleTimeoutSeconds;
     }
 
-    const seconds = Number(env.value);
+    const seconds = yield* decodeWholeNumber(env.value).pipe(Effect.mapError(() => invalid));
 
-    return wholeSeconds.test(env.value) && Number.isSafeInteger(seconds) && seconds >= 1
-      ? seconds
-      : yield* invalid;
+    return seconds >= 1 ? seconds : yield* invalid;
   });
 
 /**
@@ -1497,7 +1466,10 @@ const bodyOf = (
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
 
-  return Object.hasOwn(meta.media.responses, key) ? (meta.media.responses[key] ?? []) : [];
+  return Rec.get(meta.media.responses, key).pipe(
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly string[] => []),
+  );
 };
 
 /**
@@ -1510,10 +1482,11 @@ const warnMissingHeaders = (
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<void, never, Stdio.Stdio> => {
   const key = matchResponse(meta.media.responses, response.status);
-  const required =
-    meta.requiredHeaders !== undefined && Object.hasOwn(meta.requiredHeaders, key)
-      ? (meta.requiredHeaders[key] ?? [])
-      : [];
+  const required = Option.fromNullishOr(meta.requiredHeaders).pipe(
+    Option.flatMap((headers) => Rec.get(headers, key)),
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly string[] => []),
+  );
 
   return Effect.forEach(
     required.filter((name) => Option.isNone(Headers.get(response.headers, name))),
@@ -1568,8 +1541,6 @@ const undeclaredMediaNotice = (
       ),
     );
   });
-
-const encoder = new TextEncoder();
 
 const crlf = encoder.encode("\r\n");
 
@@ -1684,7 +1655,7 @@ class MultipartSummary {
   }
 
   push(chunk: Uint8Array): readonly Uint8Array[] {
-    this.pending = concatBytes([this.pending, chunk]);
+    this.pending = Bytes.concat([this.pending, chunk]);
 
     return this.drain(false);
   }
@@ -1932,18 +1903,6 @@ const dryRunBody = (
     : line(`<binary body, ${body.contentLength} bytes>`);
 };
 
-const querySeparator = (url: string): string => {
-  if (/[?&]$/u.test(url)) {
-    return "";
-  }
-
-  return url.includes("?") ? "&" : "?";
-};
-
-// A query name as a server decodes it.
-const decodedQueryName = (raw: string): string =>
-  new URLSearchParams(`${raw}=`).keys().next().value ?? raw;
-
 /**
  * The request target as the redirect loop sends it: `urlParams` folded in their `queryWireForm`,
  * a placeholder written as itself, no fragment. A query value whose decoded name
@@ -1957,7 +1916,7 @@ const dryRunUrl = (
   // A `Redacted` param is a value the runtime holds secret; it prints as `<redacted>`.
   const wire = (value: string | Redacted.Redacted): string => {
     if (Redacted.isRedacted(value)) {
-      return "<redacted>";
+      return redactedPlaceholder();
     }
 
     return placeholders.has(value) ? value : queryWireForm(value);
@@ -1984,7 +1943,7 @@ const dryRunUrl = (
         !placeholders.has(part.slice(equals + 1)) &&
         UrlParams.isRedactedName(decodedQueryName(part.slice(0, equals)), names);
 
-      return redacted ? `${part.slice(0, equals + 1)}<redacted>` : part;
+      return redacted ? `${part.slice(0, equals + 1)}${redactedPlaceholder()}` : part;
     });
 
   return `${url.slice(0, at + 1)}${query.join("&")}`;
@@ -2018,20 +1977,19 @@ const printDryRun = (
       }
 
       if (name.toLowerCase() !== "cookie") {
-        return exact.has(value) ? value : "<redacted>";
+        return exact.has(value) ? value : redactedPlaceholder();
       }
 
-      return value
-        .split(";")
-        .map((pair) => pair.trim())
-        .filter((pair) => pair !== "")
+      return cookiePairs(value)
         .map((pair) => {
           const equals = pair.indexOf("=");
           if (equals === -1) {
-            return "<redacted>";
+            return redactedPlaceholder();
           }
 
-          return written.has(pair.slice(equals + 1)) ? pair : `${pair.slice(0, equals)}=<redacted>`;
+          return written.has(pair.slice(equals + 1))
+            ? pair
+            : `${pair.slice(0, equals)}=${redactedPlaceholder()}`;
         })
         .join("; ");
     };
@@ -2068,7 +2026,7 @@ const printDryRun = (
  * loopback hops, the per-hop client certificate for the operation's bound origins only, the
  * per-attempt `--timeout`); `retryTransform`, so one attempt is one run of the
  * loop; `withUserAgent`. No transform wraps a response outside `retryTransform`, so the final
- * response is still the `CappedResponse` `retryAfterCapSeconds` reads. `retryTransform` sees the
+ * response is the one `send` reads the `RetryAfterCap` record for. `retryTransform` sees the
  * request before the attach step, so its `Idempotency-Key` test sees only a header parameter the
  * operation declares and the operator supplied, never a credential (design D-AD7). Every line the
  * transforms print passes through the run's scrubber (`scrubbedAndSanitized` over the recorded
@@ -2124,7 +2082,10 @@ export const send =
       const scrubbed = yield* Ref.updateAndGet(recorded, (entries) => [...entries, ...credentials]);
 
       const { table: security } = yield* Schemes;
-      const baseOrigin = new URL(baseUrl).origin;
+      // The base URL was validated when it was selected, so it parses.
+      const { origin: baseOrigin } = yield* Effect.orDie(
+        Effect.fromResult(Url.fromString(baseUrl)),
+      );
       const gate = {
         allowUnboundBase: yield* allowCredentialsForBaseUrl,
         baseOrigin,
@@ -2188,6 +2149,7 @@ export const send =
         retryTransform(scrub),
         withUserAgent(policy.binName, policy.version),
       );
+      const cap = yield* Ref.make(Option.none<number>());
       const table = {
         operation,
         requestIdHeader: meta.requestIdHeader,
@@ -2209,13 +2171,9 @@ export const send =
                     () => Effect.succeed(""),
                   ),
                   Effect.flatMap((excerpt) =>
-                    Effect.fail(
-                      toApiResponseError(
-                        table,
-                        response,
-                        excerpt,
-                        scrubbed,
-                        retryAfterCapSeconds(response),
+                    Ref.get(cap).pipe(
+                      Effect.flatMap((capped) =>
+                        Effect.fail(toApiResponseError(table, response, excerpt, scrubbed, capped)),
                       ),
                     ),
                   ),
@@ -2237,6 +2195,7 @@ export const send =
             }),
           ),
         ),
+        Effect.provideService(RetryAfterCap, cap),
         Effect.scoped,
         Effect.provide(redactedNames(security)),
       );
