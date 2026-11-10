@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Predicate, Schema } from "effect";
+import { Effect, Option, Predicate, Schema } from "effect";
 import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
 import type { Diagnostic } from "../../src/model/diagnostic.ts";
 import { Api } from "../../src/model/entities.ts";
 import { isArray, isObject } from "../../src/model/json-tree.ts";
 import type { JsonObject } from "../../src/model/json-tree.ts";
+import { nodeOption } from "../../src/normalize/document-set.ts";
 import { normalize } from "../../src/normalize/index.ts";
 import type { Normalization } from "../../src/normalize/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
@@ -170,6 +171,30 @@ describe("normalization across the document set", () => {
       "RSP-09/ignored-content-type file:///spec/common.json#/components/responses/Ok/headers/Content-Type",
       "SCH-37/not-asserted file:///spec/common.json#/components/schemas/Pet/properties/name/pattern",
     ]);
+  });
+
+  test("nodeOption reads a node of the set, none for a missing document or pointer", () => {
+    const resolution = Effect.runSync(
+      resolve({
+        document: entry,
+        line: "3.1",
+        members: [fragment],
+        value: { info: { title: "t", version: "1" }, openapi: "3.1.1", paths: referenced },
+      }),
+    );
+
+    expect(nodeOption(resolution, { document: entry, pointer: "/info/title" })).toEqual(
+      Option.some("t"),
+    );
+    expect(
+      nodeOption(resolution, { document: common, pointer: "/components/schemas/Pet" }),
+    ).toEqual(Option.some(pet));
+    expect(
+      nodeOption(resolution, { document: uri("file:///spec/absent.json"), pointer: "" }),
+    ).toEqual(Option.none());
+    expect(nodeOption(resolution, { document: common, pointer: "/components/missing" })).toEqual(
+      Option.none(),
+    );
   });
 
   test("a single document normalizes as before: its diagnostics name the entry", () => {

@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, HashMap, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, HashMap, Option, Order, Record, Schema } from "effect";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { MediaType, WireName } from "../model/brands.ts";
 import { diagnosticOf } from "../model/diagnostic.ts";
@@ -1161,13 +1161,14 @@ const ownBranches = Effect.fnUntraced(function* ownBranches(
     return settled(["other"]);
   }
 
-  const declared = decoded.value;
+  // The index signature lets `Record.has` test a key the struct declares optional.
+  const declared: Record.ReadonlyRecord<string, unknown> & typeof BranchSchema.Type = decoded.value;
   // A 3.0 `nullable: true` admits `null`, which neither switch sends.
   if (resolution.line === "3.0" && declared.nullable === true) {
     return settled(["other"]);
   }
 
-  const constant = Object.hasOwn(declared, "const");
+  const constant = Record.has(declared, "const");
   const union = (["anyOf", "oneOf"] as const).flatMap((keyword) =>
     (declared[keyword] ?? []).map((_, index) => childKey(home, keyword, String(index))),
   );

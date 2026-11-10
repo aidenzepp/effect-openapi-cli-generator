@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, Result } from "effect";
+import type { Option } from "effect";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
@@ -33,6 +34,13 @@ export const nodeInResult = (
     ? Result.fail(new PointerMemberNotFound({ pointer: key.pointer, token: key.document }))
     : evaluatePointerResult(value, key.pointer);
 };
+
+/**
+ * The node at `key`, read from its own document of the set, or none when the document is outside
+ * the set or the pointer names no node.
+ */
+export const nodeOption = (resolution: Resolution, key: CanonicalKey): Option.Option<Json> =>
+  Result.getSuccess(nodeInResult(resolution, key));
 
 /**
  * The node at `key`, read from its own document of the set.

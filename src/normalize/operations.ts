@@ -7,7 +7,6 @@ import {
   Order,
   Predicate,
   Record,
-  Result,
   Schema,
 } from "effect";
 import type { Types } from "effect";
@@ -32,7 +31,7 @@ import { isArray, isObject } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
-import { evaluatePointerResult, childPointer } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
@@ -44,7 +43,7 @@ import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { follow, nodeInResult } from "./document-set.ts";
+import { follow, nodeOption } from "./document-set.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -196,7 +195,7 @@ const bodylessMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "DELETE", "
 const unsendableMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "TRACE"]);
 
 const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
-  Result.getSuccess(evaluatePointerResult(resolution.value, pointer));
+  nodeOption(resolution, { document: resolution.document, pointer });
 
 // The path item at a use site, followed through its Reference Object to the end of the chain. A
 // path item in another document of the set is not read here: the sites of its operations would sit
@@ -330,7 +329,7 @@ interface ParameterEntry {
 // A parameter's identity, read from the document of the set its reference chain ends in.
 const parameterKey = (resolution: Resolution, pointer: string): ParameterKey => {
   const target = follow(resolution, { document: resolution.document, pointer });
-  const identity = Result.getSuccess(nodeInResult(resolution, target)).pipe(
+  const identity = nodeOption(resolution, target).pipe(
     Option.flatMap((node) => decodeOption(ParameterIdentity, node)),
   );
 
@@ -772,7 +771,7 @@ const aliasesOf = (
       )
     : [];
   const notices = read.flatMap((one) => one.notices);
-  const aliases = read.flatMap((one) => (one.value === undefined ? [] : [one.value]));
+  const aliases = Arr.getSomes(read.map((one) => Option.fromUndefinedOr(one.value)));
 
   return Arr.isReadonlyArrayNonEmpty(aliases)
     ? { notices, value: aliases }
@@ -952,6 +951,6 @@ export const assembleOperations = Effect.fnUntraced(function* assembleOperations
 
   return {
     diagnostics: distinctDiagnostics(assembled.flatMap((one) => one.diagnostics)),
-    operations: assembled.flatMap((one) => (one.operation === undefined ? [] : [one.operation])),
+    operations: Arr.getSomes(assembled.map((one) => Option.fromUndefinedOr(one.operation))),
   };
 });

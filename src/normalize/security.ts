@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, pipe, Result, Schema, UndefinedOr } from "effect";
 import { memoize } from "effect/Function";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
@@ -9,12 +9,11 @@ import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { implicitComponent } from "../resolve/index.ts";
-import type { CanonicalKey } from "../resolve/canonical.ts";
 import { childPointer, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { sanitize } from "./docs.ts";
-import { follow, nodeInResult } from "./document-set.ts";
+import { follow, nodeOption } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -146,9 +145,6 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     specSection: specSectionUrl(resolution.line, finding.anchor),
   });
 };
-
-const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
-  Result.getSuccess(nodeInResult(resolution, at));
 
 const invalidScheme = (pointer: string): Built => ({
   findings: [
@@ -414,7 +410,7 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
   return modelScheme(
     name,
     { document: resolution.document, line: resolution.line, pointer, source: "spec" },
-    nodeAt(resolution, target).pipe(
+    nodeOption(resolution, target).pipe(
       Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
     ),
   );
@@ -500,7 +496,7 @@ export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSec
   checkFindings: readonly Diagnostic[],
 ): Effect.fn.Return<SchemeNormalization> {
   const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
-  const names = nodeAt(resolution, schemes).pipe(
+  const names = nodeOption(resolution, schemes).pipe(
     Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
     Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
   );
@@ -539,7 +535,7 @@ export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSec
         .map((finding) => finding.pointer),
     ),
     diagnostics,
-    schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
+    schemes: Arr.getSomes(all.map((one) => Option.fromUndefinedOr(one.scheme))),
     supplied,
     unusable: [
       ...names.filter((_, index) => built[index]?.scheme === undefined),
@@ -591,9 +587,7 @@ const uriComponentName = (resolution: Resolution, name: string): string | undefi
     return undefined;
   }
 
-  const tokens = Result.getSuccess(parsePointerResult(key.value.pointer)).pipe(
-    Option.getOrUndefined,
-  );
+  const tokens = Result.getOrUndefined(parsePointerResult(key.value.pointer));
 
   return tokens?.length === 3 && tokens[0] === "components" && tokens[1] === "securitySchemes"
     ? tokens[2]
@@ -617,7 +611,7 @@ const effectiveList = (
     { pointer: "/security", rows: ["SEC-01", "SEC-03"] },
   ];
   for (const source of candidates) {
-    const list = nodeAt(resolution, {
+    const list = nodeOption(resolution, {
       document: resolution.document,
       pointer: source.pointer,
     }).pipe(Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)));
@@ -781,7 +775,11 @@ export const normalizeSecurityPolicy = Effect.fnUntraced(function* normalizeSecu
         }
       : undefined;
   const effective =
-    supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
+    supplied ??
+    pipe(
+      spec,
+      UndefinedOr.map((declared) => ({ ...declared, document: resolution.document })),
+    );
   const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
   const judged = (effective?.list ?? []).map((json, index) => {
     const pointer = childPointer(source.pointer, String(index));
@@ -812,7 +810,9 @@ export const normalizeSecurityPolicy = Effect.fnUntraced(function* normalizeSecu
       ),
   );
   const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
-    alternatives: judged.flatMap((one) => (one.use === undefined ? [] : [{ uses: one.use }])),
+    alternatives: Arr.getSomes(
+      judged.map((one) => Option.map(Option.fromUndefinedOr(one.use), (uses) => ({ uses }))),
+    ),
     declared: effective !== undefined,
     origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
     rows: source.rows,
