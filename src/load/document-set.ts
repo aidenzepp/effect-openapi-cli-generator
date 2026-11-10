@@ -151,7 +151,7 @@ const loadPair = (
   loading: Loading,
   pair: DocumentPair,
   verify?: VerifyOpened,
-): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> => {
+): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Digest.Digest> => {
   const uri = decodeUri(pair.uri);
 
   if (uri._tag === "None") {
@@ -175,13 +175,13 @@ const loadPair = (
     Effect.flatMap((bytes) =>
       loadBytes(bytes, { document: uri.value }).pipe(
         Effect.flatMap((loaded) =>
-          Effect.sync(() => {
-            loading.documents.set(uri.value, {
-              ...loaded,
-              path: pair.path,
-              sha256: sha256Hex(bytes),
-            });
-          }),
+          sha256Hex(bytes).pipe(
+            Effect.flatMap((sha256) =>
+              Effect.sync(() => {
+                loading.documents.set(uri.value, { ...loaded, path: pair.path, sha256 });
+              }),
+            ),
+          ),
         ),
       ),
     ),
@@ -264,7 +264,7 @@ const preloadFile = (loading: Loading, realRoot: string, real: string) =>
 const preloadRoot = (
   loading: Loading,
   root: string,
-): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem> =>
+): Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Digest.Digest> =>
   Effect.gen(function* preload() {
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
@@ -275,7 +275,7 @@ const preloadRoot = (
 
     const isSpecName = (name: string) => refRootExtensions.has(path.extname(name).toLowerCase());
 
-    type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Path.Path>;
+    type Step = Effect.Effect<void, LoadRefusal, FileSystem.FileSystem | Path.Path | Digest.Digest>;
 
     const walk = (directory: string, depth: number): Step => {
       const enter = (real: string): Step => {

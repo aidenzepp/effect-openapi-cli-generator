@@ -66,7 +66,11 @@ const twinDifferences = (json: string, yaml: string, files: readonly string[]) =
       files.filter((file) => file !== reportFile),
       (file) =>
         Effect.all([fs.readFile(path.join(json, file)), fs.readFile(path.join(yaml, file))]).pipe(
-          Effect.map(([a, b]) => (sha256Hex(a) === sha256Hex(b) ? [] : [file])),
+          Effect.flatMap(([a, b]) =>
+            Effect.all([sha256Hex(a), sha256Hex(b)]).pipe(
+              Effect.map(([left, right]) => (left === right ? [] : [file])),
+            ),
+          ),
         ),
     );
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import nodePath from "node:path";
+import { BunCrypto } from "@effect/platform-bun";
 import { Array as Arr, Effect, Exit, Option } from "effect";
 import type { ManifestError } from "../../src/write/manifest.ts";
 import {
@@ -28,7 +29,10 @@ const formatJson = (text: string) => {
   return { exitCode: result.exitCode, stdout: decoder.decode(result.stdout) };
 };
 
-const entry = (path: string, content: string) => ({ path, sha256: sha256Hex(content) });
+const hex = (content: string | Uint8Array) =>
+  Effect.runSync(sha256Hex(content).pipe(Effect.provide(BunCrypto.layerDigest)));
+
+const entry = (path: string, content: string) => ({ path, sha256: hex(content) });
 
 const failureOf = <A>(effect: Effect.Effect<A, ManifestError>) =>
   Effect.runSync(
@@ -41,14 +45,14 @@ const abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
 describe("sha256Hex", () => {
   test("hashes text and bytes to lowercase hex", () => {
-    expect(sha256Hex("abc")).toBe(abc);
-    expect(sha256Hex(encoder.encode("abc"))).toBe(abc);
+    expect(hex("abc")).toBe(abc);
+    expect(hex(encoder.encode("abc"))).toBe(abc);
   });
 
   test("hashes a lone surrogate as its UTF-8 bytes", () => {
     const text = "a\uD800é";
 
-    expect(sha256Hex(text)).toBe(createHash("sha256").update(encoder.encode(text)).digest("hex"));
+    expect(hex(text)).toBe(createHash("sha256").update(encoder.encode(text)).digest("hex"));
   });
 });
 
