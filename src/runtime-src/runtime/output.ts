@@ -1,5 +1,6 @@
 import type { PlatformError } from "effect";
 import {
+  Array as Arr,
   Cause,
   Config,
   Console,
@@ -10,6 +11,7 @@ import {
   Layer,
   Option,
   Path,
+  Record as Rec,
   Redacted,
   Ref,
   Runtime,
@@ -1425,7 +1427,7 @@ const splitTarget = (target: string): readonly [path: string, query: string] => 
  * does not extend to it (m3.md P19). It never names a value, a path or certificate material.
  */
 const withheldNotice = (headers: readonly Credential[], certificate: boolean): string => {
-  const schemes = [...new Set(headers.map((credential) => credential.scheme))].join(", ");
+  const schemes = Arr.dedupe(headers.map((credential) => credential.scheme)).join(", ");
   const clauses = [
     ...(headers.length > 0
       ? [
@@ -1496,7 +1498,10 @@ const bodyOf = (
 const declaredMedia = (meta: OperationMeta, status: number): readonly string[] => {
   const key = matchResponse(meta.media.responses, status);
 
-  return Object.hasOwn(meta.media.responses, key) ? (meta.media.responses[key] ?? []) : [];
+  return Rec.get(meta.media.responses, key).pipe(
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly string[] => []),
+  );
 };
 
 /**
@@ -1509,10 +1514,11 @@ const warnMissingHeaders = (
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<void, never, Stdio.Stdio> => {
   const key = matchResponse(meta.media.responses, response.status);
-  const required =
-    meta.requiredHeaders !== undefined && Object.hasOwn(meta.requiredHeaders, key)
-      ? (meta.requiredHeaders[key] ?? [])
-      : [];
+  const required = Option.fromNullishOr(meta.requiredHeaders).pipe(
+    Option.flatMap((headers) => Rec.get(headers, key)),
+    Option.flatMap(Option.fromNullishOr),
+    Option.getOrElse((): readonly string[] => []),
+  );
 
   return Effect.forEach(
     required.filter((name) => Option.isNone(Headers.get(response.headers, name))),

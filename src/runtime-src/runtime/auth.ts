@@ -1,4 +1,5 @@
 import {
+  Array as Arr,
   Config,
   Context,
   Effect,
@@ -6,6 +7,7 @@ import {
   Layer,
   Option,
   Path,
+  Record as Rec,
   Redacted,
   Stdio,
   Stream,
@@ -428,7 +430,7 @@ const promptTarget = <R>(
 ): Effect.Effect<Option.Option<readonly string[]>, UsageError, R> =>
   Effect.gen(function* findPromptTarget() {
     for (const alternative of requirement) {
-      if (alternative.every((scheme) => Object.hasOwn(table.schemes, scheme))) {
+      if (alternative.every((scheme) => Rec.has(table.schemes, scheme))) {
         const certificates = alternative.filter(
           (scheme) => table.schemes[scheme]?.kind === "mutualTLS",
         );
@@ -675,9 +677,9 @@ const originOf = (raw: string): Option.Option<string> => {
 export const credentialOrigins = (gate: CredentialGate): readonly string[] => {
   const base = gate.provenance === "operator" && gate.allowUnboundBase ? [gate.baseOrigin] : [];
 
-  return [
-    ...new Set([...gate.boundOrigins, ...base].flatMap((raw) => Option.toArray(originOf(raw)))),
-  ];
+  return Arr.dedupe(
+    [...gate.boundOrigins, ...base].flatMap((raw) => Option.toArray(originOf(raw))),
+  );
 };
 
 // Whether a URL's origin is one of `origins`. An unparsable URL or origin is never bound.
@@ -786,10 +788,7 @@ const strip = (
     ...apiKeyNames(table, "header"),
     ...(hasAuthorizationScheme(table) ? ["authorization"] : []),
   ];
-  let { headers } = request;
-  for (const name of headerNames) {
-    headers = Headers.remove(headers, name);
-  }
+  const headers = Headers.removeMany(request.headers, headerNames);
 
   const cookies = Option.match(Headers.get(headers, "cookie"), {
     onNone: () => headers,

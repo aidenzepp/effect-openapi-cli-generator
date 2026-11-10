@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Record as Rec, Schema } from "effect";
 import type { HttpClientError, HttpClientResponse } from "effect/http";
 import { Headers, UrlParams } from "effect/http";
 import { ApiResponseError, TransportError } from "../domain/errors.ts";
@@ -23,7 +23,7 @@ export interface ResponseTable {
 const maxRequestIdLength = 256;
 
 const declares = (responses: ResponseTable["responses"], key: string): boolean =>
-  Object.hasOwn(responses, key);
+  Rec.has(responses, key);
 
 /**
  * Explicit code, then range, then `default`, else `"undeclared"` (design 7.3).

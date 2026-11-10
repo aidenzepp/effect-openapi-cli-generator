@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Array as Arr, Effect, Option } from "effect";
 import { Flag } from "effect/cli";
 import { UsageError } from "../domain/errors.ts";
 import { isJsonFamily, mediaEssence as essence } from "./sequential.ts";
@@ -49,12 +49,16 @@ const rangeMatches = (range: string, type: string): boolean =>
 /**
  * The declared key a concrete type falls under: exact, then `type/*`, then `*` over `*`.
  */
-const matchDeclared = (declared: readonly string[], type: string): string | undefined =>
-  declared.find((key) => essence(key) === type) ??
-  declared.find(
-    (key) => essence(key) !== "*/*" && isRange(key) && rangeMatches(essence(key), type),
-  ) ??
-  declared.find((key) => essence(key) === "*/*");
+const matchDeclared = (declared: readonly string[], type: string): Option.Option<string> =>
+  Arr.findFirst(declared, (key) => essence(key) === type).pipe(
+    Option.orElse(() =>
+      Arr.findFirst(
+        declared,
+        (key) => essence(key) !== "*/*" && isRange(key) && rangeMatches(essence(key), type),
+      ),
+    ),
+    Option.orElse(() => Arr.findFirst(declared, (key) => essence(key) === "*/*")),
+  );
 
 const refuse = (flag: string, reason: string) =>
   Effect.fail(new UsageError({ flag, message: `${flag} ${reason}` }));
@@ -84,11 +88,15 @@ export const selectRequestMedia = (
     },
     onSome: (value) => {
       const named = value.trim().toLowerCase();
-      const key = concreteType.test(named) ? matchDeclared(media.request, named) : undefined;
+      const matched = concreteType.test(named)
+        ? matchDeclared(media.request, named)
+        : Option.none();
 
-      return key === undefined
-        ? refuse(contentTypeFlagName, "names a media type this operation does not declare")
-        : Effect.succeed({ contentType: isRange(key) ? named : key, key });
+      return Option.match(matched, {
+        onNone: () =>
+          refuse(contentTypeFlagName, "names a media type this operation does not declare"),
+        onSome: (key) => Effect.succeed({ contentType: isRange(key) ? named : key, key }),
+      });
     },
   });
 };
@@ -102,7 +110,7 @@ export const accept = (
   media: MediaDeclaration,
   chosen: Option.Option<string>,
 ): Effect.Effect<Option.Option<string>, UsageError> => {
-  const declared = [...new Set(Object.values(media.responses).flat())];
+  const declared = Arr.dedupe(Object.values(media.responses).flat());
 
   return Option.match(chosen, {
     onNone: () => {
@@ -114,7 +122,7 @@ export const accept = (
     onSome: (value) => {
       const named = value.trim().toLowerCase();
 
-      return concreteType.test(named) && matchDeclared(declared, named) !== undefined
+      return concreteType.test(named) && Option.isSome(matchDeclared(declared, named))
         ? Effect.succeed(Option.some(named))
         : refuse(acceptFlagName, "names a media type this operation does not declare");
     },
@@ -131,5 +139,5 @@ export const dispatchResponse = (
 ): string | undefined => {
   const type = actual === undefined ? "" : essence(actual);
 
-  return concreteType.test(type) ? matchDeclared(declared, type) : undefined;
+  return concreteType.test(type) ? Option.getOrUndefined(matchDeclared(declared, type)) : undefined;
 };

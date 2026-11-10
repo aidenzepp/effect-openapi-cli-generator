@@ -145,7 +145,7 @@ const wireForms = (entry: ScrubEntry): readonly string[] => {
     }
   }
 
-  return [...new Set(forms)].filter((form) => form !== "");
+  return Arr.dedupe(forms).filter((form) => form !== "");
 };
 
 /**
@@ -176,7 +176,7 @@ const byStartThenLongest = Order.combine(
  * such as a server echoing `<redacted:` + credential + `>`, is ordinary input.
  */
 const placeholderTokens = (text: string, entries: readonly ScrubEntry[]): readonly Covered[] =>
-  [...new Set(["<redacted>", ...entries.map(placeholderOf)])].flatMap((placeholder) => {
+  Arr.dedupe(["<redacted>", ...entries.map(placeholderOf)]).flatMap((placeholder) => {
     const found: Covered[] = [];
 
     for (let at = text.indexOf(placeholder); at !== -1; at = text.indexOf(placeholder, at + 1)) {
