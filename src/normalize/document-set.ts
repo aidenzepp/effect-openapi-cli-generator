@@ -1,4 +1,5 @@
-import { Effect, Result } from "effect";
+import { Array as Arr, Effect, Result } from "effect";
+import type { Option } from "effect";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import type { Resolution, ResolvedReference } from "../resolve/index.ts";
@@ -35,6 +36,13 @@ export const nodeInResult = (
 };
 
 /**
+ * The node at `key`, read from its own document of the set, or none when the document is outside
+ * the set or the pointer names no node.
+ */
+export const nodeOption = (resolution: Resolution, key: CanonicalKey): Option.Option<Json> =>
+  Result.getSuccess(nodeInResult(resolution, key));
+
+/**
  * The node at `key`, read from its own document of the set.
  */
 export const nodeIn = (
@@ -46,11 +54,7 @@ export const nodeIn = (
 /**
  * The key `tokens` below `key`, in the same document.
  */
-export const childKey = (key: CanonicalKey, ...tokens: readonly string[]): CanonicalKey => {
-  let { pointer } = key;
-  for (const token of tokens) {
-    pointer = childPointer(pointer, token);
-  }
-
-  return { document: key.document, pointer };
-};
+export const childKey = (key: CanonicalKey, ...tokens: readonly string[]): CanonicalKey => ({
+  document: key.document,
+  pointer: Arr.reduce(tokens, key.pointer, (pointer, token) => childPointer(pointer, token)),
+});

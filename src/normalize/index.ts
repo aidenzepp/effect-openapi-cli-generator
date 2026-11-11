@@ -1,4 +1,5 @@
-import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Record, Schema } from "effect";
+import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { JsonPointer } from "../model/brands.ts";
@@ -60,10 +61,14 @@ const Root = Schema.Struct({
   tags: Schema.optionalKey(Schema.Array(Schema.Json)),
 });
 
-type Plain<T> = { -readonly [K in keyof T]: T[K] };
+const decodeTag = Schema.decodeUnknownOption(Tag);
 
-const docsOf = (fields: typeof Described.Type | undefined): Plain<typeof Api.Encoded.info> => {
-  const docs: Plain<typeof Api.Encoded.info> = {};
+const decodeRoot = Schema.decodeUnknownOption(Root);
+
+const docsOf = (
+  fields: typeof Described.Type | undefined,
+): Types.Mutable<typeof Api.Encoded.info> => {
+  const docs: Types.Mutable<typeof Api.Encoded.info> = {};
   if (fields?.description !== undefined) {
     docs.description = sanitizeProse(fields.description);
   }
@@ -75,17 +80,17 @@ const docsOf = (fields: typeof Described.Type | undefined): Plain<typeof Api.Enc
   return docs;
 };
 
-type PlainTag = Plain<(typeof Api.Encoded.tags)[number]>;
+type PlainTag = Types.Mutable<(typeof Api.Encoded.tags)[number]>;
 
 const tagOf = (entry: Json): readonly PlainTag[] => {
-  const found = Schema.decodeUnknownOption(Tag)(entry);
+  const found = decodeTag(entry);
   if (Option.isNone(found)) {
     return [];
   }
 
   const tag: PlainTag = { name: found.value.name };
-  const docs = docsOf(found.value);
-  if (Object.keys(docs).length > 0) {
+  const docs: Record<string, string> = docsOf(found.value);
+  if (!Record.isEmptyRecord(docs)) {
     tag.docs = docs;
   }
 
@@ -120,75 +125,74 @@ const storeOf = (definitions: ReadonlyMap<string, unknown>) => ({
  * repeats dropped, in the order of design 3.7: document, then pointer token by token, then code.
  * Earlier stages (validation, resolution, spec-text checks) report their own.
  */
-export const normalize = (
+export const normalize = Effect.fn("normalize.normalize")(function* normalize(
   resolution: Resolution,
   context: NormalizeContext,
   limits: ResolveLimits = defaultLimits,
-): Effect.Effect<Normalization, NormalizeError> =>
-  Effect.gen(function* build() {
-    const root = Schema.decodeUnknownOption(Root)(resolution.value);
-    const openapi = Option.match(root, { onNone: () => resolution.line, onSome: (r) => r.openapi });
-    const fields = Option.getOrUndefined(root);
-    const servers: ServersContext = {
-      config: context.config,
-      configDocument: context.configDocument,
-      document: resolution.document,
-      openapi,
-    };
-    const schemes = yield* normalizeSecuritySchemes(
-      resolution,
-      { config: context.config, configDocument: context.configDocument },
-      context.checkFindings,
-    );
-    const schemas = yield* normalizeSchemas(resolution, { maxNodes: limits.maxNodes });
-    const assembly = yield* assembleOperations(
-      resolution,
-      schemes,
-      servers,
-      context.checkFindings,
-      limits,
-    );
-    const policy = yield* normalizeSecurityPolicy(resolution, schemes);
-    const rootServers = effectiveServers(
-      {
-        root: {
-          pointer: serversPointer,
-          value: fields?.servers,
-        },
+): Effect.fn.Return<Normalization, NormalizeError> {
+  const root = decodeRoot(resolution.value);
+  const openapi = Option.match(root, { onNone: () => resolution.line, onSome: (r) => r.openapi });
+  const fields = Option.getOrUndefined(root);
+  const servers: ServersContext = {
+    config: context.config,
+    configDocument: context.configDocument,
+    document: resolution.document,
+    openapi,
+  };
+  const schemes = yield* normalizeSecuritySchemes(
+    resolution,
+    { config: context.config, configDocument: context.configDocument },
+    context.checkFindings,
+  );
+  const schemas = yield* normalizeSchemas(resolution, { maxNodes: limits.maxNodes });
+  const assembly = yield* assembleOperations(
+    resolution,
+    schemes,
+    servers,
+    context.checkFindings,
+    limits,
+  );
+  const policy = yield* normalizeSecurityPolicy(resolution, schemes);
+  const rootServers = effectiveServers(
+    {
+      root: {
+        pointer: serversPointer,
+        value: fields?.servers,
       },
-      servers,
-    );
-    const api = yield* Schema.decodeUnknownEffect(Api)({
-      documents: [...resolution.documents.keys()],
-      entry: resolution.document,
-      info: docsOf(fields?.info),
-      informational: yield* collectInformational(resolution),
-      line: resolution.line,
-      openapi,
-      operations: assembly.operations,
+    },
+    servers,
+  );
+  const api = yield* Schema.decodeUnknownEffect(Api)({
+    documents: [...resolution.documents.keys()],
+    entry: resolution.document,
+    info: docsOf(fields?.info),
+    informational: yield* collectInformational(resolution),
+    line: resolution.line,
+    openapi,
+    operations: assembly.operations,
+    origin: { document: resolution.document, pointer: "" },
+    rows: ["DOC-01", "DOC-02", "DOC-04"],
+    schemas: {
+      document: storeOf(schemas.definitions),
       origin: { document: resolution.document, pointer: "" },
-      rows: ["DOC-01", "DOC-02", "DOC-04"],
-      schemas: {
-        document: storeOf(schemas.definitions),
-        origin: { document: resolution.document, pointer: "" },
-        rows: ["SCO-01"],
-      },
-      securitySchemes: schemes.schemes,
-      servers: rootServers.servers,
-      tags: tagsOf(fields?.tags),
-    }).pipe(Effect.orDie);
+      rows: ["SCO-01"],
+    },
+    securitySchemes: schemes.schemes,
+    servers: rootServers.servers,
+    tags: tagsOf(fields?.tags),
+  }).pipe(Effect.orDie);
 
-    return {
-      api,
-      diagnostics: sortDiagnostics(
-        [resolution.document],
-        distinctDiagnostics([
-          ...schemes.diagnostics,
-          ...schemas.diagnostics,
-          ...policy.diagnostics,
-          ...rootServers.diagnostics,
-          ...assembly.diagnostics,
-        ]),
-      ),
-    };
-  });
+  return {
+    api,
+    diagnostics: sortDiagnostics(
+      [resolution.document],
+      distinctDiagnostics([
+        ...schemes.diagnostics,
+        ...schemas.diagnostics,
+        ...policy.diagnostics,
+        ...rootServers.diagnostics,
+        ...assembly.diagnostics,
+      ]),
+    ),
+  };
+});

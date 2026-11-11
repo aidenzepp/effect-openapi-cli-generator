@@ -1,4 +1,16 @@
-import { Array as Arr, Effect, Option, Order, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Equal,
+  Equivalence,
+  Option,
+  Order,
+  Predicate,
+  Record,
+  Schema,
+  SchemaGetter,
+} from "effect";
+import type { Types } from "effect";
 import { sanitizeProse } from "../emit/help.ts";
 import { JsonPointer, MethodToken, PathTemplate } from "../model/brands.ts";
 import { makeDiagnostic, pointerOrder } from "../model/diagnostic.ts";
@@ -20,19 +32,26 @@ import { isArray, isObject } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
 import { defaultLimits, referenceAt } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution } from "../resolve/index.ts";
-import { evaluatePointerResult, childPointer } from "../model/pointer.ts";
+import { childPointer } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
-import { formContentRules, hintDiscriminators, normalizeBody } from "./bodies.ts";
+import {
+  BodyOutcome,
+  FormContentOutcome,
+  formContentRules,
+  hintDiscriminators,
+  normalizeBody,
+} from "./bodies.ts";
 import type { BodyNodeBudget, BodyNotReadable, BodySite } from "./bodies.ts";
-import { authorChoiceCodes, normalizeParameter } from "./parameters.ts";
-import type { ParameterNotReadable, ParameterOutcome, ParameterSite } from "./parameters.ts";
+import { authorChoiceCodes, normalizeParameter, ParameterOutcome } from "./parameters.ts";
+import type { ParameterNotReadable, ParameterSite } from "./parameters.ts";
 import { normalizeResponses } from "./responses.ts";
 import { normalizeSecurityPolicy } from "./security.ts";
 import type { SchemeNormalization } from "./security.ts";
 import { effectiveServers } from "./servers.ts";
 import type { ServerSource, ServersContext } from "./servers.ts";
+import { methodMembers } from "../model/path-item.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
-import { follow, nodeInResult } from "./document-set.ts";
+import { follow, nodeOption } from "./document-set.ts";
 
 /**
  * The operations of the entry document and the diagnostics found assembling them. An operation
@@ -154,17 +173,6 @@ const OperationFields = Schema.Struct({
 
 const ParameterIdentity = Schema.Struct({ in: Schema.String, name: Schema.String });
 
-const fixedMethods: ReadonlySet<string> = new Set([
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-]);
-
 const methodRows: ReadonlyMap<string, string> = new Map([
   ["DELETE", "PTH-17"],
   ["GET", "PTH-14"],
@@ -183,10 +191,8 @@ const bodylessMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "DELETE", "
 // Bun's fetch throws before connecting when one of these carries a body (design 6.3, probe SP11).
 const unsendableMethods: ReadonlySet<string> = new Set(["GET", "HEAD", "TRACE"]);
 
-type Plain<T> = { -readonly [K in keyof T]: T[K] };
-
 const nodeAt = (resolution: Resolution, pointer: string): Option.Option<Json> =>
-  Result.getSuccess(evaluatePointerResult(resolution.value, pointer));
+  nodeOption(resolution, { document: resolution.document, pointer });
 
 // The path item at a use site, followed through its Reference Object to the end of the chain. A
 // path item in another document of the set is not read here: the sites of its operations would sit
@@ -226,7 +232,7 @@ const operationsOfItem = (
   itemFields: typeof ItemFields.Type,
   itemNode: Record<string, Json>,
 ): readonly RawOperation[] => {
-  const members = resolution.line === "3.2" ? new Set([...fixedMethods, "query"]) : fixedMethods;
+  const members = new Set(methodMembers(resolution.line));
   const fixed = Object.keys(itemNode)
     .filter((name) => members.has(name))
     .map((name) => ({ additional: false, name, token: name.toUpperCase() }));
@@ -305,24 +311,32 @@ const rawOperations = (resolution: Resolution): readonly RawOperation[] => {
   ).map((entry) => entry.raw);
 };
 
+// A parameter's identity: its `in` and name (a header name lowercased), or, for an entry that
+// cannot be read, its own pointer. Compared structurally with `Equal.equals`.
+type ParameterKey =
+  | { readonly in: string; readonly name: string }
+  | { readonly unreadable: string };
+
 interface ParameterEntry {
-  readonly key: string;
+  readonly key: ParameterKey;
   readonly level: Level;
   readonly pointer: string;
 }
 
 // A parameter's identity, read from the document of the set its reference chain ends in.
-const parameterKey = (resolution: Resolution, pointer: string): string => {
+const parameterKey = (resolution: Resolution, pointer: string): ParameterKey => {
   const target = follow(resolution, { document: resolution.document, pointer });
-  const identity = Result.getSuccess(nodeInResult(resolution, target)).pipe(
+  const identity = nodeOption(resolution, target).pipe(
     Option.flatMap((node) => decodeOption(ParameterIdentity, node)),
   );
 
   // An unreadable entry gets a key of its own so `normalizeParameter` reports it.
   return Option.match(identity, {
-    onNone: () => `\u0000unreadable\u0000${pointer}`,
-    onSome: (found) =>
-      `${found.in}\u0000${found.in === "header" ? found.name.toLowerCase() : found.name}`,
+    onNone: () => ({ unreadable: pointer }),
+    onSome: (found) => ({
+      in: found.in,
+      name: found.in === "header" ? found.name.toLowerCase() : found.name,
+    }),
   });
 };
 
@@ -352,7 +366,7 @@ const mergeEntries = (
   const merged = [...itemEntries];
   let overridden = false;
   for (const entry of operationEntries) {
-    const index = merged.findIndex((existing) => existing.key === entry.key);
+    const index = merged.findIndex((existing) => Equal.equals(existing.key, entry.key));
     if (index === -1) {
       merged.push(entry);
     } else {
@@ -387,89 +401,101 @@ const operationInfo = (raw: RawOperation): DiagnosticOperationValue =>
 // A 3.2 `querystring` parameter's form content takes Encoding Objects as for bodies (design 6.1):
 // the body form rules decide them, and the parameter carries the rules, or is refused with their
 // diagnostics when they refuse the content, as a form body alternative would be dropped.
-const withFormRules = (
+const withFormRules = Effect.fnUntraced(function* withFormRules(
   shared: Shared,
   site: ParameterSite,
   outcome: ParameterOutcome,
-): Effect.Effect<ParameterOutcome, BodyNodeBudget | BodyNotReadable> =>
-  Effect.gen(function* fill() {
-    if (outcome._tag !== "Implemented" || outcome.parameter.location !== "querystring") {
-      return outcome;
-    }
+): Effect.fn.Return<ParameterOutcome, BodyNodeBudget | BodyNotReadable> {
+  if (
+    !ParameterOutcome.$is("Implemented")(outcome) ||
+    outcome.parameter.location !== "querystring"
+  ) {
+    return outcome;
+  }
 
-    const { parameter } = outcome;
-    const { serialization } = parameter;
-    if (serialization.kind !== "content") {
-      return outcome;
-    }
+  const { parameter } = outcome;
+  const { serialization } = parameter;
+  if (serialization.kind !== "content") {
+    return outcome;
+  }
 
-    const { nonStandard, ...placed } = site;
-    const bodySite: Plain<BodySite> = placed;
-    if (nonStandard !== undefined) {
-      bodySite.nonStandard = nonStandard;
-    }
+  const { nonStandard, ...placed } = site;
+  const bodySite: Types.Mutable<BodySite> = placed;
+  if (nonStandard !== undefined) {
+    bodySite.nonStandard = nonStandard;
+  }
 
-    const decided = yield* formContentRules(
-      shared.resolution,
-      bodySite,
-      serialization.mediaType,
-      shared.limits,
-    );
-    const diagnostics = [...outcome.diagnostics, ...decided.diagnostics];
-    if (decided._tag === "Refused") {
-      return { _tag: "Refused", diagnostics, required: parameter.required };
-    }
+  const decided = yield* formContentRules(
+    shared.resolution,
+    bodySite,
+    serialization.mediaType,
+    shared.limits,
+  );
+  const diagnostics = [...outcome.diagnostics, ...decided.diagnostics];
+  if (FormContentOutcome.$is("Refused")(decided)) {
+    return ParameterOutcome.Refused({ diagnostics, required: parameter.required });
+  }
 
-    // Each spread feeds a class constructor, which checks the fields and gives back the class.
+  // Each spread feeds a class constructor, which checks the fields and gives back the class.
+  // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
+  const filled = new ContentSerialization({ ...serialization, encoding: decided.encoding });
+
+  return ParameterOutcome.Implemented({
+    diagnostics,
     // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
-    const filled = new ContentSerialization({ ...serialization, encoding: decided.encoding });
-
-    return {
-      _tag: "Implemented",
-      diagnostics,
-      // oxlint-disable-next-line typescript/no-misused-spread -- rebuilt through the constructor
-      parameter: new ParameterEntity({ ...parameter, serialization: filled }),
-    };
+    parameter: new ParameterEntity({ ...parameter, serialization: filled }),
   });
+});
 
-const assembleParameters = (
+// One merged entry's outcome, read through the shared cache: a path item parameter is the item's
+// element, not one operation's, so it is read once.
+const parameterOutcome = Effect.fnUntraced(function* parameterOutcome(
+  shared: Shared,
+  raw: RawOperation,
+  entry: ParameterEntry,
+): Effect.fn.Return<ParameterOutcome, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> {
+  const site: ParameterSite =
+    entry.level === "operation"
+      ? {
+          nonStandard: shared.context.config.nonStandard,
+          openapi: shared.context.openapi,
+          operation: operationInfo(raw),
+          pointer: entry.pointer,
+        }
+      : {
+          nonStandard: shared.context.config.nonStandard,
+          openapi: shared.context.openapi,
+          pointer: entry.pointer,
+        };
+  const outcome =
+    shared.cache.get(entry.pointer) ??
+    (yield* withFormRules(shared, site, yield* normalizeParameter(shared.resolution, site)));
+  shared.cache.set(entry.pointer, outcome);
+
+  return outcome;
+});
+
+const assembleParameters = Effect.fnUntraced(function* assembleParameters(
   shared: Shared,
   raw: RawOperation,
   merged: Merged,
-): Effect.Effect<Assembled, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> =>
-  Effect.gen(function* assemble() {
-    const parameters: Parameter[] = [];
-    const diagnostics: Diagnostic[] = [];
-    const refusedRequired: string[] = [];
-    for (const entry of merged.entries) {
-      // A path item parameter is the item's element, not one operation's: it is read once.
-      const site: ParameterSite =
-        entry.level === "operation"
-          ? {
-              nonStandard: shared.context.config.nonStandard,
-              openapi: shared.context.openapi,
-              operation: operationInfo(raw),
-              pointer: entry.pointer,
-            }
-          : {
-              nonStandard: shared.context.config.nonStandard,
-              openapi: shared.context.openapi,
-              pointer: entry.pointer,
-            };
-      const outcome =
-        shared.cache.get(entry.pointer) ??
-        (yield* withFormRules(shared, site, yield* normalizeParameter(shared.resolution, site)));
-      shared.cache.set(entry.pointer, outcome);
-      diagnostics.push(...outcome.diagnostics);
-      if (outcome._tag === "Implemented") {
-        parameters.push(outcome.parameter);
-      } else if (outcome._tag === "Refused" && outcome.required) {
-        refusedRequired.push(entry.pointer);
-      }
-    }
+): Effect.fn.Return<Assembled, BodyNodeBudget | BodyNotReadable | ParameterNotReadable> {
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const outcomes = yield* Effect.forEach(merged.entries, (entry) =>
+    parameterOutcome(shared, raw, entry),
+  );
+  const read = Arr.zip(merged.entries, outcomes);
 
-    return { diagnostics, parameters, refusedRequired };
-  });
+  return {
+    diagnostics: outcomes.flatMap((outcome) => outcome.diagnostics),
+    parameters: outcomes.flatMap((outcome) =>
+      ParameterOutcome.$is("Implemented")(outcome) ? [outcome.parameter] : [],
+    ),
+    refusedRequired: read.flatMap(([entry, outcome]) =>
+      ParameterOutcome.$is("Refused")(outcome) && outcome.required ? [entry.pointer] : [],
+    ),
+  };
+});
 
 interface BodyResult {
   readonly body?: Body;
@@ -504,75 +530,75 @@ const diagnose = (
   });
 };
 
-const assembleBody = (
+const assembleBody = Effect.fnUntraced(function* assembleBody(
   shared: Shared,
   raw: RawOperation,
-): Effect.Effect<BodyResult, BodyNodeBudget | BodyNotReadable> =>
-  Effect.gen(function* assemble() {
-    if (raw.fields.requestBody === undefined) {
-      return { diagnostics: [], refusedRequired: false };
+): Effect.fn.Return<BodyResult, BodyNodeBudget | BodyNotReadable> {
+  if (raw.fields.requestBody === undefined) {
+    return { diagnostics: [], refusedRequired: false };
+  }
+
+  const pointer = childPointer(raw.pointer, "requestBody");
+  const operation = operationInfo(raw);
+  if (bodylessMethods.has(raw.method)) {
+    const ignored = shared.resolution.line === "3.0";
+    if (ignored || unsendableMethods.has(raw.method)) {
+      const code = ignored ? "OPR-10/body-ignored" : "OPR-10/body-refused";
+
+      return {
+        diagnostics: [yield* diagnose(shared, code, { operation, pointer })],
+        refusedRequired: false,
+      };
     }
+  }
 
-    const pointer = childPointer(raw.pointer, "requestBody");
-    const operation = operationInfo(raw);
-    if (bodylessMethods.has(raw.method)) {
-      const ignored = shared.resolution.line === "3.0";
-      if (ignored || unsendableMethods.has(raw.method)) {
-        const code = ignored ? "OPR-10/body-ignored" : "OPR-10/body-refused";
+  // The author config's bracket switch reaches the body as it reaches the parameters.
+  const { nonStandard } = shared.context.config;
+  const site: Types.Mutable<BodySite> = { openapi: shared.context.openapi, operation, pointer };
+  if (nonStandard !== undefined) {
+    site.nonStandard = nonStandard;
+  }
 
-        return {
-          diagnostics: [yield* diagnose(shared, code, { operation, pointer })],
-          refusedRequired: false,
-        };
-      }
-    }
+  const outcome = yield* normalizeBody(shared.resolution, site, shared.limits);
+  if (BodyOutcome.$is("Refused")(outcome)) {
+    return { diagnostics: outcome.diagnostics, refusedRequired: outcome.required };
+  }
 
-    // The author config's bracket switch reaches the body as it reaches the parameters.
-    const { nonStandard } = shared.context.config;
-    const site: Plain<BodySite> = { openapi: shared.context.openapi, operation, pointer };
-    if (nonStandard !== undefined) {
-      site.nonStandard = nonStandard;
-    }
-
-    const outcome = yield* normalizeBody(shared.resolution, site, shared.limits);
-    if (outcome._tag === "Refused") {
-      return { diagnostics: outcome.diagnostics, refusedRequired: outcome.required };
-    }
-
-    return {
-      body: yield* hintDiscriminators(shared.resolution, outcome.body, shared.checkFindings),
-      diagnostics: outcome.diagnostics,
-      refusedRequired: false,
-    };
-  });
+  return {
+    body: yield* hintDiscriminators(shared.resolution, outcome.body, shared.checkFindings),
+    diagnostics: outcome.diagnostics,
+    refusedRequired: false,
+  };
+});
 
 const serverSource = (pointer: string, value: Json | undefined): Effect.Effect<ServerSource> =>
   jsonPointer(pointer).pipe(Effect.map((decoded): ServerSource => ({ pointer: decoded, value })));
 
-const effectiveServersOf = (
+const effectiveServersOf = Effect.fnUntraced(function* effectiveServersOf(
   shared: Shared,
   raw: RawOperation,
-): Effect.Effect<{ diagnostics: readonly Diagnostic[]; servers: readonly Server[] }> =>
-  Effect.gen(function* servers() {
-    const root = decodeOption(PathsRoot, shared.resolution.value).pipe(
-      Option.flatMap((fields) => Option.fromUndefinedOr(fields.servers)),
-    );
+): Effect.fn.Return<{ diagnostics: readonly Diagnostic[]; servers: readonly Server[] }> {
+  const root = decodeOption(PathsRoot, shared.resolution.value).pipe(
+    Option.flatMap((fields) => Option.fromUndefinedOr(fields.servers)),
+  );
 
-    return effectiveServers(
-      {
-        operation: yield* serverSource(childPointer(raw.pointer, "servers"), raw.fields.servers),
-        pathItem: yield* serverSource(
-          childPointer(raw.itemPointer, "servers"),
-          raw.itemFields.servers,
-        ),
-        root: yield* serverSource("/servers", Option.getOrUndefined(root)),
-      },
-      shared.context,
-    );
-  });
+  return effectiveServers(
+    {
+      operation: yield* serverSource(childPointer(raw.pointer, "servers"), raw.fields.servers),
+      pathItem: yield* serverSource(
+        childPointer(raw.itemPointer, "servers"),
+        raw.itemFields.servers,
+      ),
+      root: yield* serverSource("/servers", Option.getOrUndefined(root)),
+    },
+    shared.context,
+  );
+});
 
-const docsOf = (fields: typeof OperationFields.Type): Plain<typeof Operation.Encoded.docs> => {
-  const docs: Plain<typeof Operation.Encoded.docs> = {};
+const docsOf = (
+  fields: typeof OperationFields.Type,
+): Types.Mutable<typeof Operation.Encoded.docs> => {
+  const docs: Types.Mutable<typeof Operation.Encoded.docs> = {};
   if (fields.description !== undefined) {
     docs.description = sanitizeProse(fields.description);
   }
@@ -628,11 +654,18 @@ const namingKeys = {
 
 const aliasesKey = "x-forge-aliases";
 
+// A dotted group, split at `.`; the empty string splits to no segments.
+const DottedGroup = Schema.String.pipe(
+  Schema.decodeTo(Schema.Array(Schema.String), {
+    decode: SchemaGetter.split({ separator: "." }),
+    encode: SchemaGetter.forbiddenEncoding,
+  }),
+);
+
 // A group is a dotted string, split at `.`, or an array whose elements are kept whole; no segment
 // may be empty. Any other shape is unusable.
 const groupSegments = (value: Json): Option.Option<Arr.NonEmptyReadonlyArray<string>> =>
-  decodeOption(Schema.String, value).pipe(
-    Option.map((text): readonly string[] => text.split(".")),
+  decodeOption(DottedGroup, value).pipe(
     Option.orElse(() => decodeOption(Schema.Array(Schema.String), value)),
     Option.filter(Arr.isReadonlyArrayNonEmpty),
     Option.filter((segments) => segments.every((segment) => segment !== "")),
@@ -649,7 +682,7 @@ const hintOf = (
   holder: JsonObject,
   pointer: string,
   source: keyof typeof namingKeys,
-): NamingRead<Plain<typeof NamingHint.Encoded>> => {
+): NamingRead<Types.Mutable<typeof NamingHint.Encoded>> => {
   const keys = namingKeys[source];
   const notices: NamingNotice[] = [];
   const read = <A>(key: string, parse: (value: Json) => Option.Option<A>): A | undefined => {
@@ -671,7 +704,7 @@ const hintOf = (
     return { notices, value: undefined };
   }
 
-  const hint: Plain<typeof NamingHint.Encoded> = { pointer };
+  const hint: Types.Mutable<typeof NamingHint.Encoded> = { pointer };
   if (group !== undefined) {
     hint.group = group;
   }
@@ -690,7 +723,7 @@ const aliasOf = (
   element: Json,
   pointer: string,
   index: number,
-): NamingRead<Plain<typeof NamingAlias.Encoded>> => {
+): NamingRead<Types.Mutable<typeof NamingAlias.Encoded>> => {
   if (!isObject(element)) {
     return { notices: [invalid(pointer)], value: undefined };
   }
@@ -710,7 +743,7 @@ const aliasOf = (
     return { notices: [...notices, { code: "EXT-01/alias-unnamed", pointer }], value: undefined };
   }
 
-  const alias: Plain<typeof NamingAlias.Encoded> = { index };
+  const alias: Types.Mutable<typeof NamingAlias.Encoded> = { index };
   if (forge.value !== undefined) {
     alias.forge = forge.value;
   }
@@ -731,7 +764,7 @@ const aliasOf = (
 const aliasesOf = (
   holder: JsonObject,
   pointer: string,
-): NamingRead<Arr.NonEmptyReadonlyArray<Plain<typeof NamingAlias.Encoded>>> => {
+): NamingRead<Arr.NonEmptyReadonlyArray<Types.Mutable<typeof NamingAlias.Encoded>>> => {
   const value = holder[aliasesKey];
   if (value === undefined) {
     return { notices: [], value: undefined };
@@ -744,7 +777,7 @@ const aliasesOf = (
       )
     : [];
   const notices = read.flatMap((one) => one.notices);
-  const aliases = read.flatMap((one) => (one.value === undefined ? [] : [one.value]));
+  const aliases = Arr.getSomes(read.map((one) => Option.fromUndefinedOr(one.value)));
 
   return Arr.isReadonlyArrayNonEmpty(aliases)
     ? { notices, value: aliases }
@@ -753,12 +786,12 @@ const aliasesOf = (
 
 // The naming extensions of an Operation Object (design 4.4, D-NAME4). Only the five naming keys
 // are read; every extension stays recorded as EXT-01 by `collectInformational`.
-const namingOf = (raw: RawOperation): NamingRead<Plain<typeof Naming.Encoded>> => {
+const namingOf = (raw: RawOperation): NamingRead<Types.Mutable<typeof Naming.Encoded>> => {
   const forge = hintOf(raw.node, raw.pointer, "forge");
   const fern = hintOf(raw.node, raw.pointer, "fern");
   const aliases = aliasesOf(raw.node, raw.pointer);
   const notices = [...forge.notices, ...fern.notices, ...aliases.notices];
-  const naming: Plain<typeof Naming.Encoded> = {};
+  const naming: Types.Mutable<typeof Naming.Encoded> = {};
   if (aliases.value !== undefined) {
     naming.aliases = aliases.value;
   }
@@ -785,68 +818,73 @@ interface Assembly {
 const withoutAuthorChoiceNotices = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
   diagnostics.filter((diagnostic) => !authorChoiceCodes.has(diagnostic.code));
 
-const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly, OperationsError> =>
-  Effect.gen(function* assemble() {
-    const { resolution } = shared;
-    const merged = mergeEntries(
-      entriesOf(resolution, raw.itemPointer, raw.itemFields.parameters, "pathItem"),
-      entriesOf(resolution, raw.pointer, raw.fields.parameters, "operation"),
-    );
-    const parameters = yield* assembleParameters(shared, raw, merged);
-    const body = yield* assembleBody(shared, raw);
-    const responses = yield* normalizeResponses(resolution, childPointer(raw.pointer, "responses"));
-    const policy = yield* normalizeSecurityPolicy(resolution, shared.schemes, raw.pointer);
-    const servers = yield* effectiveServersOf(shared, raw);
-    const site = { operation: operationInfo(raw), pointer: raw.pointer };
-    const naming = namingOf(raw);
-    const namingNotices = yield* Effect.all(
-      naming.notices.map((found) =>
-        diagnose(shared, found.code, { operation: site.operation, pointer: found.pointer }),
-      ),
-    );
-    const raises = [
-      ...(parameters.refusedRequired.length === 0
-        ? []
-        : [
-            yield* diagnose(
-              shared,
-              "OPR-08/required-parameter-refused",
-              site,
-              parameters.refusedRequired,
-            ),
+const assembleOne = Effect.fnUntraced(function* assembleOne(
+  shared: Shared,
+  raw: RawOperation,
+): Effect.fn.Return<Assembly, OperationsError> {
+  const { resolution } = shared;
+  const merged = mergeEntries(
+    entriesOf(resolution, raw.itemPointer, raw.itemFields.parameters, "pathItem"),
+    entriesOf(resolution, raw.pointer, raw.fields.parameters, "operation"),
+  );
+  const parameters = yield* assembleParameters(shared, raw, merged);
+  const body = yield* assembleBody(shared, raw);
+  const responses = yield* normalizeResponses(resolution, childPointer(raw.pointer, "responses"));
+  const policy = yield* normalizeSecurityPolicy(resolution, shared.schemes, raw.pointer);
+  const servers = yield* effectiveServersOf(shared, raw);
+  const site = { operation: operationInfo(raw), pointer: raw.pointer };
+  const naming = namingOf(raw);
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const namingNotices = yield* Effect.forEach(naming.notices, (found) =>
+    diagnose(shared, found.code, { operation: site.operation, pointer: found.pointer }),
+  );
+  const raises = [
+    ...(parameters.refusedRequired.length === 0
+      ? []
+      : [
+          yield* diagnose(
+            shared,
+            "OPR-08/required-parameter-refused",
+            site,
+            parameters.refusedRequired,
+          ),
+        ]),
+    ...(body.refusedRequired
+      ? [
+          yield* diagnose(shared, "OPR-09/required-body-refused", site, [
+            childPointer(raw.pointer, "requestBody"),
           ]),
-      ...(body.refusedRequired
-        ? [
-            yield* diagnose(shared, "OPR-09/required-body-refused", site, [
-              childPointer(raw.pointer, "requestBody"),
-            ]),
-          ]
-        : []),
-      ...(policy.listed > 0 && policy.policy.alternatives.length === 0
-        ? [
-            yield* diagnose(shared, "SEC-06/no-satisfiable-alternative", site, [
-              policy.policy.origin.pointer,
-            ]),
-          ]
-        : []),
-    ];
-    const diagnostics = [
-      ...parameters.diagnostics,
-      ...body.diagnostics,
-      ...responses.diagnostics,
-      ...policy.diagnostics,
-      ...servers.diagnostics,
-      ...namingNotices,
-      ...raises,
-    ];
-    if (raises.length > 0) {
-      return { diagnostics: withoutAuthorChoiceNotices(diagnostics) };
-    }
+        ]
+      : []),
+    ...(policy.listed > 0 && policy.policy.alternatives.length === 0
+      ? [
+          yield* diagnose(shared, "SEC-06/no-satisfiable-alternative", site, [
+            policy.policy.origin.pointer,
+          ]),
+        ]
+      : []),
+  ];
+  const diagnostics = [
+    ...parameters.diagnostics,
+    ...body.diagnostics,
+    ...responses.diagnostics,
+    ...policy.diagnostics,
+    ...servers.diagnostics,
+    ...namingNotices,
+    ...raises,
+  ];
+  if (raises.length > 0) {
+    return { diagnostics: withoutAuthorChoiceNotices(diagnostics) };
+  }
 
-    const fields: Plain<typeof Operation.Encoded> = {
+  const fields: Record<string, unknown> = Record.filter(
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+    {
+      body: body.body,
       deprecated: raw.fields.deprecated ?? false,
       docs: docsOf(raw.fields),
       key: { method: raw.method, path: raw.path },
+      naming: naming.value,
       origin: { document: resolution.document, pointer: raw.pointer },
       parameters: parameters.parameters,
       responses: responses.responses,
@@ -854,34 +892,29 @@ const assembleOne = (shared: Shared, raw: RawOperation): Effect.Effect<Assembly,
       security: policy.policy,
       servers: servers.servers,
       tags: (raw.fields.tags ?? []).map(sanitizeProse),
-    };
-    if (body.body !== undefined) {
-      fields.body = body.body;
-    }
+    },
+    Predicate.isNotUndefined,
+  );
 
-    if (naming.value !== undefined) {
-      fields.naming = naming.value;
-    }
+  // An empty operationId is not a name; naming reports it (OPR-06).
+  if (raw.fields.operationId !== undefined && raw.fields.operationId !== "") {
+    fields.operationId = raw.fields.operationId;
+  }
 
-    // An empty operationId is not a name; naming reports it (OPR-06).
-    if (raw.fields.operationId !== undefined && raw.fields.operationId !== "") {
-      fields.operationId = raw.fields.operationId;
-    }
+  const operation = yield* Schema.decodeUnknownEffect(Operation)(fields).pipe(Effect.orDie);
 
-    const operation = yield* Schema.decodeUnknownEffect(Operation)(fields).pipe(Effect.orDie);
+  return { diagnostics, operation };
+});
 
-    return { diagnostics, operation };
-  });
-
-const diagnosticKey = (diagnostic: Diagnostic): string =>
-  JSON.stringify([
-    diagnostic.code,
-    diagnostic.document,
-    diagnostic.pointer,
-    diagnostic.operation?.method,
-    diagnostic.operation?.path,
-    (diagnostic.related ?? []).map((site) => [site.document, site.pointer]),
-  ]);
+// A diagnostic's identity for `distinctDiagnostics`: a fresh array, compared element by element.
+const identityKey = (diagnostic: Diagnostic) => [
+  diagnostic.code,
+  diagnostic.document,
+  diagnostic.pointer,
+  diagnostic.operation?.method,
+  diagnostic.operation?.path,
+  (diagnostic.related ?? []).map((site) => [site.document, site.pointer]),
+];
 
 /**
  * Drops repeated diagnostics (same code, document, pointer, operation and related sites), keeping
@@ -889,7 +922,7 @@ const diagnosticKey = (diagnostic: Diagnostic): string =>
  * per operation that inherits them, and report once.
  */
 export const distinctDiagnostics = (diagnostics: readonly Diagnostic[]): readonly Diagnostic[] =>
-  Arr.dedupeWith(diagnostics, (left, right) => diagnosticKey(left) === diagnosticKey(right));
+  Arr.dedupeWith(diagnostics, Equivalence.mapInput(Equal.asEquivalence(), identityKey));
 
 /**
  * Assembles the operations of the entry document in canonical order (design 2.2, 2.4, 3.7, 6.3).
@@ -903,28 +936,27 @@ export const distinctDiagnostics = (diagnostics: readonly Diagnostic[]): readonl
  * site the earlier stages should have stopped fails as in the stage that reads it. `checkFindings`
  * are the spec-text check findings of the run: a body discriminator they refuse gets no hint.
  */
-export const assembleOperations = (
+export const assembleOperations = Effect.fnUntraced(function* assembleOperations(
   resolution: Resolution,
   schemes: SchemeNormalization,
   context: ServersContext,
   checkFindings: readonly Diagnostic[],
   limits: ResolveLimits = defaultLimits,
-): Effect.Effect<OperationAssembly, OperationsError> =>
-  Effect.gen(function* assemble() {
-    const shared: Shared = {
-      cache: new Map(),
-      checkFindings,
-      context,
-      limits,
-      resolution,
-      schemes,
-    };
-    const assembled = yield* Effect.forEach(rawOperations(resolution), (raw) =>
-      assembleOne(shared, raw),
-    );
+): Effect.fn.Return<OperationAssembly, OperationsError> {
+  const shared: Shared = {
+    cache: new Map(),
+    checkFindings,
+    context,
+    limits,
+    resolution,
+    schemes,
+  };
+  const assembled = yield* Effect.forEach(rawOperations(resolution), (raw) =>
+    assembleOne(shared, raw),
+  );
 
-    return {
-      diagnostics: distinctDiagnostics(assembled.flatMap((one) => one.diagnostics)),
-      operations: assembled.flatMap((one) => (one.operation === undefined ? [] : [one.operation])),
-    };
-  });
+  return {
+    diagnostics: distinctDiagnostics(assembled.flatMap((one) => one.diagnostics)),
+    operations: Arr.getSomes(assembled.map((one) => Option.fromUndefinedOr(one.operation))),
+  };
+});

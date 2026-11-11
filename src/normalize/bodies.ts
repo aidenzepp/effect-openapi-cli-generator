@@ -1,32 +1,50 @@
-import { Array as Arr, Data, Effect, Option, Order, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  Match,
+  Option,
+  Order,
+  pipe,
+  Predicate,
+  Record,
+  Schema,
+  Struct,
+  UndefinedOr,
+} from "effect";
 import { HeaderName, MediaRange } from "../model/brands.ts";
-import { diagnosticOf, makeDiagnostic } from "../model/diagnostic.ts";
-import type { Diagnostic, DiagnosticOperation } from "../model/diagnostic.ts";
+import { Diagnostic, diagnosticOf, makeDiagnostic } from "../model/diagnostic.ts";
+import type { DiagnosticOperation } from "../model/diagnostic.ts";
 import { Body, EncodingRule } from "../model/entities.ts";
 import type { DiscriminatorHint } from "../model/entities.ts";
-import { nodeAt as jsonAt } from "../model/json-tree.ts";
 import { childPointer, formatPointer, isPointerWithin } from "../model/pointer.ts";
-import type { Json } from "../model/pointer.ts";
 import { keyOf } from "../resolve/canonical.ts";
 import type { CanonicalKey } from "../resolve/canonical.ts";
 import { allOfReferrers, defaultLimits, implicitComponent } from "../resolve/index.ts";
 import type { ResolveLimits, Resolution, ResolvedReference } from "../resolve/index.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { mediaEssence } from "../runtime-src/runtime/sequential.ts";
 import { docsOf, sanitize } from "./docs.ts";
-import { childKey, follow, nodeIn, referenceIn } from "./document-set.ts";
+import { childKey, follow, nodeIn, nodeOption, referenceIn } from "./document-set.ts";
 import { headerMarks } from "./header-object.ts";
 import {
   authorChoiceCodes,
   bracketChoiceCode,
+  compound,
   deepObjectExplodeText,
   formStyleRefusal,
   partHeader,
+  PartHeaderOutcome,
+  ScalarCover,
   scalarChoiceCode,
   scalarCover,
+  styleNames,
+  typeNames,
 } from "./parameters.ts";
-import type { PartHeaderOutcome, ScalarCover } from "./parameters.ts";
-import { appliesDynamicKeyword, schemaKeyAt } from "./schemas.ts";
+import type { StyleName } from "./parameters.ts";
+import { appliesDynamicKeyword, budgetOf, charge, schemaKeyAt } from "./schemas.ts";
+import type { Budget } from "./schemas.ts";
 
 /**
  * Where a request body is read: its use site in the entry document, the operation it belongs to
@@ -48,48 +66,42 @@ export interface BodySite {
  * survived; `Refused` means none did, and keeps `required` so the operation assembly can raise the
  * refusal to operation scope.
  */
-export type BodyOutcome =
-  | {
-      readonly _tag: "Implemented";
-      readonly body: Body;
-      readonly diagnostics: readonly Diagnostic[];
-    }
-  | {
-      readonly _tag: "Refused";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly required: boolean;
-    };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type BodyOutcome = Data.TaggedEnum<{
+  Implemented: { readonly body: Body; readonly diagnostics: readonly Diagnostic[] };
+  Refused: { readonly diagnostics: readonly Diagnostic[]; readonly required: boolean };
+}>;
+
+/**
+ * Constructors and dispatch for {@link BodyOutcome}.
+ */
+export const BodyOutcome = Data.taggedEnum<BodyOutcome>();
 
 /**
  * The site is not a Request Body Object the earlier stages could have passed: validation or
  * resolution should have stopped it.
  */
-export class BodyNotReadable extends Data.TaggedError("BodyNotReadable")<{
-  readonly pointer: string;
-  readonly reason: "media-type-not-an-object" | "not-a-request-body";
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class BodyNotReadable extends Schema.TaggedError<BodyNotReadable>()("BodyNotReadable", {
+  pointer: Schema.String,
+  reason: Schema.Literals(["media-type-not-an-object", "not-a-request-body"]),
+}) {}
 
 /**
  * Schema inspection visited more nodes than the node budget allows.
  */
-export class BodyNodeBudget extends Data.TaggedError("BodyNodeBudget")<{
-  readonly diagnostic: Diagnostic;
-}> {}
-
-const styleNames = [
-  "cookie",
-  "deepObject",
-  "form",
-  "label",
-  "matrix",
-  "pipeDelimited",
-  "simple",
-  "spaceDelimited",
-] as const;
-
-type StyleName = (typeof styleNames)[number];
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class BodyNodeBudget extends Schema.TaggedError<BodyNodeBudget>()("BodyNodeBudget", {
+  diagnostic: Diagnostic,
+}) {}
 
 const ObjectValue = Schema.Record(Schema.String, Schema.Unknown);
+
+const isObjectValue = Schema.is(ObjectValue);
+
+const decodeMediaRange = Schema.decodeUnknownOption(MediaRange);
+
+const decodeHeaderName = Schema.decodeUnknownOption(HeaderName);
 
 const HeaderObject = Schema.Struct({ required: Schema.optionalKey(Schema.Boolean) });
 
@@ -162,6 +174,8 @@ const SchemaNode = Schema.Struct({
   type: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 });
 
+const decodeSchemaNode = Schema.decodeUnknownOption(SchemaNode);
+
 type SchemaNodeValue = typeof SchemaNode.Type;
 
 const formUrlencoded = "application/x-www-form-urlencoded";
@@ -187,14 +201,9 @@ const ndjsonTypes: ReadonlySet<string> = new Set([
   "application/x-ndjson",
 ]);
 
-const baseType = (mediaType: string): string => {
-  const [base = ""] = mediaType.split(";");
-
-  return base.trim().toLowerCase();
-};
-
 // The codec follows the media type alone (design 2.2); a range such as `*/*` is raw bytes until the
 // operator names a concrete type.
+// Differs from responses.ts codecOf on `text/*` and `+json-seq` by design; want 546a83f5 unifies.
 const codecOf = (base: string): Codec => {
   if (base === formUrlencoded) {
     return "form";
@@ -287,7 +296,7 @@ const anchorDrops = (home: CanonicalKey, findings: readonly Finding[]): readonly
 // anchored at the property's Encoding entry, its own keyword first in `related` (design 8.5 rule 4),
 // and names the property by `wire`.
 const fieldRefusal = (entry: CanonicalKey, finding: Finding, wire: string): Finding => {
-  const { drops: _drops, ...kept } = finding;
+  const kept = Struct.omit(finding, ["drops"]);
   const field: Finding = { ...kept, at: entry, scope: "field", wire };
 
   return keyOf(finding.at) === keyOf(entry)
@@ -322,18 +331,17 @@ const settle = (resolution: Resolution, start: CanonicalKey): CanonicalKey => {
 
 const nodeAt = (resolution: Resolution, at: CanonicalKey): Effect.Effect<SchemaNodeValue> =>
   nodeIn(resolution, at).pipe(
-    Effect.map((json) => Schema.decodeUnknownOption(SchemaNode)(json)),
+    Effect.map((json) => decodeSchemaNode(json)),
     Effect.map(Option.getOrElse((): SchemaNodeValue => ({}))),
     Effect.orElseSucceed((): SchemaNodeValue => ({})),
   );
 
 // What one body spends on schema inspection: every visit of an `allOf` member is charged to
-// `spent`, against the resolution limits' node budget (design 9 I5).
+// `budget`, the resolution limits' node budget (design 9 I5).
 interface Walk {
-  readonly maxNodes: number;
+  readonly budget: Budget;
   readonly resolution: Resolution;
   readonly site: BodySite;
-  spent: number;
 }
 
 const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
@@ -351,37 +359,35 @@ const budgetFailure = (walk: Walk): Effect.Effect<never, BodyNodeBudget> =>
 
 // The schema and its `allOf` members in document order, each distinct schema once, so a graph
 // that reuses members costs its size and a cycle ends at the first repeat.
-const flatten = (
+const flatten = Effect.fnUntraced(function* flatten(
   walk: Walk,
   start: CanonicalKey,
-): Effect.Effect<readonly Located[], BodyNodeBudget> =>
-  Effect.gen(function* walkMembers() {
-    const seen = new Set<string>();
-    const found: Located[] = [];
-    const pending = [start];
-    let next = pending.pop();
-    while (next !== undefined) {
-      const at = settle(walk.resolution, next);
-      walk.spent += 1;
-      if (walk.spent > walk.maxNodes) {
-        return yield* budgetFailure(walk);
-      }
-
-      if (!seen.has(keyOf(at))) {
-        seen.add(keyOf(at));
-
-        const node = yield* nodeAt(walk.resolution, at);
-        found.push({ at, node });
-
-        const members = (node.allOf ?? []).map((_, index) => childKey(at, "allOf", String(index)));
-        pending.push(...Arr.reverse(members));
-      }
-
-      next = pending.pop();
+): Effect.fn.Return<readonly Located[], BodyNodeBudget> {
+  const seen = new Set<string>();
+  const found: Located[] = [];
+  const pending = [start];
+  let next = pending.pop();
+  while (next !== undefined) {
+    const at = settle(walk.resolution, next);
+    if (!charge(walk.budget)) {
+      return yield* budgetFailure(walk);
     }
 
-    return found;
-  });
+    if (!seen.has(keyOf(at))) {
+      seen.add(keyOf(at));
+
+      const node = yield* nodeAt(walk.resolution, at);
+      found.push({ at, node });
+
+      const members = (node.allOf ?? []).map((_, index) => childKey(at, "allOf", String(index)));
+      pending.push(...Arr.reverse(members));
+    }
+
+    next = pending.pop();
+  }
+
+  return found;
+});
 
 const firstLocated = <T>(
   nodes: readonly Located[],
@@ -406,33 +412,35 @@ interface Members {
 const noMembers: Members = { items: undefined, prefixItems: [], properties: [] };
 
 // The declared properties (document order, first definition wins) and item schemas of a schema.
-const membersOf = (walk: Walk, schema: CanonicalKey): Effect.Effect<Members, BodyNodeBudget> =>
-  Effect.gen(function* members() {
-    const nodes = yield* flatten(walk, schema);
-    const seen = new Set<string>();
-    const properties: (readonly [string, CanonicalKey])[] = [];
-    for (const located of nodes) {
-      for (const name of Object.keys(located.node.properties ?? {})) {
-        if (!seen.has(name)) {
-          seen.add(name);
-          properties.push([name, childKey(located.at, "properties", name)]);
-        }
+const membersOf = Effect.fnUntraced(function* membersOf(
+  walk: Walk,
+  schema: CanonicalKey,
+): Effect.fn.Return<Members, BodyNodeBudget> {
+  const nodes = yield* flatten(walk, schema);
+  const seen = new Set<string>();
+  const properties: (readonly [string, CanonicalKey])[] = [];
+  for (const located of nodes) {
+    for (const name of Object.keys(located.node.properties ?? {})) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        properties.push([name, childKey(located.at, "properties", name)]);
       }
     }
+  }
 
-    const prefix = firstLocated(nodes, (node) => node.prefixItems);
-    const items = firstLocated(nodes, (node) => node.items);
+  const prefix = firstLocated(nodes, (node) => node.prefixItems);
+  const items = firstLocated(nodes, (node) => node.items);
 
-    // `items: false` admits no item beyond `prefixItems`, so it has no item schema.
-    return {
-      items: items === undefined || items.value === false ? undefined : childKey(items.at, "items"),
-      prefixItems:
-        prefix === undefined
-          ? []
-          : prefix.value.map((_, index) => childKey(prefix.at, "prefixItems", String(index))),
-      properties,
-    };
-  });
+  // `items: false` admits no item beyond `prefixItems`, so it has no item schema.
+  return {
+    items: items === undefined || items.value === false ? undefined : childKey(items.at, "items"),
+    prefixItems:
+      prefix === undefined
+        ? []
+        : prefix.value.map((_, index) => childKey(prefix.at, "prefixItems", String(index))),
+    properties,
+  };
+});
 
 const memberSchema = (members: Members, target: Target): CanonicalKey | undefined =>
   target.kind === "property"
@@ -463,53 +471,52 @@ const unresolved = [
 
 const requiredStrings = Schema.decodeUnknownOption(Schema.Array(Schema.String));
 
-const requirementOf = (
+const requirementOf = Effect.fnUntraced(function* requirementOf(
   walk: Walk,
   schema: CanonicalKey,
-): Effect.Effect<Requirement, BodyNodeBudget> =>
-  Effect.gen(function* requirement() {
-    const names = new Set<string>();
-    const done = new Set<string>();
-    const path = new Set<string>();
-    let sure = true;
-    // A schema already on the path is a cycle, and a reference `settle` left unfollowed is not
-    // resolved: either leaves the walk unsure. A schema reached twice otherwise is read once.
-    const visit = (start: CanonicalKey): Effect.Effect<void, BodyNodeBudget> =>
-      Effect.gen(function* member() {
-        const at = settle(walk.resolution, start);
-        walk.spent += 1;
-        if (walk.spent > walk.maxNodes) {
-          yield* budgetFailure(walk);
-        }
+): Effect.fn.Return<Requirement, BodyNodeBudget> {
+  const names = new Set<string>();
+  const done = new Set<string>();
+  const path = new Set<string>();
+  let sure = true;
+  // A schema already on the path is a cycle, and a reference `settle` left unfollowed is not
+  // resolved: either leaves the walk unsure. A schema reached twice otherwise is read once.
+  const visit = Effect.fnUntraced(function* member(
+    start: CanonicalKey,
+  ): Effect.fn.Return<void, BodyNodeBudget> {
+    const at = settle(walk.resolution, start);
+    if (!charge(walk.budget)) {
+      yield* budgetFailure(walk);
+    }
 
-        const key = keyOf(at);
-        if (path.has(key) || referenceIn(walk.resolution, at)?.kind === "schema") {
-          sure = false;
-        } else if (!done.has(key)) {
-          done.add(key);
+    const key = keyOf(at);
+    if (path.has(key) || referenceIn(walk.resolution, at)?.kind === "schema") {
+      sure = false;
+    } else if (!done.has(key)) {
+      done.add(key);
 
-          const node = yield* nodeAt(walk.resolution, at);
-          for (const name of Option.getOrElse(requiredStrings(node.required), () => [])) {
-            names.add(name);
-          }
+      const node = yield* nodeAt(walk.resolution, at);
+      for (const name of Option.getOrElse(requiredStrings(node.required), () => [])) {
+        names.add(name);
+      }
 
-          if (unresolved.some((keyword) => node[keyword] !== undefined)) {
-            sure = false;
-          }
+      if (unresolved.some((keyword) => node[keyword] !== undefined)) {
+        sure = false;
+      }
 
-          path.add(key);
-          for (const index of (node.allOf ?? []).keys()) {
-            yield* visit(childKey(at, "allOf", String(index)));
-          }
+      path.add(key);
+      for (const index of (node.allOf ?? []).keys()) {
+        yield* visit(childKey(at, "allOf", String(index)));
+      }
 
-          path.delete(key);
-        }
-      });
-
-    yield* visit(schema);
-
-    return { names, sure };
+      path.delete(key);
+    }
   });
+
+  yield* visit(schema);
+
+  return { names, sure };
+});
 
 const isRequired = (requirement: Requirement, name: string): boolean =>
   !requirement.sure || requirement.names.has(name);
@@ -528,31 +535,30 @@ const noFacts: Facts = {
   type: [],
 };
 
-const factsOf = (
+const factsOf = Effect.fnUntraced(function* facts(
   walk: Walk,
   schema: CanonicalKey | undefined,
   depth = 0,
-): Effect.Effect<Facts, BodyNodeBudget> =>
-  Effect.gen(function* facts() {
-    if (schema === undefined) {
-      return noFacts;
-    }
+): Effect.fn.Return<Facts, BodyNodeBudget> {
+  if (schema === undefined) {
+    return noFacts;
+  }
 
-    const nodes = yield* flatten(walk, schema);
-    const items = firstLocated(nodes, (node) => node.items);
-    const itemFacts =
-      items === undefined || depth > 0
-        ? undefined
-        : yield* factsOf(walk, childKey(items.at, "items"), depth + 1);
-    const type = firstLocated(nodes, (node) => node.type)?.value;
+  const nodes = yield* flatten(walk, schema);
+  const items = firstLocated(nodes, (node) => node.items);
+  const itemFacts =
+    items === undefined || depth > 0
+      ? undefined
+      : yield* factsOf(walk, childKey(items.at, "items"), depth + 1);
+  const type = firstLocated(nodes, (node) => node.type)?.value;
 
-    return {
-      contentEncoding: firstLocated(nodes, (node) => node.contentEncoding),
-      format: firstLocated(nodes, (node) => node.format)?.value,
-      items: itemFacts,
-      type: type === undefined ? [] : Arr.ensure(type),
-    };
-  });
+  return {
+    contentEncoding: firstLocated(nodes, (node) => node.contentEncoding),
+    format: firstLocated(nodes, (node) => node.format)?.value,
+    items: itemFacts,
+    type: typeNames(type),
+  };
+});
 
 interface Default {
   readonly row: string;
@@ -576,27 +582,17 @@ const stringDefault = (line: Line, facts: Facts): Default => {
   return { row: "ENC-20", type: "text/plain" };
 };
 
-const scalarDefault = (line: Line, name: string, facts: Facts): Default => {
-  switch (name) {
-    case "string": {
-      return stringDefault(line, facts);
-    }
-    case "number":
-    case "integer":
-    case "boolean": {
-      return { row: "ENC-21", type: "text/plain" };
-    }
-    case "object": {
-      return { row: "ENC-22", type: "application/json" };
-    }
-    case "null": {
-      return { row: "ENC-25", type: "text/plain" };
-    }
-    default: {
-      return absentDefault(line);
-    }
-  }
-};
+const scalarDefault = (line: Line, name: string, facts: Facts): Default =>
+  Match.value(name).pipe(
+    Match.when("string", (): Default => stringDefault(line, facts)),
+    Match.whenOr("number", "integer", "boolean", (): Default => ({
+      row: "ENC-21",
+      type: "text/plain",
+    })),
+    Match.when("object", (): Default => ({ row: "ENC-22", type: "application/json" })),
+    Match.when("null", (): Default => ({ row: "ENC-25", type: "text/plain" })),
+    Match.orElse((): Default => absentDefault(line)),
+  );
 
 type ArrayDefault = (line: Line, facts: Facts) => Default;
 
@@ -700,12 +696,15 @@ interface Context {
   readonly walk: Walk;
 }
 
+// A label as a message quotes it: sanitized, then written as a JSON string.
+const quoted = (text: string): string => pipe(text, sanitize, JSON.stringify);
+
 const targetLabel = (target: Target): string =>
   target.kind === "property" ? target.name : `position ${target.index}`;
 
 const contentTypes = (text: string): Option.Option<readonly string[]> => {
   const parts = text.split(",").map((part) => part.trim());
-  const decoded = parts.map((part) => Schema.decodeUnknownOption(MediaRange)(part));
+  const decoded = parts.map((part) => decodeMediaRange(part));
 
   return decoded.every((part) => Option.isSome(part)) ? Option.some(parts) : Option.none();
 };
@@ -757,7 +756,7 @@ const unsupportedPartStyle = (input: RuleInput): Finding =>
     unsupportedPartStyleCode,
     "appendix-c-using-rfc6570-based-serialization",
     "Encoding style, explode or allowReserved",
-    `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
+    `The multipart part ${quoted(targetLabel(input.target))} uses a style that joins its values into one part, which is not supported; the part has no flag.`,
     input.actual,
     "Use style form with explode true, or remove the style fields",
   );
@@ -786,7 +785,7 @@ const invalidContentType = (input: RuleInput): Finding =>
       "ENC-02/invalid-content-type",
       "encoding-content-type",
       "Encoding contentType",
-      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} is not a list of media ranges.`,
+      `The contentType of ${quoted(targetLabel(input.target))} is not a list of media ranges.`,
       childKey(input.actual, "contentType"),
     ),
   );
@@ -799,32 +798,31 @@ const schemaDrivenXml = (input: RuleInput): Finding =>
       "XML-01/schema-driven",
       "xml-object",
       "Multipart part contentType",
-      `The multipart part ${JSON.stringify(sanitize(targetLabel(input.target)))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
+      `The multipart part ${quoted(targetLabel(input.target))} is an object typed as XML, which needs serialization from its schema and the XML Object; schema-driven XML is not supported.`,
       childKey(input.actual, "contentType"),
       "Type the part application/json, or make the whole body an XML media type sent from --body-file",
     ),
   );
 
-const isXmlType = (range: string): boolean => codecOf(baseType(range)) === "xml";
+const isXmlType = (range: string): boolean => codecOf(mediaEssence(range)) === "xml";
 
 // Whether the part's schema is an object: typed `object`, or untyped with declared properties,
 // found through `$ref` and `allOf`.
-const isObjectPart = (
+const isObjectPart = Effect.fnUntraced(function* isObjectPart(
   walk: Walk,
   schema: CanonicalKey | undefined,
   facts: Facts,
-): Effect.Effect<boolean, BodyNodeBudget> =>
-  Effect.gen(function* objectPart() {
-    if (schema === undefined) {
-      return false;
-    }
+): Effect.fn.Return<boolean, BodyNodeBudget> {
+  if (schema === undefined) {
+    return false;
+  }
 
-    if (facts.type.includes("object")) {
-      return true;
-    }
+  if (facts.type.includes("object")) {
+    return true;
+  }
 
-    return facts.type.length === 0 && (yield* membersOf(walk, schema)).properties.length > 0;
-  });
+  return facts.type.length === 0 && (yield* membersOf(walk, schema)).properties.length > 0;
+});
 
 interface Typing {
   readonly contentType: readonly string[];
@@ -835,88 +833,86 @@ interface Typing {
 }
 
 // ENC-02, ENC-12, ENC-13 and the ENC-17 to ENC-26 table: how the part's type is decided.
-const typingOf = (
+const typingOf = Effect.fnUntraced(function* typingOf(
   ctx: Context,
   input: RuleInput,
   node: EncodingNode,
   facts: Effect.Effect<Facts, BodyNodeBudget>,
-): Effect.Effect<Typing, BodyNodeBudget> =>
-  Effect.gen(function* typing() {
-    const given = explicitStyle(node);
-    const hasStyle = Object.keys(given).length > 0;
-    const findings: Finding[] = [];
-    if (hasStyle && input.honorsStyle) {
-      if (node.contentType !== undefined) {
-        findings.push(contentTypeIgnored(input.actual));
-      }
-
-      return {
-        contentType: [],
-        findings,
-        refused: false,
-        rows: ["ENC-01", ...styleRows(given)],
-        serialization: given,
-      };
-    }
-
-    if (hasStyle) {
-      findings.push(styleIgnored(input.actual));
-    }
-
-    if (node.contentType === undefined) {
-      const fallback = defaultFor(ctx.line, yield* facts, input);
-
-      return {
-        contentType: [fallback.type],
-        findings,
-        refused: false,
-        rows: ["ENC-01", fallback.row],
-        serialization: undefined,
-      };
-    }
-
-    const parsed = contentTypes(node.contentType);
-    if (Option.isNone(parsed)) {
-      return {
-        contentType: [],
-        findings: [...findings, invalidContentType(input)],
-        refused: true,
-        rows: [],
-        serialization: undefined,
-      };
+): Effect.fn.Return<Typing, BodyNodeBudget> {
+  const given = explicitStyle(node);
+  const hasStyle = Object.keys(given).length > 0;
+  const findings: Finding[] = [];
+  if (hasStyle && input.honorsStyle) {
+    if (node.contentType !== undefined) {
+      findings.push(contentTypeIgnored(input.actual));
     }
 
     return {
-      contentType: parsed.value,
+      contentType: [],
       findings,
       refused: false,
-      rows: ["ENC-01", "ENC-02"],
+      rows: ["ENC-01", ...styleRows(given)],
+      serialization: given,
+    };
+  }
+
+  if (hasStyle) {
+    findings.push(styleIgnored(input.actual));
+  }
+
+  if (node.contentType === undefined) {
+    const fallback = defaultFor(ctx.line, yield* facts, input);
+
+    return {
+      contentType: [fallback.type],
+      findings,
+      refused: false,
+      rows: ["ENC-01", fallback.row],
       serialization: undefined,
     };
-  });
+  }
+
+  const parsed = contentTypes(node.contentType);
+  if (Option.isNone(parsed)) {
+    return {
+      contentType: [],
+      findings: [...findings, invalidContentType(input)],
+      refused: true,
+      rows: [],
+      serialization: undefined,
+    };
+  }
+
+  return {
+    contentType: parsed.value,
+    findings,
+    refused: false,
+    rows: ["ENC-01", "ENC-02"],
+    serialization: undefined,
+  };
+});
 
 // A multipart part's typing: as `typingOf`, and an object part typed as XML is refused (XML-01).
-const partTypingOf = (
+const partTypingOf = Effect.fnUntraced(function* partTypingOf(
   ctx: Context,
   input: RuleInput,
   node: EncodingNode,
   facts: Facts,
-): Effect.Effect<Typing, BodyNodeBudget> =>
-  Effect.gen(function* partTyping() {
-    const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
-    const xml = typing.contentType.some(isXmlType);
-    if (typing.refused || !xml || !(yield* isObjectPart(ctx.walk, input.schema, facts))) {
-      return typing;
-    }
+): Effect.fn.Return<Typing, BodyNodeBudget> {
+  const typing = yield* typingOf(ctx, input, node, Effect.succeed(facts));
+  const xml = typing.contentType.some(isXmlType);
+  if (typing.refused || !xml || !(yield* isObjectPart(ctx.walk, input.schema, facts))) {
+    return typing;
+  }
 
-    return {
-      ...typing,
-      contentType: [],
-      findings: [...typing.findings, schemaDrivenXml(input)],
-      refused: true,
-      rows: [],
-    };
-  });
+  return {
+    ...typing,
+    contentType: [],
+    findings: [...typing.findings, schemaDrivenXml(input)],
+    refused: true,
+    rows: [],
+  };
+});
 
 interface Headers {
   readonly findings: readonly Finding[];
@@ -940,88 +936,91 @@ const writerOwned = (name: string, formData: boolean): boolean => {
 // ENC-03, ENC-11: part headers, each typed and serialized as a header parameter (HDR-01). A
 // `Content-Type` entry is ignored, a header the writer owns gets no flag, and a bad name or a header
 // the header parameter path cannot carry refuses the part.
-const headersOf = (ctx: Context, input: RuleInput, node: EncodingNode): Effect.Effect<Headers> =>
-  Effect.gen(function* headers() {
-    const { resolution } = ctx;
-    const findings: Finding[] = [];
-    const kept: PlainHeader[] = [];
-    let declares = false;
-    for (const name of Object.keys(node.headers ?? {})) {
-      const at = childKey(input.actual, "headers", name);
-      if (name.toLowerCase() === "content-type") {
-        findings.push(
-          notice(
-            "ENC-11/content-type-header-ignored",
-            "encoding-headers",
-            "Encoding header Content-Type",
-            "The specification says a Content-Type entry in headers SHALL be ignored; the part type comes from contentType.",
-            at,
-          ),
-        );
-        continue;
-      }
-
-      declares = true;
-      if (Option.isNone(Schema.decodeUnknownOption(HeaderName)(name))) {
-        findings.push(
-          dropping(
-            refusal(
-              "ENC-03/invalid-header-name",
-              "encoding-headers",
-              "Encoding header name",
-              `The header name ${JSON.stringify(sanitize(name))} is not an HTTP field name.`,
-              at,
-            ),
-          ),
-        );
-
-        return { declares, findings, headers: undefined };
-      }
-
-      if (writerOwned(name, input.formData)) {
-        findings.push(
-          notice(
-            writerOwnedCode,
-            "encoding-headers",
-            `Encoding header ${name}`,
-            `The multipart writer writes ${name} itself, so the declared header gets no flag and is not sent as declared.`,
-            at,
-          ),
-        );
-        continue;
-      }
-
-      const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.maxNodes });
-      if (typed._tag === "Unsupported") {
-        findings.push(
-          dropping(
-            refusal(
-              "ENC-03/unsupported-part-header",
-              "encoding-headers",
-              `Encoding header ${name}`,
-              `The part header ${name} cannot be sent as a header parameter: ${typed.reason}`,
-              at,
-              "Describe the header with a schema the header parameter rules accept, or remove it",
-            ),
-          ),
-        );
-
-        return { declares, findings, headers: undefined };
-      }
-
-      const marks = yield* headerMarks(resolution, at);
-      const header: PlainHeader = {
-        deprecated: marks.deprecated,
-        name,
-        required: marks.required,
-        schema: typed.schema,
-        serialization: typed.serialization,
-      };
-      kept.push(typed.sensitive === true ? { ...header, sensitive: true } : header);
+const headersOf = Effect.fnUntraced(function* headersOf(
+  ctx: Context,
+  input: RuleInput,
+  node: EncodingNode,
+): Effect.fn.Return<Headers> {
+  const { resolution } = ctx;
+  const findings: Finding[] = [];
+  const kept: PlainHeader[] = [];
+  let declares = false;
+  for (const name of Object.keys(node.headers ?? {})) {
+    const at = childKey(input.actual, "headers", name);
+    if (name.toLowerCase() === "content-type") {
+      findings.push(
+        notice(
+          "ENC-11/content-type-header-ignored",
+          "encoding-headers",
+          "Encoding header Content-Type",
+          "The specification says a Content-Type entry in headers SHALL be ignored; the part type comes from contentType.",
+          at,
+        ),
+      );
+      continue;
     }
 
-    return { declares, findings, headers: kept };
-  });
+    declares = true;
+    if (Option.isNone(decodeHeaderName(name))) {
+      findings.push(
+        dropping(
+          refusal(
+            "ENC-03/invalid-header-name",
+            "encoding-headers",
+            "Encoding header name",
+            `The header name ${quoted(name)} is not an HTTP field name.`,
+            at,
+          ),
+        ),
+      );
+
+      return { declares, findings, headers: undefined };
+    }
+
+    if (writerOwned(name, input.formData)) {
+      findings.push(
+        notice(
+          writerOwnedCode,
+          "encoding-headers",
+          `Encoding header ${name}`,
+          `The multipart writer writes ${name} itself, so the declared header gets no flag and is not sent as declared.`,
+          at,
+        ),
+      );
+      continue;
+    }
+
+    const typed = yield* partHeader(resolution, at, name, at, { maxNodes: ctx.walk.budget.limit });
+    if (PartHeaderOutcome.$is("Unsupported")(typed)) {
+      findings.push(
+        dropping(
+          refusal(
+            "ENC-03/unsupported-part-header",
+            "encoding-headers",
+            `Encoding header ${name}`,
+            `The part header ${name} cannot be sent as a header parameter: ${typed.reason}`,
+            at,
+            "Describe the header with a schema the header parameter rules accept, or remove it",
+          ),
+        ),
+      );
+
+      return { declares, findings, headers: undefined };
+    }
+
+    const marks = yield* headerMarks(resolution, at);
+    const header: PlainHeader = {
+      deprecated: marks.deprecated,
+      name,
+      required: marks.required,
+      schema: typed.schema,
+      serialization: typed.serialization,
+    };
+    kept.push(typed.sensitive === true ? { ...header, sensitive: true } : header);
+  }
+
+  return { declares, findings, headers: kept };
+});
 
 interface NestedEntry {
   readonly actual: CanonicalKey;
@@ -1050,7 +1049,7 @@ const nestedEntries = (
     byName === undefined
       ? []
       : members.properties.map(([name, schema]): NestedEntry => {
-          const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+          const explicit = Option.getOrUndefined(Record.get(byName, name));
 
           return {
             actual: explicit === undefined ? schema : childKey(actual, "encoding", name),
@@ -1128,66 +1127,65 @@ const nestedRows = (node: EncodingNode): readonly string[] => [
 // ENC-07 to ENC-09, ENC-16: one nested level by name and by position, the nested `itemEncoding`
 // the rule of every position after the nested `prefixEncoding` (HT:B16); a deeper level is
 // refused.
-const nestingOf = (
+const nestingOf = Effect.fnUntraced(function* nestingOf(
   ctx: Context,
   input: RuleInput,
   node: EncodingNode,
   buildAll: BuildAll,
-): Effect.Effect<Nesting, BodyNodeBudget> =>
-  Effect.gen(function* nesting() {
-    const nests =
-      Object.keys(node.encoding ?? {}).length > 0 || (node.prefixEncoding ?? []).length > 0;
-    if (input.depth === 1 && (nests || node.itemEncoding !== undefined)) {
-      return refuseNesting(
-        nestingRefusal(
-          "ENC-16/nesting-too-deep",
-          "Encoding nested more than one level",
-          "Nested encoding is supported for one level only.",
-          input.actual,
-        ),
-      );
-    }
+): Effect.fn.Return<Nesting, BodyNodeBudget> {
+  const nests =
+    Object.keys(node.encoding ?? {}).length > 0 || (node.prefixEncoding ?? []).length > 0;
+  if (input.depth === 1 && (nests || node.itemEncoding !== undefined)) {
+    return refuseNesting(
+      nestingRefusal(
+        "ENC-16/nesting-too-deep",
+        "Encoding nested more than one level",
+        "Nested encoding is supported for one level only.",
+        input.actual,
+      ),
+    );
+  }
 
-    const item = node.itemEncoding;
-    const children =
-      (!nests && item === undefined) || input.schema === undefined
-        ? noMembers
-        : yield* membersOf(ctx.walk, input.schema);
-    const entries = nestedEntries(node, input.actual, children);
-    const inputs = entries.map((entry): RuleInput => ({
-      actual: entry.actual,
-      depth: 1,
-      formData: false,
-      honorsStyle: false,
-      node: entry.node,
-      schema: memberSchema(children, entry.target),
-      target: entry.target,
-    }));
-    const itemInput: readonly RuleInput[] =
-      item === undefined
-        ? []
-        : [
-            {
-              actual: childKey(input.actual, "itemEncoding"),
-              depth: 1,
-              formData: false,
-              honorsStyle: false,
-              node: item,
-              schema: children.items,
-              target: { index: (node.prefixEncoding ?? []).length, kind: "position" },
-            },
-          ];
-    const built = yield* buildAll(ctx, [...inputs, ...itemInput]);
-    const rules = built.rules.map((rule) => toNested(rule));
+  const item = node.itemEncoding;
+  const children =
+    (!nests && item === undefined) || input.schema === undefined
+      ? noMembers
+      : yield* membersOf(ctx.walk, input.schema);
+  const entries = nestedEntries(node, input.actual, children);
+  const inputs = entries.map((entry): RuleInput => ({
+    actual: entry.actual,
+    depth: 1,
+    formData: false,
+    honorsStyle: false,
+    node: entry.node,
+    schema: memberSchema(children, entry.target),
+    target: entry.target,
+  }));
+  const itemInput: readonly RuleInput[] =
+    item === undefined
+      ? []
+      : [
+          {
+            actual: childKey(input.actual, "itemEncoding"),
+            depth: 1,
+            formData: false,
+            honorsStyle: false,
+            node: item,
+            schema: children.items,
+            target: { index: (node.prefixEncoding ?? []).length, kind: "position" },
+          },
+        ];
+  const built = yield* buildAll(ctx, [...inputs, ...itemInput]);
+  const rules = built.rules.map((rule) => toNested(rule));
 
-    return {
-      findings: built.findings,
-      item: item === undefined ? undefined : rules[entries.length],
-      nested: rules.slice(0, entries.length),
-      refused: built.refused,
-      rows: nestedRows(node),
-    };
-  });
+  return {
+    findings: built.findings,
+    item: item === undefined ? undefined : rules[entries.length],
+    nested: rules.slice(0, entries.length),
+    refused: built.refused,
+    rows: nestedRows(node),
+  };
+});
 
 // --- Transfer encoding (design 6.3: ENC-37 to ENC-39) ---
 
@@ -1246,7 +1244,7 @@ const declaredTransfer = (line: Line, label: string, facts: Facts): TransferResu
             "ENC-37/unsupported-content-encoding",
             transferAnchor(line),
             "Multipart part contentEncoding",
-            `The contentEncoding ${JSON.stringify(sanitize(declared.value))} of ${JSON.stringify(sanitize(label))} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
+            `The contentEncoding ${quoted(declared.value)} of ${quoted(label)} is neither base64 nor an identity encoding (binary, 7bit, 8bit), the transfer encodings a part is sent with.`,
             childKey(declared.at, "contentEncoding"),
             "Use contentEncoding base64 or binary, or remove it to send the part as is",
           ),
@@ -1260,7 +1258,10 @@ const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResul
   const label = targetLabel(input.target);
   const found =
     declaredTransfer(ctx.line, label, facts) ??
-    (facts.items === undefined ? undefined : declaredTransfer(ctx.line, label, facts.items)) ??
+    pipe(
+      facts.items,
+      UndefinedOr.map((items) => declaredTransfer(ctx.line, label, items)),
+    ) ??
     noTransfer;
   if (input.depth === 0 || found.encoding === undefined) {
     return found;
@@ -1273,7 +1274,7 @@ const transferOf = (ctx: Context, input: RuleInput, facts: Facts): TransferResul
         `${found.row}/nested-transfer-encoding`,
         transferAnchor(ctx.line),
         "Transfer encoding of a nested part",
-        `The nested part ${JSON.stringify(sanitize(label))} declares a base64 transfer encoding, which a nested part cannot carry.`,
+        `The nested part ${quoted(label)} declares a base64 transfer encoding, which a nested part cannot carry.`,
         input.actual,
       ),
     ),
@@ -1295,38 +1296,42 @@ const admitsBase64 = (values: readonly string[] | undefined): boolean =>
   values === undefined || values.some(isBase64);
 
 // ENC-39: a declared Content-Transfer-Encoding header whose schema rules out the part's base64.
-const transferConflict = (
+const transferConflict = Effect.fnUntraced(function* transferConflict(
   ctx: Context,
   input: RuleInput,
   name: string,
-): Effect.Effect<Finding | undefined> =>
-  Effect.gen(function* conflict() {
-    const header = follow(ctx.resolution, childKey(input.actual, "headers", name));
-    const at = follow(ctx.resolution, childKey(header, "schema"));
-    const schema = yield* nodeIn(ctx.resolution, at).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(TransferHeaderSchema)),
-      Effect.orElseSucceed((): typeof TransferHeaderSchema.Type => ({})),
-    );
-    const isString = Schema.is(Schema.String);
-    const declared = {
-      const: schema.const === undefined ? undefined : [schema.const].filter(isString),
-      enum: schema.enum?.filter(isString),
-    };
-    const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
+): Effect.fn.Return<Finding | undefined> {
+  const header = follow(ctx.resolution, childKey(input.actual, "headers", name));
+  const at = follow(ctx.resolution, childKey(header, "schema"));
+  const schema = yield* nodeIn(ctx.resolution, at).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(TransferHeaderSchema)),
+    Effect.orElseSucceed((): typeof TransferHeaderSchema.Type => ({})),
+  );
+  const declared = {
+    const: pipe(
+      schema.const,
+      UndefinedOr.map((value) => [value].filter(Predicate.isString)),
+    ),
+    enum: schema.enum?.filter(Predicate.isString),
+  };
+  const keyword = (["const", "enum"] as const).find((field) => !admitsBase64(declared[field]));
 
-    return keyword === undefined
-      ? undefined
-      : dropping(
-          refusal(
-            "ENC-39/conflicting-transfer-encoding",
-            transferAnchor(ctx.line),
-            "Encoding header Content-Transfer-Encoding",
-            `The Content-Transfer-Encoding schema of ${JSON.stringify(sanitize(targetLabel(input.target)))} does not admit base64, the transfer encoding its schema declares.`,
-            childKey(at, keyword),
-            "Remove the header, or let its schema admit base64",
-          ),
-        );
-  });
+  return pipe(
+    keyword,
+    UndefinedOr.map((field) =>
+      dropping(
+        refusal(
+          "ENC-39/conflicting-transfer-encoding",
+          transferAnchor(ctx.line),
+          "Encoding header Content-Transfer-Encoding",
+          `The Content-Transfer-Encoding schema of ${quoted(targetLabel(input.target))} does not admit base64, the transfer encoding its schema declares.`,
+          childKey(at, field),
+          "Remove the header, or let its schema admit base64",
+        ),
+      ),
+    ),
+  );
+});
 
 // A nesting part's rules on its rule: `nested` is present whenever the part nests, so an item rule
 // alone still marks it, and `nestedItem` holds the nested `itemEncoding`'s rule (ENC-09).
@@ -1341,96 +1346,95 @@ const withNesting = (rule: PlainRule, nesting: Nesting): void => {
 };
 
 // One Encoding Object, or the table default of a part that has none, as a rule (design 2.2).
-const buildRule = (
+const buildRule = Effect.fnUntraced(function* buildRule(
   ctx: Context,
   input: RuleInput,
   buildAll: BuildAll,
-): Effect.Effect<RuleResult, BodyNodeBudget> =>
-  Effect.gen(function* build() {
-    const node: EncodingNode = input.node ?? {};
-    const facts = yield* factsOf(ctx.walk, input.schema);
-    const typing = yield* partTypingOf(ctx, input, node, facts);
-    if (typing.refused) {
-      return { findings: typing.findings, rule: undefined };
-    }
+): Effect.fn.Return<RuleResult, BodyNodeBudget> {
+  const node: EncodingNode = input.node ?? {};
+  const facts = yield* factsOf(ctx.walk, input.schema);
+  const typing = yield* partTypingOf(ctx, input, node, facts);
+  if (typing.refused) {
+    return { findings: typing.findings, rule: undefined };
+  }
 
-    const transfer = transferOf(ctx, input, facts);
-    if (transfer.finding !== undefined) {
-      return { findings: [...typing.findings, transfer.finding], rule: undefined };
-    }
+  const transfer = transferOf(ctx, input, facts);
+  if (transfer.finding !== undefined) {
+    return { findings: [...typing.findings, transfer.finding], rule: undefined };
+  }
 
-    const headers = yield* headersOf(ctx, input, node);
-    const transferHeader = transferHeaderOf(node);
-    const conflict =
-      transfer.encoding === undefined ||
-      headers.headers === undefined ||
-      transferHeader === undefined
-        ? undefined
-        : yield* transferConflict(ctx, input, transferHeader);
-    // A conflict refuses the part, so it sends no header and the writer-owned notices are moot.
-    if (conflict !== undefined) {
-      const kept = headers.findings.filter(({ code }) => code !== writerOwnedCode);
+  const headers = yield* headersOf(ctx, input, node);
+  const transferHeader = transferHeaderOf(node);
+  const conflict =
+    transfer.encoding === undefined || headers.headers === undefined || transferHeader === undefined
+      ? undefined
+      : yield* transferConflict(ctx, input, transferHeader);
+  // A conflict refuses the part, so it sends no header and the writer-owned notices are moot.
+  if (conflict !== undefined) {
+    const kept = headers.findings.filter(({ code }) => code !== writerOwnedCode);
 
-      return { findings: [...typing.findings, ...kept, conflict], rule: undefined };
-    }
+    return { findings: [...typing.findings, ...kept, conflict], rule: undefined };
+  }
 
-    const nesting = yield* nestingOf(ctx, input, node, buildAll);
-    // ENC-40: a style the writer sends is name and raw value under `text/plain`; any other style
-    // refuses the part alone, and the rule keeps its style so the names plan gives it no flag.
-    const styled = typing.serialization;
-    const pairs = styled !== undefined && sendsFormPairs(styled);
-    const findings = [
-      ...typing.findings,
-      ...headers.findings,
-      ...nesting.findings,
-      ...(styled === undefined || pairs ? [] : [unsupportedPartStyle(input)]),
-    ];
-    if (headers.headers === undefined || nesting.refused) {
-      return { findings, rule: undefined };
-    }
+  const nesting = yield* nestingOf(ctx, input, node, buildAll);
+  // ENC-40: a style the writer sends is name and raw value under `text/plain`; any other style
+  // refuses the part alone, and the rule keeps its style so the names plan gives it no flag.
+  const styled = typing.serialization;
+  const pairs = styled !== undefined && sendsFormPairs(styled);
+  const findings = [
+    ...typing.findings,
+    ...headers.findings,
+    ...nesting.findings,
+    ...(styled === undefined || pairs ? [] : [unsupportedPartStyle(input)]),
+  ];
+  if (headers.headers === undefined || nesting.refused) {
+    return { findings, rule: undefined };
+  }
 
-    const rule: PlainRule = {
-      contentType: pairs ? [formPairsType] : typing.contentType,
-      headers: headers.headers,
-      origin: input.actual,
-      rows: sorted([
-        ...typing.rows,
-        ...nesting.rows,
-        ...(headers.declares ? ["ENC-03"] : []),
-        ...(transfer.row === undefined ? [] : [transfer.row]),
-        ...(styled === undefined ? [] : ["ENC-40"]),
-      ]),
-      target: input.target,
-    };
-    if (transfer.encoding !== undefined) {
-      rule.contentEncoding = transfer.encoding;
-    }
+  const rule: PlainRule = {
+    contentType: pairs ? [formPairsType] : typing.contentType,
+    headers: headers.headers,
+    origin: input.actual,
+    rows: sorted([
+      ...typing.rows,
+      ...nesting.rows,
+      ...(headers.declares ? ["ENC-03"] : []),
+      ...(transfer.row === undefined ? [] : [transfer.row]),
+      ...(styled === undefined ? [] : ["ENC-40"]),
+    ]),
+    target: input.target,
+  };
+  if (transfer.encoding !== undefined) {
+    rule.contentEncoding = transfer.encoding;
+  }
 
-    withNesting(rule, nesting);
-    if (typing.serialization !== undefined) {
-      rule.serialization = typing.serialization;
-    }
+  withNesting(rule, nesting);
+  if (typing.serialization !== undefined) {
+    rule.serialization = typing.serialization;
+  }
 
-    return { findings, rule };
-  });
+  return { findings, rule };
+});
 
 // Builds the rules in order and stops at the first refusal.
-const buildAll: BuildAll = (ctx, inputs) =>
-  Effect.gen(function* all() {
-    const findings: Finding[] = [];
-    const rules: PlainRule[] = [];
-    for (const input of inputs) {
-      const result = yield* buildRule(ctx, input, buildAll);
-      findings.push(...result.findings);
-      if (result.rule === undefined) {
-        return { findings, refused: true, rules: [] };
-      }
-
-      rules.push(result.rule);
+const buildAll: BuildAll = Effect.fnUntraced(function* all(
+  ctx: Context,
+  inputs: readonly RuleInput[],
+): Effect.fn.Return<Batch, BodyNodeBudget> {
+  const findings: Finding[] = [];
+  const rules: PlainRule[] = [];
+  for (const input of inputs) {
+    const result = yield* buildRule(ctx, input, buildAll);
+    findings.push(...result.findings);
+    if (result.rule === undefined) {
+      return { findings, refused: true, rules: [] };
     }
 
-    return { findings, refused: false, rules };
-  });
+    rules.push(result.rule);
+  }
+
+  return { findings, refused: false, rules };
+});
 
 // --- Media alternatives ---
 
@@ -1598,7 +1602,7 @@ const extraFields = (
   flatten(ctx.walk, schema).pipe(
     Effect.map((nodes) => {
       const found = firstLocated(nodes, (node) =>
-        Schema.is(ObjectValue)(node.additionalProperties) ? true : undefined,
+        isObjectValue(node.additionalProperties) ? true : undefined,
       );
 
       return found === undefined
@@ -1651,7 +1655,7 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
               "MED-11/unknown-property",
               "media-type-encoding",
               "Media type encoding key",
-              `The encoding key ${JSON.stringify(sanitize(name))} is not a property of the schema.`,
+              `The encoding key ${quoted(name)} is not a property of the schema.`,
               actual,
             ),
           ),
@@ -1666,7 +1670,7 @@ const unknownKeys = (line: Line, media: Media, members: Members): Keys => {
           "MED-12/absent-property-ignored",
           "encoding-by-name",
           "Media type encoding key",
-          `The encoding key ${JSON.stringify(sanitize(name))} names no schema property, so it is ignored.`,
+          `The encoding key ${quoted(name)} names no schema property, so it is ignored.`,
           actual,
         ),
       );
@@ -1686,7 +1690,7 @@ const propertyInputs = (
   const byName = media.node.encoding ?? {};
 
   return members.properties.map(([name, schema]): RuleInput => {
-    const explicit = Object.hasOwn(byName, name) ? byName[name] : undefined;
+    const explicit = Option.getOrUndefined(Record.get(byName, name));
 
     return {
       actual: explicit === undefined ? schema : childKey(media.home, "encoding", name),
@@ -1770,41 +1774,37 @@ const partInputs = (
 const typesOf = (nodes: readonly Located[]): readonly string[] => {
   const type = firstLocated(nodes, (node) => node.type)?.value;
 
-  return type === undefined ? [] : Arr.ensure(type);
+  return typeNames(type);
 };
 
 // An array root: typed array, or item schemas with no declared properties.
-const isArrayBody = (
+const isArrayBody = Effect.fnUntraced(function* isArrayBody(
   walk: Walk,
   schema: CanonicalKey,
   members: Members,
-): Effect.Effect<boolean, BodyNodeBudget> =>
-  Effect.gen(function* arrayBody() {
-    if (
-      members.properties.length === 0 &&
-      (members.items !== undefined || members.prefixItems.length > 0)
-    ) {
-      return true;
-    }
+): Effect.fn.Return<boolean, BodyNodeBudget> {
+  if (
+    members.properties.length === 0 &&
+    (members.items !== undefined || members.prefixItems.length > 0)
+  ) {
+    return true;
+  }
 
-    return typesOf(yield* flatten(walk, schema)).includes("array");
-  });
+  return typesOf(yield* flatten(walk, schema)).includes("array");
+});
 
 // An object root: not an array body, and typed object or with declared properties.
-const isObjectBody = (
+const isObjectBody = Effect.fnUntraced(function* isObjectBody(
   walk: Walk,
   schema: CanonicalKey,
   members: Members,
-): Effect.Effect<boolean, BodyNodeBudget> =>
-  Effect.gen(function* objectBody() {
-    if (yield* isArrayBody(walk, schema, members)) {
-      return false;
-    }
+): Effect.fn.Return<boolean, BodyNodeBudget> {
+  if (yield* isArrayBody(walk, schema, members)) {
+    return false;
+  }
 
-    return (
-      members.properties.length > 0 || typesOf(yield* flatten(walk, schema)).includes("object")
-    );
-  });
+  return members.properties.length > 0 || typesOf(yield* flatten(walk, schema)).includes("object");
+});
 
 interface PartStyles {
   readonly drops: boolean;
@@ -1815,107 +1815,105 @@ interface PartStyles {
 // ENC-40 on a named part follows the form property rules (design 8.5 rules 2, 3 and 11): refused
 // at `field` scope when every named part it refuses is optional, otherwise every one of them drops
 // the alternative. A 3.2 positional entry has no name, so its refusal keeps `element` scope.
-const partStyles = (
+const partStyles = Effect.fnUntraced(function* partStyles(
   ctx: Context,
   schema: CanonicalKey | undefined,
   inputs: readonly RuleInput[],
   findings: readonly Finding[],
-): Effect.Effect<PartStyles, BodyNodeBudget> =>
-  Effect.gen(function* styles() {
-    const named = new Map(
-      inputs.flatMap((input) =>
-        input.target.kind === "property" ? [[keyOf(input.actual), input.target.name] as const] : [],
-      ),
-    );
-    const nameOf = (finding: Finding): string | undefined =>
-      finding.code === unsupportedPartStyleCode ? named.get(keyOf(finding.at)) : undefined;
-    const refusedFields = findings.flatMap((finding) => nameOf(finding) ?? []);
-    if (schema === undefined || refusedFields.length === 0) {
-      return { drops: false, findings, refusedFields: [] };
-    }
+): Effect.fn.Return<PartStyles, BodyNodeBudget> {
+  const named = new Map(
+    inputs.flatMap((input) =>
+      input.target.kind === "property" ? [[keyOf(input.actual), input.target.name] as const] : [],
+    ),
+  );
+  const nameOf = (finding: Finding): string | undefined =>
+    finding.code === unsupportedPartStyleCode ? named.get(keyOf(finding.at)) : undefined;
+  const refusedFields = findings.flatMap((finding) => nameOf(finding) ?? []);
+  if (schema === undefined || refusedFields.length === 0) {
+    return { drops: false, findings, refusedFields: [] };
+  }
 
-    const requirement = yield* requirementOf(ctx.walk, schema);
-    const drops = refusedFields.some((name) => isRequired(requirement, name));
-    const moved = (finding: Finding, name: string): Finding =>
-      drops ? dropping(finding) : fieldRefusal(finding.at, finding, name);
+  const requirement = yield* requirementOf(ctx.walk, schema);
+  const drops = refusedFields.some((name) => isRequired(requirement, name));
+  const moved = (finding: Finding, name: string): Finding =>
+    drops ? dropping(finding) : fieldRefusal(finding.at, finding, name);
 
-    return {
-      drops,
-      findings: findings.map((finding) => {
-        const name = nameOf(finding);
+  return {
+    drops,
+    findings: findings.map((finding) => {
+      const name = nameOf(finding);
 
-        return name === undefined ? finding : moved(finding, name);
-      }),
-      refusedFields: drops ? [] : refusedFields,
-    };
-  });
+      return name === undefined ? finding : moved(finding, name);
+    }),
+    refusedFields: drops ? [] : refusedFields,
+  };
+});
 
-const multipartParts = (
+const multipartParts = Effect.fnUntraced(function* multipartParts(
   ctx: Context,
   media: Media,
   base: string,
-): Effect.Effect<Parts, BodyNodeBudget> =>
-  Effect.gen(function* parts() {
-    const { line } = ctx;
-    const blocker = partsBlocker(line, media);
-    if (blocker !== undefined) {
-      return refusedParts([blocker]);
-    }
+): Effect.fn.Return<Parts, BodyNodeBudget> {
+  const { line } = ctx;
+  const blocker = partsBlocker(line, media);
+  if (blocker !== undefined) {
+    return refusedParts([blocker]);
+  }
 
-    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
-    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
-    if (
-      schema !== undefined &&
-      base === "multipart/form-data" &&
-      (yield* isArrayBody(ctx.walk, schema, members))
-    ) {
-      return refusedParts([arrayFormData(media.home)]);
-    }
+  const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+  const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+  if (
+    schema !== undefined &&
+    base === "multipart/form-data" &&
+    (yield* isArrayBody(ctx.walk, schema, members))
+  ) {
+    return refusedParts([arrayFormData(media.home)]);
+  }
 
-    // A range such as `multipart/*` is not a concrete type, so it is left to the emitter.
-    if (
-      schema !== undefined &&
-      base !== "multipart/form-data" &&
-      !base.endsWith("/*") &&
-      (yield* isObjectBody(ctx.walk, schema, members))
-    ) {
-      return refusedParts([dropping(unnamedParts(line, schema))]);
-    }
+  // A range such as `multipart/*` is not a concrete type, so it is left to the emitter.
+  if (
+    schema !== undefined &&
+    base !== "multipart/form-data" &&
+    !base.endsWith("/*") &&
+    (yield* isObjectBody(ctx.walk, schema, members))
+  ) {
+    return refusedParts([dropping(unnamedParts(line, schema))]);
+  }
 
-    const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
-    const keys = unknownKeys(line, media, members);
-    if (keys.refused) {
-      return refusedParts([...extra, ...keys.findings]);
-    }
+  const extra = schema === undefined ? [] : yield* extraFields(ctx, schema);
+  const keys = unknownKeys(line, media, members);
+  if (keys.refused) {
+    return refusedParts([...extra, ...keys.findings]);
+  }
 
-    const { inputs, prefixCount } = partInputs(line, media, members, {
-      formData: base === "multipart/form-data",
-      honorsStyle: base === "multipart/form-data" && line !== "3.0",
-      mixed: base === "multipart/mixed",
-    });
-    const built = yield* buildAll(ctx, inputs);
-    if (built.refused) {
-      return refusedParts([...extra, ...keys.findings, ...built.findings]);
-    }
-
-    const styled = yield* partStyles(ctx, schema, inputs, built.findings);
-    const findings = [...extra, ...keys.findings, ...styled.findings];
-    if (styled.drops) {
-      return refusedParts(findings);
-    }
-
-    const propertyCount = members.properties.length;
-    const positioned = built.rules.slice(propertyCount);
-
-    return {
-      encoding: built.rules.slice(0, propertyCount),
-      findings,
-      itemEncoding: positioned[prefixCount],
-      prefixEncoding: positioned.slice(0, prefixCount),
-      refused: false,
-      refusedFields: styled.refusedFields,
-    };
+  const { inputs, prefixCount } = partInputs(line, media, members, {
+    formData: base === "multipart/form-data",
+    honorsStyle: base === "multipart/form-data" && line !== "3.0",
+    mixed: base === "multipart/mixed",
   });
+  const built = yield* buildAll(ctx, inputs);
+  if (built.refused) {
+    return refusedParts([...extra, ...keys.findings, ...built.findings]);
+  }
+
+  const styled = yield* partStyles(ctx, schema, inputs, built.findings);
+  const findings = [...extra, ...keys.findings, ...styled.findings];
+  if (styled.drops) {
+    return refusedParts(findings);
+  }
+
+  const propertyCount = members.properties.length;
+  const positioned = built.rules.slice(propertyCount);
+
+  return {
+    encoding: built.rules.slice(0, propertyCount),
+    findings,
+    itemEncoding: positioned[prefixCount],
+    prefixEncoding: positioned.slice(0, prefixCount),
+    refused: false,
+    refusedFields: styled.refusedFields,
+  };
+});
 
 // --- Form-urlencoded (design 6.3) ---
 
@@ -1979,46 +1977,40 @@ const formContentTypeRefusal = (input: RuleInput, expected: string): Finding =>
       "ENC-02/form-content-type",
       "encoding-content-type",
       "Encoding contentType under form-urlencoded",
-      `The contentType of ${JSON.stringify(sanitize(targetLabel(input.target)))} differs from ${expected}, the type a form value is sent as.`,
+      `The contentType of ${quoted(targetLabel(input.target))} differs from ${expected}, the type a form value is sent as.`,
       childKey(input.actual, "contentType"),
       `Remove contentType, or set it to ${expected}`,
     ),
   );
 
-const isCompound = (types: readonly string[]): boolean =>
-  types.some((name) => name === "object" || name === "array");
-
 // PRM-27 (design 6.1): a deepObject value is nested when its schema is an array, or declares a
 // property or additionalProperties schema whose type is or includes object or array. An untyped
 // member is not nested.
-const isNested = (
+const isNested = Effect.fnUntraced(function* isNested(
   walk: Walk,
   schema: CanonicalKey | undefined,
-): Effect.Effect<boolean, BodyNodeBudget> =>
-  Effect.gen(function* nested() {
-    if (schema === undefined) {
-      return false;
-    }
+): Effect.fn.Return<boolean, BodyNodeBudget> {
+  if (schema === undefined) {
+    return false;
+  }
 
-    const nodes = yield* flatten(walk, schema);
-    if (typesOf(nodes).includes("array")) {
+  const nodes = yield* flatten(walk, schema);
+  if (typesOf(nodes).includes("array")) {
+    return true;
+  }
+
+  const members = nodes.flatMap(({ at, node }) => [
+    ...Object.keys(node.properties ?? {}).map((name) => childKey(at, "properties", name)),
+    ...(isObjectValue(node.additionalProperties) ? [childKey(at, "additionalProperties")] : []),
+  ]);
+  for (const member of members) {
+    if (compound(typesOf(yield* flatten(walk, member)))) {
       return true;
     }
+  }
 
-    const members = nodes.flatMap(({ at, node }) => [
-      ...Object.keys(node.properties ?? {}).map((name) => childKey(at, "properties", name)),
-      ...(Schema.is(ObjectValue)(node.additionalProperties)
-        ? [childKey(at, "additionalProperties")]
-        : []),
-    ]);
-    for (const member of members) {
-      if (isCompound(typesOf(yield* flatten(walk, member)))) {
-        return true;
-      }
-    }
-
-    return false;
-  });
+  return false;
+});
 
 const compoundNested = (input: RuleInput): Finding =>
   dropping(
@@ -2026,7 +2018,7 @@ const compoundNested = (input: RuleInput): Finding =>
       "PRM-27/compound-nested",
       "style-values",
       "Encoding style deepObject under form-urlencoded",
-      `The deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} has nested objects or arrays, which the specification does not define.`,
+      `The deepObject value of ${quoted(targetLabel(input.target))} has nested objects or arrays, which the specification does not define.`,
       input.actual,
       "Set nonStandard.deepObjectBrackets in the author config to send it in the bracket convention",
     ),
@@ -2037,7 +2029,7 @@ const bracketChoice = (input: RuleInput): Finding =>
     bracketChoiceCode,
     "style-values",
     "Encoding style deepObject under form-urlencoded",
-    `The author config sends the nested deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} in the bracket convention, which the specification does not define.`,
+    `The author config sends the nested deepObject value of ${quoted(targetLabel(input.target))} in the bracket convention, which the specification does not define.`,
     input.actual,
   );
 
@@ -2046,7 +2038,7 @@ const scalarChoice = (input: RuleInput): Finding =>
     scalarChoiceCode,
     "style-values",
     "Encoding style deepObject under form-urlencoded",
-    `The author config sends a scalar deepObject value of ${JSON.stringify(sanitize(targetLabel(input.target)))} as name=value, which the specification does not define.`,
+    `The author config sends a scalar deepObject value of ${quoted(targetLabel(input.target))} as name=value, which the specification does not define.`,
     input.actual,
   );
 
@@ -2058,9 +2050,9 @@ const scalarCoverOf = (
   serialization: PlainSerialization | undefined,
 ): Effect.Effect<ScalarCover> =>
   serialization?.style !== "deepObject" || input.schema === undefined
-    ? Effect.succeed({ _tag: "Strict" })
+    ? Effect.succeed(ScalarCover.Strict())
     : scalarCover(ctx.resolution, input.schema, ctx.site.nonStandard, {
-        maxNodes: ctx.walk.maxNodes,
+        maxNodes: ctx.walk.budget.limit,
       });
 
 // The query style table's refusal for a form property's explicit style fields (design 6.3, through
@@ -2073,7 +2065,7 @@ const styleRefusalOf = (
   serialization === undefined
     ? Effect.succeedNone
     : formStyleRefusal(ctx.resolution, input.schema, serialization, {
-        maxNodes: ctx.walk.maxNodes,
+        maxNodes: ctx.walk.budget.limit,
       }).pipe(
         Effect.map(
           Option.map((found) =>
@@ -2112,18 +2104,19 @@ const deepObjectExplode = (
 
 // What PRM-27 does to one form rule: nothing, refuse its alternative (strict), or mark it for the
 // bracket convention (the author config's switch, never defaulted or inferred).
-const deepObjectOf = (
+type DeepObjectAction = "mark" | "none" | "refuse";
+
+const deepObjectOf = Effect.fnUntraced(function* deepObjectOf(
   ctx: Context,
   input: RuleInput,
   serialization: PlainSerialization | undefined,
-): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> =>
-  Effect.gen(function* deepObject() {
-    if (serialization?.style !== "deepObject" || !(yield* isNested(ctx.walk, input.schema))) {
-      return "none";
-    }
+): Effect.fn.Return<DeepObjectAction, BodyNodeBudget> {
+  if (serialization?.style !== "deepObject" || !(yield* isNested(ctx.walk, input.schema))) {
+    return "none";
+  }
 
-    return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
-  });
+  return ctx.site.nonStandard?.deepObjectBrackets === true ? "mark" : "refuse";
+});
 
 // What PRM-27 does to one form rule once the scalar switch has decided: its covered branches
 // (refused when a nested branch or member union is uncovered, marked when the bracket switch covers
@@ -2133,97 +2126,96 @@ const coveredDeepObject = (
   input: RuleInput,
   serialization: PlainSerialization | undefined,
   cover: ScalarCover,
-): Effect.Effect<"mark" | "none" | "refuse", BodyNodeBudget> => {
-  if (cover._tag === "Uncovered") {
-    return Effect.succeed("refuse");
-  }
-
-  if (cover._tag === "Covered") {
-    return Effect.succeed(cover.nested ? "mark" : "none");
-  }
-
-  return deepObjectOf(ctx, input, serialization);
-};
+): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+  ScalarCover.$match(cover, {
+    Covered: ({ nested }): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+      Effect.succeed(nested ? "mark" : "none"),
+    Strict: (): Effect.Effect<DeepObjectAction, BodyNodeBudget> =>
+      deepObjectOf(ctx, input, serialization),
+    Uncovered: (): Effect.Effect<DeepObjectAction, BodyNodeBudget> => Effect.succeed("refuse"),
+  });
 
 // One form property's rule. Style fields apply on every line (ENC-12; 3.0 per ENC-14); without
 // them the value is sent by the default table, so an explicit contentType is kept only when it
 // names the table's type, which changes nothing on the wire. Style fields the query style table
 // marks not applicable refuse the alternative (STY-17 to STY-24, PRM-27), and a deepObject over a
 // nested value refuses it unless the author config opts into brackets (PRM-27).
-const formRule = (ctx: Context, input: RuleInput): Effect.Effect<RuleResult, BodyNodeBudget> =>
-  Effect.gen(function* build() {
-    const node: EncodingNode = input.node ?? {};
-    const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
-    if (typing.refused) {
-      return { findings: typing.findings, rule: undefined };
-    }
+const formRule = Effect.fnUntraced(function* formRule(
+  ctx: Context,
+  input: RuleInput,
+): Effect.fn.Return<RuleResult, BodyNodeBudget> {
+  const node: EncodingNode = input.node ?? {};
+  const typing = yield* typingOf(ctx, input, node, factsOf(ctx.walk, input.schema));
+  if (typing.refused) {
+    return { findings: typing.findings, rule: undefined };
+  }
 
-    // Under the scalar switch the branch walk decides a deepObject entry the strict object test
-    // would refuse; the style table refuses nothing else for deepObject (design 6.1 Scalar switch).
-    const cover = yield* scalarCoverOf(ctx, input, typing.serialization);
-    const inapplicable =
-      cover._tag === "Strict"
-        ? yield* styleRefusalOf(ctx, input, typing.serialization)
-        : Option.none();
-    if (Option.isSome(inapplicable)) {
-      return { findings: [...typing.findings, inapplicable.value], rule: undefined };
-    }
+  // Under the scalar switch the branch walk decides a deepObject entry the strict object test
+  // would refuse; the style table refuses nothing else for deepObject (design 6.1 Scalar switch).
+  const cover = yield* scalarCoverOf(ctx, input, typing.serialization);
+  const inapplicable = ScalarCover.$is("Strict")(cover)
+    ? yield* styleRefusalOf(ctx, input, typing.serialization)
+    : Option.none();
+  if (Option.isSome(inapplicable)) {
+    return { findings: [...typing.findings, inapplicable.value], rule: undefined };
+  }
 
-    const deepObject = yield* coveredDeepObject(ctx, input, typing.serialization, cover);
-    if (deepObject === "refuse") {
-      return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
-    }
+  const deepObject = yield* coveredDeepObject(ctx, input, typing.serialization, cover);
+  if (deepObject === "refuse") {
+    return { findings: [...typing.findings, compoundNested(input)], rule: undefined };
+  }
 
-    const explicit = typing.serialization === undefined && node.contentType !== undefined;
-    const fallback = explicit
-      ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema), input)
-      : undefined;
-    const [given] = typing.contentType;
-    if (
-      fallback !== undefined &&
-      (typing.contentType.length !== 1 || given?.toLowerCase() !== fallback.type)
-    ) {
-      return {
-        findings: [...typing.findings, formContentTypeRefusal(input, fallback.type)],
-        rule: undefined,
-      };
-    }
-
-    const rule: PlainRule = {
-      contentType: typing.contentType,
-      headers: [],
-      origin: input.actual,
-      rows: sorted([
-        ...typing.rows,
-        ...(fallback === undefined ? [] : [fallback.row]),
-        ...(typing.serialization === undefined ? [] : ["ENC-12"]),
-        ...(ctx.line === "3.0" ? ["ENC-14"] : []),
-      ]),
-      target: input.target,
-    };
-    if (typing.serialization !== undefined) {
-      rule.serialization = typing.serialization;
-    }
-
-    if (deepObject === "mark") {
-      rule.nonStandard = "deepObjectBrackets";
-    }
-
-    if (cover._tag === "Covered") {
-      rule.nonStandardScalars = "deepObjectScalars";
-    }
-
+  const explicit = typing.serialization === undefined && node.contentType !== undefined;
+  const fallback = explicit
+    ? defaultFor(ctx.line, yield* factsOf(ctx.walk, input.schema), input)
+    : undefined;
+  const [given] = typing.contentType;
+  if (
+    fallback !== undefined &&
+    (typing.contentType.length !== 1 || given?.toLowerCase() !== fallback.type)
+  ) {
     return {
-      findings: [
-        ...typing.findings,
-        ...(deepObject === "mark" ? [bracketChoice(input)] : []),
-        ...(cover._tag === "Covered" ? [scalarChoice(input)] : []),
-        ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
-        ...formIgnored(node, input.actual),
-      ],
-      rule,
+      findings: [...typing.findings, formContentTypeRefusal(input, fallback.type)],
+      rule: undefined,
     };
-  });
+  }
+
+  const rule: PlainRule = {
+    contentType: typing.contentType,
+    headers: [],
+    origin: input.actual,
+    rows: sorted([
+      ...typing.rows,
+      ...(fallback === undefined ? [] : [fallback.row]),
+      ...(typing.serialization === undefined ? [] : ["ENC-12"]),
+      ...(ctx.line === "3.0" ? ["ENC-14"] : []),
+    ]),
+    target: input.target,
+  };
+  if (typing.serialization !== undefined) {
+    rule.serialization = typing.serialization;
+  }
+
+  if (deepObject === "mark") {
+    rule.nonStandard = "deepObjectBrackets";
+  }
+
+  const covered = ScalarCover.$is("Covered")(cover);
+  if (covered) {
+    rule.nonStandardScalars = "deepObjectScalars";
+  }
+
+  return {
+    findings: [
+      ...typing.findings,
+      ...(deepObject === "mark" ? [bracketChoice(input)] : []),
+      ...(covered ? [scalarChoice(input)] : []),
+      ...deepObjectExplode(ctx.line, typing.serialization, input.actual),
+      ...formIgnored(node, input.actual),
+    ],
+    rule,
+  };
+});
 
 // Positional encoding applies to multipart only (MED-07, MED-08), so a form alternative ignores it.
 const formPositional = (media: Media): readonly Finding[] => [
@@ -2260,60 +2252,59 @@ const refusedFormParts = (findings: readonly Finding[]): Parts =>
 // refused at `field` scope when it is optional, and the alternative stays; a required one drops
 // the alternative with every entry's dropping refusals, so no `field` record outlives it. Without
 // (a `querystring` content entry, design 6.1), the first refusing rule refuses the entry.
-const formParts = (
+const formParts = Effect.fnUntraced(function* formParts(
   ctx: Context,
   media: Media,
   fields: boolean,
-): Effect.Effect<Parts, BodyNodeBudget> =>
-  Effect.gen(function* parts() {
-    const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
-    const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
-    const keys = unknownKeys(ctx.line, media, members);
-    if (keys.refused) {
-      return refusedParts(keys.findings);
+): Effect.fn.Return<Parts, BodyNodeBudget> {
+  const schema = media.node.schema === undefined ? undefined : childKey(media.home, "schema");
+  const members = schema === undefined ? noMembers : yield* membersOf(ctx.walk, schema);
+  const keys = unknownKeys(ctx.line, media, members);
+  if (keys.refused) {
+    return refusedParts(keys.findings);
+  }
+
+  const findings: Finding[] = [...keys.findings, ...formPositional(media)];
+  const rules: PlainRule[] = [];
+  const refusedFields: string[] = [];
+  const entries = new Map<Finding, { readonly at: CanonicalKey; readonly name: string }>();
+  let requirement: Requirement | undefined;
+  for (const input of propertyInputs(media, members, true, false)) {
+    const result = yield* formRule(ctx, input);
+    findings.push(...result.findings);
+    if (result.rule !== undefined) {
+      rules.push(result.rule);
+      continue;
     }
 
-    const findings: Finding[] = [...keys.findings, ...formPositional(media)];
-    const rules: PlainRule[] = [];
-    const refusedFields: string[] = [];
-    const entries = new Map<Finding, { readonly at: CanonicalKey; readonly name: string }>();
-    let requirement: Requirement | undefined;
-    for (const input of propertyInputs(media, members, true, false)) {
-      const result = yield* formRule(ctx, input);
-      findings.push(...result.findings);
-      if (result.rule !== undefined) {
-        rules.push(result.rule);
-        continue;
-      }
-
-      if (!fields || schema === undefined || input.target.kind !== "property") {
-        return refusedFormParts(findings);
-      }
-
-      requirement ??= yield* requirementOf(ctx.walk, schema);
-      if (isRequired(requirement, input.target.name)) {
-        return refusedFormParts(findings);
-      }
-
-      refusedFields.push(input.target.name);
-      for (const finding of result.findings) {
-        if (finding.drops === true) {
-          entries.set(finding, { at: input.actual, name: input.target.name });
-        }
-      }
+    if (!fields || schema === undefined || input.target.kind !== "property") {
+      return refusedFormParts(findings);
     }
 
-    return {
-      ...noParts,
-      encoding: rules,
-      findings: findings.map((finding) => {
-        const entry = entries.get(finding);
+    requirement ??= yield* requirementOf(ctx.walk, schema);
+    if (isRequired(requirement, input.target.name)) {
+      return refusedFormParts(findings);
+    }
 
-        return entry === undefined ? finding : fieldRefusal(entry.at, finding, entry.name);
-      }),
-      refusedFields,
-    };
-  });
+    refusedFields.push(input.target.name);
+    for (const finding of result.findings) {
+      if (finding.drops === true) {
+        entries.set(finding, { at: input.actual, name: input.target.name });
+      }
+    }
+  }
+
+  return {
+    ...noParts,
+    encoding: rules,
+    findings: findings.map((finding) => {
+      const entry = entries.get(finding);
+
+      return entry === undefined ? finding : fieldRefusal(entry.at, finding, entry.name);
+    }),
+    refusedFields,
+  };
+});
 
 const ignoredParts = (line: Line, media: Media): Parts => {
   const { home, node } = media;
@@ -2341,80 +2332,79 @@ const partsOf = (
     : Effect.succeed(ignoredParts(ctx.line, media));
 };
 
-const normalizeAlternative = (
+const normalizeAlternative = Effect.fnUntraced(function* normalizeAlternative(
   ctx: Context,
   body: CanonicalKey,
   key: string,
-): Effect.Effect<AlternativeResult, BodyNodeBudget | BodyNotReadable> =>
-  Effect.gen(function* alternative() {
-    const { line, resolution } = ctx;
-    const mediaSite = childKey(body, "content", key);
-    if (Option.isNone(Schema.decodeUnknownOption(MediaRange)(key))) {
-      // The grammar check refuses the key (MED-24) before normalization, so it is not raised twice.
-      return stopAlternative();
-    }
+): Effect.fn.Return<AlternativeResult, BodyNodeBudget | BodyNotReadable> {
+  const { line, resolution } = ctx;
+  const mediaSite = childKey(body, "content", key);
+  if (Option.isNone(decodeMediaRange(key))) {
+    // The grammar check refuses the key (MED-24) before normalization, so it is not raised twice.
+    return stopAlternative();
+  }
 
-    const base = baseType(key);
-    const codec = codecOf(base);
-    const media = yield* readMedia(resolution, mediaSite);
-    const { home, node } = media;
-    const parts = yield* partsOf(ctx, media, base, codec);
-    if (parts.refused) {
-      return stopAlternative(...anchorDrops(home, parts.findings));
-    }
+  const base = mediaEssence(key);
+  const codec = codecOf(base);
+  const media = yield* readMedia(resolution, mediaSite);
+  const { home, node } = media;
+  const parts = yield* partsOf(ctx, media, base, codec);
+  if (parts.refused) {
+    return stopAlternative(...anchorDrops(home, parts.findings));
+  }
 
-    // An XML body is opaque, so its schema is never consulted (design 6.3, D-SCH3).
-    const opaque = codec === "xml";
-    const schemaSites = opaque
-      ? []
-      : (["schema", "itemSchema"] as const).flatMap((field) =>
-          node[field] === undefined ? [] : [childKey(home, field)],
-        );
-    const limits = { maxNodes: ctx.walk.maxNodes };
-    if (schemaSites.some((site) => appliesDynamicKeyword(resolution, site, limits))) {
-      // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
-      // the body cannot be checked without it, so the alternative is refused with no second
-      // diagnostic, and a required body left without one raises to operation scope.
-      return stopAlternative();
-    }
+  // An XML body is opaque, so its schema is never consulted (design 6.3, D-SCH3).
+  const opaque = codec === "xml";
+  const schemaSites = opaque
+    ? []
+    : (["schema", "itemSchema"] as const).flatMap((field) =>
+        node[field] === undefined ? [] : [childKey(home, field)],
+      );
+  const limits = { maxNodes: ctx.walk.budget.limit };
+  if (schemaSites.some((site) => appliesDynamicKeyword(resolution, site, limits))) {
+    // The schema store refuses the keyword at element scope where it sits (SCH-05, 06, 65, 66);
+    // the body cannot be checked without it, so the alternative is refused with no second
+    // diagnostic, and a required body left without one raises to operation scope.
+    return stopAlternative();
+  }
 
-    const result: PlainAlternative = {
+  const result: PlainAlternative = {
+    codec,
+    encoding: parts.encoding,
+    mediaType: key,
+    origin: home,
+    prefixEncoding: parts.prefixEncoding,
+    rows: alternativeRows(
+      line,
       codec,
-      encoding: parts.encoding,
-      mediaType: key,
-      origin: home,
-      prefixEncoding: parts.prefixEncoding,
-      rows: alternativeRows(
-        line,
-        codec,
-        node,
-        node.schema !== undefined && !opaque,
-        node.itemSchema !== undefined && !opaque,
-      ),
-    };
-    if (node.schema !== undefined && !opaque) {
-      result.schema = { key: schemaKeyAt(resolution, childKey(home, "schema")) };
-    }
+      node,
+      node.schema !== undefined && !opaque,
+      node.itemSchema !== undefined && !opaque,
+    ),
+  };
+  if (node.schema !== undefined && !opaque) {
+    result.schema = { key: schemaKeyAt(resolution, childKey(home, "schema")) };
+  }
 
-    if (node.itemSchema !== undefined && !opaque) {
-      result.itemSchema = { key: schemaKeyAt(resolution, childKey(home, "itemSchema")) };
-    }
+  if (node.itemSchema !== undefined && !opaque) {
+    result.itemSchema = { key: schemaKeyAt(resolution, childKey(home, "itemSchema")) };
+  }
 
-    if (parts.itemEncoding !== undefined) {
-      result.itemEncoding = parts.itemEncoding;
-    }
+  if (parts.itemEncoding !== undefined) {
+    result.itemEncoding = parts.itemEncoding;
+  }
 
-    if (parts.refusedFields.length > 0) {
-      result.refusedFields = parts.refusedFields;
-    }
+  if (parts.refusedFields.length > 0) {
+    result.refusedFields = parts.refusedFields;
+  }
 
-    const described = line === "3.2" && node.description !== undefined;
+  const described = line === "3.2" && node.description !== undefined;
 
-    return {
-      alternative: result,
-      findings: described ? [...parts.findings, descriptionIgnored(home)] : parts.findings,
-    };
-  });
+  return {
+    alternative: result,
+    findings: described ? [...parts.findings, descriptionIgnored(home)] : parts.findings,
+  };
+});
 
 // --- Diagnostics and the body ---
 
@@ -2453,33 +2443,32 @@ const toDiagnostics = (
   findings: readonly Finding[],
   mediaSite?: CanonicalKey,
 ): Effect.Effect<readonly Diagnostic[]> =>
-  Effect.all(
-    findings.map((item) => {
-      const viaEntry = underMediaSite(ctx.resolution, mediaSite, item.at);
-      const own = viaEntry ?? item.at;
-      // Placed away from its own location, the element names it first; under a referenced body,
-      // the same place below the body's content entry follows.
-      const moved = ctx.reference !== undefined || viaEntry !== undefined;
-      const bodyEntry = ctx.reference === undefined || viaEntry === undefined ? [] : [viaEntry];
-      const related = [...(moved ? [item.at] : []), ...bodyEntry, ...(item.related ?? [])];
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  Effect.forEach(findings, (item) => {
+    const viaEntry = underMediaSite(ctx.resolution, mediaSite, item.at);
+    const own = viaEntry ?? item.at;
+    // Placed away from its own location, the element names it first; under a referenced body,
+    // the same place below the body's content entry follows.
+    const moved = ctx.reference !== undefined || viaEntry !== undefined;
+    const bodyEntry = ctx.reference === undefined || viaEntry === undefined ? [] : [viaEntry];
+    const related = [...(moved ? [item.at] : []), ...bodyEntry, ...(item.related ?? [])];
 
-      return diagnosticOf({
-        code: item.code,
-        document: ctx.reference === undefined ? own.document : ctx.resolution.document,
-        element: item.element,
-        hint: item.hint,
-        message: item.message,
-        openapi: ctx.site.openapi,
-        operation: ctx.site.operation,
-        pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
-        related: related.length > 0 ? related : undefined,
-        scope: item.scope ?? "element",
-        severity: item.severity,
-        specSection: specSectionUrl(ctx.line, item.anchor),
-        wire: item.wire,
-      });
-    }),
-  ).pipe(Effect.orDie);
+    return diagnosticOf({
+      code: item.code,
+      document: ctx.reference === undefined ? own.document : ctx.resolution.document,
+      element: item.element,
+      hint: item.hint,
+      message: item.message,
+      openapi: ctx.site.openapi,
+      operation: ctx.site.operation,
+      pointer: ctx.reference === undefined ? own.pointer : ctx.site.pointer,
+      related: related.length > 0 ? related : undefined,
+      scope: item.scope ?? "element",
+      severity: item.severity,
+      specSection: specSectionUrl(ctx.line, item.anchor),
+      wire: item.wire,
+    });
+  }).pipe(Effect.orDie);
 
 const emptyContent = (line: Line, at: CanonicalKey): Finding =>
   refusal(
@@ -2507,15 +2496,13 @@ const EntryComponents = Schema.Struct({
   ),
 });
 
+const decodeDiscriminated = Schema.decodeUnknownOption(Discriminated);
+
+const decodeEntryComponents = Schema.decodeUnknownOption(EntryComponents);
+
 type Hint = typeof DiscriminatorHint.Encoded;
 
 type Branch = Hint["branches"][number];
-
-const jsonIn = (resolution: Resolution, key: CanonicalKey): Json | undefined => {
-  const document = resolution.documents.get(key.document);
-
-  return document === undefined ? undefined : jsonAt(document, key.pointer);
-};
 
 // Whether an element-scope refusal of check names the Discriminator Object of `root`: DSC-03,
 // 04, 05, 09 and 10 all sit at or below it, so none is listed by code.
@@ -2538,7 +2525,7 @@ interface Component {
 
 // The entry's component schemas, in document key order.
 const entrySchemas = (resolution: Resolution): readonly Component[] => {
-  const names = Option.match(Schema.decodeUnknownOption(EntryComponents)(resolution.value), {
+  const names = Option.match(decodeEntryComponents(resolution.value), {
     onNone: (): readonly string[] => [],
     onSome: (root) => Object.keys(root.components?.schemas ?? {}),
   });
@@ -2584,7 +2571,7 @@ const hintAt = (
 ): Hint | undefined => {
   const root = settle(resolution, site);
   const node = Option.getOrUndefined(
-    Schema.decodeUnknownOption(Discriminated)(jsonIn(resolution, root)),
+    decodeDiscriminated(Option.getOrUndefined(nodeOption(resolution, root))),
   );
   if (node === undefined || discriminatorRefused(checkFindings, root)) {
     return undefined;
@@ -2635,32 +2622,35 @@ const hintAt = (
  * discriminator any element-scope refusal in `checkFindings` names gets no hint. The hint never
  * changes validation (DSC-06).
  */
-export const hintDiscriminators = (
+export const hintDiscriminators: (
   resolution: Resolution,
   body: Body,
   checkFindings: readonly Diagnostic[],
-): Effect.Effect<Body> =>
-  Effect.gen(function* hint() {
-    const hints = body.alternatives.map((alternative) =>
-      alternative.schema === undefined
-        ? undefined
-        : hintAt(resolution, childKey(alternative.origin, "schema"), checkFindings),
-    );
-    if (hints.every((found) => found === undefined)) {
-      return body;
-    }
+) => Effect.Effect<Body> = Effect.fnUntraced(function* hintDiscriminators(
+  resolution: Resolution,
+  body: Body,
+  checkFindings: readonly Diagnostic[],
+): Effect.fn.Return<Body, Schema.SchemaError> {
+  const hints = body.alternatives.map((alternative) =>
+    alternative.schema === undefined
+      ? undefined
+      : hintAt(resolution, childKey(alternative.origin, "schema"), checkFindings),
+  );
+  if (hints.every((found) => found === undefined)) {
+    return body;
+  }
 
-    const plain = yield* Schema.encodeEffect(Body)(body);
+  const plain = yield* Schema.encodeEffect(Body)(body);
 
-    return yield* Schema.decodeUnknownEffect(Body)({
-      ...plain,
-      alternatives: plain.alternatives.map((alternative, index) => {
-        const found = hints[index];
+  return yield* Schema.decodeUnknownEffect(Body)({
+    ...plain,
+    alternatives: plain.alternatives.map((alternative, index) => {
+      const found = hints[index];
 
-        return found === undefined ? alternative : { ...alternative, discriminator: found };
-      }),
-    });
-  }).pipe(Effect.orDie);
+      return found === undefined ? alternative : { ...alternative, discriminator: found };
+    }),
+  });
+}, Effect.orDie);
 
 /**
  * Normalizes one Request Body Object into a `Body` whose alternatives are the media types that
@@ -2669,67 +2659,72 @@ export const hintDiscriminators = (
  * bodies take a rule per property; XML stays opaque; undecided constructs are refused rather than
  * dropped. A site the earlier stages should have stopped fails with `BodyNotReadable`.
  */
-export const normalizeBody = (
+export const normalizeBody = Effect.fnUntraced(function* normalizeBody(
   resolution: Resolution,
   site: BodySite,
   limits: ResolveLimits = defaultLimits,
-): Effect.Effect<BodyOutcome, BodyNodeBudget | BodyNotReadable> =>
-  Effect.gen(function* normalize() {
-    const unreadable = new BodyNotReadable({ pointer: site.pointer, reason: "not-a-request-body" });
-    const use = { document: resolution.document, pointer: site.pointer };
-    const reference = referenceIn(resolution, use);
-    const target = follow(resolution, use);
-    const node = yield* nodeIn(resolution, target).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
-      Effect.mapError(() => unreadable),
-    );
-    const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
-    const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
-    const required = node.required ?? false;
-    const keys = Object.keys(node.content);
-    if (keys.length === 0) {
-      const empty = emptyContent(resolution.line, childKey(target, "content"));
+): Effect.fn.Return<BodyOutcome, BodyNodeBudget | BodyNotReadable> {
+  const unreadable = new BodyNotReadable({ pointer: site.pointer, reason: "not-a-request-body" });
+  const use = { document: resolution.document, pointer: site.pointer };
+  const reference = referenceIn(resolution, use);
+  const target = follow(resolution, use);
+  const node = yield* nodeIn(resolution, target).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(RequestBodyObject)),
+    Effect.mapError(() => unreadable),
+  );
+  const walk: Walk = { budget: budgetOf({ maxNodes: limits.maxNodes }), resolution, site };
+  const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
+  const required = node.required ?? false;
+  const keys = Object.keys(node.content);
+  if (keys.length === 0) {
+    const empty = emptyContent(resolution.line, childKey(target, "content"));
 
-      return { _tag: "Refused", diagnostics: yield* toDiagnostics(ctx, [empty]), required };
-    }
+    return BodyOutcome.Refused({ diagnostics: yield* toDiagnostics(ctx, [empty]), required });
+  }
 
-    const results = yield* Effect.all(keys.map((key) => normalizeAlternative(ctx, target, key)));
-    const placed = yield* Effect.all(
-      results.map((result, index) =>
-        toDiagnostics(ctx, result.findings, childKey(target, "content", keys[index] ?? "")),
-      ),
-    );
-    const diagnostics = placed.flat();
-    const alternatives = results.flatMap((result) =>
-      result.alternative === undefined ? [] : [result.alternative],
-    );
-    if (alternatives.length === 0) {
-      return { _tag: "Refused", diagnostics, required };
-    }
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const results = yield* Effect.forEach(keys, (key) => normalizeAlternative(ctx, target, key));
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach(items, f), not an array method
+  const placed = yield* Effect.forEach(results, (result, index) =>
+    toDiagnostics(ctx, result.findings, childKey(target, "content", keys[index] ?? "")),
+  );
+  const diagnostics = placed.flat();
+  const alternatives = Arr.getSomes(
+    results.map((result) => Option.fromUndefinedOr(result.alternative)),
+  );
+  if (alternatives.length === 0) {
+    return BodyOutcome.Refused({ diagnostics, required });
+  }
 
-    const body = yield* Schema.decodeUnknownEffect(Body)({
-      alternatives,
-      docs: docsOf(reference?.description ?? node.description, reference?.summary),
-      origin: { document: resolution.document, pointer: site.pointer },
-      required,
-      rows: ["RQB-01", "RQB-03", "RQB-04"],
-    }).pipe(Effect.orDie);
+  const body = yield* Schema.decodeUnknownEffect(Body)({
+    alternatives,
+    docs: docsOf(reference?.description ?? node.description, reference?.summary),
+    origin: { document: resolution.document, pointer: site.pointer },
+    required,
+    rows: ["RQB-01", "RQB-03", "RQB-04"],
+  }).pipe(Effect.orDie);
 
-    return { _tag: "Implemented", body, diagnostics };
-  });
+  return BodyOutcome.Implemented({ body, diagnostics });
+});
 
 /**
  * What the form rules decided for one form-urlencoded content entry outside a request body.
  * `Implemented` holds one rule per declared property in document order; `Refused` means a rule
  * refused the entry, as it would drop a form body alternative.
  */
-export type FormContentOutcome =
-  | {
-      readonly _tag: "Implemented";
-      readonly diagnostics: readonly Diagnostic[];
-      readonly encoding: readonly EncodingRule[];
-    }
-  | { readonly _tag: "Refused"; readonly diagnostics: readonly Diagnostic[] };
+// oxlint-disable-next-line no-redeclare -- Data.taggedEnum pairs a type and its constructors under one name
+export type FormContentOutcome = Data.TaggedEnum<{
+  Implemented: {
+    readonly diagnostics: readonly Diagnostic[];
+    readonly encoding: readonly EncodingRule[];
+  };
+  Refused: { readonly diagnostics: readonly Diagnostic[] };
+}>;
+
+/**
+ * Constructors and dispatch for {@link FormContentOutcome}.
+ */
+export const FormContentOutcome = Data.taggedEnum<FormContentOutcome>();
 
 /**
  * The form-urlencoded rules of the content entry `mediaType` of the element at `site`, decided
@@ -2737,36 +2732,33 @@ export type FormContentOutcome =
  * whose form content takes Encoding Objects "as for bodies". Content of any other media type has
  * no rules. Diagnostics are placed as a body's are, at `site` when the element is a reference.
  */
-export const formContentRules = (
+export const formContentRules = Effect.fnUntraced(function* formContentRules(
   resolution: Resolution,
   site: BodySite,
   mediaType: string,
   limits: ResolveLimits = defaultLimits,
-): Effect.Effect<FormContentOutcome, BodyNodeBudget | BodyNotReadable> =>
-  Effect.gen(function* rules() {
-    if (codecOf(baseType(mediaType)) !== "form") {
-      return { _tag: "Implemented", diagnostics: [], encoding: [] };
-    }
+): Effect.fn.Return<FormContentOutcome, BodyNodeBudget | BodyNotReadable> {
+  if (codecOf(mediaEssence(mediaType)) !== "form") {
+    return FormContentOutcome.Implemented({ diagnostics: [], encoding: [] });
+  }
 
-    const use = { document: resolution.document, pointer: site.pointer };
-    const reference = referenceIn(resolution, use);
-    const walk: Walk = { maxNodes: limits.maxNodes, resolution, site, spent: 0 };
-    const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
-    const mediaSite = childKey(follow(resolution, use), "content", mediaType);
-    const media = yield* readMedia(resolution, mediaSite);
-    const parts = yield* formParts(ctx, media, false);
-    if (parts.refused) {
-      return {
-        _tag: "Refused",
-        diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings), mediaSite),
-      };
-    }
+  const use = { document: resolution.document, pointer: site.pointer };
+  const reference = referenceIn(resolution, use);
+  const walk: Walk = { budget: budgetOf({ maxNodes: limits.maxNodes }), resolution, site };
+  const ctx: Context = { line: resolution.line, reference, resolution, site, walk };
+  const mediaSite = childKey(follow(resolution, use), "content", mediaType);
+  const media = yield* readMedia(resolution, mediaSite);
+  const parts = yield* formParts(ctx, media, false);
+  if (parts.refused) {
+    return FormContentOutcome.Refused({
+      diagnostics: yield* toDiagnostics(ctx, anchorDrops(media.home, parts.findings), mediaSite),
+    });
+  }
 
-    return {
-      _tag: "Implemented",
-      diagnostics: yield* toDiagnostics(ctx, parts.findings, mediaSite),
-      encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
-        Effect.orDie,
-      ),
-    };
+  return FormContentOutcome.Implemented({
+    diagnostics: yield* toDiagnostics(ctx, parts.findings, mediaSite),
+    encoding: yield* Schema.decodeUnknownEffect(Schema.Array(EncodingRule))(parts.encoding).pipe(
+      Effect.orDie,
+    ),
   });
+});

@@ -58,6 +58,14 @@ const ok: Members = { description: "ok" };
 const described = (...names: readonly string[]): Members =>
   Object.fromEntries(names.map((name) => [name, ok]));
 
+// One key alone: its built case, its refusal code, or skipped (no case and no diagnostic).
+const keyOutcome = (key: string) => {
+  const result = normalize("3.1", { [key]: ok });
+  const [built] = keys(result);
+
+  return built ?? codes(result)[0] ?? "skipped";
+};
+
 describe("response keys", () => {
   test("an explicit code, a range and default become their key kinds in member order", () => {
     // JavaScript lists integer-like keys first and ascending, so 200 precedes 404 here.
@@ -112,6 +120,32 @@ describe("response keys", () => {
     const result = Effect.runSync(normalizeResponses(resolution, responsesPointer));
 
     expect(result).toEqual({ diagnostics: [], responses: [] });
+  });
+
+  test("response keys classify by the exact grammar", () => {
+    const expected = {
+      "": "RSS-06/invalid-key",
+      " 200": "RSS-06/invalid-key",
+      "007": "RSS-10/status-out-of-range",
+      "099": "RSS-10/status-out-of-range",
+      "100": { code: 100 },
+      "1XX": { range: 1 },
+      "1xx": "RSS-06/invalid-key",
+      "200 ": "RSS-06/invalid-key",
+      "2xx": "RSS-06/invalid-key",
+      "599": { code: 599 },
+      "5XX": { range: 5 },
+      "600": "RSS-10/status-out-of-range",
+      "6XX": "RSS-06/invalid-key",
+      "999": "RSS-10/status-out-of-range",
+      DEFAULT: "RSS-06/invalid-key",
+      "X-note": "RSS-06/invalid-key",
+      default: "default",
+      "x-note": "skipped",
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((key) => [key, keyOutcome(key)]));
+
+    expect(actual).toEqual(expected);
   });
 });
 
@@ -373,6 +407,32 @@ describe("order", () => {
       { range: 4 },
       { range: 5 },
       "default",
+    ]);
+  });
+});
+
+describe("finding order", () => {
+  test("response findings follow key order, alternatives before headers", () => {
+    // A lowercase range is outside the key grammar; it sorts first and is listed first.
+    const result = normalize("3.1", {
+      "1xx": ok,
+      "2XX": {
+        content: { "application/json": { encoding: {} }, "not media": {} },
+        description: "ok",
+        headers: { "Content-Type": {}, "not a token": {} },
+      },
+      default: { description: "ok", headers: { "also not a token": {} } },
+    });
+
+    expect(
+      result.diagnostics.map((diagnostic) => [diagnostic.code, text(diagnostic.pointer)]),
+    ).toEqual([
+      ["RSS-06/invalid-key", `${responsesPointer}/1xx`],
+      ["MED-10/encoding-ignored", `${responsesPointer}/2XX/content/application~1json`],
+      ["RSP-05/invalid-media-type", `${responsesPointer}/2XX/content/not media`],
+      ["RSP-09/ignored-content-type", `${responsesPointer}/2XX/headers/Content-Type`],
+      ["RSP-09/invalid-header-name", `${responsesPointer}/2XX/headers/not a token`],
+      ["RSP-09/invalid-header-name", `${responsesPointer}/default/headers/also not a token`],
     ]);
   });
 });

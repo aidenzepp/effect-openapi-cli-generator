@@ -373,6 +373,17 @@ describe("ENC-02 ENC-03 ENC-11 ENC-13 explicit encoding", () => {
     expect(codes(outcome)).toEqual(["ENC-02/invalid-content-type"]);
   });
 
+  test("an empty Encoding contentType is refused", () => {
+    for (const contentType of ["", "a/b,"]) {
+      const outcome = refused(
+        "3.1",
+        multipart(object({ file: string }), { encoding: { file: { contentType } } }),
+      );
+
+      expect(codes(outcome)).toEqual(["ENC-02/invalid-content-type"]);
+    }
+  });
+
   test("an explicit style makes the part a schema-style value and contentType is ignored", () => {
     const outcome = implemented(
       "3.1",

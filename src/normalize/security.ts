@@ -1,4 +1,5 @@
-import { Effect, Option, Result, Schema } from "effect";
+import { Array as Arr, Effect, Option, pipe, Result, Schema, UndefinedOr } from "effect";
+import { memoize } from "effect/Function";
 import type { AuthorConfig } from "../model/author-config.ts";
 import { CookieName, HeaderName } from "../model/brands.ts";
 import type { DocumentUri } from "../model/brands.ts";
@@ -6,14 +7,14 @@ import { makeDiagnostic } from "../model/diagnostic.ts";
 import type { Diagnostic } from "../model/diagnostic.ts";
 import { SecurityPolicy, SecurityScheme } from "../model/entities.ts";
 import type { Resolution } from "../resolve/index.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
 import type { Line } from "../validate/index.ts";
 import { implicitComponent } from "../resolve/index.ts";
-import type { CanonicalKey } from "../resolve/canonical.ts";
 import { childPointer, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
 import { sanitize } from "./docs.ts";
-import { follow, nodeInResult } from "./document-set.ts";
+import { follow, nodeOption } from "./document-set.ts";
 
 /**
  * The declared schemes of a document. `unusable` names schemes that were declared but refused, so
@@ -98,7 +99,21 @@ const Requirement = Schema.Record(Schema.String, Schema.Array(Schema.String));
 
 const AlternativeList = Schema.Array(Schema.Json);
 
-const Declared = Schema.Struct({ openapi: Schema.String });
+const decodeSchemeNode = Schema.decodeUnknownOption(SchemeNode);
+
+const decodeFlowNode = Schema.decodeUnknownOption(FlowNode);
+
+const decodeJsonMap = Schema.decodeUnknownOption(JsonMap);
+
+const decodeRequirement = Schema.decodeUnknownOption(Requirement);
+
+const decodeAlternativeList = Schema.decodeUnknownOption(AlternativeList);
+
+const decodeCookieName = Schema.decodeUnknownOption(CookieName);
+
+const decodeHeaderName = Schema.decodeUnknownOption(HeaderName);
+
+const decodeSecurityScheme = Schema.decodeUnknownOption(SecurityScheme);
 
 const flowRules = new Map([
   [
@@ -123,10 +138,7 @@ const acquisitionHint = (permanent: boolean): string =>
     : "The generated CLI does not acquire tokens. Supply an access token obtained elsewhere.";
 
 const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<Diagnostic> => {
-  const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
+  const openapi = Option.getOrElse(declaredOpenapi(resolution.value), () => "unknown");
 
   return makeDiagnostic({
     code: finding.code,
@@ -145,9 +157,6 @@ const toDiagnostic = (resolution: Resolution, finding: Finding): Effect.Effect<D
     specSection: specSectionUrl(resolution.line, finding.anchor),
   });
 };
-
-const nodeAt = (resolution: Resolution, at: CanonicalKey): Option.Option<Json> =>
-  Result.getSuccess(nodeInResult(resolution, at));
 
 const invalidScheme = (pointer: string): Built => ({
   findings: [
@@ -244,7 +253,7 @@ const flowsOf = (fields: SchemeFields): Option.Option<Readonly<Record<string, Fl
       continue;
     }
 
-    const flow = Schema.decodeUnknownOption(FlowNode)(json);
+    const flow = decodeFlowNode(json);
     if (Option.isNone(flow)) {
       return Option.none();
     }
@@ -339,7 +348,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
     node.type === "apiKey" &&
     node.in === "cookie" &&
     node.name !== undefined &&
-    Option.isNone(Schema.decodeUnknownOption(CookieName)(node.name))
+    Option.isNone(decodeCookieName(node.name))
   ) {
     return {
       findings: [
@@ -359,7 +368,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
     node.type === "apiKey" &&
     node.in === "header" &&
     node.name !== undefined &&
-    Option.isNone(Schema.decodeUnknownOption(HeaderName)(node.name))
+    Option.isNone(decodeHeaderName(node.name))
   ) {
     return {
       findings: [
@@ -379,7 +388,7 @@ const modelFields = (name: string, site: Site, fields: Option.Option<SchemeField
   const decoded =
     modelled === undefined
       ? Option.none<SecurityScheme>()
-      : Schema.decodeUnknownOption(SecurityScheme)({
+      : decodeSecurityScheme({
           credentialSources: node.type === "mutualTLS" ? ["env"] : ["file", "env", "prompt"],
           deprecated: node.deprecated ?? false,
           kind: modelled.kind,
@@ -413,9 +422,7 @@ const buildScheme = (resolution: Resolution, name: string, pointer: string): Bui
   return modelScheme(
     name,
     { document: resolution.document, line: resolution.line, pointer, source: "spec" },
-    nodeAt(resolution, target).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(SchemeNode)(json)),
-    ),
+    nodeOption(resolution, target).pipe(Option.flatMap((json) => decodeSchemeNode(json))),
   );
 };
 
@@ -469,7 +476,7 @@ const addedSchemes = (
             pointer: formatPointer(["security", "add", "schemes", name]),
             source: "author-supplied",
           },
-          Schema.decodeUnknownOption(SchemeNode)(node),
+          decodeSchemeNode(node),
         );
   });
 
@@ -493,62 +500,62 @@ const unresolvedCodes: ReadonlySet<string> = new Set([
  * `checkFindings` are the spec-text check findings of the run; a requirement name they refuse as
  * unresolved gets no second diagnostic from `normalizeSecurityPolicy`.
  */
-export const normalizeSecuritySchemes = (
+export const normalizeSecuritySchemes = Effect.fnUntraced(function* normalizeSecuritySchemes(
   resolution: Resolution,
   author: AuthorSecurity | undefined,
   checkFindings: readonly Diagnostic[],
-): Effect.Effect<SchemeNormalization> =>
-  Effect.gen(function* normalize() {
-    const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
-    const names = nodeAt(resolution, schemes).pipe(
-      Option.flatMap((json) => Schema.decodeUnknownOption(JsonMap)(json)),
-      Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
-    );
-    const refused = new Set<string>(
-      resolution.diagnostics
-        .filter((diagnostic) => diagnostic.code === "SEC-10/uri-like-name")
-        .map((diagnostic) => diagnostic.pointer),
-    );
-    const built = names.map((name): Built => {
-      const pointer = formatPointer(["components", "securitySchemes", name]);
+): Effect.fn.Return<SchemeNormalization> {
+  const schemes = { document: resolution.document, pointer: "/components/securitySchemes" };
+  const names = nodeOption(resolution, schemes).pipe(
+    Option.flatMap((json) => decodeJsonMap(json)),
+    Option.match({ onNone: (): string[] => [], onSome: (map) => Object.keys(map) }),
+  );
+  const refused = new Set<string>(
+    resolution.diagnostics
+      .filter((diagnostic) => diagnostic.code === "SEC-10/uri-like-name")
+      .map((diagnostic) => diagnostic.pointer),
+  );
+  const built = names.map((name): Built => {
+    const pointer = formatPointer(["components", "securitySchemes", name]);
 
-      // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
-      return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
-    });
-    const extra = addedSchemes(new Set(names), author, resolution.line);
-    const all = [...built, ...extra.built];
-    const diagnostics = yield* Effect.all(
-      all.flatMap((one) => one.findings).map((finding) => toDiagnostic(resolution, finding)),
-    );
-
-    const requirement = author?.config.security?.add?.requirement;
-    const supplied =
-      author === undefined || requirement === undefined
-        ? undefined
-        : { document: author.configDocument, requirement };
-
-    return {
-      added: new Set(extra.names.filter((name) => !names.includes(name))),
-      checkRefused: new Set(
-        checkFindings
-          .filter(
-            (finding) =>
-              finding.document === resolution.document && unresolvedCodes.has(finding.code),
-          )
-          .map((finding) => finding.pointer),
-      ),
-      diagnostics,
-      schemes: all.flatMap((one) => (one.scheme === undefined ? [] : [one.scheme])),
-      supplied,
-      unusable: [
-        ...names.filter((_, index) => built[index]?.scheme === undefined),
-        // An added name that collides keeps meaning the declared scheme, so it is never unusable.
-        ...extra.names.filter(
-          (name, index) => !names.includes(name) && extra.built[index]?.scheme === undefined,
-        ),
-      ],
-    };
+    // SEC-10 is already refused by resolve; the scheme is never modelled or given credentials.
+    return refused.has(pointer) ? { findings: [] } : buildScheme(resolution, name, pointer);
   });
+  const extra = addedSchemes(new Set(names), author, resolution.line);
+  const all = [...built, ...extra.built];
+  const diagnostics = yield* Effect.forEach(
+    all.flatMap((one) => one.findings),
+    (finding) => toDiagnostic(resolution, finding),
+  );
+
+  const requirement = author?.config.security?.add?.requirement;
+  const supplied =
+    author === undefined || requirement === undefined
+      ? undefined
+      : { document: author.configDocument, requirement };
+
+  return {
+    added: new Set(Arr.difference(extra.names, names)),
+    checkRefused: new Set(
+      checkFindings
+        .filter(
+          (finding) =>
+            finding.document === resolution.document && unresolvedCodes.has(finding.code),
+        )
+        .map((finding) => finding.pointer),
+    ),
+    diagnostics,
+    schemes: Arr.getSomes(all.map((one) => Option.fromUndefinedOr(one.scheme))),
+    supplied,
+    unusable: [
+      ...names.filter((_, index) => built[index]?.scheme === undefined),
+      // An added name that collides keeps meaning the declared scheme, so it is never unusable.
+      ...extra.names.filter(
+        (name, index) => !names.includes(name) && extra.built[index]?.scheme === undefined,
+      ),
+    ],
+  };
+});
 
 interface Scope {
   readonly declared: ReadonlyMap<string, SecurityScheme>;
@@ -561,33 +568,22 @@ interface Lookup {
   readonly spec: Scope;
 }
 
-// Built once per SchemeNormalization, so a requirement entry costs one map probe.
-const lookups = new WeakMap<SchemeNormalization, Lookup>();
-
-const lookupOf = (schemes: SchemeNormalization): Lookup => {
-  const cached = lookups.get(schemes);
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  const built = {
-    author: {
-      declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
-      unusable: new Set(schemes.unusable),
-    },
-    spec: {
-      declared: new Map(
-        schemes.schemes
-          .filter((scheme) => scheme.source === "spec")
-          .map((scheme) => [scheme.name, scheme]),
-      ),
-      unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
-    },
-  };
-  lookups.set(schemes, built);
-
-  return built;
-};
+// Built once per SchemeNormalization (memoized by identity), so a requirement entry costs one map
+// probe.
+const lookupOf = memoize((schemes: SchemeNormalization): Lookup => ({
+  author: {
+    declared: new Map(schemes.schemes.map((scheme) => [scheme.name, scheme])),
+    unusable: new Set(schemes.unusable),
+  },
+  spec: {
+    declared: new Map(
+      schemes.schemes
+        .filter((scheme) => scheme.source === "spec")
+        .map((scheme) => [scheme.name, scheme]),
+    ),
+    unusable: new Set(schemes.unusable.filter((name) => !schemes.added.has(name))),
+  },
+}));
 
 // A 3.2 requirement name that is not a component name resolves as a URI inside the set. The result
 // is the component name it reaches, or undefined when it reaches nothing that is a component.
@@ -601,9 +597,7 @@ const uriComponentName = (resolution: Resolution, name: string): string | undefi
     return undefined;
   }
 
-  const tokens = Result.getSuccess(parsePointerResult(key.value.pointer)).pipe(
-    Option.getOrUndefined,
-  );
+  const tokens = Result.getOrUndefined(parsePointerResult(key.value.pointer));
 
   return tokens?.length === 3 && tokens[0] === "components" && tokens[1] === "securitySchemes"
     ? tokens[2]
@@ -627,10 +621,10 @@ const effectiveList = (
     { pointer: "/security", rows: ["SEC-01", "SEC-03"] },
   ];
   for (const source of candidates) {
-    const list = nodeAt(resolution, {
+    const list = nodeOption(resolution, {
       document: resolution.document,
       pointer: source.pointer,
-    }).pipe(Option.flatMap((json) => Schema.decodeUnknownOption(AlternativeList)(json)));
+    }).pipe(Option.flatMap((json) => decodeAlternativeList(json)));
     if (Option.isSome(list)) {
       return { list: list.value, source };
     }
@@ -654,33 +648,33 @@ interface Named {
   readonly unusable: ReadonlySet<string>;
 }
 
-// The refusal of a requirement name that names no usable scheme, or `checked` when check already
-// raised the one diagnostic for it; either way its alternative is dropped.
-const nameRefusal = (resolution: Resolution, named: Named): Finding | "checked" => {
+// The refusal of a requirement name that names no usable scheme, or None when check already raised
+// the one diagnostic for it; either way its alternative is dropped.
+const nameRefusal = (resolution: Resolution, named: Named): Option.Option<Finding> => {
   const { name, resolved } = named;
   const pointer = childPointer(named.pointer, name);
   if (named.unusable.has(resolved)) {
-    return {
+    return Option.some({
       anchor: "security-requirements-name",
       code: "SEC-02/unusable-scheme",
       element: "Security Requirement Object",
       message: "The requirement names a security scheme that is refused.",
       pointer,
       related: [{ pointer: formatPointer(["components", "securitySchemes", resolved]) }],
-    };
+    });
   }
 
   if (!named.supplied && named.checkRefused.has(pointer)) {
-    return "checked";
+    return Option.none();
   }
 
-  return {
+  return Option.some({
     anchor: "security-requirements-name",
     code: `${resolution.line === "3.2" ? "SEC-10" : "SEC-09"}/undeclared-scheme`,
     element: "Security Requirement Object",
     message: "The requirement names a security scheme that is not declared.",
     pointer,
-  };
+  });
 };
 
 // Whether a scheme writes the one `Authorization` header (design 6.5 Conflicting Authorization
@@ -750,10 +744,10 @@ const judge = (
         supplied,
         unusable,
       });
-      if (refusal === "checked") {
+      if (Option.isNone(refusal)) {
         refused = true;
       } else {
-        findings.push(refusal);
+        findings.push(refusal.value);
       }
     }
   }
@@ -775,61 +769,64 @@ const judge = (
  * check already refused as unresolved keeps that one diagnostic and gets no second here. Raising an
  * operation with no alternative left is the caller's job (`listed`).
  */
-export const normalizeSecurityPolicy = (
+export const normalizeSecurityPolicy = Effect.fnUntraced(function* normalizeSecurityPolicy(
   resolution: Resolution,
   schemes: SchemeNormalization,
   operation?: string,
-): Effect.Effect<PolicyNormalization> =>
-  Effect.gen(function* normalize() {
-    const spec = effectiveList(resolution, operation);
-    // `security.add` applies as if declared, only where the spec declares no security (D-OQ10).
-    const supplied =
-      spec === undefined && schemes.supplied !== undefined
-        ? {
-            document: schemes.supplied.document,
-            list: schemes.supplied.requirement,
-            source: { pointer: addRequirementPointer, rows: ["CFG-1", "SEC-01", "SEC-08"] },
-          }
-        : undefined;
-    const effective =
-      supplied ?? (spec === undefined ? undefined : { ...spec, document: resolution.document });
-    const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
-    const judged = (effective?.list ?? []).map((json, index) => {
-      const pointer = childPointer(source.pointer, String(index));
-      const entries = Schema.decodeUnknownOption(Requirement)(json).pipe(
-        Option.map((requirement) => Object.entries(requirement)),
-      );
-
-      return Option.isNone(entries)
-        ? {
-            findings: [
-              {
-                anchor: "security-requirement-object",
-                code: "SEC-01/invalid-requirement",
-                element: "Security Requirement Object",
-                message: "The security requirement is malformed.",
-                pointer,
-              },
-            ],
-          }
-        : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
-    });
-    const diagnostics = yield* Effect.all(
-      judged
-        .flatMap((one) => one.findings)
-        .map((finding) =>
-          toDiagnostic(
-            resolution,
-            supplied === undefined ? finding : { ...finding, document: supplied.document },
-          ),
-        ),
+): Effect.fn.Return<PolicyNormalization> {
+  const spec = effectiveList(resolution, operation);
+  // `security.add` applies as if declared, only where the spec declares no security (D-OQ10).
+  const supplied =
+    spec === undefined && schemes.supplied !== undefined
+      ? {
+          document: schemes.supplied.document,
+          list: schemes.supplied.requirement,
+          source: { pointer: addRequirementPointer, rows: ["CFG-1", "SEC-01", "SEC-08"] },
+        }
+      : undefined;
+  const effective =
+    supplied ??
+    pipe(
+      spec,
+      UndefinedOr.map((declared) => ({ ...declared, document: resolution.document })),
     );
-    const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
-      alternatives: judged.flatMap((one) => (one.use === undefined ? [] : [{ uses: one.use }])),
-      declared: effective !== undefined,
-      origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
-      rows: source.rows,
-    }).pipe(Effect.orDie);
+  const source = effective?.source ?? { pointer: operation ?? "", rows: ["SEC-08"] };
+  const judged = (effective?.list ?? []).map((json, index) => {
+    const pointer = childPointer(source.pointer, String(index));
+    const entries = decodeRequirement(json).pipe(
+      Option.map((requirement) => Object.entries(requirement)),
+    );
 
-    return { diagnostics, listed: judged.length, policy };
+    return Option.isNone(entries)
+      ? {
+          findings: [
+            {
+              anchor: "security-requirement-object",
+              code: "SEC-01/invalid-requirement",
+              element: "Security Requirement Object",
+              message: "The security requirement is malformed.",
+              pointer,
+            },
+          ],
+        }
+      : judge(resolution, schemes, entries.value, pointer, supplied !== undefined);
   });
+  const diagnostics = yield* Effect.forEach(
+    judged.flatMap((one) => one.findings),
+    (finding) =>
+      toDiagnostic(
+        resolution,
+        supplied === undefined ? finding : { ...finding, document: supplied.document },
+      ),
+  );
+  const policy = yield* Schema.decodeUnknownEffect(SecurityPolicy)({
+    alternatives: Arr.getSomes(
+      judged.map((one) => Option.map(Option.fromUndefinedOr(one.use), (uses) => ({ uses }))),
+    ),
+    declared: effective !== undefined,
+    origin: { document: effective?.document ?? resolution.document, pointer: source.pointer },
+    rows: source.rows,
+  }).pipe(Effect.orDie);
+
+  return { diagnostics, listed: judged.length, policy };
+});

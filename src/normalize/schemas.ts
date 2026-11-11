@@ -1,16 +1,20 @@
 import {
   Array as Arr,
-  Data,
   Effect,
+  Equal,
+  Graph,
+  HashSet,
   JsonPointer,
   JsonSchema,
   Option,
   Order,
   pipe,
   Predicate,
+  Record,
   Result,
   Schema,
   SchemaRepresentation,
+  UndefinedOr,
 } from "effect";
 import type { DocumentUri } from "../model/brands.ts";
 import { makeDiagnostic, sortDiagnostics } from "../model/diagnostic.ts";
@@ -21,11 +25,14 @@ import { defaultLimits } from "../resolve/index.ts";
 import type { ReferenceKind, Resolution, ResolveLimits } from "../resolve/index.ts";
 import { evaluatePointerResult, formatPointer, parsePointerResult } from "../model/pointer.ts";
 import type { Json } from "../model/pointer.ts";
+import { declaredOpenapi } from "../validate/dispatch.ts";
+import { methodMembers } from "../model/path-item.ts";
 import type { Line } from "../validate/index.ts";
 import { specSectionUrl } from "../model/spec-section.ts";
+import { isSpecificationExtension } from "../model/extension.ts";
 import { isObject, isArray, nodeAt, stringMember } from "../model/json-tree.ts";
 import type { JsonObject } from "../model/json-tree.ts";
-import { nodeIn, referenceIn } from "./document-set.ts";
+import { nodeIn, nodeOption, referenceIn } from "./document-set.ts";
 
 type Document = typeof DocumentUri.Type;
 
@@ -86,17 +93,20 @@ export interface SchemaNormalization extends StoredSchemas {
 /**
  * A conversion or import failure that no D-AD12 class names: a defect in that list (design 3.5).
  */
-export class SchemaImportDefect extends Data.TaggedError("SchemaImportDefect")<{
-  readonly key: string;
-  readonly message: string;
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class SchemaImportDefect extends Schema.TaggedError<SchemaImportDefect>()(
+  "SchemaImportDefect",
+  { key: Schema.String, message: Schema.String },
+) {}
 
 /**
  * A schema walk visited more nodes than the node budget allows (design 3.3, 9 I5).
  */
-export class SchemaBudgetExceeded extends Data.TaggedError("SchemaBudgetExceeded")<{
-  readonly limit: number;
-}> {}
+// oxlint-disable-next-line unicorn/throw-new-error -- Schema.TaggedError<Self>()(tag, fields) declares a class; nothing is thrown
+export class SchemaBudgetExceeded extends Schema.TaggedError<SchemaBudgetExceeded>()(
+  "SchemaBudgetExceeded",
+  { limit: Schema.Number },
+) {}
 
 /**
  * The node budget of one call: `maxNodes` from the resolution limits.
@@ -122,10 +132,10 @@ export const budgetOf = (limits: SchemaLimits): Budget => ({
 });
 
 /**
- * Charges one visit; false once the budget is spent.
+ * Charges `cost` visits, one by default; false once the budget is spent.
  */
-export const charge = (budget: Budget): boolean => {
-  budget.spent += 1;
+export const charge = (budget: Budget, cost = 1): boolean => {
+  budget.spent += cost;
 
   return budget.spent <= budget.limit;
 };
@@ -135,8 +145,8 @@ const within = <A>(budget: Budget, value: A): Effect.Effect<A, SchemaBudgetExcee
     ? Effect.fail(new SchemaBudgetExceeded({ limit: budget.limit }))
     : Effect.succeed(value);
 
-const member = (node: JsonObject, key: string): Json | undefined =>
-  Object.hasOwn(node, key) ? node[key] : undefined;
+const member = (node: Record.ReadonlyRecord<string, Json>, key: string): Json | undefined =>
+  Option.getOrUndefined(Record.get(node, key));
 
 const strings = (value: Json | undefined): readonly string[] =>
   isArray(value) ? value.filter(Predicate.isString) : [];
@@ -149,7 +159,7 @@ const sortedKeys = (map: ReadonlyMap<string, unknown>): readonly string[] =>
   Arr.sort([...map.keys()], byString);
 
 const tokensOf = (pointer: string): readonly string[] | undefined =>
-  Result.getSuccess(parsePointerResult(pointer)).pipe(Option.getOrUndefined);
+  Result.getOrUndefined(parsePointerResult(pointer));
 
 const childAt = (node: Json | undefined, token: string): Json | undefined => {
   if (isObject(node)) {
@@ -218,7 +228,7 @@ const inPlace: Positions = {
 type Visit = (node: JsonObject, path: readonly string[]) => JsonObject;
 
 // Rebuilds a schema node: `visit` rewrites the node itself, then its subschemas are transformed.
-// Objects are rebuilt with `Object.fromEntries`, so a `__proto__` member stays an own key.
+// Objects are rebuilt with `Record.map`, so a `__proto__` member stays an own key.
 const transformSchema = (
   budget: Budget,
   node: Json,
@@ -233,28 +243,22 @@ const transformSchema = (
   const child = (value: Json, tokens: readonly string[]): Json =>
     transformSchema(budget, value, [...path, ...tokens], where, visit);
 
-  return Object.fromEntries(
-    Object.entries(visit(node, path)).map(([key, value]): [string, Json] => {
-      if (where.one.has(key)) {
-        return [key, child(value, [key])];
-      }
+  return Record.map(visit(node, path), (value, key): Json => {
+    if (where.one.has(key)) {
+      return child(value, [key]);
+    }
 
-      if (where.list.has(key) && isArray(value)) {
-        return [key, value.map((item, index) => child(item, [key, String(index)]))];
-      }
+    if (where.list.has(key) && isArray(value)) {
+      return value.map((item, index) => child(item, [key, String(index)]));
+    }
 
-      if (where.map.has(key) && isObject(value)) {
-        const entries = Object.entries(value).map(([name, item]): [string, Json] => [
-          name,
-          child(item, [key, name]),
-        ]);
+    if (where.map.has(key) && isObject(value)) {
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+      return Record.map(value, (item, name) => child(item, [key, name]));
+    }
 
-        return [key, Object.fromEntries(entries)];
-      }
-
-      return [key, value];
-    }),
-  );
+    return value;
+  });
 };
 
 const forEachSchema = (
@@ -290,7 +294,7 @@ type Arity = "list" | "map" | "one";
 
 type Field = readonly [name: string, kind: Kind | "schema", arity: Arity];
 
-const methods = ["delete", "get", "head", "options", "patch", "post", "put", "query", "trace"];
+const methods = Arr.sort(methodMembers("3.2"), Order.String);
 
 const content: Field = ["content", "mediaType", "map"];
 
@@ -466,16 +470,14 @@ const rewriteReferences = (
     // A reference the resolver left without a key names the document root, which is no schema
     // (D-AD12): the `$ref` is dropped here and `diagnosticsOf` refuses the site.
     if (reference.defsKey === undefined) {
-      return Object.fromEntries(Object.entries(current).filter(([key]) => key !== "$ref"));
+      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+      return Record.filter(current, (_, key) => key !== "$ref");
     }
 
     const ref = refFor(reference.defsKey);
 
-    return Object.fromEntries(
-      Object.entries(current).map(([key, value]): [string, Json] =>
-        key === "$ref" ? [key, ref] : [key, value],
-      ),
-    );
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+    return Record.map(current, (value, key): Json => (key === "$ref" ? ref : value));
   });
 };
 
@@ -523,7 +525,7 @@ const factsOf = (node: Json): SchemaFacts => {
     format: format === "binary" || format === "byte" ? format : undefined,
     items: member(object, "items") !== undefined || member(object, "prefixItems") !== undefined,
     properties: isObject(properties) ? Object.keys(properties) : [],
-    reference: ref === undefined ? undefined : referenceKey(ref),
+    reference: pipe(ref, UndefinedOr.map(referenceKey)),
     required: strings(member(object, "required")),
     types: typesOf(object),
   };
@@ -618,7 +620,7 @@ const nonAsserting: ReadonlySet<string> = new Set([
 ]);
 
 const asserts = (keyword: string): boolean =>
-  keyword !== "$ref" && !nonAsserting.has(keyword) && !keyword.startsWith("x-");
+  keyword !== "$ref" && !nonAsserting.has(keyword) && !isSpecificationExtension(keyword);
 
 /**
  * The store key of the schema at a use site (design 2.2 key rule, SCH-03). A `$ref` names its
@@ -633,8 +635,7 @@ export const schemaKeyAt = (resolution: Resolution, site: CanonicalKey): string 
     return target ?? own;
   }
 
-  const value = resolution.documents.get(site.document);
-  const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+  const node = Option.getOrUndefined(nodeOption(resolution, site));
 
   return isObject(node) && Object.keys(node).some(asserts) ? own : target;
 };
@@ -719,9 +720,8 @@ const refusedInSource = (
   const found: [string, CanonicalKey][] = [];
   for (const key of sortedKeys(sites)) {
     const site = sites.get(key) ?? { document: resolution.document, pointer: "" };
-    const value = resolution.documents.get(site.document);
     const tokens = tokensOf(site.pointer);
-    const node = value === undefined ? undefined : nodeAt(value, site.pointer);
+    const node = Option.getOrUndefined(nodeOption(resolution, site));
     if (tokens !== undefined && node !== undefined) {
       const visit = (current: JsonObject, path: readonly string[]): void => {
         for (const keyword of Object.keys(current)) {
@@ -738,22 +738,26 @@ const refusedInSource = (
   return found;
 };
 
+interface DynamicScan {
+  readonly found: boolean;
+  readonly targets: readonly CanonicalKey[];
+}
+
 // Whether the schema at `at` holds a dynamic or recursive keyword in place (subschemas included,
-// nested `$defs` not); the targets of its `$ref`s join `pending`.
+// nested `$defs` not), with the targets of its `$ref`s in visit order.
 const holdsDynamicKeyword = (
   budget: Budget,
   resolution: Resolution,
   at: CanonicalKey,
-  pending: CanonicalKey[],
-): boolean => {
-  const value = resolution.documents.get(at.document);
+): DynamicScan => {
   const tokens = tokensOf(at.pointer);
-  const node = value === undefined ? undefined : nodeAt(value, at.pointer);
+  const node = Option.getOrUndefined(nodeOption(resolution, at));
   if (tokens === undefined || node === undefined) {
-    return false;
+    return { found: false, targets: [] };
   }
 
   const where = resolution.line === "3.0" ? positions30 : copyPositions;
+  const targets: CanonicalKey[] = [];
   let found = false;
   forEachSchema(
     budget,
@@ -768,13 +772,13 @@ const holdsDynamicKeyword = (
           ? undefined
           : referenceIn(resolution, { document: at.document, pointer });
       if (reference !== undefined) {
-        pending.push(reference.target);
+        targets.push(reference.target);
       }
     },
     tokens,
   );
 
-  return found;
+  return { found, targets };
 };
 
 /**
@@ -794,9 +798,13 @@ export const appliesDynamicKeyword = (
   for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
     if (!seen.has(keyOf(at))) {
       seen.add(keyOf(at));
-      if (holdsDynamicKeyword(budget, resolution, at, pending)) {
+
+      const scan = holdsDynamicKeyword(budget, resolution, at);
+      if (scan.found) {
         return true;
       }
+
+      pending.push(...scan.targets);
     }
   }
 
@@ -833,7 +841,7 @@ const inTypes = (types: readonly string[], value: Json): boolean => {
 
 const isAnnotationOnly = (branch: JsonObject): boolean =>
   Object.keys(branch).every(
-    (key) => key === "const" || annotationKeys.has(key) || key.startsWith("x-"),
+    (key) => key === "const" || annotationKeys.has(key) || isSpecificationExtension(key),
   );
 
 // The values of a `oneOf`/`anyOf` whose branches are all primitive `const` values with annotations
@@ -928,8 +936,11 @@ const isReadOnly = (definitions: ReadonlyMap<string, Json>, schema: Json | undef
   }
 
   const ref = stringMember(schema, "$ref");
-  const key = ref === undefined ? undefined : referenceKey(ref);
-  const target = key === undefined ? undefined : definitions.get(key);
+  const key = pipe(ref, UndefinedOr.map(referenceKey));
+  const target = pipe(
+    key,
+    UndefinedOr.map((name) => definitions.get(name)),
+  );
 
   return (
     member(schema, "readOnly") === true || (isObject(target) && member(target, "readOnly") === true)
@@ -1083,7 +1094,7 @@ const edgesOf = (budget: Budget, definitions: ReadonlyMap<string, Json>): readon
   for (const key of sortedKeys(definitions)) {
     forEachSchema(budget, definitions.get(key) ?? {}, inPlace, (node, path) => {
       const ref = stringMember(node, "$ref");
-      const to = ref === undefined ? undefined : referenceKey(ref);
+      const to = pipe(ref, UndefinedOr.map(referenceKey));
       if (to !== undefined && definitions.has(to)) {
         edges.push({ from: key, path, to });
       }
@@ -1091,114 +1102,6 @@ const edgesOf = (budget: Budget, definitions: ReadonlyMap<string, Json>): readon
   }
 
   return edges;
-};
-
-interface Frame {
-  at: number;
-  readonly key: string;
-  readonly targets: readonly string[];
-}
-
-interface Tarjan {
-  counter: number;
-  readonly component: Map<string, number>;
-  readonly index: Map<string, number>;
-  readonly low: Map<string, number>;
-  readonly next: ReadonlyMap<string, readonly string[]>;
-  readonly onStack: Set<string>;
-  readonly stack: string[];
-  readonly work: Frame[];
-}
-
-const lower = (state: Tarjan, key: string, value: number): void => {
-  state.low.set(key, Math.min(state.low.get(key) ?? value, value));
-};
-
-const open = (state: Tarjan, key: string): void => {
-  state.index.set(key, state.counter);
-  state.low.set(key, state.counter);
-  state.counter += 1;
-  state.stack.push(key);
-  state.onStack.add(key);
-  state.work.push({ at: 0, key, targets: state.next.get(key) ?? [] });
-};
-
-// Closes a finished node: its low link flows to its caller, and a root pops its component.
-const close = (state: Tarjan, frame: Frame): void => {
-  const own = state.index.get(frame.key) ?? 0;
-  const low = state.low.get(frame.key) ?? own;
-  const caller = state.work.at(-1);
-  if (caller !== undefined) {
-    lower(state, caller.key, low);
-  }
-
-  if (low !== own) {
-    return;
-  }
-
-  let popped = state.stack.pop();
-  while (popped !== undefined) {
-    state.onStack.delete(popped);
-    state.component.set(popped, own);
-    popped = popped === frame.key ? undefined : state.stack.pop();
-  }
-};
-
-// One depth-first search with an explicit work stack, so a long reference chain cannot exhaust
-// the call stack.
-const connect = (state: Tarjan, root: string): void => {
-  open(state, root);
-  let frame = state.work.at(-1);
-  while (frame !== undefined) {
-    const target = frame.targets[frame.at];
-    if (target === undefined) {
-      state.work.pop();
-      close(state, frame);
-    } else {
-      frame.at += 1;
-      if (!state.index.has(target)) {
-        open(state, target);
-      } else if (state.onStack.has(target)) {
-        lower(state, frame.key, state.index.get(target) ?? 0);
-      }
-    }
-
-    frame = state.work.at(-1);
-  }
-};
-
-// Tarjan's strongly connected components over the in-place reference graph, iteratively.
-const componentsOf = (
-  keys: readonly string[],
-  edges: readonly Edge[],
-): ReadonlyMap<string, number> => {
-  const next = new Map<string, string[]>();
-  for (const edge of edges) {
-    const targets = next.get(edge.from);
-    if (targets === undefined) {
-      next.set(edge.from, [edge.to]);
-    } else {
-      targets.push(edge.to);
-    }
-  }
-
-  const state: Tarjan = {
-    component: new Map(),
-    counter: 0,
-    index: new Map(),
-    low: new Map(),
-    next,
-    onStack: new Set(),
-    stack: [],
-    work: [],
-  };
-  for (const key of keys) {
-    if (!state.index.has(key)) {
-      connect(state, key);
-    }
-  }
-
-  return state.component;
 };
 
 const replaceAt = (node: Json, path: readonly string[]): Json => {
@@ -1215,28 +1118,52 @@ const replaceAt = (node: Json, path: readonly string[]): Json => {
     return node;
   }
 
-  return Object.fromEntries(
-    Object.entries(node).map(([key, value]): [string, Json] =>
-      key === token ? [key, replaceAt(value, rest)] : [key, value],
-    ),
-  );
+  // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.map(record, f), not an array method
+  return Record.map(node, (value, key) => (key === token ? replaceAt(value, rest) : value));
 };
+
+// A copy of the definitions with the edits that made it, in the order they were made.
+interface EditedCopy {
+  readonly definitions: ReadonlyMap<string, Json>;
+  readonly edits: readonly SchemaEdit[];
+}
 
 // Refuses every reference site on a cycle that returns to a schema without descending into the
 // instance (D-AD12 refused tier, DOC-23/alias-cycle): each such site becomes `{}` in the copy.
-const breakAliasCycles = (
-  budget: Budget,
-  initial: ReadonlyMap<string, Json>,
-  edits: SchemaEdit[],
-): ReadonlyMap<string, Json> => {
+const breakAliasCycles = (budget: Budget, initial: ReadonlyMap<string, Json>): EditedCopy => {
   const edges = edgesOf(budget, initial);
-  const component = componentsOf(sortedKeys(initial), edges);
+  // The strongly connected components of the in-place reference graph. Graph's search keeps an
+  // explicit stack, so a long reference chain cannot exhaust the call stack.
+  const nodes = new Map<string, Graph.NodeIndex>();
+  const graph = Graph.directed<string, Edge>((mutable) => {
+    for (const key of sortedKeys(initial)) {
+      nodes.set(key, Graph.addNode(mutable, key));
+    }
+    for (const edge of edges) {
+      const from = nodes.get(edge.from);
+      const to = nodes.get(edge.to);
+      if (from !== undefined && to !== undefined) {
+        Graph.addEdge(mutable, from, to, edge);
+      }
+    }
+  });
+  const component = new Map<string, number>();
+  for (const [id, members] of Graph.stronglyConnectedComponents(graph).entries()) {
+    for (const node of members) {
+      const key = Graph.getNode(graph, node);
+      if (Option.isSome(key)) {
+        component.set(key.value, id);
+      }
+    }
+  }
+
   const sizes = new Map<number, number>();
   for (const id of component.values()) {
     sizes.set(id, (sizes.get(id) ?? 0) + 1);
   }
 
   const definitions = new Map(initial);
+  const edits: SchemaEdit[] = [];
   for (const edge of edges) {
     const id = component.get(edge.from);
     const cyclic =
@@ -1254,7 +1181,7 @@ const breakAliasCycles = (
     }
   }
 
-  return definitions;
+  return { definitions, edits };
 };
 
 // The importer's failure classes D-AD12 names (spike S7); any other class is a defect.
@@ -1368,9 +1295,6 @@ const importOnce = (
   );
 };
 
-const sameJson = (left: Json | undefined, right: Json | undefined): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
-
 // The edit for one importer failure, or `undefined` when its class is unnamed or it makes no
 // progress (the located node is already `{}`).
 const importEdit = (
@@ -1389,7 +1313,7 @@ const importEdit = (
 
   const path = root === "definitions" ? deepestSchema(node, tokens) : [];
 
-  return sameJson(replaceAt(node, path), node)
+  return Equal.equals(replaceAt(node, path), node)
     ? undefined
     : { action: "replace", code: found[1](line), key, path };
 };
@@ -1398,32 +1322,31 @@ const importEdit = (
 // at its deepest existing schema ancestor, until the import succeeds. The importer stops at its
 // first failure, so repairs cannot be batched: each pass is charged the number of definitions it
 // imports, and the budget caps the passes.
-const importCopy = (
+const importCopy = Effect.fnUntraced(function* importCopy(
   budget: Budget,
   line: Line,
   initial: ReadonlyMap<string, Json>,
-  edits: SchemaEdit[],
-): Effect.Effect<ReadonlyMap<string, Json>, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* importLoop() {
-    const definitions = new Map(initial);
-    budget.spent += definitions.size;
-    yield* within(budget, definitions);
-    let failure = yield* importOnce(definitions);
-    while (Option.isSome(failure)) {
-      const edit = importEdit(line, definitions, failure.value);
-      if (edit === undefined) {
-        return yield* new SchemaImportDefect({ key: "", message: failure.value });
-      }
-
-      edits.push(edit);
-      definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
-      budget.spent += definitions.size;
-      yield* within(budget, definitions);
-      failure = yield* importOnce(definitions);
+): Effect.fn.Return<EditedCopy, SchemaBudgetExceeded | SchemaImportDefect> {
+  const definitions = new Map(initial);
+  const edits: SchemaEdit[] = [];
+  charge(budget, definitions.size);
+  yield* within(budget, definitions);
+  let failure = yield* importOnce(definitions);
+  while (Option.isSome(failure)) {
+    const edit = importEdit(line, definitions, failure.value);
+    if (edit === undefined) {
+      return yield* new SchemaImportDefect({ key: "", message: failure.value });
     }
 
-    return definitions;
-  });
+    edits.push(edit);
+    definitions.set(edit.key, replaceAt(definitions.get(edit.key) ?? {}, edit.path));
+    charge(budget, definitions.size);
+    yield* within(budget, definitions);
+    failure = yield* importOnce(definitions);
+  }
+
+  return { definitions, edits };
+});
 
 /**
  * Derives the validation copy from stored definitions (design 3.5 "Import copies", D-AD12): the
@@ -1438,26 +1361,28 @@ const importCopy = (
  * Effect's importer runs, and each node it still rejects becomes `{}` under the code of its D-AD12
  * class. The copy is the stored document minus `edits` (X10); it is recomputed, never edited.
  */
-export const validationCopy = (
+export const validationCopy = Effect.fnUntraced(function* validationCopy(
   line: Line,
   definitions: ReadonlyMap<string, Json>,
   limits: SchemaLimits = {},
-): Effect.Effect<ValidationCopy, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* derive() {
-    const budget = budgetOf(limits);
-    const edits: SchemaEdit[] = [];
-    const filtered = new Map(
-      sortedKeys(definitions).map((key): [string, Json] => {
-        const visit = filterNode({ definitions, edits, key, line });
+): Effect.fn.Return<ValidationCopy, SchemaBudgetExceeded | SchemaImportDefect> {
+  const budget = budgetOf(limits);
+  const edits: SchemaEdit[] = [];
+  const filtered = new Map(
+    sortedKeys(definitions).map((key): [string, Json] => {
+      const visit = filterNode({ definitions, edits, key, line });
 
-        return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
-      }),
-    );
-    const acyclic = yield* within(budget, breakAliasCycles(budget, filtered, edits));
-    const imported = yield* importCopy(budget, line, acyclic, edits);
+      return [key, transformSchema(budget, definitions.get(key) ?? {}, [], copyPositions, visit)];
+    }),
+  );
+  const acyclic = yield* within(budget, breakAliasCycles(budget, filtered));
+  const imported = yield* importCopy(budget, line, acyclic.definitions);
 
-    return { definitions: imported, edits };
-  });
+  return {
+    definitions: imported.definitions,
+    edits: [...edits, ...acyclic.edits, ...imported.edits],
+  };
+});
 
 // ---------------------------------------------------------------------------------------------
 // Diagnostics.
@@ -1622,8 +1547,6 @@ const rules = new Map<string, Rule>([
   ],
 ]);
 
-const Declared = Schema.Struct({ openapi: Schema.String });
-
 // The deepest existing node of the source document on the edit's path, as an RFC 6901 pointer.
 const sourcePointer = (value: Json, base: string, path: readonly string[]): string => {
   const tokens = tokensOf(base);
@@ -1631,7 +1554,7 @@ const sourcePointer = (value: Json, base: string, path: readonly string[]): stri
     return "";
   }
 
-  let current = Result.getSuccess(evaluatePointerResult(value, base)).pipe(Option.getOrUndefined);
+  let current = Result.getOrUndefined(evaluatePointerResult(value, base));
   let consumed = 0;
   for (const token of path) {
     current = childAt(current, token);
@@ -1654,22 +1577,20 @@ const reportedPath = (edit: SchemaEdit, rule: Rule): readonly string[] => {
   return removedRefusal || droppedRequired ? edit.path.slice(0, -1) : edit.path;
 };
 
-// A diagnostic's identity for deduplication: its code at its document and pointer.
-const identityOf = (code: string, at: { readonly document: string; readonly pointer: string }) =>
-  `${code} ${at.document}#${at.pointer}`;
-
 const diagnosticsOf = (
   resolution: Resolution,
   sites: ReadonlyMap<string, CanonicalKey>,
   edits: readonly SchemaEdit[],
   refused: readonly (readonly [code: string, at: CanonicalKey])[],
 ): Effect.Effect<readonly Diagnostic[]> => {
-  const openapi = Schema.decodeUnknownOption(Declared)(resolution.value).pipe(
-    Option.map((declared) => declared.openapi),
-    Option.getOrElse(() => "unknown"),
-  );
-  const seen = new Set(
-    resolution.diagnostics.map((diagnostic) => identityOf(diagnostic.code, diagnostic)),
+  const openapi = Option.getOrElse(declaredOpenapi(resolution.value), () => "unknown");
+  // A diagnostic's identity for deduplication: its code at its document and pointer.
+  let seen = HashSet.fromIterable<readonly [code: string, document: string, pointer: string]>(
+    resolution.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.document,
+      diagnostic.pointer,
+    ]),
   );
   const records: DiagnosticInput[] = [];
   const report = (
@@ -1679,9 +1600,9 @@ const diagnosticsOf = (
     keyword?: string,
   ): void => {
     const [, name = ""] = code.split("/");
-    const identity = identityOf(code, at);
-    if (rule !== undefined && !seen.has(identity)) {
-      seen.add(identity);
+    const identity = [code, at.document, at.pointer] as const;
+    if (rule !== undefined && !HashSet.has(seen, identity)) {
+      seen = HashSet.add(seen, identity);
 
       records.push({
         code,
@@ -1735,22 +1656,21 @@ const diagnosticsOf = (
  * each refused keyword in a stored schema's source, nested `$defs` members included. A refusal the
  * resolver already reported is not repeated.
  */
-export const normalizeSchemas = (
+export const normalizeSchemas = Effect.fnUntraced(function* normalizeSchemas(
   resolution: Resolution,
   limits: SchemaLimits = {},
-): Effect.Effect<SchemaNormalization, SchemaBudgetExceeded | SchemaImportDefect> =>
-  Effect.gen(function* normalize() {
-    const budget = budgetOf(limits);
-    const sites = yield* within(budget, sitesOf(budget, resolution));
-    const stored = yield* storeFrom(budget, resolution, sites);
-    const refused = yield* within(budget, refusedInSource(budget, resolution, sites));
-    const validation = yield* validationCopy(resolution.line, stored.definitions, {
-      maxNodes: budget.limit - budget.spent,
-    });
-    const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits, refused);
-
-    return { ...stored, diagnostics, line: resolution.line, validation };
+): Effect.fn.Return<SchemaNormalization, SchemaBudgetExceeded | SchemaImportDefect> {
+  const budget = budgetOf(limits);
+  const sites = yield* within(budget, sitesOf(budget, resolution));
+  const stored = yield* storeFrom(budget, resolution, sites);
+  const refused = yield* within(budget, refusedInSource(budget, resolution, sites));
+  const validation = yield* validationCopy(resolution.line, stored.definitions, {
+    maxNodes: budget.limit - budget.spent,
   });
+  const diagnostics = yield* diagnosticsOf(resolution, sites, validation.edits, refused);
+
+  return { ...stored, diagnostics, line: resolution.line, validation };
+});
 
 // ---------------------------------------------------------------------------------------------
 // The code-generation copy.
@@ -1758,29 +1678,25 @@ export const normalizeSchemas = (
 const annotationsDropped: ReadonlySet<string> = new Set(["default", "example", "examples"]);
 
 const forCodeGeneration: Visit = (node) =>
-  Object.fromEntries(
-    Object.entries(node).flatMap(([keyword, value]): [string, Json][] => {
-      if (annotationsDropped.has(keyword)) {
-        return [];
-      }
-
+  Record.map(
+    // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Record.filter(record, predicate), not an array method
+    Record.filter(node, (_, keyword) => !annotationsDropped.has(keyword)),
+    (value, keyword): Json => {
       if (keyword !== "properties" || !isObject(value)) {
-        return [[keyword, value]];
+        return value;
       }
 
       const names = Arr.sort(Object.keys(value), byString);
 
-      return [
-        [keyword, Object.fromEntries(names.map((name) => [name, member(value, name) ?? {}]))],
-      ];
-    }),
+      return Object.fromEntries(names.map((name) => [name, member(value, name) ?? {}]));
+    },
   );
 
 const referencedKeys = (budget: Budget, node: Json): readonly string[] => {
   const keys: string[] = [];
   forEachSchema(budget, node, copyPositions, (current) => {
     const ref = stringMember(current, "$ref");
-    const key = ref === undefined ? undefined : referenceKey(ref);
+    const key = pipe(ref, UndefinedOr.map(referenceKey));
     if (key !== undefined) {
       keys.push(key);
     }

@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { AuthorConfig } from "../../src/model/author-config.ts";
 import { DocumentUri } from "../../src/model/brands.ts";
-import type { Diagnostic } from "../../src/model/diagnostic.ts";
-import { sortDiagnostics } from "../../src/model/diagnostic.ts";
+import type { Diagnostic, DiagnosticInput } from "../../src/model/diagnostic.ts";
+import { makeDiagnostic, sortDiagnostics } from "../../src/model/diagnostic.ts";
 import type { Operation } from "../../src/model/entities.ts";
 import { normalize } from "../../src/normalize/index.ts";
+import { distinctDiagnostics } from "../../src/normalize/operations.ts";
 import { nonStandardEntries } from "../../src/report/index.ts";
 import { resolve } from "../../src/resolve/index.ts";
 import type { Json } from "../../src/model/pointer.ts";
@@ -571,6 +572,8 @@ const mixed = () =>
     "x-extra": true,
   });
 
+const relatedAt = (pointer: string) => [{ document: entry, pointer }];
+
 describe("diagnostic order", () => {
   test("diagnostics come in document order: pointer by tokens, then code", () => {
     const { diagnostics } = mixed();
@@ -590,6 +593,38 @@ describe("diagnostic order", () => {
 
   test("the same input yields the same diagnostics twice", () => {
     see(mixed().diagnostics).toEqual(mixed().diagnostics);
+  });
+
+  test("distinctDiagnostics keeps the first of each repeat", () => {
+    const pointer = "/paths/~1a/parameters/0";
+    const make = (fields: Partial<DiagnosticInput>) =>
+      Effect.runSync(
+        makeDiagnostic({
+          code: "PRM-19/ignored-header",
+          document: entry,
+          element: "Parameter",
+          message: "first",
+          openapi: "3.1.1",
+          operation: { method: "GET", path: "/a" },
+          pointer,
+          scope: "element",
+          severity: "notice",
+          specSection: "https://spec.openapis.org/oas/v3.1.1.html#parameter-object",
+          ...fields,
+        }),
+      );
+    const first = make({ related: relatedAt("/components/parameters/a") });
+    const repeat = make({ message: "second", related: relatedAt("/components/parameters/a") });
+    const elsewhere = make({ related: relatedAt("/components/parameters/b") });
+    const empty = make({ related: [] });
+    const absent = make({});
+
+    see(distinctDiagnostics([first, repeat, elsewhere, empty, absent])).toEqual([
+      first,
+      elsewhere,
+      empty,
+    ]);
+    see(distinctDiagnostics([first, repeat])[0]?.message).toBe("first");
   });
 });
 
